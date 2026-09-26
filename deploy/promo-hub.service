@@ -1,0 +1,41 @@
+# systemd unit for Promotional Content Hub (native, no Docker)
+#
+# Install:
+#   sudo useradd --system --home /opt/promo-hub --shell /usr/sbin/nologin promohub
+#   sudo cp -r promo-hub /opt/promo-hub && cd /opt/promo-hub && sudo -u promohub npm ci --omit=dev
+#   sudo cp deploy/promo-hub.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now promo-hub
+# Logs:    journalctl -u promo-hub -f
+# Restart: sudo systemctl restart promo-hub
+
+[Unit]
+Description=Promotional Content Hub
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=promohub
+Group=promohub
+WorkingDirectory=/opt/promo-hub
+EnvironmentFile=/opt/promo-hub/.env
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/promo-hub/uploads
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
