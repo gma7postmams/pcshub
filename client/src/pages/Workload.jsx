@@ -266,11 +266,10 @@ export default function Workload() {
   const isAll = tab === 'ALL';
   const cols = meta.views[tab];
   const total = data && data.total ? data.total : 0;
-  const head = (k) => (isAll && k === 'prog_name' ? 'Program / Project Title' : meta.fields[k].label);
+  const head = (k) => meta.fields[k].label;
   const firstLineOf = (t) => String(t || '').split('\n');
 
   // Cells wrap (pasted line breaks kept) instead of being cut off; data-label feeds the card layout.
-  // The All tab is the summary layout: Length sits under the Plug ID and Billable Party under the program.
   const cell = (r, k) => {
     const val = r[k];
     const common = { key: k, 'data-k': k, 'data-label': head(k) };
@@ -285,7 +284,6 @@ export default function Workload() {
           <td {...common}>
             <div className="strong">{first}</div>
             {rest.length ? <div className="sub pre">{rest.join('\n')}</div> : null}
-            {isAll && r.length ? <div className="sub">({r.length})</div> : null}
           </td>
         );
       }
@@ -293,7 +291,6 @@ export default function Workload() {
         return (
           <td {...common}>
             {val ? <div className="strong">{val}</div> : null}
-            {isAll && r.billable_party ? <div className="sub">{r.billable_party}</div> : null}
           </td>
         );
       case 'audio_guide': return <td {...common}>{ISO.test(val || '') ? fmtDate(val) : val}</td>;

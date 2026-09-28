@@ -58,8 +58,8 @@ const AUDIO_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned'
 // Audio-only columns; any row that involves Audio (e.g. VGFX/VEDIT/Audio) also gets these in the form
 const AUDIO_EXTRA = ['length', 'others'];
 const VIEWS = {
-  // All tab = the summary layout: Billable Party shows under the program title and Length under the Plug ID
-  ALL: ['work_date', 'platform', 'plug_id', 'prog_name', 'units_concerned', 'plug_type', 'psd', 'remarks'],
+  // All tab = every column (the template's main columns plus Length and Others), each in its own column
+  ALL: [...MAIN_COLS.slice(0, -1), 'length', 'others', 'plug_type'],
   VGFX: MAIN_COLS,
   VEDIT: MAIN_COLS,
   AUDIO: AUDIO_COLS,
