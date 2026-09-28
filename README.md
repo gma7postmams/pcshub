@@ -92,7 +92,7 @@ A section only takes effect if its page is also checked.
 | Create / edit / send ingest | Ingest | ✓ | ✓ | ✓ | — |
 | Delete ingest | Ingest | ✓ | — | — | — |
 | Approve / reject | Approval | ✓ | ✓ | — | — |
-| Edit Workload (when built) | Workload | ✓ | ✓ | — | — |
+| Edit Workload | Workload | ✓ | ✓ | — | — |
 | Users, groups, dropdowns, branding, audit | Admin | ✓ | — | — | — |
 
 Adding a new page or section: add it to `CATALOG`, then guard its route with `requirePageAccess(path)` or `requireSection(key)`. It then shows up as a checkbox in Admin → Groups automatically.
@@ -116,7 +116,7 @@ Status is the approval state and is never set by the client:
 - Every approval request references an `ingest_record_id` (NOT NULL FK); only one pending request per record (partial unique index).
 - Managers/Admins are notified on send; the sender, creator and "Requested by" user are notified on decision. Rejection requires a reason.
 
-**Workload** — page (opened by any group that has it checked; editing will need Manager+ role) and the `workload_items` table (identity/audit columns only) are in place. **Fields are not defined yet**; the page shows an empty placeholder with Table / Excel mode toggles. To build it out: add columns in `src/schema.sql`, list them in `FIELDS` in `src/routes/workload.js`, implement list + batch save guarded by `requireAction('workload.write')`, and render them in `client/src/pages/Workload.jsx`.
+**Workload** — one table (`workload_items`) for all sections, tagged by **Section Assigned** (`VEDIT` / `VGFX` / `AUDIO`), based on the PCS Workload Excel template. Shared columns: Work Date, Section Assigned, Platform, Plug ID, PSD, Prog Name / Project Title, Remarks. VEDIT/VGFX add Breakdate, VO, Script, Art/STB, Audio Guide, Total Mats; AUDIO adds Length and Status (AUDIO's Platform defaults to `RADIO`). The API blanks columns that don't belong to a row's section. The page has section tabs (All / VEDIT / VGFX / AUDIO) that show only that section's columns, a **Table** mode (add/edit form) and an **Excel** mode (editable grid with batch save, one section at a time), and **Export** to `.xlsx` with one sheet per section (needs `npm install` for `exceljs`). Field definitions and per-section columns live in `src/routes/workload.js` and are served to the UI via `/api/workload/meta`. Platform choices are the admin-managed **Workload Platform** dropdown (Admin → Dropdowns). Writes need `workload.write` (Manager+).
 
 ## Security
 

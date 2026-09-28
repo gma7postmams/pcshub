@@ -136,8 +136,9 @@ CREATE INDEX IF NOT EXISTS approval_status_idx ON approval_requests (status, req
 CREATE UNIQUE INDEX IF NOT EXISTS approval_one_pending_uq
   ON approval_requests (ingest_record_id) WHERE status = 'Pending';
 
--- Workload Tracker: fields not defined yet (to be built).
--- Only identity/audit columns exist; add the tracker's fields here once they are specified.
+-- Workload Tracker: ONE table for all sections (VEDIT / VGFX / AUDIO).
+-- Shared columns apply to every row; video columns are used by VEDIT/VGFX only and
+-- length/status by AUDIO only. The API blanks columns that do not belong to the row's section.
 CREATE TABLE IF NOT EXISTS workload_items (
   id          SERIAL PRIMARY KEY,
   created_by  INT REFERENCES users(id) ON DELETE SET NULL,
@@ -145,6 +146,25 @@ CREATE TABLE IF NOT EXISTS workload_items (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- ADD COLUMN IF NOT EXISTS so installs that already have the placeholder table are upgraded in place
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS work_date   DATE;
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS section     TEXT CHECK (section IN ('VEDIT','VGFX','AUDIO'));
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS platform    TEXT;
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS plug_id     TEXT;
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS psd         TEXT;
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS prog_name   TEXT;
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS remarks     TEXT;
+-- VEDIT / VGFX only
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate   TEXT;
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS vo          TEXT;
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS script      TEXT;
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS art_stb     TEXT;
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS audio_guide TEXT;
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS total_mats  TEXT;
+-- AUDIO only
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS length      TEXT;
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS status      TEXT;
+CREATE INDEX IF NOT EXISTS workload_items_date_section_idx ON workload_items (work_date DESC, section);
 
 CREATE TABLE IF NOT EXISTS app_settings (
   key         TEXT PRIMARY KEY,
@@ -166,6 +186,18 @@ SELECT 'platform', v, o FROM (VALUES
   ('TV',1),('YouTube',2),('Facebook',3),('TikTok',4),('Instagram',5),('Website',6),('X',7)
 ) AS t(v,o)
 WHERE NOT EXISTS (SELECT 1 FROM dropdown_options WHERE category = 'platform');
+
+-- Workload platform choices (from the PCS Workload template's filter pool); only inserted if the category is empty
+INSERT INTO dropdown_options (category, value, sort_order)
+SELECT 'workload_platform', v, o FROM (VALUES
+  ('GMA',1),('GTV',2),('HOA',3),('IHM',4),('DIGITAL',5),('GPTV',6),('GNTV',7),('GLTV',8),
+  ('INTL DIGITAL',9),('INTL MKTG',10),
+  ('REG/TDMD (SYNERGY)',11),('REG/TDMD (SPARKLE)',12),('REG/TDMD (GMA MUSIC)',13),('REG/TDMD (GMA PICTURES)',14),
+  ('REG/TDMD (RGMA)',15),('REG/TDMD (RTV LOCAL AIRING)',16),('REG/TDMD (PG_REGIONAL AIRING)',17),
+  ('ALL 6 CHANNELS',18),('AFFORDABOX',19),('CORPORATE',20),('GMAI',21),('GMAIN',22),('GMA NOW',23),
+  ('HALLYPOP',24),('PINOY HITS',25),('PSD-DIGITAL',26),('RADIO',27)
+) AS t(v,o)
+WHERE NOT EXISTS (SELECT 1 FROM dropdown_options WHERE category = 'workload_platform');
 
 -- Themes: older installs stored the Midnight accent as an explicit override; clear it so the theme's own accent applies
 INSERT INTO app_settings (key, value) VALUES ('theme', 'midnight') ON CONFLICT (key) DO NOTHING;

@@ -428,3 +428,12 @@ td.overdue { color: var(--red); }
 .dropdown .dd-mode { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
 .dropdown .dd-mode .segmented { flex: 1; display: flex; }
 .dropdown .dd-mode .segmented button { flex: 1; padding: 5px 6px; }
+
+/* Workload Tracker — Excel (grid) mode */
+table.t.xl th { white-space: nowrap; }
+table.t.xl td { padding: 4px 6px; }
+table.t.xl input, table.t.xl select, table.t.xl textarea { width: 100%; min-width: 120px; font-size: 13px; }
+table.t.xl input, table.t.xl select { height: 32px; }
+table.t.xl textarea { height: 32px; min-height: 32px; resize: vertical; padding-top: 6px; line-height: 1.35; }
+table.t.xl input[type="date"] { min-width: 140px; }
+table.t.xl tr.dirty td, table.t.xl tr.dirty:hover td { background: color-mix(in srgb, var(--accent) 9%, transparent); }

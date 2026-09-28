@@ -18,7 +18,13 @@ const router = express.Router();
 const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads', 'branding');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-const DROPDOWN_CATEGORIES = ['program', 'platform'];
+const DROPDOWN_CATEGORIES = ['program', 'platform', 'workload_platform'];
+// Which table/column each dropdown category is stored in (used for usage counts, rename propagation, delete guard)
+const DROPDOWN_USAGE = {
+  program: { table: 'ingest_records', col: 'program' },
+  platform: { table: 'ingest_records', col: 'platform' },
+  workload_platform: { table: 'workload_items', col: 'platform' },
+};
 
 // ---------- Access model reference (catalog of assignable pages/sections + role actions) ----------
 router.get('/access-model', (req, res) => {
@@ -217,8 +223,11 @@ router.post('/users/:id/unlock', asyncH(async (req, res) => {
 // ---------- Dropdowns ----------
 router.get('/dropdowns', asyncH(async (req, res) => {
   const { rows } = await db.query(
-    `SELECT d.*, (SELECT count(*)::int FROM ingest_records i
-                   WHERE (d.category='program' AND i.program=d.value) OR (d.category='platform' AND i.platform=d.value)) AS usage
+    `SELECT d.*, (
+              (SELECT count(*)::int FROM ingest_records i
+                WHERE (d.category='program' AND i.program=d.value) OR (d.category='platform' AND i.platform=d.value))
+            + (SELECT count(*)::int FROM workload_items w
+                WHERE d.category='workload_platform' AND w.platform=d.value)) AS usage
        FROM dropdown_options d ORDER BY category, sort_order, value`
   );
   res.json({ categories: DROPDOWN_CATEGORIES, rows });
@@ -257,10 +266,10 @@ router.put('/dropdowns/:id', asyncH(async (req, res) => {
       if (e.code === '23505') throw new HttpError(409, `"${value}" already exists`);
       throw e;
     }
-    // Renaming propagates to existing ingest records so reports stay consistent
+    // Renaming propagates to existing records so reports stay consistent
     if (old.value !== value) {
-      const col = old.category === 'program' ? 'program' : 'platform';
-      await c.query(`UPDATE ingest_records SET ${col}=$2 WHERE ${col}=$1`, [old.value, value]);
+      const u = DROPDOWN_USAGE[old.category];
+      await c.query(`UPDATE ${u.table} SET ${u.col}=$2 WHERE ${u.col}=$1`, [old.value, value]);
     }
     await audit(req, 'admin.dropdown_update', 'dropdown_option', id,
       { from: { value: old.value, is_active: old.is_active }, to: { value, is_active } }, c);
@@ -273,10 +282,11 @@ router.delete('/dropdowns/:id', asyncH(async (req, res) => {
   const cur = await db.query('SELECT * FROM dropdown_options WHERE id=$1', [id]);
   if (!cur.rows.length) throw new HttpError(404, 'Option not found');
   const o = cur.rows[0];
-  const col = o.category === 'program' ? 'program' : 'platform';
-  const used = await db.query(`SELECT count(*)::int AS n FROM ingest_records WHERE ${col}=$1`, [o.value]);
+  const u = DROPDOWN_USAGE[o.category];
+  const used = await db.query(`SELECT count(*)::int AS n FROM ${u.table} WHERE ${u.col}=$1`, [o.value]);
   if (used.rows[0].n > 0) {
-    throw new HttpError(409, `"${o.value}" is used by ${used.rows[0].n} ingest record(s). Deactivate it instead.`);
+    const what = u.table === 'workload_items' ? 'workload item(s)' : 'ingest record(s)';
+    throw new HttpError(409, `"${o.value}" is used by ${used.rows[0].n} ${what}. Deactivate it instead.`);
   }
   await db.query('DELETE FROM dropdown_options WHERE id=$1', [id]);
   await audit(req, 'admin.dropdown_delete', 'dropdown_option', id, { category: o.category, value: o.value });

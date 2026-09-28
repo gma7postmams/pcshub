@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { del, get, post, put } from '../../lib/api.js';
 import { Empty, Modal, useConfirm, useForm, useToast } from '../../components/ui.jsx';
 
-const LABEL = { program: 'PROGRAM', platform: 'Platform' };
+const LABEL = { program: 'PROGRAM', platform: 'Platform', workload_platform: 'Workload Platform' };
 
 export default function Dropdowns() {
   const toast = useToast();
