@@ -18,12 +18,13 @@ const router = express.Router();
 const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads', 'branding');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-const DROPDOWN_CATEGORIES = ['program', 'platform', 'workload_platform'];
+const DROPDOWN_CATEGORIES = ['program', 'platform', 'workload_platform', 'plug_type'];
 // Which table/column each dropdown category is stored in (used for usage counts, rename propagation, delete guard)
 const DROPDOWN_USAGE = {
   program: { table: 'ingest_records', col: 'program' },
   platform: { table: 'ingest_records', col: 'platform' },
   workload_platform: { table: 'workload_items', col: 'platform' },
+  plug_type: { table: 'workload_items', col: 'plug_type' },
 };
 
 // ---------- Access model reference (catalog of assignable pages/sections + role actions) ----------
@@ -227,7 +228,8 @@ router.get('/dropdowns', asyncH(async (req, res) => {
               (SELECT count(*)::int FROM ingest_records i
                 WHERE (d.category='program' AND i.program=d.value) OR (d.category='platform' AND i.platform=d.value))
             + (SELECT count(*)::int FROM workload_items w
-                WHERE d.category='workload_platform' AND w.platform=d.value)) AS usage
+                WHERE (d.category='workload_platform' AND w.platform=d.value)
+                   OR (d.category='plug_type' AND w.plug_type=d.value))) AS usage
        FROM dropdown_options d ORDER BY category, sort_order, value`
   );
   res.json({ categories: DROPDOWN_CATEGORIES, rows });

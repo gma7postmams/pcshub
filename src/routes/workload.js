@@ -1,4 +1,5 @@
 const express = require('express');
+const validator = require('validator');
 const db = require('../db');
 const v = require('../validate');
 const { asyncH, HttpError, requireAction } = require('../middleware');
@@ -6,73 +7,144 @@ const { audit } = require('../audit');
 
 // Mounted behind requirePageAccess('/workload'); writes need requireAction('workload.write').
 //
-// ONE table (workload_items) holds every section. "Section Assigned" (VEDIT / VGFX / AUDIO) decides
-// which columns a row uses; columns that do not belong to the row's section are blanked on save.
+// ONE table (workload_items). "Units Concerned" says which team(s) a plug is for; the tabs in the UI
+// (All / VGFX / VEDIT / Audio) are filters over it. Field types follow the red notes in the
+// Sept 2026 PCS Workload template: "dropdown", "Date" and "Open" (free text you can type or paste).
 const router = express.Router();
 
-const SECTIONS = ['VEDIT', 'VGFX', 'AUDIO'];
+const UNITS = ['VGFX Only', 'VEDIT Only', 'VGFX/VEDIT', 'Audio - RADIO', 'Audio – AUDIO GUIDE', 'VGFX/VEDIT/Audio'];
+// Which teams each Units Concerned option covers (drives the team tabs)
+const UNIT_TEAMS = {
+  'VGFX Only': ['VGFX'],
+  'VEDIT Only': ['VEDIT'],
+  'VGFX/VEDIT': ['VGFX', 'VEDIT'],
+  'Audio - RADIO': ['AUDIO'],
+  'Audio – AUDIO GUIDE': ['AUDIO'],
+  'VGFX/VEDIT/Audio': ['VGFX', 'VEDIT', 'AUDIO'],
+};
+const TEAMS = ['VGFX', 'VEDIT', 'AUDIO'];
+const TAB_LABEL = { ALL: 'All', VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio' };
 
-// Field definitions (also sent to the client via /meta so the UI never hard-codes them)
+// Field kinds: date | select | text | audio_guide. `multiline` = textarea. `hint` = placeholder from the red notes.
+const OPEN = 'Type or paste anything';
+const FROM_PSD = 'Paste from the PSD daily plug list';
 const FIELDS = {
-  work_date:   { label: 'Work Date', type: 'date', required: true },
-  section:     { label: 'Section Assigned', type: 'select', options: SECTIONS, required: true },
-  platform:    { label: 'Platform', type: 'select', lookup: 'workload_platform', max: 100 },
-  plug_id:     { label: 'Plug ID', type: 'text', multiline: true, max: 1000, required: true },
-  psd:         { label: 'PSD', type: 'text', max: 200 },
-  prog_name:   { label: 'Prog Name / Project Title', type: 'text', max: 300 },
-  remarks:     { label: 'Remarks', type: 'text', multiline: true, max: 4000 },
-  breakdate:   { label: 'Breakdate', type: 'text', multiline: true, max: 1000 },
-  vo:          { label: 'VO', type: 'text', multiline: true, max: 1000 },
-  script:      { label: 'Script', type: 'text', multiline: true, max: 1000 },
-  art_stb:     { label: 'Art/STB', type: 'text', multiline: true, max: 1000 },
-  audio_guide: { label: 'Audio Guide', type: 'text', multiline: true, max: 1000 },
-  total_mats:  { label: 'Total Mats', type: 'text', multiline: true, max: 500 },
-  length:      { label: 'Length', type: 'text', max: 100 },
-  status:      { label: 'Status', type: 'text', multiline: true, max: 500 },
+  work_date:      { label: 'Work Date', kind: 'date', required: true },
+  platform:       { label: 'Platform', kind: 'select', lookup: 'workload_platform', max: 100 },
+  billable_party: { label: 'Billable Party', kind: 'text', max: 200, hint: OPEN },
+  units_concerned:{ label: 'Units Concerned', kind: 'select', options: UNITS, required: true },
+  plug_id:        { label: 'Plug ID', kind: 'text', multiline: true, max: 1000, required: true, hint: FROM_PSD },
+  psd:            { label: 'PSD', kind: 'text', max: 200, hint: FROM_PSD },
+  breakdate:      { label: 'Breakdate', kind: 'date' },
+  breakdate_time: { label: 'Time', kind: 'text', multiline: true, max: 1000, hint: OPEN },
+  vo:             { label: 'VO', kind: 'text', multiline: true, max: 1000, hint: OPEN },
+  script:         { label: 'Script', kind: 'date' },
+  art_stb:        { label: 'Artwork/STB', kind: 'date' },
+  audio_guide:    { label: 'Audio Guide', kind: 'audio_guide' },
+  remarks:        { label: 'Remarks', kind: 'text', multiline: true, max: 4000, hint: OPEN },
+  total_mats:     { label: 'Total Mats', kind: 'text', multiline: true, max: 500, hint: OPEN },
+  prog_name:      { label: 'Prog Name / Project Title', kind: 'text', max: 300, hint: FROM_PSD },
+  plug_type:      { label: 'Plug Type', kind: 'select', lookup: 'plug_type', max: 100 },
 };
 const COLS = Object.keys(FIELDS);
 
-// Columns shown per section, in the same order as the team's Excel sheets (Work Date first)
-const VIDEO = ['platform', 'plug_id', 'psd', 'breakdate', 'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats', 'prog_name'];
-const AUDIO = ['platform', 'plug_id', 'psd', 'length', 'remarks', 'status'];
-const SECTION_COLS = { VEDIT: VIDEO, VGFX: VIDEO, AUDIO };
+// Columns per tab, in the same order as the template's sheets ("main" for VGFX/VEDIT, "ojo" for Audio)
+const MAIN_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'breakdate', 'breakdate_time',
+  'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats', 'prog_name', 'plug_type'];
+const AUDIO_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'vo', 'script', 'remarks', 'plug_type'];
 const VIEWS = {
-  ALL: ['work_date', 'section', 'platform', 'plug_id', 'psd', 'prog_name', 'remarks'],
-  VEDIT: ['work_date', ...VIDEO],
-  VGFX: ['work_date', ...VIDEO],
-  AUDIO: ['work_date', ...AUDIO],
+  ALL: ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'prog_name', 'plug_type', 'remarks'],
+  VGFX: MAIN_COLS,
+  VEDIT: MAIN_COLS,
+  AUDIO: AUDIO_COLS,
 };
+// Default Units Concerned when adding a row from a team tab
+const TAB_DEFAULT_UNITS = { VGFX: 'VGFX Only', VEDIT: 'VEDIT Only', AUDIO: 'Audio - RADIO' };
 
-const MAX_BATCH = 200;
-const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'remarks', 'breakdate', 'vo', 'script', 'art_stb', 'audio_guide', 'total_mats', 'status'];
-
-router.get('/meta', (req, res) => res.json({ ready: true, sections: SECTIONS, fields: FIELDS, views: VIEWS }));
-
-async function assertPlatform(client, value) {
-  const { rows } = await client.query(
-    `SELECT 1 FROM dropdown_options WHERE category='workload_platform' AND value=$1 AND is_active`, [value]
-  );
-  if (!rows.length) throw new HttpError(400, `Platform "${value}" is not a valid option`);
+// The template's Platform formula: first matching rule wins, tested against the whole Plug ID cell.
+// platform: null means "no automatic value" (PD_ = digital: pick DIGITAL or INTL DIGITAL by hand).
+const PLATFORM_RULES = [
+  { pattern: 'PG_REGION_', platform: 'REG/TDMD (PG_REGIONAL AIRING)' },
+  { pattern: 'PV_REGION_|PN_REGION_|MALSHO', platform: 'REG/TDMD (RTV LOCAL AIRING)' },
+  { pattern: '_RATI', platform: 'REG/TDMD (RGMA)' },
+  { pattern: 'GMUSIC|GRECOR', platform: 'REG/TDMD (GMA MUSIC)' },
+  { pattern: 'GMAPIC', platform: 'REG/TDMD (GMA PICTURES)' },
+  { pattern: 'MKTG26|MRCI', platform: 'INTL MKTG' },
+  { pattern: 'SOCMED', platform: 'REG/TDMD (PSD-DIGITAL)' },
+  { pattern: 'SPARKL|SPARTI', platform: 'REG/TDMD (SPARKLE)' },
+  { pattern: 'PF_', platform: 'GNTV' },
+  { pattern: 'PL_', platform: 'GLTV' },
+  { pattern: 'PI_|PU_|PJ_', platform: 'GPTV' },
+  { pattern: 'PD_', platform: null },
+  { pattern: 'NC101', platform: 'REG/TDMD (SYNERGY)' },
+  { pattern: 'PV_', platform: 'GMA' },
+  { pattern: 'PN_', platform: 'GTV' },
+  { pattern: 'PH_', platform: 'HOA' },
+  { pattern: 'PW_', platform: 'IHM' },
+];
+const RULE_RES = PLATFORM_RULES.map((r) => ({ re: new RegExp(r.pattern, 'i'), platform: r.platform }));
+function derivePlatform(plugId) {
+  const text = String(plugId || '');
+  for (const r of RULE_RES) if (r.re.test(text)) return r.platform;
+  return null;
 }
 
-/** Validate one row; returns the values to store (columns outside the section are null). */
-async function parseRow(client, body, current) {
-  const section = v.oneOf(body.section, SECTIONS, { field: 'Section Assigned' });
-  const rec = { work_date: v.date(body.work_date, { field: 'Work Date', required: true }), section };
-  for (const k of COLS) {
-    if (k === 'work_date' || k === 'section') continue;
-    const f = FIELDS[k];
-    rec[k] = SECTION_COLS[section].includes(k)
-      ? v.str(body[k], { field: f.label, max: f.max, required: !!f.required })
-      : null;
+const MAX_BATCH = 200;
+const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'billable_party', 'remarks', 'breakdate_time', 'vo', 'total_mats', 'audio_guide'];
+
+router.get('/meta', (req, res) => res.json({
+  ready: true, units: UNITS, unitTeams: UNIT_TEAMS, tabs: ['ALL', ...TEAMS].map((key) => ({ key, label: TAB_LABEL[key] })),
+  tabDefaultUnits: TAB_DEFAULT_UNITS, fields: FIELDS, views: VIEWS, platformRules: PLATFORM_RULES,
+}));
+
+async function assertOption(client, category, value, field, current) {
+  if (!value) return;
+  if (current && current === value) return; // a value already stored on the row stays valid even if the option was deactivated since
+  const { rows } = await client.query(
+    'SELECT 1 FROM dropdown_options WHERE category=$1 AND value=$2 AND is_active', [category, value]
+  );
+  if (!rows.length) throw new HttpError(400, `${field} "${value}" is not a valid option`);
+}
+
+/** Audio Guide dropdown: "N/A" or a date (YYYY-MM-DD). A value already stored on the row is left alone. */
+function parseAudioGuide(raw, current) {
+  const s = v.str(raw, { field: 'Audio Guide', max: 100 });
+  if (!s || s === 'N/A') return s;
+  if (current && s === current) return s;
+  if (!validator.isDate(s, { format: 'YYYY-MM-DD', strictMode: true })) {
+    throw new HttpError(400, 'Audio Guide must be N/A or a date');
   }
-  if (section === 'AUDIO' && !rec.platform) rec.platform = 'RADIO'; // audio tabs have no Platform column; they are radio plugs
-  // A value already stored on the row stays valid even if the option was deactivated since
-  if (rec.platform && !(current && current.platform === rec.platform)) await assertPlatform(client, rec.platform);
+  return s;
+}
+
+/** Validate one row; returns the values to store. `current` = the stored row when updating. */
+async function parseRow(client, body, current) {
+  const cur = current || {};
+  const rec = {};
+  for (const k of COLS) {
+    const f = FIELDS[k];
+    if (k === 'audio_guide') rec[k] = parseAudioGuide(body[k], cur[k]);
+    else if (f.kind === 'date') rec[k] = v.date(body[k], { field: f.label, required: !!f.required });
+    else if (k === 'units_concerned') rec[k] = v.oneOf(body[k], UNITS, { field: f.label });
+    else rec[k] = v.str(body[k], { field: f.label, max: f.max, required: !!f.required });
+  }
+  // Platform follows the Plug ID prefix unless one was chosen (only if that option exists and is active)
+  if (!rec.platform) {
+    const auto = derivePlatform(rec.plug_id);
+    if (auto) {
+      const { rows } = await client.query(
+        `SELECT 1 FROM dropdown_options WHERE category='workload_platform' AND value=$1 AND is_active`, [auto]
+      );
+      if (rows.length) rec.platform = auto;
+    }
+  }
+  await assertOption(client, 'workload_platform', rec.platform, 'Platform', cur.platform);
+  await assertOption(client, 'plug_type', rec.plug_type, 'Plug Type', cur.plug_type);
   return rec;
 }
 
 const colList = COLS.map((c) => `"${c}"`);
+const CUR_COLS = 'platform, plug_type, audio_guide';
 
 async function insertRow(client, rec, userId) {
   const params = [...COLS.map((c) => rec[c]), userId];
@@ -100,8 +172,13 @@ function buildFilter(query) {
   const where = [];
   const params = [];
   const add = (sql, val) => { params.push(val); where.push(sql.replace('?', `$${params.length}`)); };
-  if (query.section) add('w.section = ?', v.oneOf(String(query.section), SECTIONS, { field: 'section' }));
+  if (query.team) {
+    const team = v.oneOf(String(query.team), TEAMS, { field: 'team' });
+    add('w.units_concerned = ANY(?::text[])', UNITS.filter((u) => UNIT_TEAMS[u].includes(team)));
+  }
+  if (query.units) add('w.units_concerned = ?', v.oneOf(String(query.units), UNITS, { field: 'units' }));
   if (query.platform) add('w.platform = ?', String(query.platform));
+  if (query.plug_type) add('w.plug_type = ?', String(query.plug_type));
   if (query.from) add('w.work_date >= ?', v.date(query.from, { field: 'from' }));
   if (query.to) add('w.work_date <= ?', v.date(query.to, { field: 'to' }));
   if (query.q) {
@@ -109,46 +186,67 @@ function buildFilter(query) {
     const p = `$${params.length}`;
     where.push(`(${SEARCH_COLS.map((c) => `w.${c} ILIKE ${p}`).join(' OR ')})`);
   }
-  return { whereSql: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
+  return { where, params };
 }
+const whereSql = (where) => (where.length ? `WHERE ${where.join(' AND ')}` : '');
 
 router.get('/', asyncH(async (req, res) => {
-  const { whereSql, params } = buildFilter(req.query);
+  const { where, params } = buildFilter(req.query);
   const limit = Math.min(parseInt(req.query.limit, 10) || 100, MAX_BATCH * 2);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-  const total = await db.query(`SELECT count(*)::int AS n FROM workload_items w ${whereSql}`, params);
+  const total = await db.query(`SELECT count(*)::int AS n FROM workload_items w ${whereSql(where)}`, params);
   const { rows } = await db.query(
-    `${SELECT} ${whereSql} ORDER BY w.work_date DESC NULLS LAST, w.id ASC LIMIT ${limit} OFFSET ${offset}`, params
+    `${SELECT} ${whereSql(where)} ORDER BY w.work_date DESC NULLS LAST, w.id ASC LIMIT ${limit} OFFSET ${offset}`, params
   );
   res.json({ total: total.rows[0].n, rows });
 }));
 
-// Export: one sheet per section (mirrors the team's workbook). exceljs is loaded lazily so the app
+// Export (.xlsx) mirrors the template: sheet "MAIN" (rows that involve VGFX or VEDIT) and sheet "AUDIO"
+// (rows that involve Audio). A VGFX/VEDIT/Audio row appears on both, like it does in the template.
+// With ?team=VGFX|VEDIT|AUDIO only that team's sheet is written. exceljs is loaded lazily so the app
 // still starts if `npm install` has not been run yet after pulling this change.
 router.get('/export', asyncH(async (req, res) => {
   let ExcelJS;
   try { ExcelJS = require('exceljs'); } catch (e) {
     throw new HttpError(501, 'Excel export needs the "exceljs" package. Run "npm install" on the server, then restart.');
   }
-  const { whereSql, params } = buildFilter(req.query);
+  const { where, params } = buildFilter({ ...req.query, team: undefined });
   const { rows } = await db.query(
-    `SELECT w.* FROM workload_items w ${whereSql} ORDER BY w.work_date ASC, w.id ASC LIMIT 20000`, params
+    `SELECT w.* FROM workload_items w ${whereSql(where)} ORDER BY w.work_date ASC, w.id ASC LIMIT 20000`, params
   );
+  const involves = (r, teams) => teams.some((t) => (UNIT_TEAMS[r.units_concerned] || []).includes(t));
+  const team = req.query.team ? v.oneOf(String(req.query.team), TEAMS, { field: 'team' }) : null;
+  const sheets = team
+    ? [{ name: TAB_LABEL[team].toUpperCase(), cols: VIEWS[team], pick: (r) => involves(r, [team]) }]
+    : [
+      { name: 'MAIN', cols: MAIN_COLS, pick: (r) => involves(r, ['VGFX', 'VEDIT']) },
+      { name: 'AUDIO', cols: AUDIO_COLS, pick: (r) => involves(r, ['AUDIO']) },
+    ];
+
   const wb = new ExcelJS.Workbook();
   wb.creator = 'PromoHub';
-  const wanted = req.query.section ? [String(req.query.section)] : SECTIONS;
-  for (const section of wanted) {
-    const ws = wb.addWorksheet(section);
-    const keys = VIEWS[section];
-    ws.columns = keys.map((k) => ({
-      header: FIELDS[k].label, key: k,
-      width: FIELDS[k].multiline ? 32 : k === 'work_date' ? 13 : 20,
-    }));
+  const asDate = (s) => (s ? new Date(`${s}T00:00:00Z`) : null);
+  for (const sh of sheets) {
+    const ws = wb.addWorksheet(sh.name);
+    ws.columns = sh.cols.map((k) => {
+      const f = FIELDS[k];
+      return { header: f.label, key: k, width: f.multiline ? 34 : f.kind === 'date' ? 14 : 22,
+        style: f.kind === 'date' ? { numFmt: 'mmm d, yyyy' } : {} };
+    });
     ws.getRow(1).font = { bold: true };
     ws.views = [{ state: 'frozen', ySplit: 1 }];
-    rows.filter((r) => r.section === section).forEach((r) => {
-      const row = ws.addRow(keys.reduce((o, k) => ({ ...o, [k]: r[k] }), {}));
+    rows.filter(sh.pick).forEach((r) => {
+      const row = ws.addRow(sh.cols.reduce((o, k) => {
+        const f = FIELDS[k];
+        let val = r[k];
+        if (f.kind === 'date') val = asDate(val);
+        else if (k === 'audio_guide' && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = asDate(val);
+        return { ...o, [k]: val };
+      }, {}));
       row.alignment = { wrapText: true, vertical: 'top' };
+      if (sh.cols.includes('audio_guide') && r.audio_guide && /^\d{4}-\d{2}-\d{2}$/.test(r.audio_guide)) {
+        row.getCell('audio_guide').numFmt = 'mmm d, yyyy';
+      }
     });
   }
   const stamp = req.query.from || req.query.to ? `${req.query.from || ''}_${req.query.to || ''}` : 'all';
@@ -181,7 +279,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
       try {
         if (row.id) {
           const id = v.id(row.id);
-          const cur = await c.query('SELECT platform FROM workload_items WHERE id=$1 FOR UPDATE', [id]);
+          const cur = await c.query(`SELECT ${CUR_COLS} FROM workload_items WHERE id=$1 FOR UPDATE`, [id]);
           if (!cur.rows.length) throw new HttpError(404, 'Row no longer exists (deleted by someone else?)');
           const rec = await parseRow(c, row, cur.rows[0]);
           await updateRow(c, id, rec, req.user.id);
@@ -206,7 +304,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
 router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   await db.tx(async (c) => {
-    const cur = await c.query('SELECT platform FROM workload_items WHERE id=$1 FOR UPDATE', [id]);
+    const cur = await c.query(`SELECT ${CUR_COLS} FROM workload_items WHERE id=$1 FOR UPDATE`, [id]);
     if (!cur.rows.length) throw new HttpError(404, 'Workload item not found');
     const rec = await parseRow(c, req.body, cur.rows[0]);
     await updateRow(c, id, rec, req.user.id);
@@ -218,7 +316,7 @@ router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
 router.delete('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const { rows } = await db.query(
-    'DELETE FROM workload_items WHERE id=$1 RETURNING work_date, section, plug_id', [id]
+    'DELETE FROM workload_items WHERE id=$1 RETURNING work_date, units_concerned, plug_id', [id]
   );
   if (!rows.length) throw new HttpError(404, 'Workload item not found');
   await audit(req, 'workload.delete', 'workload_item', id, rows[0]);

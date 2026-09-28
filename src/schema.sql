@@ -136,9 +136,8 @@ CREATE INDEX IF NOT EXISTS approval_status_idx ON approval_requests (status, req
 CREATE UNIQUE INDEX IF NOT EXISTS approval_one_pending_uq
   ON approval_requests (ingest_record_id) WHERE status = 'Pending';
 
--- Workload Tracker: ONE table for all sections (VEDIT / VGFX / AUDIO).
--- Shared columns apply to every row; video columns are used by VEDIT/VGFX only and
--- length/status by AUDIO only. The API blanks columns that do not belong to the row's section.
+-- Workload Tracker: ONE table for every team. "Units Concerned" says which team(s) a plug is for
+-- (VGFX / VEDIT / Audio, alone or combined). Columns follow the Sept 2026 PCS Workload template.
 CREATE TABLE IF NOT EXISTS workload_items (
   id          SERIAL PRIMARY KEY,
   created_by  INT REFERENCES users(id) ON DELETE SET NULL,
@@ -146,25 +145,62 @@ CREATE TABLE IF NOT EXISTS workload_items (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
--- ADD COLUMN IF NOT EXISTS so installs that already have the placeholder table are upgraded in place
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS work_date   DATE;
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS section     TEXT CHECK (section IN ('VEDIT','VGFX','AUDIO'));
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS platform    TEXT;
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS plug_id     TEXT;
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS psd         TEXT;
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS prog_name   TEXT;
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS remarks     TEXT;
--- VEDIT / VGFX only
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate   TEXT;
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS vo          TEXT;
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS script      TEXT;
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS art_stb     TEXT;
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS audio_guide TEXT;
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS total_mats  TEXT;
--- AUDIO only
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS length      TEXT;
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS status      TEXT;
-CREATE INDEX IF NOT EXISTS workload_items_date_section_idx ON workload_items (work_date DESC, section);
+
+-- Upgrade from the first Workload build (Section Assigned + free-text columns) to the Sept 2026 template.
+-- Idempotent: each step only runs while the old shape is still there.
+DO $$
+BEGIN
+  -- Section Assigned (VEDIT / VGFX / AUDIO) -> Units Concerned
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+              AND table_name = 'workload_items' AND column_name = 'section') THEN
+    ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS units_concerned TEXT;
+    UPDATE workload_items SET units_concerned = CASE section
+        WHEN 'VEDIT' THEN 'VEDIT Only' WHEN 'VGFX' THEN 'VGFX Only' WHEN 'AUDIO' THEN 'Audio - RADIO' END
+      WHERE units_concerned IS NULL;
+    ALTER TABLE workload_items DROP COLUMN section;
+  END IF;
+  -- Breakdate (free text) becomes Breakdate (date) + Time (open text): keep the old text as the time
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+              AND table_name = 'workload_items' AND column_name = 'breakdate' AND data_type = 'text')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+              AND table_name = 'workload_items' AND column_name = 'breakdate_time') THEN
+    ALTER TABLE workload_items RENAME COLUMN breakdate TO breakdate_time;
+  END IF;
+  -- Script and Artwork/STB become real dates (only values that are already ISO dates are kept)
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+              AND table_name = 'workload_items' AND column_name = 'script' AND data_type = 'text') THEN
+    ALTER TABLE workload_items ALTER COLUMN script TYPE DATE
+      USING (CASE WHEN script ~ '^\d{4}-\d{2}-\d{2}$' THEN script::date END);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+              AND table_name = 'workload_items' AND column_name = 'art_stb' AND data_type = 'text') THEN
+    ALTER TABLE workload_items ALTER COLUMN art_stb TYPE DATE
+      USING (CASE WHEN art_stb ~ '^\d{4}-\d{2}-\d{2}$' THEN art_stb::date END);
+  END IF;
+END $$;
+
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS work_date       DATE;
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS platform        TEXT;   -- dropdown; auto-filled from the Plug ID prefix
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS billable_party  TEXT;   -- open
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS units_concerned TEXT;   -- dropdown (6 fixed options, see constraint below)
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS plug_id         TEXT;   -- copied from the PSD daily plug list
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS psd             TEXT;   -- copied from the PSD daily plug list
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate       DATE;   -- date
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate_time  TEXT;   -- time: open
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS vo              TEXT;   -- open
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS script          DATE;   -- date
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS art_stb         DATE;   -- date
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS audio_guide     TEXT;   -- dropdown: 'N/A' or a date (YYYY-MM-DD)
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS remarks         TEXT;   -- open
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS total_mats      TEXT;   -- open
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS prog_name       TEXT;   -- copied from the PSD daily plug list
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS plug_type       TEXT;   -- dropdown (admin-managed)
+-- (Older installs may still have unused length/status columns from the first build; they are left untouched.)
+
+ALTER TABLE workload_items DROP CONSTRAINT IF EXISTS workload_items_units_check;
+ALTER TABLE workload_items ADD CONSTRAINT workload_items_units_check CHECK (units_concerned IN
+  ('VGFX Only', 'VEDIT Only', 'VGFX/VEDIT', 'Audio - RADIO', 'Audio – AUDIO GUIDE', 'VGFX/VEDIT/Audio'));
+CREATE INDEX IF NOT EXISTS workload_items_date_units_idx ON workload_items (work_date DESC, units_concerned);
 
 CREATE TABLE IF NOT EXISTS app_settings (
   key         TEXT PRIMARY KEY,
@@ -187,17 +223,28 @@ SELECT 'platform', v, o FROM (VALUES
 ) AS t(v,o)
 WHERE NOT EXISTS (SELECT 1 FROM dropdown_options WHERE category = 'platform');
 
--- Workload platform choices (from the PCS Workload template's filter pool); only inserted if the category is empty
+-- Workload Platform choices: the values the template's Platform formula produces, plus the older list.
+-- Added once (flag in app_settings) so options an Admin later deletes are not brought back on restart.
 INSERT INTO dropdown_options (category, value, sort_order)
 SELECT 'workload_platform', v, o FROM (VALUES
   ('GMA',1),('GTV',2),('HOA',3),('IHM',4),('DIGITAL',5),('GPTV',6),('GNTV',7),('GLTV',8),
   ('INTL DIGITAL',9),('INTL MKTG',10),
   ('REG/TDMD (SYNERGY)',11),('REG/TDMD (SPARKLE)',12),('REG/TDMD (GMA MUSIC)',13),('REG/TDMD (GMA PICTURES)',14),
   ('REG/TDMD (RGMA)',15),('REG/TDMD (RTV LOCAL AIRING)',16),('REG/TDMD (PG_REGIONAL AIRING)',17),
-  ('ALL 6 CHANNELS',18),('AFFORDABOX',19),('CORPORATE',20),('GMAI',21),('GMAIN',22),('GMA NOW',23),
-  ('HALLYPOP',24),('PINOY HITS',25),('PSD-DIGITAL',26),('RADIO',27)
+  ('REG/TDMD (PSD-DIGITAL)',18),
+  ('ALL 6 CHANNELS',19),('AFFORDABOX',20),('CORPORATE',21),('GMAI',22),('GMAIN',23),('GMA NOW',24),
+  ('HALLYPOP',25),('PINOY HITS',26),('PSD-DIGITAL',27),('RADIO',28)
 ) AS t(v,o)
-WHERE NOT EXISTS (SELECT 1 FROM dropdown_options WHERE category = 'workload_platform');
+WHERE NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'seed_workload_platform_v2')
+ON CONFLICT (category, value) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('seed_workload_platform_v2', '1') ON CONFLICT (key) DO NOTHING;
+
+-- Plug Type choices (values seen in the Sept 2026 template); only inserted if the category is empty
+INSERT INTO dropdown_options (category, value, sort_order)
+SELECT 'plug_type', v, o FROM (VALUES
+  ('EPISODIC',1),('SEASONAL',2),('BUMPER',3),('POP-UP/POP LOGO',4),('RADIO',5)
+) AS t(v,o)
+WHERE NOT EXISTS (SELECT 1 FROM dropdown_options WHERE category = 'plug_type');
 
 -- Themes: older installs stored the Midnight accent as an explicit override; clear it so the theme's own accent applies
 INSERT INTO app_settings (key, value) VALUES ('theme', 'midnight') ON CONFLICT (key) DO NOTHING;

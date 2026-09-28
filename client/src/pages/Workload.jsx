@@ -6,25 +6,62 @@ import { useSession } from '../context.jsx';
 import { DownloadIcon, PlusIcon } from '../components/Icons.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
-// Workload Tracker — ONE table for VEDIT / VGFX / AUDIO.
-// Field definitions and the columns shown per section come from /api/workload/meta, so this page
-// never hard-codes them. Table mode = read + add/edit form; Excel mode = editable grid with batch save.
+// Workload Tracker — ONE table. "Units Concerned" says which team(s) a plug is for; the tabs
+// (All / VGFX / VEDIT / Audio) are filters over it. Fields, per-tab columns and the Platform rules come
+// from /api/workload/meta (field types follow the red notes in the Sept 2026 template:
+// dropdown / Date / Open). Table mode = read + add/edit form; Excel mode = editable grid with batch save.
 const PAGE = 50;
 const GRID_LIMIT = 200;
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const withCurrent = (list, v) => (v && !list.includes(v) ? [...list, v] : list);
-const tabLabel = (t) => (t === 'ALL' ? 'All' : t);
 const firstLine = (s) => String(s || '').split('\n')[0];
 const newKey = () => `n${Math.random().toString(36).slice(2)}`;
 
-function FieldInput({ k, def, value, onChange, disabled, lookups }) {
+/** Platform suggested by the Plug ID prefix (same rules as the template's Platform formula). null = none. */
+function derivePlatform(rules, plug) {
+  const text = String(plug || '');
+  for (const r of rules) if (new RegExp(r.pattern, 'i').test(text)) return r.platform;
+  return null;
+}
+/** Changing the Plug ID re-fills Platform only if it was empty or still holds the previous automatic value. */
+function withAutoPlatform(rules, row, k, val) {
+  const next = { ...row, [k]: val };
+  if (k !== 'plug_id') return next;
+  const before = derivePlatform(rules, row.plug_id);
+  if (!row.platform || row.platform === before) next.platform = derivePlatform(rules, val) || '';
+  return next;
+}
+
+// Audio Guide: dropdown "N/A" or "Date" (then pick the date). Stored as 'N/A' or YYYY-MM-DD.
+function AudioGuideInput({ value, onChange, disabled }) {
+  const v = value || '';
+  const isDate = ISO.test(v);
+  const legacy = v && !isDate && v !== 'N/A';
+  const mode = isDate ? 'DATE' : v;
+  const emit = (x) => onChange({ target: { value: x } });
+  return (
+    <div className="ag">
+      <select value={mode} disabled={disabled} onChange={(e) => emit(e.target.value === 'DATE' ? isoDate() : e.target.value)}>
+        <option value="">—</option>
+        <option value="N/A">N/A</option>
+        <option value="DATE">Date</option>
+        {legacy ? <option value={v}>{firstLine(v)} (old)</option> : null}
+      </select>
+      {isDate ? <input type="date" value={v} disabled={disabled} onChange={(e) => emit(e.target.value)} /> : null}
+    </div>
+  );
+}
+
+function FieldInput({ def, value, onChange, disabled, lookups }) {
   const v = value ?? '';
-  if (def.type === 'date') return <input type="date" value={v} disabled={disabled} onChange={onChange} />;
-  if (def.type === 'select') {
+  if (def.kind === 'audio_guide') return <AudioGuideInput value={v} onChange={onChange} disabled={disabled} />;
+  if (def.kind === 'date') return <input type="date" value={v} disabled={disabled} onChange={onChange} />;
+  if (def.kind === 'select') {
     const list = def.lookup ? withCurrent(lookups[def.lookup] || [], v) : def.options;
-    return <select value={v} disabled={disabled} onChange={onChange}><Options list={list} blank={k === 'section' ? 'Select section…' : '—'} /></select>;
+    return <select value={v} disabled={disabled} onChange={onChange}><Options list={list} blank={def.required ? 'Select…' : '—'} /></select>;
   }
-  if (def.multiline) return <textarea maxLength={def.max} value={v} disabled={disabled} onChange={onChange} />;
-  return <input maxLength={def.max} value={v} disabled={disabled} onChange={onChange} />;
+  if (def.multiline) return <textarea maxLength={def.max} placeholder={def.hint} value={v} disabled={disabled} onChange={onChange} />;
+  return <input maxLength={def.max} placeholder={def.hint} value={v} disabled={disabled} onChange={onChange} />;
 }
 
 export default function Workload() {
@@ -34,10 +71,10 @@ export default function Workload() {
   const canWrite = s.can('workload.write');
 
   const [meta, setMeta] = useState(null);
-  const [lookups, setLookups] = useState({ workload_platform: [] });
+  const [lookups, setLookups] = useState({ workload_platform: [], plug_type: [] });
   const [tab, setTab] = useState('ALL');
   const [mode, setMode] = useState('table');
-  const [filt, setFilt] = useState({ q: '', platform: '', from: '', to: '' });
+  const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', from: '', to: '' });
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState(null);   // table mode: { total, rows } | { error }
   const [grid, setGrid] = useState(null);   // excel mode: { total, rows } | { error }
@@ -47,18 +84,18 @@ export default function Workload() {
   const isGrid = mode === 'excel' && tab !== 'ALL';
 
   useEffect(() => {
-    Promise.all([get('/api/workload/meta'), get('/api/dropdowns?categories=workload_platform')])
+    Promise.all([get('/api/workload/meta'), get('/api/dropdowns?categories=workload_platform,plug_type')])
       .then(([m, dd]) => { setMeta(m); setLookups(dd); })
       .catch((e) => toast(e.message, 'err'));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const query = useCallback((extra = {}) => {
     const p = new URLSearchParams(extra);
-    if (tab !== 'ALL') p.set('section', tab);
-    ['platform', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
+    if (tab !== 'ALL') p.set('team', tab);
+    ['units', 'platform', 'plug_type', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
     if (!isGrid && q) p.set('q', q);
     return p;
-  }, [tab, filt.platform, filt.from, filt.to, q, isGrid]);
+  }, [tab, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q, isGrid]);
 
   const load = useCallback(async () => {
     if (!meta) return;
@@ -96,11 +133,10 @@ export default function Workload() {
     setOffset(0);
   };
 
-  // ---- Excel export (one sheet per section) ----
+  // ---- Excel export (sheets mirror the template: MAIN + AUDIO, or just the open team tab) ----
   const exportXlsx = async () => {
     try {
-      const p = query();
-      const res = await fetch(`/api/workload/export?${p}`, { credentials: 'same-origin', headers: { 'X-Requested-With': 'PromoHub' } });
+      const res = await fetch(`/api/workload/export?${query()}`, { credentials: 'same-origin', headers: { 'X-Requested-With': 'PromoHub' } });
       if (!res.ok) {
         let msg = `Export failed (${res.status})`;
         try { msg = (await res.json()).error || msg; } catch (e) { /* not JSON */ }
@@ -117,12 +153,13 @@ export default function Workload() {
   };
 
   // ---- grid operations ----
-  const editableKeys = (section) => meta.views[section].filter((k) => k !== 'work_date');
-  const isEmptyRow = (r) => editableKeys(tab).every((k) => !String(r[k] ?? '').trim());
-  const setCell = (key, k, val) => setGrid((g) => ({ ...g, rows: g.rows.map((r) => (r._key === key ? { ...r, [k]: val, _dirty: true } : r)) }));
+  const setCell = (key, k, val) => setGrid((g) => ({
+    ...g, rows: g.rows.map((r) => (r._key === key ? { ...withAutoPlatform(meta.platformRules, r, k, val), _dirty: true } : r)),
+  }));
+  const isEmptyRow = (r) => meta.views[tab].filter((k) => k !== 'work_date' && k !== 'units_concerned').every((k) => !String(r[k] ?? '').trim());
   const addRow = () => setGrid((g) => {
     const last = g.rows.length ? g.rows[g.rows.length - 1].work_date : '';
-    return { ...g, rows: [...g.rows, { _key: newKey(), _new: true, _dirty: false, work_date: last || filt.from || isoDate(), section: tab }] };
+    return { ...g, rows: [...g.rows, { _key: newKey(), _new: true, _dirty: false, work_date: last || filt.from || isoDate(), units_concerned: filt.units || meta.tabDefaultUnits[tab] }] };
   });
   const removeRow = async (r) => {
     if (!r._new) {
@@ -154,13 +191,13 @@ export default function Workload() {
 
   if (!meta) return <main className="container"><Empty>Loading…</Empty></main>;
 
-  const tabs = ['ALL', ...meta.sections];
   const cols = meta.views[tab];
   const total = data && data.total ? data.total : 0;
   const cell = (r, k) => {
     const val = r[k];
-    if (k === 'work_date') return <td key={k} className="nowrap">{fmtDate(val)}</td>;
-    if (k === 'section') return <td key={k}><strong>{val}</strong></td>;
+    if (meta.fields[k].kind === 'date') return <td key={k} className="nowrap">{fmtDate(val)}</td>;
+    if (k === 'audio_guide') return <td key={k} className="nowrap">{ISO.test(val || '') ? fmtDate(val) : val}</td>;
+    if (k === 'units_concerned') return <td key={k} className="nowrap"><strong>{val}</strong></td>;
     if (k === 'plug_id') return <td key={k} className="cell-clip mono" title={val || ''}><strong>{val}</strong></td>;
     return <td key={k} className="cell-clip" title={val || ''}>{val}</td>;
   };
@@ -168,7 +205,7 @@ export default function Workload() {
   return (
     <main className="container">
       <div className="page-head">
-        <div><h1>Workload Tracker</h1><div className="sub">One table for VEDIT, VGFX and AUDIO — each section shows its own columns.</div></div>
+        <div><h1>Workload Tracker</h1><div className="sub">One table for VGFX, VEDIT and Audio — Units Concerned says which team(s) a plug is for.</div></div>
         <div className="actions">
           <div className="segmented" id="mode-seg">
             <button type="button" className={mode === 'table' ? 'on' : ''} onClick={() => changeMode('table')}>Table</button>
@@ -189,27 +226,30 @@ export default function Workload() {
         </div>
       </div>
 
-      {!lookups.workload_platform.length ? (
+      {!lookups.workload_platform.length || !lookups.plug_type.length ? (
         <div className="alert warn mb-12">
-          No Workload Platform options exist yet.{' '}
+          {!lookups.workload_platform.length ? 'No Workload Platform options exist yet. ' : ''}
+          {!lookups.plug_type.length ? 'No Plug Type options exist yet. ' : ''}
           {s.canPage('/admin') ? <>Add them in <Link to="/admin#dropdowns">Admin → Dropdowns</Link>.</> : 'Ask an Admin to add them.'}
         </div>
       ) : null}
 
       <div className="tabs" id="section-tabs">
-        {tabs.map((t) => <button key={t} type="button" className={tab === t ? 'on' : ''} onClick={() => changeTab(t)}>{tabLabel(t)}</button>)}
+        {meta.tabs.map((t) => <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => changeTab(t.key)}>{t.label}</button>)}
       </div>
 
       <div className="card">
         <div className="filters">
-          {!isGrid ? <input type="search" placeholder="Search plug ID, PSD, program, remarks…" value={filt.q} onChange={setF('q')} /> : null}
+          {!isGrid ? <input type="search" placeholder="Search plug ID, PSD, program, billable party, remarks…" value={filt.q} onChange={setF('q')} /> : null}
+          <select value={filt.units} onChange={setF('units')} title="Units Concerned"><Options list={meta.units} blank="All units" /></select>
           <select value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All platforms" /></select>
+          <select value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All plug types" /></select>
           <input type="date" title="Work date from" value={filt.from} onChange={setF('from')} />
           <input type="date" title="Work date to" value={filt.to} onChange={setF('to')} />
         </div>
 
         {mode === 'excel' && tab === 'ALL' ? (
-          <Empty>Pick VEDIT, VGFX or AUDIO above to edit in the Excel grid — each section has its own columns.</Empty>
+          <Empty>Pick VGFX, VEDIT or Audio above to edit in the Excel grid — each shows its own columns.</Empty>
         ) : isGrid ? (
           <>
             <div className="table-wrap" id="grid">
@@ -223,12 +263,12 @@ export default function Workload() {
                           <tr key={r._key} className={r._dirty ? 'dirty' : ''}>
                             {cols.map((k) => (
                               <td key={k}>
-                                <FieldInput k={k} def={meta.fields[k]} value={r[k]} lookups={lookups} disabled={!canWrite} onChange={(e) => setCell(r._key, k, e.target.value)} />
+                                <FieldInput def={meta.fields[k]} value={r[k]} lookups={lookups} disabled={!canWrite} onChange={(e) => setCell(r._key, k, e.target.value)} />
                               </td>
                             ))}
                             {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removeRow(r)}>{r._new ? 'Remove' : 'Delete'}</button></td> : null}
                           </tr>
-                        )) : <tr><td colSpan={cols.length + 1} className="empty">No {tab} rows match these filters.{canWrite ? ' Use “Add row” to start.' : ''}</td></tr>}
+                        )) : <tr><td colSpan={cols.length + 1} className="empty">No {meta.tabs.find((t) => t.key === tab).label} rows match these filters.{canWrite ? ' Use “Add row” to start.' : ''}</td></tr>}
                       </tbody>
                     </table>
                   )}
@@ -269,7 +309,7 @@ export default function Workload() {
       {form ? (
         <WorkloadForm
           rec={form.rec}
-          defaultSection={tab === 'ALL' ? '' : tab}
+          defaultUnits={tab === 'ALL' ? '' : meta.tabDefaultUnits[tab]}
           meta={meta}
           lookups={lookups}
           canWrite={canWrite}
@@ -281,20 +321,30 @@ export default function Workload() {
   );
 }
 
-function WorkloadForm({ rec, defaultSection, meta, lookups, canWrite, onClose, onSaved }) {
+function WorkloadForm({ rec, defaultUnits, meta, lookups, canWrite, onClose, onSaved }) {
   const toast = useToast();
   const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const initial = Object.keys(meta.fields).reduce((o, k) => ({ ...o, [k]: (rec && rec[k]) ?? '' }), {});
-  if (!rec) { initial.work_date = isoDate(); initial.section = defaultSection; }
-  const [f, set] = useForm(initial);
-  // Only the selected section's fields are shown (server also blanks any that do not belong)
-  const keys = f.section ? meta.views[f.section].filter((k) => k !== 'work_date') : [];
+  if (!rec) { initial.work_date = isoDate(); initial.units_concerned = defaultUnits; }
+  const [f, , setAll] = useForm(initial);
+  const set = (k) => (e) => {
+    const val = e && e.target ? e.target.value : e;
+    setAll((prev) => withAutoPlatform(meta.platformRules, prev, k, val));
+  };
+
+  // Audio-only units use the template's Audio sheet columns; everything else uses the main sheet columns
+  const teams = meta.unitTeams[f.units_concerned] || [];
+  const audioOnly = teams.length === 1 && teams[0] === 'AUDIO';
+  const shown = f.units_concerned
+    ? meta.views[audioOnly ? 'AUDIO' : 'VGFX'].filter((k) => k !== 'work_date' && k !== 'units_concerned')
+    : [];
+  const plugText = String(f.plug_id || '').trim();
 
   const submit = async () => {
     if (!f.work_date) { toast('Work Date is required', 'err'); return; }
-    if (!f.section) { toast('Section Assigned is required', 'err'); return; }
-    if (!String(f.plug_id || '').trim()) { toast('Plug ID is required', 'err'); return; }
+    if (!f.units_concerned) { toast('Units Concerned is required', 'err'); return; }
+    if (!plugText) { toast('Plug ID is required', 'err'); return; }
     setBusy(true);
     try {
       if (rec) await put(`/api/workload/${rec.id}`, f);
@@ -324,19 +374,21 @@ function WorkloadForm({ rec, defaultSection, meta, lookups, canWrite, onClose, o
     >
       <form id="wl-form" className="form-grid" noValidate onSubmit={(e) => e.preventDefault()}>
         <label className="f"><span>Work Date <span className="req">*</span></span>
-          <FieldInput k="work_date" def={meta.fields.work_date} value={f.work_date} onChange={set('work_date')} disabled={!canWrite} lookups={lookups} /></label>
-        <label className="f"><span>Section Assigned <span className="req">*</span></span>
-          <FieldInput k="section" def={meta.fields.section} value={f.section} onChange={set('section')} disabled={!canWrite} lookups={lookups} /></label>
-        {!f.section ? <div className="full dim">Choose a section to see its fields.</div> : keys.map((k) => {
+          <FieldInput def={meta.fields.work_date} value={f.work_date} onChange={set('work_date')} disabled={!canWrite} lookups={lookups} /></label>
+        <label className="f"><span>Units Concerned <span className="req">*</span></span>
+          <FieldInput def={meta.fields.units_concerned} value={f.units_concerned} onChange={set('units_concerned')} disabled={!canWrite} lookups={lookups} /></label>
+        {!f.units_concerned ? <div className="full dim">Choose Units Concerned to see the fields.</div> : shown.map((k) => {
           const def = meta.fields[k];
           return (
             <label key={k} className={`f${def.multiline ? ' full' : ''}`}>
               <span>{def.label}{def.required ? <span className="req"> *</span> : null}</span>
-              <FieldInput k={k} def={def} value={f[k]} onChange={set(k)} disabled={!canWrite} lookups={lookups} />
+              <FieldInput def={def} value={f[k]} onChange={set(k)} disabled={!canWrite} lookups={lookups} />
+              {k === 'platform' && plugText && !f.platform ? (
+                <small className="dim">{/PD_/i.test(plugText) ? 'PD_ plugs are digital — choose DIGITAL or INTL DIGITAL.' : 'Could not tell the platform from the Plug ID — choose one.'}</small>
+              ) : null}
             </label>
           );
         })}
-        {f.section === 'AUDIO' ? <div className="full dim">Platform defaults to <strong>RADIO</strong> if left blank.</div> : null}
       </form>
     </Modal>
   );
