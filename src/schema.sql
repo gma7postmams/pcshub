@@ -185,8 +185,7 @@ ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS billable_party  TEXT;   -- o
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS units_concerned TEXT;   -- dropdown (6 fixed options, see constraint below)
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS plug_id         TEXT;   -- copied from the PSD daily plug list
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS psd             TEXT;   -- copied from the PSD daily plug list
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate       DATE;   -- date
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate_time  TEXT;   -- time of day 'HH:MM' (24h), picked from a list
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate       TIMESTAMP;   -- Breakdate/Time: date and time picked together (wall-clock, no time zone)
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS vo              TEXT;   -- open
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS script          DATE;   -- date
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS art_stb         DATE;   -- date
@@ -199,16 +198,33 @@ ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS length          TEXT;   -- A
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS others          TEXT;   -- Audio: open
 -- (Older installs may still have an unused status column from the first build; it is left untouched.)
 
--- Time used to be free text ("VGFX: Sep 28, 10am / VEDIT: 11am"). It is now a picked time ('HH:MM'). Anything that is not
--- already a time is kept: the first clock time in it (e.g. 10am -> 10:00) becomes the time and the old text is added to Remarks.
-UPDATE workload_items SET
-  remarks = concat_ws(E'\n', remarks, 'Time (as typed before): ' || breakdate_time),
-  breakdate_time = (
-    SELECT CASE WHEN m IS NOT NULL AND m[1]::int BETWEEN 1 AND 12 AND COALESCE(m[2], '0')::int <= 59
-      THEN to_char(make_time(CASE WHEN lower(m[3]) = 'pm' THEN (m[1]::int % 12) + 12 ELSE m[1]::int % 12 END, COALESCE(m[2], '0')::int, 0), 'HH24:MI')
-      END
-    FROM (SELECT regexp_match(breakdate_time, '(\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])') AS m) x)
-WHERE breakdate_time IS NOT NULL AND breakdate_time !~ '^([01]\d|2[0-3]):[0-5]\d$';
+-- Breakdate and Time used to be two fields (a date, and a time that was free text and then a picked HH:MM). They are now one
+-- Breakdate/Time value. Runs only while the old breakdate_time column still exists:
+--  * typed text in it -> the first clock time in it (e.g. 10am -> 10:00) is used, the original text is added to Remarks
+--  * breakdate (date) + that time -> one timestamp (a date without a time becomes 12:00 AM and shows as date only)
+--  * a time with no date has nowhere to go, so it is added to Remarks
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+              AND table_name = 'workload_items' AND column_name = 'breakdate_time') THEN
+    UPDATE workload_items SET
+      remarks = concat_ws(E'\n', remarks, 'Time (as typed before): ' || breakdate_time),
+      breakdate_time = (
+        SELECT CASE WHEN m IS NOT NULL AND m[1]::int BETWEEN 1 AND 12 AND COALESCE(m[2], '0')::int <= 59
+          THEN to_char(make_time(CASE WHEN lower(m[3]) = 'pm' THEN (m[1]::int % 12) + 12 ELSE m[1]::int % 12 END, COALESCE(m[2], '0')::int, 0), 'HH24:MI')
+          END
+        FROM (SELECT regexp_match(breakdate_time, '(\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])') AS m) x)
+    WHERE breakdate_time IS NOT NULL AND breakdate_time !~ '^([01]\d|2[0-3]):[0-5]\d$';
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+                AND table_name = 'workload_items' AND column_name = 'breakdate' AND data_type = 'date') THEN
+      ALTER TABLE workload_items ALTER COLUMN breakdate TYPE TIMESTAMP
+        USING (breakdate::timestamp + COALESCE(breakdate_time::time, TIME '00:00'));
+    END IF;
+    UPDATE workload_items SET remarks = concat_ws(E'\n', remarks, 'Breakdate time: ' || breakdate_time)
+      WHERE breakdate IS NULL AND breakdate_time IS NOT NULL;
+    ALTER TABLE workload_items DROP COLUMN breakdate_time;
+  END IF;
+END $$;
 
 -- A workflow "Status" column was tried in a draft of the redesign and removed again; drop it if a database got it.
 ALTER TABLE workload_items DROP COLUMN IF EXISTS work_status;

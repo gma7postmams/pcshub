@@ -15,6 +15,8 @@ pool.on('error', (err) => console.error('[pg] idle client error', err.message));
 
 // Return DATE columns as plain 'YYYY-MM-DD' strings (no timezone shifting)
 require('pg').types.setTypeParser(1082, (v) => v);
+// TIMESTAMP (no time zone) -> 'YYYY-MM-DDTHH:MM' wall-clock text (what <input type=datetime-local> uses; no timezone shifting)
+require('pg').types.setTypeParser(1114, (v) => (v === null ? null : v.replace(' ', 'T').slice(0, 16)));
 // NUMERIC -> JS number
 require('pg').types.setTypeParser(1700, (v) => (v === null ? null : parseFloat(v)));
 
