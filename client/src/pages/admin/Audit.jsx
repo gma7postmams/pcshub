@@ -5,6 +5,148 @@ import { Empty, useDebounced } from '../../components/ui.jsx';
 
 const PAGE = 50;
 
+const ACTION_LABELS = {
+  'auth.login': 'User Login',
+  'auth.logout': 'User Logout',
+  'auth.login_failed': 'Failed Login',
+
+  'ingest.create': 'Created Ingest Record',
+  'ingest.send_for_approval': 'Submitted For Approval',
+
+  'approval.approved': 'Approved Request',
+  'approval.rejected': 'Rejected Request',
+
+  'admin.user_create': 'Created User',
+  'admin.user_update': 'Updated User',
+  'admin.user_reset_password': 'Reset Password',
+  'admin.user_reset_2fa': 'Reset 2FA',
+
+  'admin.group_create': 'Created Group',
+  'admin.group_update': 'Updated Group',
+  'admin.group_delete': 'Deleted Group',
+
+  'admin.dropdown_create': 'Created Dropdown',
+  'admin.dropdown_update': 'Updated Dropdown',
+  'admin.dropdown_delete': 'Deleted Dropdown',
+
+  'admin.branding_update': 'Updated Branding',
+  'admin.branding_logo': 'Uploaded Logo',
+  'admin.branding_logo_remove': 'Removed Logo',
+};
+
+function formatAction(action) {
+  return ACTION_LABELS[action] || action;
+}
+
+function formatEntity(row) {
+  switch (row.entity) {
+    case 'user':
+      return 'User';
+    case 'group':
+      return 'Group';
+    case 'dropdown_option':
+      return 'Dropdown';
+    case 'approval_request':
+      return 'Approval Request';
+    case 'ingest_record':
+      return 'Ingest Record';
+    case 'app_settings':
+      return 'Application Branding';
+    case 'report':
+      return 'Report';
+    default:
+      return row.entity || '';
+  }
+}
+
+function formatDetails(row) {
+  const d = row.details || {};
+
+  switch (row.action) {
+    case 'auth.login':
+      return 'User logged in successfully';
+
+    case 'auth.logout':
+      return 'User logged out';
+
+    case 'auth.login_failed':
+      if (d.reason === 'unknown_user') {
+        return `Unknown username: ${d.username || ''}`;
+      }
+      if (d.reason === 'bad_password') {
+        return `Invalid password for ${d.username || 'user'}`;
+      }
+      if (d.reason === 'locked') {
+        return `Account locked: ${d.username || 'user'}`;
+      }
+      return 'Login attempt failed';
+
+    case 'admin.dropdown_create':
+      return `Created ${d.category}: ${d.value}`;
+
+    case 'admin.dropdown_update':
+      return `Updated ${d.to?.value || ''}`;
+
+    case 'admin.dropdown_delete':
+      return `Deleted ${d.category}: ${d.value}`;
+
+    case 'admin.branding_update':
+      return `Updated branding theme: ${d.theme || ''}`;
+
+    case 'admin.branding_logo':
+      return 'Uploaded application logo';
+
+    case 'admin.branding_logo_remove':
+      return 'Removed application logo';
+
+    case 'admin.user_create':
+      return `Created user: ${d.username || ''}`;
+
+    case 'admin.user_update':
+      return 'Updated user settings';
+
+    case 'admin.user_reset_password':
+      return 'Password reset';
+
+    case 'admin.user_reset_2fa':
+      return '2FA reset';
+
+    case 'admin.group_create':
+      return `Created group: ${d.name || ''}`;
+
+    case 'admin.group_update':
+      return 'Updated group permissions';
+
+    case 'admin.group_delete':
+      return `Deleted group: ${d.name || ''}`;
+
+    case 'ingest.create':
+      return `Created ingest record (${d.program || 'Program'})`;
+
+    case 'ingest.send_for_approval':
+      return 'Submitted ingest record for approval';
+
+    case 'approval.approved':
+      return d.note
+        ? `Approved request - Note: ${d.note}`
+        : 'Approved request';
+
+    case 'approval.rejected':
+      return d.note
+        ? `Rejected request - Reason: ${d.note}`
+        : 'Rejected request';
+
+    case 'reports_export_ingest':
+    case 'reports.export_ingest':
+      return 'Exported ingest report';
+
+    default:
+      return '';
+  }
+}
+
+
+
 export default function Audit() {
   const [f, setF] = useState({ action: '', user: '', from: '', to: '' });
   const [offset, setOffset] = useState(0);
@@ -40,9 +182,16 @@ export default function Audit() {
                   <tr key={r.id}>
                     <td className="nowrap dim">{fmtDateTime(r.created_at)}</td>
                     <td className="mono">{r.username || '—'}</td>
-                    <td className="mono">{r.action}</td>
-                    <td className="nowrap">{r.entity || ''}{r.entity_id ? ` #${r.entity_id}` : ''}</td>
-                    <td className="cell-clip mono" title={details}>{details}</td>
+
+                    <td>{formatAction(r.action)}</td>
+
+                    <td className="nowrap">
+                      {formatEntity(r)}
+                    </td>
+
+                    <td title={details}>
+                      {formatDetails(r)}
+                    </td>                    
                     <td className="mono dim">{r.ip || ''}</td>
                   </tr>
                 );
