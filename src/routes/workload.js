@@ -2,7 +2,7 @@ const express = require('express');
 
 // Mounted behind requirePageAccess('/workload') => Admin, Manager only.
 //
-// Work Load Tracker fields are NOT defined yet (to be built).
+// Workload Tracker fields are NOT defined yet (to be built).
 // The page, its group lock and the workload_items table (identity/audit columns only)
 // are in place. When fields are specified:
 //   1. add the columns to workload_items in src/schema.sql

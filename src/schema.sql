@@ -136,7 +136,7 @@ CREATE INDEX IF NOT EXISTS approval_status_idx ON approval_requests (status, req
 CREATE UNIQUE INDEX IF NOT EXISTS approval_one_pending_uq
   ON approval_requests (ingest_record_id) WHERE status = 'Pending';
 
--- Work Load Tracker: fields not defined yet (to be built).
+-- Workload Tracker: fields not defined yet (to be built).
 -- Only identity/audit columns exist; add the tracker's fields here once they are specified.
 CREATE TABLE IF NOT EXISTS workload_items (
   id          SERIAL PRIMARY KEY,

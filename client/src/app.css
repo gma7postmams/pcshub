@@ -336,7 +336,7 @@ table.t td.num, table.t th.num { text-align: right; font-variant-numeric: tabula
 .tabs button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--text-2); font: 550 14px var(--font); padding: 10px 14px; cursor: pointer; white-space: nowrap; }
 .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
 
-/* ---------- Excel grid (Work Load) ---------- */
+/* ---------- Excel grid (Workload) ---------- */
 .xl-wrap { overflow: auto; max-height: calc(100vh - 260px); min-height: 300px; }
 table.xl { border-collapse: separate; border-spacing: 0; font-size: 13px; min-width: 1200px; width: 100%; }
 table.xl th { position: sticky; top: 0; z-index: 2; background: var(--surface-3); color: var(--text-2); font-weight: 600; font-size: 12px; padding: 7px 8px; border-right: 1px solid var(--border-2); border-bottom: 1px solid var(--border-2); text-align: left; white-space: nowrap; }
