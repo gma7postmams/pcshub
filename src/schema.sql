@@ -186,7 +186,7 @@ ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS units_concerned TEXT;   -- d
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS plug_id         TEXT;   -- copied from the PSD daily plug list
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS psd             TEXT;   -- copied from the PSD daily plug list
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate       DATE;   -- date
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate_time  TEXT;   -- time: open
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate_time  TEXT;   -- time of day 'HH:MM' (24h), picked from a list
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS vo              TEXT;   -- open
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS script          DATE;   -- date
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS art_stb         DATE;   -- date
@@ -198,6 +198,17 @@ ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS plug_type       TEXT;   -- d
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS length          TEXT;   -- Audio: open (older installs already have this column)
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS others          TEXT;   -- Audio: open
 -- (Older installs may still have an unused status column from the first build; it is left untouched.)
+
+-- Time used to be free text ("VGFX: Sep 28, 10am / VEDIT: 11am"). It is now a picked time ('HH:MM'). Anything that is not
+-- already a time is kept: the first clock time in it (e.g. 10am -> 10:00) becomes the time and the old text is added to Remarks.
+UPDATE workload_items SET
+  remarks = concat_ws(E'\n', remarks, 'Time (as typed before): ' || breakdate_time),
+  breakdate_time = (
+    SELECT CASE WHEN m IS NOT NULL AND m[1]::int BETWEEN 1 AND 12 AND COALESCE(m[2], '0')::int <= 59
+      THEN to_char(make_time(CASE WHEN lower(m[3]) = 'pm' THEN (m[1]::int % 12) + 12 ELSE m[1]::int % 12 END, COALESCE(m[2], '0')::int, 0), 'HH24:MI')
+      END
+    FROM (SELECT regexp_match(breakdate_time, '(\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])') AS m) x)
+WHERE breakdate_time IS NOT NULL AND breakdate_time !~ '^([01]\d|2[0-3]):[0-5]\d$';
 
 -- A workflow "Status" column was tried in a draft of the redesign and removed again; drop it if a database got it.
 ALTER TABLE workload_items DROP COLUMN IF EXISTS work_status;

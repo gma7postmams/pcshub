@@ -452,20 +452,12 @@ table.t.wl { font-size: 12.5px; }
 table.t.wl th { padding: 8px 8px; white-space: normal; line-height: 1.25; vertical-align: bottom; }
 table.t.wl td { padding: 7px 8px; }
 /* keep line breaks from pasted multi-line cells; wrap long text rather than cutting it off */
-table.t.wl td { white-space: pre-wrap; overflow-wrap: break-word; }   /* short fields keep their words whole */
-/* free-text columns often hold long unbroken file paths: let those break anywhere so they never force the table wider than the window */
-table.t.wl td[data-k="remarks"], table.t.wl td[data-k="others"], table.t.wl td[data-k="vo"],
-table.t.wl td[data-k="breakdate_time"], table.t.wl td[data-k="total_mats"] { overflow-wrap: anywhere; }
-table.t.wl td[data-k="plug_id"] { min-width: 150px; }
-table.t.wl td[data-k="remarks"], table.t.wl td[data-k="breakdate_time"], table.t.wl td[data-k="vo"],
-table.t.wl td[data-k="others"], table.t.wl td[data-k="total_mats"] { min-width: 120px; }
-table.t.wl td[data-k="prog_name"], table.t.wl td[data-k="billable_party"], table.t.wl td[data-k="units_concerned"] { min-width: 100px; }
 table.t.wl td.actions-cell { white-space: normal; width: 1%; }
 table.t.wl td.actions-cell .btn { display: block; width: 100%; margin: 0 0 4px; }
 table.t.wl td.actions-cell .btn:last-child { margin-bottom: 0; }
 /* Excel grid: wider columns for the long-text fields (textareas grow with their content) */
 table.t.xl td[data-k="plug_id"] textarea, table.t.xl td[data-k="remarks"] textarea, table.t.xl td[data-k="others"] textarea,
-table.t.xl td[data-k="breakdate_time"] textarea, table.t.xl td[data-k="vo"] textarea, table.t.xl td[data-k="total_mats"] textarea { min-width: 190px; }
+table.t.xl td[data-k="vo"] textarea, table.t.xl td[data-k="total_mats"] textarea { min-width: 190px; }
 table.t.xl td[data-k="units_concerned"] select, table.t.xl td[data-k="platform"] select { min-width: 150px; }
 table.t.xl textarea { overflow: hidden; resize: none; }
 
@@ -483,7 +475,7 @@ table.t.wl.cards td::before { content: attr(data-label); color: var(--text-3); f
 table.t.wl.cards td:empty { display: none; }
 table.t.wl.cards td[data-k="plug_id"] { grid-column: 1 / -1; order: -1; font-size: 14px; }
 table.t.wl.cards td[data-k="plug_id"]::before { content: none; }
-table.t.wl.cards td[data-k="remarks"], table.t.wl.cards td[data-k="breakdate_time"], table.t.wl.cards td[data-k="vo"],
+table.t.wl.cards td[data-k="remarks"], table.t.wl.cards td[data-k="vo"],
 table.t.wl.cards td[data-k="others"], table.t.wl.cards td[data-k="total_mats"], table.t.wl.cards td[data-k="prog_name"] { grid-column: span 2; }
 table.t.wl.cards td.actions-cell { grid-column: 1 / -1; order: 99; flex-direction: row; justify-content: flex-end; gap: 8px; padding-top: 4px; width: auto; }
 table.t.wl.cards td.actions-cell::before { content: none; }
@@ -540,14 +532,13 @@ button.wl-kpi:hover { transform: translateY(-1px); border-color: color-mix(in sr
 table.t.wl { font-size: 13px; }
 table.t.wl thead th { background: transparent; font-size: 11px; letter-spacing: .05em; color: var(--text-3); vertical-align: middle; }
 table.t.wl th.right { text-align: right; }
-table.t.wl th, table.t.wl td { padding: 12px 10px; }
+table.t.wl th, table.t.wl td { padding: 9px 10px; }
 table.t.wl td { vertical-align: middle; }
 table.t.wl .strong { font-weight: 650; color: var(--text); }
 table.t.wl .sub { margin-top: 2px; font-size: 12px; color: var(--text-2); }
 table.t.wl .sub.pre { white-space: pre-wrap; }
 table.t.wl .stack { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 table.t.wl .stack .sub { margin: 0; }
-table.t.wl td[data-k="plug_type"] { min-width: 110px; }
 
 .kebab { display: inline-grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); cursor: pointer; }
 .kebab:hover, .kebab[aria-expanded="true"] { background: var(--surface-3); color: var(--text); }
@@ -563,7 +554,6 @@ table.t.wl td[data-k="plug_type"] { min-width: 110px; }
 .pager .pg.on { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
 .pg-gap { padding: 0 4px; color: var(--text-3); }
 table.t.wl td[data-k="work_date"] strong { white-space: nowrap; }
-table.t.wl td[data-k="units_concerned"] { min-width: 190px; }
 .chips { flex-wrap: nowrap; }
 table.t.wl.cards .chips { flex-wrap: wrap; }
 table.t.wl .stack { gap: 3px; }
@@ -579,14 +569,19 @@ table.t.wl.cards td { align-items: flex-start; }
   .wl-kpi .num { font-size: 24px; }
 }
 
-/* Wide tabs (VGFX / VEDIT / Audio have 13+ columns): slightly denser so a normal desktop still gets the real table */
-table.t.wl.dense { font-size: 12.5px; }
-table.t.wl.dense th, table.t.wl.dense td { padding: 10px 7px; }
-table.t.wl.dense td[data-k="units_concerned"], table.t.wl.dense td[data-k="plug_type"] { min-width: 0; }
-table.t.wl.dense td[data-k="units_concerned"] .chip { white-space: nowrap; }   /* pills stay on one line; only the row of team pills may stack */
-table.t.wl.dense .chips { flex-wrap: wrap; }
-table.t.wl.dense td[data-k="work_date"] strong { white-space: normal; }
 /* cards: put the ⋮ menu in the card's top-right corner instead of a row of its own */
 table.t.wl.cards tr { position: relative; }
 table.t.wl.cards td.actions-cell { position: absolute; top: 6px; right: 8px; order: 0; padding: 0; width: auto; grid-column: auto; }
 table.t.wl.cards td[data-k="plug_id"] { padding-right: 38px; }
+
+/* One line per row: every cell stays on a single line (a wide table scrolls sideways inside the card), except Remarks which wraps */
+table.t.wl td { white-space: nowrap; }
+table.t.wl td .rem { min-width: 260px; max-width: 460px; white-space: pre-wrap; overflow-wrap: anywhere; }
+table.t.wl .dim-inline { color: var(--text-2); font-weight: 400; }
+table.t.wl th { white-space: nowrap; }
+/* ...but on phones each row is a card, where text has to wrap */
+table.t.wl.cards td { white-space: pre-wrap; }
+table.t.wl.cards td .rem { min-width: 0; max-width: none; }
+/* cards: long pills (e.g. "REG/TDMD (GMA MUSIC)") get the whole card width and may wrap rather than spill into the next column */
+table.t.wl.cards td[data-k="platform"], table.t.wl.cards td[data-k="units_concerned"] { grid-column: 1 / -1; }
+table.t.wl.cards .chip { white-space: normal; max-width: 100%; }

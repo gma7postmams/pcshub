@@ -26,30 +26,15 @@ export function UnitsPills({ value, unitTeams }) {
   return <span className="chips">{teams.map((t) => <Chip key={t} hue={TEAM_HUE[t]}>{TEAM_LABEL[t]}</Chip>)}</span>;
 }
 
-/** "REG/TDMD (GMA MUSIC)" -> pill "REG/TDMD" with "GMA MUSIC" underneath; plain platforms -> just the pill */
+/** Platform as one pill, exactly as chosen (e.g. "REG/TDMD (GMA MUSIC)"); the colour follows the family before the bracket */
 export function PlatformCell({ value }) {
   if (!value) return null;
-  const m = /^(.+?)\s*\((.+)\)$/.exec(value);
-  const main = m ? m[1] : value;
-  return <div className="stack"><Chip hue={hueOf(main)}>{main}</Chip>{m ? <span className="sub">{m[2]}</span> : null}</div>;
+  const family = value.replace(/\s*\(.*\)\s*$/, '') || value;
+  return <Chip hue={hueOf(family)}>{value}</Chip>;
 }
 
 const dayNum = (iso) => { const [y, m, d] = iso.split('-').map(Number); return Date.UTC(y, m - 1, d) / 86400000; };
-/** Friendly label for a date relative to today (null when it is far away) */
-export function relDay(iso, today = isoDate()) {
-  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-  const n = dayNum(today) - dayNum(iso);
-  if (n === 0) return { label: 'Today', hue: 'blue' };
-  if (n === 1) return { label: 'Yesterday', hue: 'gray' };
-  if (n > 1 && n <= 30) return { label: `${n} days ago`, hue: 'gray' };
-  if (n === -1) return { label: 'Tomorrow', hue: 'green' };
-  if (n < -1 && n >= -30) return { label: `In ${-n} days`, hue: 'green' };
-  return null;
-}
-export function WorkDate({ value, today }) {
-  const rel = relDay(value, today);
-  return <div className="stack"><strong>{fmtDate(value)}</strong>{rel ? <Chip hue={rel.hue} small>{rel.label}</Chip> : null}</div>;
-}
+export const WorkDate = ({ value }) => <span className="strong nowrap">{fmtDate(value)}</span>;
 
 /** Summary card: coloured icon tile + label + big number. Clickable when onClick is given. */
 export function KpiCard({ hue, icon, label, value, active, onClick }) {

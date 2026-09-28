@@ -36,7 +36,7 @@ const FIELDS = {
   plug_id:        { label: 'Plug ID', kind: 'text', multiline: true, max: 1000, required: true, hint: FROM_PSD },
   psd:            { label: 'PSD', kind: 'text', max: 200, hint: FROM_PSD },
   breakdate:      { label: 'Breakdate', kind: 'date' },
-  breakdate_time: { label: 'Time', kind: 'text', multiline: true, max: 1000, hint: OPEN },
+  breakdate_time: { label: 'Time', kind: 'time' },
   vo:             { label: 'VO', kind: 'text', multiline: true, max: 1000, hint: OPEN },
   script:         { label: 'Script', kind: 'date' },
   art_stb:        { label: 'Artwork/STB', kind: 'date' },
@@ -123,6 +123,14 @@ function parseAudioGuide(raw, current) {
   return s;
 }
 
+/** Time of day picked from a list: 'HH:MM' (24h) or empty */
+function parseTime(raw, field) {
+  const s = v.str(raw, { field, max: 10 });
+  if (!s) return null;
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s)) throw new HttpError(400, `${field} must be a time`);
+  return s;
+}
+
 /** Validate one row; returns the values to store. `current` = the stored row when updating. */
 async function parseRow(client, body, current) {
   const cur = current || {};
@@ -131,6 +139,7 @@ async function parseRow(client, body, current) {
     const f = FIELDS[k];
     if (k === 'audio_guide') rec[k] = parseAudioGuide(body[k], cur[k]);
     else if (f.kind === 'date') rec[k] = v.date(body[k], { field: f.label, required: !!f.required });
+    else if (f.kind === 'time') rec[k] = parseTime(body[k], f.label);
     else if (k === 'units_concerned') rec[k] = v.oneOf(body[k], UNITS, { field: f.label });
     else rec[k] = v.str(body[k], { field: f.label, max: f.max, required: !!f.required });
   }
@@ -253,7 +262,7 @@ router.get('/export', asyncH(async (req, res) => {
     ws.columns = sh.cols.map((k) => {
       const f = FIELDS[k];
       return { header: f.label, key: k, width: f.multiline ? 34 : f.kind === 'date' ? 14 : 22,
-        style: f.kind === 'date' ? { numFmt: 'mmm d, yyyy' } : {} };
+        style: f.kind === 'date' ? { numFmt: 'mmm d, yyyy' } : f.kind === 'time' ? { numFmt: 'h:mm AM/PM' } : {} };
     });
     ws.getRow(1).font = { bold: true };
     ws.views = [{ state: 'frozen', ySplit: 1 }];
@@ -262,6 +271,7 @@ router.get('/export', asyncH(async (req, res) => {
         const f = FIELDS[k];
         let val = r[k];
         if (f.kind === 'date') val = asDate(val);
+        else if (f.kind === 'time') val = /^\d{2}:\d{2}$/.test(val || '') ? (Number(val.slice(0, 2)) * 60 + Number(val.slice(3))) / 1440 : null;
         else if (k === 'audio_guide' && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = asDate(val);
         return { ...o, [k]: val };
       }, {}));

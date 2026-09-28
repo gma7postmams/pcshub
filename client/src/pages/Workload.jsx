@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { del, get, post, put } from '../lib/api.js';
-import { fmtDate, isoDate } from '../lib/util.js';
+import { fmtDate, fmtTime, isoDate, TIME_OPTIONS } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { CalendarIcon, DocIcon, DownloadIcon, FilmIcon, LayersIcon, PlusIcon, SearchIcon, SpeakerIcon } from '../components/Icons.jsx';
 import { DateRange, FilterSelect, KpiCard, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
@@ -13,6 +13,7 @@ import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } fr
 // dropdown / Date / Open). Table mode = read + add/edit form; Excel mode = editable grid with batch save.
 const PAGE = 50;
 const GRID_LIMIT = 200;
+const CARDS_BELOW = 900;   // window width under which table rows become cards
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const withCurrent = (list, v) => (v && !list.includes(v) ? [...list, v] : list);
 const firstLine = (s) => String(s || '').split('\n')[0];
@@ -67,8 +68,16 @@ function AutoTextarea({ value, ...props }) {
   return <textarea ref={ref} value={value} {...props} />;
 }
 
+// Time of day picked from a list (15-minute steps), not typed. Stored as 'HH:MM'.
+function TimeSelect({ value, onChange, disabled }) {
+  const v = value || '';
+  const list = v && !TIME_OPTIONS.some((o) => o.value === v) ? [...TIME_OPTIONS, { value: v, label: fmtTime(v) }] : TIME_OPTIONS;
+  return <select value={v} disabled={disabled} onChange={onChange}><Options list={list} blank="—" /></select>;
+}
+
 function FieldInput({ def, value, onChange, disabled, lookups, auto }) {
   const v = value ?? '';
+  if (def.kind === 'time') return <TimeSelect value={v} onChange={onChange} disabled={disabled} />;
   if (def.kind === 'audio_guide') return <AudioGuideInput value={v} onChange={onChange} disabled={disabled} />;
   if (def.kind === 'date') return <input type="date" value={v} disabled={disabled} onChange={onChange} />;
   if (def.kind === 'select') {
@@ -100,25 +109,15 @@ export default function Workload() {
   const q = useDebounced(filt.q, 300);
   const isGrid = mode === 'excel' && tab !== 'ALL';
 
-  // Table vs cards: use the real table whenever it fits the window; when it would need sideways scrolling,
-  // show each row as a card instead (measured, so it follows the actual columns and content, not fixed breakpoints).
+  // Rows are one line each (Remarks wraps), so a wide table scrolls sideways inside the card, like Excel.
+  // Phones and small tablets show each row as a card instead.
   const [winW, setWinW] = useState(() => window.innerWidth);
   useEffect(() => {
     const on = () => setWinW(window.innerWidth);
     window.addEventListener('resize', on);
     return () => window.removeEventListener('resize', on);
   }, []);
-  const [needW, setNeedW] = useState({});   // tab -> window width the table needs to fit without sideways scrolling
-  const wrapRef = useRef(null);
-  const cards = mode === 'table' && winW < (needW[tab] || 0);
-  useLayoutEffect(() => {
-    const wrap = wrapRef.current;
-    if (!wrap || cards || mode !== 'table') return;
-    const t = wrap.querySelector('table');
-    if (t && t.scrollWidth > wrap.clientWidth + 1) {
-      setNeedW((o) => ({ ...o, [tab]: t.scrollWidth + (window.innerWidth - wrap.clientWidth) + 1 }));
-    }
-  }, [data, tab, winW, cards, mode]);
+  const cards = mode === 'table' && winW < CARDS_BELOW;
 
   useEffect(() => {
     Promise.all([get('/api/workload/meta'), get('/api/dropdowns?categories=workload_platform,plug_type')])
@@ -268,13 +267,15 @@ export default function Workload() {
   const total = data && data.total ? data.total : 0;
   const head = (k) => meta.fields[k].label;
   const firstLineOf = (t) => String(t || '').split('\n');
+  // every cell except Remarks stays on one line: line breaks in pasted text are shown as " · "
+  const oneLine = (t) => String(t ?? '').replace(/\s*\n+\s*/g, ' · ');
 
   // Cells wrap (pasted line breaks kept) instead of being cut off; data-label feeds the card layout.
   const cell = (r, k) => {
     const val = r[k];
     const common = { key: k, 'data-k': k, 'data-label': head(k) };
     switch (k) {
-      case 'work_date': return <td {...common}><WorkDate value={val} today={today} /></td>;
+      case 'work_date': return <td {...common}><WorkDate value={val} /></td>;
       case 'platform': return <td {...common}><PlatformCell value={val} /></td>;
       case 'units_concerned': return <td {...common}><UnitsPills value={val} unitTeams={meta.unitTeams} /></td>;
       case 'plug_type': return <td {...common}><TypePill value={val} /></td>;
@@ -282,20 +283,22 @@ export default function Workload() {
         const [first, ...rest] = firstLineOf(val);
         return (
           <td {...common}>
-            <div className="strong">{first}</div>
-            {rest.length ? <div className="sub pre">{rest.join('\n')}</div> : null}
+            <span className="strong">{first}</span>
+            {rest.length ? <span className="dim-inline"> · {rest.join(' · ')}</span> : null}
           </td>
         );
       }
       case 'prog_name':
         return (
           <td {...common}>
-            {val ? <div className="strong">{val}</div> : null}
+            {val ? <span className="strong">{oneLine(val)}</span> : null}
           </td>
         );
-      case 'audio_guide': return <td {...common}>{ISO.test(val || '') ? fmtDate(val) : val}</td>;
+      case 'audio_guide': return <td {...common}>{ISO.test(val || '') ? fmtDate(val) : oneLine(val)}</td>;
+      case 'breakdate_time': return <td {...common}>{fmtTime(val)}</td>;
+      case 'remarks': return <td {...common}>{val ? <div className="rem">{val}</div> : null}</td>;
       default:
-        return <td {...common}>{meta.fields[k].kind === 'date' ? fmtDate(val) : val}</td>;
+        return <td {...common}>{meta.fields[k].kind === 'date' ? fmtDate(val) : oneLine(val)}</td>;
     }
   };
 
@@ -399,12 +402,12 @@ export default function Workload() {
           </>
         ) : (
           <>
-            <div className="table-wrap" id="tbl" ref={wrapRef}>
+            <div className="table-wrap" id="tbl">
               {!data ? <Empty>Loading…</Empty>
                 : data.error ? <Empty>{data.error}</Empty>
                   : !data.rows.length ? <Empty>No workload items match these filters.</Empty>
                     : (
-                      <table className={`t wl${cols.length > 10 ? ' dense' : ''}${cards ? ' cards' : ''}`}>
+                      <table className={`t wl${cards ? ' cards' : ''}`}>
                         <thead><tr>{cols.map((k) => <th key={k}>{head(k)}</th>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {data.rows.map((r) => (

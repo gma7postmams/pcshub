@@ -41,3 +41,17 @@ export function download(filename, text, type) {
 
 /** Only follow same-origin relative links from server data (notifications). */
 export const safeLocalLink = (link) => (typeof link === 'string' && link.startsWith('/') && !link.startsWith('//') ? link : null);
+
+/** '14:30' -> '2:30 PM' */
+export function fmtTime(t) {
+  const m = /^(\d{2}):(\d{2})/.exec(t || '');
+  if (!m) return t || '';
+  const h = Number(m[1]);
+  return `${h % 12 || 12}:${m[2]} ${h >= 12 ? 'PM' : 'AM'}`;
+}
+
+/** Times of day in 15-minute steps, for picking instead of typing */
+export const TIME_OPTIONS = Array.from({ length: 96 }, (_, i) => {
+  const value = `${String(Math.floor(i / 4)).padStart(2, '0')}:${String((i % 4) * 15).padStart(2, '0')}`;
+  return { value, label: fmtTime(value) };
+});
