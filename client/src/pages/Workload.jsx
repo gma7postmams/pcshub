@@ -168,6 +168,17 @@ export default function Workload() {
     }
     setGrid((g) => ({ ...g, rows: g.rows.filter((x) => x._key !== r._key), total: r._new ? g.total : g.total - 1 }));
   };
+  // ---- table-mode delete (per row) ----
+  const deleteItem = async (r) => {
+    const what = `${firstLine(r.plug_id)}${r.work_date ? ` (${fmtDate(r.work_date)})` : ''}`;
+    if (!(await confirm('Delete workload item', `Permanently delete "${what}"? This cannot be undone.`, { okText: 'Delete', danger: true }))) return;
+    try {
+      await del(`/api/workload/${r.id}`);
+      toast('Deleted');
+      if (data && data.rows.length === 1 && offset > 0) setOffset(Math.max(0, offset - PAGE)); // last row on this page
+      else load();
+    } catch (e) { toast(e.message, 'err'); }
+  };
   const saveGrid = async () => {
     const idx = [];
     const rows = [];
@@ -285,11 +296,17 @@ export default function Workload() {
                   : !data.rows.length ? <Empty>No workload items match these filters.</Empty>
                     : (
                       <table className="t">
-                        <thead><tr>{cols.map((k) => <th key={k}>{meta.fields[k].label}</th>)}</tr></thead>
+                        <thead><tr>{cols.map((k) => <th key={k}>{meta.fields[k].label}</th>)}{canWrite ? <th /> : null}</tr></thead>
                         <tbody>
                           {data.rows.map((r) => (
                             <tr key={r.id} className="clickable" onClick={() => setForm({ rec: r })}>
                               {cols.map((k) => cell(r, k))}
+                              {canWrite ? (
+                                <td className="right nowrap" onClick={(e) => e.stopPropagation()}>
+                                  <button type="button" className="btn sm" onClick={() => setForm({ rec: r })}>Edit</button>{' '}
+                                  <button type="button" className="btn sm danger row-del" onClick={() => deleteItem(r)}>Delete</button>
+                                </td>
+                              ) : null}
                             </tr>
                           ))}
                         </tbody>
