@@ -45,13 +45,18 @@ const FIELDS = {
   total_mats:     { label: 'Total Mats', kind: 'text', multiline: true, max: 500, hint: OPEN },
   prog_name:      { label: 'Prog Name / Project Title', kind: 'text', max: 300, hint: FROM_PSD },
   plug_type:      { label: 'Plug Type', kind: 'select', lookup: 'plug_type', max: 100 },
+  // Audio sheet's Assigned / Done / Resched-cancelled tables: open columns you can type or paste into
+  length:         { label: 'Length', kind: 'text', max: 100, hint: OPEN },
+  others:         { label: 'Others', kind: 'text', multiline: true, max: 2000, hint: OPEN },
 };
 const COLS = Object.keys(FIELDS);
 
 // Columns per tab, in the same order as the template's sheets ("main" for VGFX/VEDIT, "ojo" for Audio)
 const MAIN_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'breakdate', 'breakdate_time',
   'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats', 'prog_name', 'plug_type'];
-const AUDIO_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'vo', 'script', 'remarks', 'plug_type'];
+const AUDIO_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'vo', 'script', 'remarks', 'length', 'others', 'plug_type'];
+// Audio-only columns; any row that involves Audio (e.g. VGFX/VEDIT/Audio) also gets these in the form
+const AUDIO_EXTRA = ['length', 'others'];
 const VIEWS = {
   ALL: ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'prog_name', 'plug_type', 'remarks'],
   VGFX: MAIN_COLS,
@@ -90,11 +95,11 @@ function derivePlatform(plugId) {
 }
 
 const MAX_BATCH = 200;
-const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'billable_party', 'remarks', 'breakdate_time', 'vo', 'total_mats', 'audio_guide'];
+const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'billable_party', 'remarks', 'breakdate_time', 'vo', 'total_mats', 'audio_guide', 'length', 'others'];
 
 router.get('/meta', (req, res) => res.json({
   ready: true, units: UNITS, unitTeams: UNIT_TEAMS, tabs: ['ALL', ...TEAMS].map((key) => ({ key, label: TAB_LABEL[key] })),
-  tabDefaultUnits: TAB_DEFAULT_UNITS, fields: FIELDS, views: VIEWS, platformRules: PLATFORM_RULES,
+  tabDefaultUnits: TAB_DEFAULT_UNITS, audioExtra: AUDIO_EXTRA, fields: FIELDS, views: VIEWS, platformRules: PLATFORM_RULES,
 }));
 
 async function assertOption(client, category, value, field, current) {

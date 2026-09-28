@@ -336,8 +336,10 @@ function WorkloadForm({ rec, defaultUnits, meta, lookups, canWrite, onClose, onS
   // Audio-only units use the template's Audio sheet columns; everything else uses the main sheet columns
   const teams = meta.unitTeams[f.units_concerned] || [];
   const audioOnly = teams.length === 1 && teams[0] === 'AUDIO';
+  const base = meta.views[audioOnly ? 'AUDIO' : 'VGFX'].filter((k) => k !== 'work_date' && k !== 'units_concerned');
+  // Any row that involves Audio also gets the Audio-only columns (Length, Others)
   const shown = f.units_concerned
-    ? meta.views[audioOnly ? 'AUDIO' : 'VGFX'].filter((k) => k !== 'work_date' && k !== 'units_concerned')
+    ? [...base, ...(teams.includes('AUDIO') ? meta.audioExtra.filter((k) => !base.includes(k)) : [])]
     : [];
   const plugText = String(f.plug_id || '').trim();
 

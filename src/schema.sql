@@ -195,7 +195,9 @@ ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS remarks         TEXT;   -- o
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS total_mats      TEXT;   -- open
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS prog_name       TEXT;   -- copied from the PSD daily plug list
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS plug_type       TEXT;   -- dropdown (admin-managed)
--- (Older installs may still have unused length/status columns from the first build; they are left untouched.)
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS length          TEXT;   -- Audio: open (older installs already have this column)
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS others          TEXT;   -- Audio: open
+-- (Older installs may still have an unused status column from the first build; it is left untouched.)
 
 ALTER TABLE workload_items DROP CONSTRAINT IF EXISTS workload_items_units_check;
 ALTER TABLE workload_items ADD CONSTRAINT workload_items_units_check CHECK (units_concerned IN
