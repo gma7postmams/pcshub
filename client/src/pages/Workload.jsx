@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom';
 import { del, get, post, put } from '../lib/api.js';
 import { fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { DownloadIcon, PlusIcon } from '../components/Icons.jsx';
+import { ClockIcon, DocIcon, DownloadIcon, FilmIcon, LayersIcon, PaperclipIcon, PlusIcon, SearchIcon, SpeakerIcon, CalendarIcon } from '../components/Icons.jsx';
+import { DateRange, FilterSelect, KpiCard, PlatformCell, Pager, RowMenu, StatusPill, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
 // Workload Tracker — ONE table. "Units Concerned" says which team(s) a plug is for; the tabs
@@ -89,7 +90,8 @@ export default function Workload() {
   const [lookups, setLookups] = useState({ workload_platform: [], plug_type: [] });
   const [tab, setTab] = useState('ALL');
   const [mode, setMode] = useState('table');
-  const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', from: '', to: '' });
+  const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', status: '', from: '', to: '' });
+  const [stats, setStats] = useState(null);   // summary cards + tab badges
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState(null);   // table mode: { total, rows } | { error }
   const [grid, setGrid] = useState(null);   // excel mode: { total, rows } | { error }
@@ -127,13 +129,23 @@ export default function Workload() {
   const query = useCallback((extra = {}) => {
     const p = new URLSearchParams(extra);
     if (tab !== 'ALL') p.set('team', tab);
-    ['units', 'platform', 'plug_type', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
+    ['units', 'platform', 'plug_type', 'status', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
     if (!isGrid && q) p.set('q', q);
     return p;
-  }, [tab, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q, isGrid]);
+  }, [tab, filt.units, filt.platform, filt.plug_type, filt.status, filt.from, filt.to, q, isGrid]);
+
+  // Summary cards / tab badges follow every filter except the team tab ("today" = the browser's local date)
+  const loadStats = useCallback(async () => {
+    if (!meta) return;
+    const p = query();
+    p.delete('team');
+    p.set('today', isoDate());
+    try { setStats(await get(`/api/workload/stats?${p}`)); } catch (e) { /* cards just stay as they were */ }
+  }, [meta, query]);
 
   const load = useCallback(async () => {
     if (!meta) return;
+    loadStats();
     try {
       if (isGrid) {
         const d = await get(`/api/workload?${query({ limit: GRID_LIMIT })}`);
@@ -144,7 +156,7 @@ export default function Workload() {
     } catch (e) {
       (isGrid ? setGrid : setData)({ error: e.message, rows: [], total: 0 });
     }
-  }, [meta, isGrid, query, offset]);
+  }, [meta, isGrid, query, offset, loadStats]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -165,6 +177,19 @@ export default function Workload() {
     const val = e.target.value;
     if (k !== 'q' && !(await okToLeave())) return;
     setFilt((f) => ({ ...f, [k]: val }));
+    setOffset(0);
+  };
+
+  const setRange = async ({ from, to }) => {
+    if (!(await okToLeave())) return;
+    setFilt((f) => ({ ...f, from, to }));
+    setOffset(0);
+  };
+  const today = isoDate();
+  const cardTab = (t) => async () => { await changeTab(t); };
+  const cardFilter = (patch) => async () => {
+    if (!(await okToLeave())) return;
+    setFilt((f) => ({ ...f, ...patch }));
     setOffset(0);
   };
 
@@ -191,10 +216,10 @@ export default function Workload() {
   const setCell = (key, k, val) => setGrid((g) => ({
     ...g, rows: g.rows.map((r) => (r._key === key ? { ...withAutoPlatform(meta.platformRules, r, k, val), _dirty: true } : r)),
   }));
-  const isEmptyRow = (r) => meta.views[tab].filter((k) => k !== 'work_date' && k !== 'units_concerned').every((k) => !String(r[k] ?? '').trim());
+  const isEmptyRow = (r) => meta.views[tab].filter((k) => k !== 'work_date' && k !== 'units_concerned' && k !== 'work_status').every((k) => !String(r[k] ?? '').trim());
   const addRow = () => setGrid((g) => {
     const last = g.rows.length ? g.rows[g.rows.length - 1].work_date : '';
-    return { ...g, rows: [...g.rows, { _key: newKey(), _new: true, _dirty: false, work_date: last || filt.from || isoDate(), units_concerned: filt.units || meta.tabDefaultUnits[tab] }] };
+    return { ...g, rows: [...g.rows, { _key: newKey(), _new: true, _dirty: false, work_date: last || filt.from || isoDate(), units_concerned: filt.units || meta.tabDefaultUnits[tab], work_status: meta.statusDefault }] };
   });
   const removeRow = async (r) => {
     if (!r._new) {
@@ -202,6 +227,7 @@ export default function Workload() {
       try { await del(`/api/workload/${r.id}`); toast('Deleted'); } catch (e) { toast(e.message, 'err'); return; }
     }
     setGrid((g) => ({ ...g, rows: g.rows.filter((x) => x._key !== r._key), total: r._new ? g.total : g.total - 1 }));
+    if (!r._new) loadStats();
   };
   // ---- table-mode delete (per row) ----
   const deleteItem = async (r) => {
@@ -237,41 +263,71 @@ export default function Workload() {
 
   if (!meta) return <main className="container wide"><Empty>Loading…</Empty></main>;
 
+  const isAll = tab === 'ALL';
   const cols = meta.views[tab];
   const total = data && data.total ? data.total : 0;
-  // Cells wrap (pasted line breaks kept) instead of being cut off; data-label feeds the phone card layout
+  const head = (k) => (isAll && k === 'prog_name' ? 'Program / Project Title' : meta.fields[k].label);
+  const firstLineOf = (t) => String(t || '').split('\n');
+
+  // Cells wrap (pasted line breaks kept) instead of being cut off; data-label feeds the card layout.
+  // The All tab is the summary layout: Length sits under the Plug ID, Billable Party under the program, the Script date under Remarks.
   const cell = (r, k) => {
     const val = r[k];
-    const common = { key: k, 'data-k': k, 'data-label': meta.fields[k].label };
-    if (meta.fields[k].kind === 'date') return <td {...common}>{fmtDate(val)}</td>;
-    if (k === 'audio_guide') return <td {...common}>{ISO.test(val || '') ? fmtDate(val) : val}</td>;
-    if (k === 'units_concerned') return <td {...common}><strong>{val}</strong></td>;
-    if (k === 'plug_id') return <td {...common} className="mono"><strong>{val}</strong></td>;
-    return <td {...common}>{val}</td>;
+    const common = { key: k, 'data-k': k, 'data-label': head(k) };
+    switch (k) {
+      case 'work_date': return <td {...common}><WorkDate value={val} today={today} /></td>;
+      case 'platform': return <td {...common}><PlatformCell value={val} /></td>;
+      case 'units_concerned': return <td {...common}><UnitsPills value={val} unitTeams={meta.unitTeams} /></td>;
+      case 'plug_type': return <td {...common}><TypePill value={val} /></td>;
+      case 'work_status': return <td {...common}><StatusPill value={val} /></td>;
+      case 'plug_id': {
+        const [first, ...rest] = firstLineOf(val);
+        return (
+          <td {...common}>
+            <div className="strong">{first}</div>
+            {rest.length ? <div className="sub pre">{rest.join('\n')}</div> : null}
+            {isAll && r.length ? <div className="sub">({r.length})</div> : null}
+          </td>
+        );
+      }
+      case 'prog_name':
+        return (
+          <td {...common}>
+            {val ? <div className="strong">{val}</div> : null}
+            {isAll && r.billable_party ? <div className="sub">{r.billable_party}</div> : null}
+          </td>
+        );
+      case 'remarks':
+        return (
+          <td {...common}>
+            {val}
+            {isAll && r.script ? <div className="clip-note"><PaperclipIcon /> Script: {fmtDate(r.script)}</div> : null}
+          </td>
+        );
+      case 'audio_guide': return <td {...common}>{ISO.test(val || '') ? fmtDate(val) : val}</td>;
+      default:
+        return <td {...common}>{meta.fields[k].kind === 'date' ? fmtDate(val) : val}</td>;
+    }
   };
 
+  const tabCount = { ALL: stats && stats.total, VGFX: stats && stats.vgfx, VEDIT: stats && stats.vedit, AUDIO: stats && stats.audio };
+  const KPIS = [
+    { key: 'total', hue: 'blue', icon: <DocIcon />, label: 'Total Workloads', value: stats && stats.total, active: isAll, onClick: cardTab('ALL') },
+    { key: 'today', hue: 'green', icon: <CalendarIcon />, label: 'Today', value: stats && stats.today, active: filt.from === today && filt.to === today, onClick: cardFilter({ from: today, to: today }) },
+    { key: 'vgfx', hue: 'purple', icon: <LayersIcon />, label: 'VGFX', value: stats && stats.vgfx, active: tab === 'VGFX', onClick: cardTab('VGFX') },
+    { key: 'vedit', hue: 'orange', icon: <FilmIcon />, label: 'VEDIT', value: stats && stats.vedit, active: tab === 'VEDIT', onClick: cardTab('VEDIT') },
+    { key: 'audio', hue: 'teal', icon: <SpeakerIcon />, label: 'Audio', value: stats && stats.audio, active: tab === 'AUDIO', onClick: cardTab('AUDIO') },
+    { key: 'pending', hue: 'gray', icon: <ClockIcon />, label: 'Pending', value: stats && stats.pending, active: filt.status === 'PENDING', onClick: cardFilter({ status: filt.status === 'PENDING' ? '' : 'PENDING' }) },
+  ];
+
   return (
-    <main className="container wide">
+    <main className="container wide wl-page">
       <div className="page-head">
-        <div><h1>Workload Tracker</h1><div className="sub">One table for VGFX, VEDIT and Audio — Units Concerned says which team(s) a plug is for.</div></div>
-        <div className="actions">
-          <div className="segmented" id="mode-seg">
-            <button type="button" className={mode === 'table' ? 'on' : ''} onClick={() => changeMode('table')}>Table</button>
-            <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
-          </div>
-          <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
-          {canWrite && !isGrid ? (
-            <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({ rec: null })}><PlusIcon /> New Workload</button>
-          ) : null}
-          {canWrite && isGrid ? (
-            <>
-              <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add row</button>
-              <button type="button" className="btn primary" id="save-grid" disabled={saving || !dirtyCount} onClick={saveGrid}>
-                {saving ? 'Saving…' : `Save changes${dirtyCount ? ` (${dirtyCount})` : ''}`}
-              </button>
-            </>
-          ) : null}
-        </div>
+        <div><h1>Workload Tracker</h1><div className="sub">Track and monitor promotional plug workloads across VGFX, VEDIT and Audio.</div></div>
+      </div>
+
+      <div className="wl-kpis" id="wl-kpis">
+        {KPIS.map(({ key, ...k }) => <KpiCard key={key} {...k} />)}
       </div>
 
       {!lookups.workload_platform.length || !lookups.plug_type.length ? (
@@ -282,18 +338,49 @@ export default function Workload() {
         </div>
       ) : null}
 
-      <div className="tabs" id="section-tabs">
-        {meta.tabs.map((t) => <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => changeTab(t.key)}>{t.label}</button>)}
-      </div>
+      <div className="card wl-card">
+        <div className="wl-tabbar">
+          <div className="tabs" id="section-tabs">
+            {meta.tabs.map((t) => (
+              <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => changeTab(t.key)}>
+                {t.label}<span className="count">{tabCount[t.key] ?? '–'}</span>
+              </button>
+            ))}
+          </div>
+          <div className="wl-tabactions">
+            <div className="segmented" id="mode-seg">
+              <button type="button" className={mode === 'table' ? 'on' : ''} onClick={() => changeMode('table')}>Table</button>
+              <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
+            </div>
+            <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
+            {canWrite && !isGrid ? (
+              <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({ rec: null })}><PlusIcon /> New Workload</button>
+            ) : null}
+            {canWrite && isGrid ? (
+              <>
+                <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add row</button>
+                <button type="button" className="btn primary" id="save-grid" disabled={saving || !dirtyCount} onClick={saveGrid}>
+                  {saving ? 'Saving…' : `Save changes${dirtyCount ? ` (${dirtyCount})` : ''}`}
+                </button>
+              </>
+            ) : null}
+          </div>
+        </div>
 
-      <div className="card">
-        <div className="filters">
-          {!isGrid ? <input type="search" placeholder="Search plug ID, PSD, program, billable party, remarks…" value={filt.q} onChange={setF('q')} /> : null}
-          <select value={filt.units} onChange={setF('units')} title="Units Concerned"><Options list={meta.units} blank="All units" /></select>
-          <select value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All platforms" /></select>
-          <select value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All plug types" /></select>
-          <input type="date" title="Work date from" value={filt.from} onChange={setF('from')} />
-          <input type="date" title="Work date to" value={filt.to} onChange={setF('to')} />
+        <div className="wl-filters">
+          {!isGrid ? (
+            <label className="wl-search">
+              <SearchIcon />
+              <input type="search" placeholder="Search plug ID, PSD, program, billable party, remarks…" value={filt.q} onChange={setF('q')} />
+            </label>
+          ) : null}
+          <FilterSelect label="Units" value={filt.units} onChange={setF('units')}><Options list={meta.units} blank="All" /></FilterSelect>
+          <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
+          <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
+          <FilterSelect label="Status" value={filt.status} onChange={setF('status')}>
+            <Options list={[{ value: '', label: 'All' }, { value: 'PENDING', label: 'Pending' }, ...meta.statuses]} />
+          </FilterSelect>
+          <DateRange from={filt.from} to={filt.to} onChange={setRange} />
         </div>
 
         {mode === 'excel' && tab === 'ALL' ? (
@@ -332,16 +419,15 @@ export default function Workload() {
                 : data.error ? <Empty>{data.error}</Empty>
                   : !data.rows.length ? <Empty>No workload items match these filters.</Empty>
                     : (
-                      <table className={`t wl${cards ? ' cards' : ''}`}>
-                        <thead><tr>{cols.map((k) => <th key={k}>{meta.fields[k].label}</th>)}{canWrite ? <th /> : null}</tr></thead>
+                      <table className={`t wl${cols.length > 10 ? ' dense' : ''}${cards ? ' cards' : ''}`}>
+                        <thead><tr>{cols.map((k) => <th key={k}>{head(k)}</th>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {data.rows.map((r) => (
                             <tr key={r.id} className="clickable" onClick={() => setForm({ rec: r })}>
                               {cols.map((k) => cell(r, k))}
                               {canWrite ? (
                                 <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
-                                  <button type="button" className="btn sm" onClick={() => setForm({ rec: r })}>Edit</button>{' '}
-                                  <button type="button" className="btn sm danger row-del" onClick={() => deleteItem(r)}>Delete</button>
+                                  <RowMenu onEdit={() => setForm({ rec: r })} onDelete={() => deleteItem(r)} />
                                 </td>
                               ) : null}
                             </tr>
@@ -350,12 +436,7 @@ export default function Workload() {
                       </table>
                     )}
             </div>
-            <div className="pager">
-              <span>{total ? `${offset + 1}–${Math.min(offset + PAGE, total)} of ${total}` : ''}</span>
-              <span className="grow" />
-              <button type="button" className="btn sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</button>
-              <button type="button" className="btn sm" disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</button>
-            </div>
+            <Pager total={total} offset={offset} size={PAGE} onOffset={setOffset} />
           </>
         )}
       </div>
@@ -380,7 +461,7 @@ function WorkloadForm({ rec, defaultUnits, meta, lookups, canWrite, onClose, onS
   const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const initial = Object.keys(meta.fields).reduce((o, k) => ({ ...o, [k]: (rec && rec[k]) ?? '' }), {});
-  if (!rec) { initial.work_date = isoDate(); initial.units_concerned = defaultUnits; }
+  if (!rec) { initial.work_date = isoDate(); initial.units_concerned = defaultUnits; initial.work_status = meta.statusDefault; }
   const [f, , setAll] = useForm(initial);
   const set = (k) => (e) => {
     const val = e && e.target ? e.target.value : e;
