@@ -1,4 +1,4 @@
-# Promotional Content Hub - Initial QA Review
+# Promotional Content Hub - QA Review & Enhancement Summary
 
 ## Authentication & Security
 
@@ -81,6 +81,8 @@
 
 ✅ User login and role validation are working as expected.
 
+---
+
 ### Groups
 
 ✅ Groups page loads successfully.
@@ -89,9 +91,13 @@
 
 ✅ Group permission enforcement is working correctly.
 
+---
+
 ### Roles
 
 ✅ Roles page loads successfully.
+
+---
 
 ### Dropdowns
 
@@ -112,6 +118,8 @@
 ✅ Successfully edited a Platform.
 
 ✅ Successfully deleted a Platform.
+
+---
 
 ### Branding
 
@@ -141,16 +149,142 @@
 
 ⚠️ "Reset Preview" button does not appear to function as expected. No visible action occurs when clicked.
 
+---
+
 ### Audit Log
 
 ✅ Audit Log page loads successfully.
 
 ✅ Audit Log is visible only to Administrators as intended.
 
-💡 Enhancement Suggestion:
+✅ Audit Log usability has been improved with human-readable action names.
 
-- Non-administrative users could have access to a personal activity log showing only their own actions (e.g., login history, profile changes, records created, or records updated).
-- Full Audit Log should remain restricted to Administrators for security and compliance purposes.
+Examples:
+
+**Before**
+
+```text
+auth.login
+auth.logout
+approval.approved
+```
+
+**After**
+
+```text
+User Login
+User Logout
+Approved Request
+```
+
+✅ Audit Log entity names are displayed in a more readable format.
+
+**Before**
+
+```text
+user
+approval_request
+ingest_record
+```
+
+**After**
+
+```text
+User
+Approval Request
+Ingest Record
+```
+
+✅ Audit Log detail messages are displayed in a user-friendly format instead of raw JSON where applicable.
+
+**Before**
+
+```json
+{"reason":"unknown_user","username":"admin@example.com"}
+```
+
+**After**
+
+```text
+Unknown username: admin@example.com
+```
+
+✅ Audit Log filtering and search functionality are operational.
+
+---
+
+### Activity History
+
+✅ Added Activity History module for non-administrative users.
+
+✅ Activity History appears in the navigation for non-admin users.
+
+✅ Activity History is hidden from Administrators.
+
+✅ Users can view only their own activity records.
+
+✅ Backend security enforcement prevents users from accessing activity records belonging to other users.
+
+✅ Activity History includes:
+
+- Login history
+- Logout history
+- Password changes
+- Ingest activities
+- Approval activities
+- Other account-related events
+
+✅ Activity History supports:
+
+- Search
+- Date filtering
+- Pagination
+
+✅ Activity History search was enhanced to search across:
+
+- Action
+- Username
+- Entity
+- Details
+- IP Address
+
+✅ Full Audit Log remains restricted to Administrators.
+
+---
+
+## Security Enhancements Completed
+
+✅ Added secure Activity History endpoint:
+
+```text
+GET /api/profile/activity-history
+```
+
+✅ Backend filtering ensures users can only view their own audit records.
+
+✅ User-level activity filtering is enforced server-side and cannot be bypassed through browser developer tools.
+
+✅ Full system Audit Log remains Administrator-only.
+
+---
+
+## Repository & Development Environment Improvements
+
+✅ Added project `.gitignore`.
+
+✅ Excluded:
+
+- node_modules
+- client/node_modules
+- dist
+- client/dist
+- .env files
+- IDE files
+- temporary files
+
+✅ Removed generated build artifacts from source control tracking.
+
+✅ Repository housekeeping completed to prevent Git status noise from generated files.
 
 ---
 
@@ -164,12 +298,33 @@
 
 ⚠️ Branding → "Reset Preview" button appears to be non-functional and requires further investigation.
 
-### Enhancement Opportunities
+---
 
-💡 User Activity Log
+## Enhancements Successfully Delivered
 
-- Provide users with visibility into their own activity history.
-- Maintain Administrator-only access to the complete system Audit Log.
+### Audit Log Usability Improvements
+
+✅ Converted technical action codes into human-readable descriptions.
+
+✅ Converted technical entity types into readable names.
+
+✅ Converted raw JSON details into user-friendly descriptions.
+
+✅ Improved readability for administrators performing audits and investigations.
+
+---
+
+### Activity History
+
+✅ Added Activity History for non-administrative users.
+
+✅ Reused the Audit framework while maintaining strict data isolation.
+
+✅ Added enhanced search capabilities.
+
+✅ Added secure backend filtering.
+
+✅ Improved overall audit transparency for end users.
 
 ---
 
@@ -181,7 +336,7 @@
 
 ✅ Core application navigation is functioning properly.
 
-✅ Dashboard, Ingest, Approval, and Reports modules are functioning as expected.
+✅ Dashboard, Ingest, Approval, Reports, and Administration modules are functioning as expected.
 
 ✅ User management, role validation, group permissions, dropdown management, and branding configuration are working as expected.
 
@@ -189,27 +344,51 @@
 
 ✅ Audit Log access control is functioning correctly.
 
+✅ Activity History has been successfully implemented for non-administrative users.
+
+✅ Audit Log usability has been significantly improved.
+
+✅ Repository housekeeping and Git ignore configuration have been completed.
+
 ✅ No critical or blocking issues were identified during testing.
 
-### Remaining Activities
+---
 
-- End-to-end workflow testing with multiple user
+## Remaining Activities
 
+- End-to-end workflow testing with multiple users
+- Investigate Branding → Reset Preview functionality
+- Review README setup documentation and provide `.env.example`
 
-### Audit Log Usability Improvements
+---
 
-💡 The Audit Log currently exposes technical action names, entity identifiers, and raw JSON data.
+## Future Enhancement Opportunities
 
-Examples:
+### Audit Details Modal
 
-- auth.login_failed
-- dropdown_option #12
-- {"reason":"unknown_user","username":"admin@example.com"}
+Provide a detailed audit record view containing:
 
-Recommendation:
+- User
+- Time
+- IP Address
+- Action
+- Entity
+- Raw Audit Data
 
-- Convert action names into human-readable descriptions.
-- Replace internal entity IDs with meaningful entity names.
-- Display user-friendly detail messages instead of raw JSON.
-- Provide an optional "View Details" action for advanced technical information.
-- Improve readability for administrators performing audits and investigations.
+### Audit Log Export
+
+Allow Administrators to:
+
+- Export CSV
+- Export Excel
+- Filter and export date ranges
+
+### Advanced Audit Analytics
+
+Potential future additions:
+
+- Login trend analysis
+- Failed login monitoring
+- Approval activity reports
+- User activity summaries
+- Security dashboards
