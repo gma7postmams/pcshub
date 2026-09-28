@@ -23,7 +23,7 @@ const CATALOG = [
     ],
   },
   { key: 'ingest', label: 'Ingest Tracker', path: '/ingest', sections: [] },
-  { key: 'workload', label: 'Work Load Tracker', path: '/workload', sections: [] },
+  { key: 'workload', label: 'Workload Tracker', path: '/workload', sections: [] },
   { key: 'approval', label: 'Approval', path: '/approval', sections: [] },
   {
     key: 'reports', label: 'Reports', path: '/reports',
@@ -32,6 +32,7 @@ const CATALOG = [
       { key: 'reports.export', label: 'CSV export' },
     ],
   },
+  { key: 'knowledge', label: 'Knowledge Base', path: '/knowledge', sections: [] },
 ];
 
 const FIXED_PAGES = [

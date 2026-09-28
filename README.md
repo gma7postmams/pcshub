@@ -1,6 +1,6 @@
 # Promotional Content Hub
 
-Multi-user tracker for promotional content: **Ingest Tracker → Approval**, **Work Load Tracker**, Reports, Dashboard, Admin.
+Multi-user tracker for promotional content: **Ingest Tracker → Approval**, **Workload Tracker**, Reports, Knowledge Base, Dashboard, Admin.
 Node.js (Express) + PostgreSQL API · **React 18 + Vite** front end · themes with dark/light · top navigation only · mobile-ready PWA · no AI.
 
 ## Quick start
@@ -78,9 +78,10 @@ Upgrading: replace the code, `npm ci --omit=dev`, `npm run build`, `npm run migr
 |------|----------|
 | Dashboard | Ingest KPIs · Recent ingest activity |
 | Ingest Tracker | — |
-| Work Load Tracker | — |
+| Workload Tracker | — |
 | Approval | — |
 | Reports | Ingest & Approval summary · CSV export |
+| Knowledge Base | — |
 
 A section only takes effect if its page is also checked.
 
@@ -91,7 +92,7 @@ A section only takes effect if its page is also checked.
 | Create / edit / send ingest | Ingest | ✓ | ✓ | ✓ | — |
 | Delete ingest | Ingest | ✓ | — | — | — |
 | Approve / reject | Approval | ✓ | ✓ | — | — |
-| Edit Work Load (when built) | Work Load | ✓ | ✓ | — | — |
+| Edit Workload | Workload | ✓ | ✓ | — | — |
 | Users, groups, dropdowns, branding, audit | Admin | ✓ | — | — | — |
 
 Adding a new page or section: add it to `CATALOG`, then guard its route with `requirePageAccess(path)` or `requireSection(key)`. It then shows up as a checkbox in Admin → Groups automatically.
@@ -115,7 +116,7 @@ Status is the approval state and is never set by the client:
 - Every approval request references an `ingest_record_id` (NOT NULL FK); only one pending request per record (partial unique index).
 - Managers/Admins are notified on send; the sender, creator and "Requested by" user are notified on decision. Rejection requires a reason.
 
-**Work Load** — page (opened by any group that has it checked; editing will need Manager+ role) and the `workload_items` table (identity/audit columns only) are in place. **Fields are not defined yet**; the page shows an empty placeholder with Table / Excel mode toggles. To build it out: add columns in `src/schema.sql`, list them in `FIELDS` in `src/routes/workload.js`, implement list + batch save guarded by `requireAction('workload.write')`, and render them in `client/src/pages/Workload.jsx`.
+**Workload** — one table (`workload_items`) for every team, following the Sept 2026 PCS Workload template. **Units Concerned** (dropdown: VGFX Only, VEDIT Only, VGFX/VEDIT, Audio - RADIO, Audio – AUDIO GUIDE, VGFX/VEDIT/Audio) says which team(s) a plug is for; the page tabs (All / VGFX / VEDIT / Audio) are filters over it. Columns and field types come from the template's red notes: Platform (dropdown, auto-filled from the Plug ID prefix — same rules as the template's formula; PD_ plugs are set by hand to DIGITAL / INTL DIGITAL), Billable Party (open), Plug ID / PSD / Prog Name (pasted from the PSD daily plug list), Breakdate (date) + Time (open), VO (open), Script and Artwork/STB (dates), Audio Guide (N/A or a date), Remarks and Total Mats (open), Plug Type (dropdown); Audio rows also have Length and Others (open text, for the Assigned / Done / Resched-cancelled details). Table mode has a section-aware add/edit form (Audio-only units show the Audio sheet's columns); Excel mode is an editable grid with batch save (one team tab at a time); **Export** writes `.xlsx` with a MAIN sheet (VGFX/VEDIT rows) and an AUDIO sheet (needs `npm install` for `exceljs`). Field definitions, per-tab columns and the Platform rules live in `src/routes/workload.js` and reach the UI through `/api/workload/meta`. Platform and Plug Type options are admin-managed (Admin → Dropdowns). Writes need `workload.write` (Manager+). The page opens with summary cards (Total, Today, VGFX, VEDIT, Audio — clickable, and they follow the active filters), tabs with counts, and filters for Units / Platform / Plug Type / date range. Each row has a ⋮ menu (Edit / Delete). Table rows are one line each (only Remarks wraps; line breaks in pasted cells show as " · "), so a wide table scrolls sideways inside the card; below 900px each row becomes a card. **Time** (next to Breakdate) is picked from a list in 15-minute steps, stored as `HH:MM`; older typed text is converted on upgrade (the first clock time becomes the time and the old text is kept in Remarks). The All tab shows every column (the template's columns plus Length and Others); the VGFX / VEDIT tabs show the template's main columns and the Audio tab the Audio sheet's columns. Upgrading from the first Workload build is automatic on restart (Section Assigned becomes Units Concerned; Script / Artwork keep only real dates).
 
 ## Security
 
@@ -174,12 +175,12 @@ server.js                 app wiring, security headers, page routes behind requi
 src/permissions.js        CATALOG (pages/sections), ROLE_ACTIONS — the single source of truth
 src/middleware.js         loadUser (role + group perms), requirePageAccess, requireSection, requireAction, csrfGuard
 src/schema.sql            idempotent schema (runs on every boot)
-src/routes/*.js           auth, profile, ingest, approvals, workload, reports, dashboard, admin, notifications, branding
+src/routes/*.js           auth, profile, ingest, approvals, workload, reports, knowledge, dashboard, admin, notifications, branding
 client/                   React 18 + Vite front end
   src/App.jsx             routes + client-side page guard (mirrors the server lock)
   src/context.jsx         session (role, group, allowed pages/sections/actions) + branding
   src/components/         TopNav (nav, notifications, user menu), Modal, Confirm, Toast, Pill, Kpi, Bars
-  src/pages/              Login, Dashboard, Ingest, Approval, Workload, Reports, Profile, admin/*
+  src/pages/              Login, Dashboard, Ingest, Approval, Workload, Reports, Knowledge, Profile, admin/*
   src/lib/                api client (CSRF header, auth redirects), theme engine, utils
   public/                 theme-boot.js, sw.js, manifest, icons, offline page
   dist/                   build output served by Express (index.html only after the access check)
