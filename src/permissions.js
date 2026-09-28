@@ -36,6 +36,7 @@ const CATALOG = [
 
 const FIXED_PAGES = [
   { key: 'admin', label: 'Admin', path: '/admin', roleOnly: 'Admin' },
+  { key: 'activity-history', label: 'Activity History', path: '/activity-history', always: true },
   { key: 'profile', label: 'Profile', path: '/profile', always: true, inNav: false },
 ];
 
@@ -95,9 +96,28 @@ function can(user, action) {
 
 function allowedPages(user) {
   const eff = effectiveKeys(user);
-  const pages = CATALOG.filter((p) => eff.has(p.key)).map(({ key, label, path }) => ({ key, label, path }));
-  if (user && user.role === 'Admin') pages.push({ key: 'admin', label: 'Admin', path: '/admin' });
-  pages.push({ key: 'profile', label: 'Profile', path: '/profile', inNav: false });
+
+  const pages = CATALOG
+    .filter((p) => eff.has(p.key))
+    .map(({ key, label, path }) => ({ key, label, path }));
+
+  if (user && user.role === 'Admin') {
+    pages.push({ key: 'admin', label: 'Admin', path: '/admin' });
+  } else {
+    pages.push({
+      key: 'activity-history',
+      label: 'Activity History',
+      path: '/activity-history',
+    });
+  }
+
+  pages.push({
+    key: 'profile',
+    label: 'Profile',
+    path: '/profile',
+    inNav: false,
+  });
+
   return pages;
 }
 

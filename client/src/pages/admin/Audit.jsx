@@ -148,6 +148,9 @@ function formatDetails(row) {
 
 
 export default function Audit() {
+  const isActivityHistory =
+    window.location.pathname === '/activity-history';
+
   const [f, setF] = useState({ action: '', user: '', from: '', to: '' });
   const [offset, setOffset] = useState(0);
   const [d, setD] = useState(null);
@@ -157,7 +160,14 @@ export default function Audit() {
   useEffect(() => {
     const p = new URLSearchParams({ limit: PAGE, offset });
     Object.entries({ action, user, from: f.from, to: f.to }).forEach(([k, v]) => { if (v) p.set(k, v); });
-    get(`/api/admin/audit?${p}`).then(setD).catch(() => setD({ rows: [], total: 0 }));
+    const endpoint =
+      window.location.pathname === '/activity-history'
+        ? '/api/profile/activity-history'
+        : '/api/admin/audit';
+
+    get(`${endpoint}?${p}`)
+      .then(setD)
+      .catch(() => setD({ rows: [], total: 0 }));
   }, [action, user, f.from, f.to, offset]);
 
   const set = (k) => (e) => { setF((x) => ({ ...x, [k]: e.target.value })); setOffset(0); };
@@ -165,12 +175,42 @@ export default function Audit() {
 
   return (
     <div className="card">
+
       <div className="filters">
-        <input type="search" placeholder="Action (e.g. ingest, approval, auth)" value={f.action} onChange={set('action')} />
-        <input type="search" placeholder="Username" value={f.user} onChange={set('user')} />
-        <input type="date" value={f.from} onChange={set('from')} />
-        <input type="date" value={f.to} onChange={set('to')} />
+        <input
+          type="search"
+          placeholder={
+            isActivityHistory
+              ? 'Search activity'
+              : 'Action (e.g. ingest, approval, auth)'
+          }
+          value={f.action}
+          onChange={set('action')}
+        />
+
+        {!isActivityHistory && (
+          <input
+            type="search"
+            placeholder="Username"
+            value={f.user}
+            onChange={set('user')}
+          />
+        )}
+
+        <input
+          type="date"
+          value={f.from}
+          onChange={set('from')}
+        />
+
+        <input
+          type="date"
+          value={f.to}
+          onChange={set('to')}
+        />
       </div>
+
+
       <div className="table-wrap">
         {!d ? <Empty>Loading…</Empty> : !d.rows.length ? <Empty>No audit entries.</Empty> : (
           <table className="t">

@@ -13,15 +13,20 @@ const Reports = lazy(() => import('./pages/Reports.jsx'));
 const Admin = lazy(() => import('./pages/admin/Admin.jsx'));
 const Profile = lazy(() => import('./pages/Profile.jsx'));
 
+const ActivityHistory = lazy(() => import('./pages/ActivityHistory.jsx'));
+
 const PAGES = {
   '/dashboard': Dashboard,
   '/ingest': Ingest,
   '/workload': Workload,
   '/approval': Approval,
   '/reports': Reports,
+  '/activity-history': ActivityHistory,
   '/admin': Admin,
   '/profile': Profile,
 };
+
+
 
 const Loading = () => <main className="container"><div className="empty">Loading…</div></main>;
 

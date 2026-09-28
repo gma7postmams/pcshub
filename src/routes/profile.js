@@ -83,4 +83,63 @@ router.post('/2fa/disable', asyncH(async (req, res) => {
   res.json({ ok: true });
 }));
 
+router.get('/activity-history', asyncH(async (req, res) => {
+  const params = [req.user.id];
+  const where = ['user_id = $1'];
+
+  if (req.query.action) {
+    const search = `%${String(req.query.action).trim()}%`;
+
+    params.push(search);
+
+    where.push(`
+      (
+        action ILIKE $${params.length}
+        OR username ILIKE $${params.length}
+        OR entity ILIKE $${params.length}
+        OR COALESCE(details::text, '') ILIKE $${params.length}
+        OR COALESCE(ip, '') ILIKE $${params.length}
+      )
+    `);
+  }
+
+  if (req.query.from) {
+    params.push(req.query.from);
+    where.push(`created_at >= $${params.length}::date`);
+  }
+
+  if (req.query.to) {
+    params.push(req.query.to);
+    where.push(`created_at < ($${params.length}::date + 1)`);
+  }
+
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
+  const whereSql = `WHERE ${where.join(' AND ')}`;
+
+  const [cnt, list] = await Promise.all([
+    db.query(
+      `SELECT count(*)::int AS n
+       FROM audit_logs
+       ${whereSql}`,
+      params
+    ),
+    db.query(
+      `SELECT *
+       FROM audit_logs
+       ${whereSql}
+       ORDER BY created_at DESC, id DESC
+       LIMIT ${limit}
+       OFFSET ${offset}`,
+      params
+    ),
+  ]);
+
+  res.json({
+    total: cnt.rows[0].n,
+    rows: list.rows,
+  });
+}));
+
 module.exports = router;
