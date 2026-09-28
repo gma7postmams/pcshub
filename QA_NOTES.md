@@ -392,3 +392,23 @@ Potential future additions:
 - Approval activity reports
 - User activity summaries
 - Security dashboards
+
+### Audit Log Usability
+
+⚠️ Workload Tracker audit events are captured correctly but are not yet translated into user-friendly action names and detail messages.
+
+Examples:
+
+Current:
+- workload.create
+- workload.update
+- workload.delete
+
+Recommended:
+- Created Workload Item
+- Updated Workload Item
+- Deleted Workload Item
+
+Status:
+✅ Enhancement identified
+✅ Formatting update ready for implementation

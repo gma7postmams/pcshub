@@ -32,6 +32,17 @@ const ACTION_LABELS = {
   'admin.branding_update': 'Updated Branding',
   'admin.branding_logo': 'Uploaded Logo',
   'admin.branding_logo_remove': 'Removed Logo',
+
+  'workload.create': 'Created Workload Item',
+  'workload.update': 'Updated Workload Item',
+  'workload.delete': 'Deleted Workload Item',
+
+  'profile.password_change': 'Password Changed',
+
+  'auth.2fa_failed': '2FA Verification Failed',
+  'profile.2fa_enable': 'Enabled 2FA',
+  'profile.2fa_disable': 'Disabled 2FA',  
+
 };
 
 function formatAction(action) {
@@ -54,6 +65,8 @@ function formatEntity(row) {
       return 'Application Branding';
     case 'report':
       return 'Report';
+    case 'workload_item':
+      return 'Workload Item';  
     default:
       return row.entity || '';
   }
@@ -139,6 +152,33 @@ function formatDetails(row) {
     case 'reports_export_ingest':
     case 'reports.export_ingest':
       return 'Exported ingest report';
+
+    case 'workload.create':
+      return d.title
+        ? `Created workload item (${d.title})`
+        : 'Created workload item';
+
+    case 'workload.update':
+      return d.title
+        ? `Updated workload item (${d.title})`
+        : 'Updated workload item';
+
+    case 'workload.delete':
+      return d.title
+        ? `Deleted workload item (${d.title})`
+        : 'Deleted workload item';
+
+    case 'profile.password_change':
+      return 'Password changed successfully';
+
+    case 'auth.2fa_failed':
+      return 'Invalid 2FA authentication code';
+
+    case 'profile.2fa_enable':
+      return 'Two-factor authentication enabled';
+
+    case 'profile.2fa_disable':
+      return 'Two-factor authentication disabled';      
 
     default:
       return '';
