@@ -493,18 +493,6 @@ html[data-mode="light"] .c-orange { --c: #b95a12; } html[data-mode="light"] .c-t
 .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
 .chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 
-.wl-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 16px; }
-.wl-kpi { display: flex; align-items: center; gap: 14px; padding: 16px 18px; text-align: left; font: inherit; color: var(--text); border: 1px solid var(--border); border-radius: 14px;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--c) 9%, var(--surface)), var(--surface) 70%); }
-button.wl-kpi { cursor: pointer; transition: transform .12s, border-color .12s, box-shadow .12s; }
-button.wl-kpi:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--c) 45%, var(--border)); box-shadow: 0 6px 18px rgba(0,0,0,.10); }
-.wl-kpi.active { border-color: color-mix(in srgb, var(--c) 60%, var(--border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 16%, transparent); }
-.wl-kpi .ico { flex: none; width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; color: var(--c); background: color-mix(in srgb, var(--c) 16%, var(--surface)); }
-.wl-kpi .ico svg { width: 24px; height: 24px; }
-.wl-kpi .txt { display: flex; flex-direction: column; min-width: 0; }
-.wl-kpi .lbl { font-size: 13px; color: var(--text-2); }
-.wl-kpi .num { font-size: 28px; font-weight: 700; line-height: 1.15; }
-
 .wl-tabbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 0 16px; border-bottom: 1px solid var(--border); }
 .wl-tabbar .tabs { margin: 0; border: 0; }
 .wl-tabbar .tabs button { display: inline-flex; align-items: center; gap: 8px; padding: 15px 14px; }
@@ -564,9 +552,6 @@ table.t.wl.cards td { align-items: flex-start; }
   .wl-tabbar { padding: 0 6px; }
   .wl-tabbar .tabs button { padding: 13px 9px; gap: 6px; font-size: 13.5px; }
   .wl-tabbar .tabs { overflow-x: auto; max-width: 100%; }
-  .wl-kpi { padding: 12px 12px; gap: 10px; }
-  .wl-kpi .ico { width: 40px; height: 40px; }
-  .wl-kpi .num { font-size: 24px; }
 }
 
 /* cards: put the ⋮ menu in the card's top-right corner instead of a row of its own */

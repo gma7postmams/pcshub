@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { CalendarIcon, DocIcon, DownloadIcon, FilmIcon, LayersIcon, PlusIcon, SearchIcon, SpeakerIcon } from '../components/Icons.jsx';
-import { DateRange, FilterSelect, KpiCard, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
+import { DownloadIcon, PlusIcon, SearchIcon } from '../components/Icons.jsx';
+import { DateRange, FilterSelect, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
 // Workload Tracker — ONE table. "Units Concerned" says which team(s) a plug is for; the tabs
@@ -173,7 +173,7 @@ export default function Workload() {
     return p;
   }, [tab, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q, isGrid]);
 
-  // Summary cards / tab badges follow every filter except the team tab ("today" = the browser's local date)
+  // Tab badges (the counts next to All / VGFX / VEDIT / Audio) follow every filter except the team tab
   const loadStats = useCallback(async () => {
     if (!meta) return;
     const p = query();
@@ -222,13 +222,6 @@ export default function Workload() {
   const setRange = async ({ from, to }) => {
     if (!(await okToLeave())) return;
     setFilt((f) => ({ ...f, from, to }));
-    setOffset(0);
-  };
-  const today = isoDate();
-  const cardTab = (t) => async () => { await changeTab(t); };
-  const cardFilter = (patch) => async () => {
-    if (!(await okToLeave())) return;
-    setFilt((f) => ({ ...f, ...patch }));
     setOffset(0);
   };
 
@@ -374,22 +367,11 @@ export default function Workload() {
   };
 
   const tabCount = { ALL: stats && stats.total, VGFX: stats && stats.vgfx, VEDIT: stats && stats.vedit, AUDIO: stats && stats.audio };
-  const KPIS = [
-    { key: 'total', hue: 'blue', icon: <DocIcon />, label: 'Total Workloads', value: stats && stats.total, active: isAll, onClick: cardTab('ALL') },
-    { key: 'today', hue: 'green', icon: <CalendarIcon />, label: 'Today', value: stats && stats.today, active: filt.from === today && filt.to === today, onClick: cardFilter({ from: today, to: today }) },
-    { key: 'vgfx', hue: 'purple', icon: <LayersIcon />, label: 'VGFX', value: stats && stats.vgfx, active: tab === 'VGFX', onClick: cardTab('VGFX') },
-    { key: 'vedit', hue: 'orange', icon: <FilmIcon />, label: 'VEDIT', value: stats && stats.vedit, active: tab === 'VEDIT', onClick: cardTab('VEDIT') },
-    { key: 'audio', hue: 'teal', icon: <SpeakerIcon />, label: 'Audio', value: stats && stats.audio, active: tab === 'AUDIO', onClick: cardTab('AUDIO') },
-  ];
 
   return (
     <main className="container wide wl-page">
       <div className="page-head">
         <div><h1>Workload Tracker</h1><div className="sub">Track and monitor promotional plug workloads across VGFX, VEDIT and Audio.</div></div>
-      </div>
-
-      <div className="wl-kpis" id="wl-kpis">
-        {KPIS.map(({ key, ...k }) => <KpiCard key={key} {...k} />)}
       </div>
 
       {!lookups.workload_platform.length || !lookups.plug_type.length ? (
