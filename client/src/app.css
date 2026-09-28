@@ -547,9 +547,7 @@ table.t.wl .sub { margin-top: 2px; font-size: 12px; color: var(--text-2); }
 table.t.wl .sub.pre { white-space: pre-wrap; }
 table.t.wl .stack { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 table.t.wl .stack .sub { margin: 0; }
-table.t.wl .clip-note { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 12px; font-weight: 550; color: var(--accent); }
-table.t.wl .clip-note svg { width: 14px; height: 14px; flex: none; }
-table.t.wl td[data-k="work_status"], table.t.wl td[data-k="plug_type"], table.t.wl td[data-k="units_concerned"] { min-width: 110px; }
+table.t.wl td[data-k="plug_type"] { min-width: 110px; }
 
 .kebab { display: inline-grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); cursor: pointer; }
 .kebab:hover, .kebab[aria-expanded="true"] { background: var(--surface-3); color: var(--text); }
@@ -584,7 +582,7 @@ table.t.wl.cards td { align-items: flex-start; }
 /* Wide tabs (VGFX / VEDIT / Audio have 13+ columns): slightly denser so a normal desktop still gets the real table */
 table.t.wl.dense { font-size: 12.5px; }
 table.t.wl.dense th, table.t.wl.dense td { padding: 10px 7px; }
-table.t.wl.dense td[data-k="units_concerned"], table.t.wl.dense td[data-k="plug_type"], table.t.wl.dense td[data-k="work_status"] { min-width: 0; }
+table.t.wl.dense td[data-k="units_concerned"], table.t.wl.dense td[data-k="plug_type"] { min-width: 0; }
 table.t.wl.dense td[data-k="units_concerned"] .chip { white-space: nowrap; }   /* pills stay on one line; only the row of team pills may stack */
 table.t.wl.dense .chips { flex-wrap: wrap; }
 table.t.wl.dense td[data-k="work_date"] strong { white-space: normal; }

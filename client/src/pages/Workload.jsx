@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom';
 import { del, get, post, put } from '../lib/api.js';
 import { fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { ClockIcon, DocIcon, DownloadIcon, FilmIcon, LayersIcon, PaperclipIcon, PlusIcon, SearchIcon, SpeakerIcon, CalendarIcon } from '../components/Icons.jsx';
-import { DateRange, FilterSelect, KpiCard, PlatformCell, Pager, RowMenu, StatusPill, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
+import { CalendarIcon, DocIcon, DownloadIcon, FilmIcon, LayersIcon, PlusIcon, SearchIcon, SpeakerIcon } from '../components/Icons.jsx';
+import { DateRange, FilterSelect, KpiCard, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
 // Workload Tracker — ONE table. "Units Concerned" says which team(s) a plug is for; the tabs
@@ -90,7 +90,7 @@ export default function Workload() {
   const [lookups, setLookups] = useState({ workload_platform: [], plug_type: [] });
   const [tab, setTab] = useState('ALL');
   const [mode, setMode] = useState('table');
-  const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', status: '', from: '', to: '' });
+  const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', from: '', to: '' });
   const [stats, setStats] = useState(null);   // summary cards + tab badges
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState(null);   // table mode: { total, rows } | { error }
@@ -129,10 +129,10 @@ export default function Workload() {
   const query = useCallback((extra = {}) => {
     const p = new URLSearchParams(extra);
     if (tab !== 'ALL') p.set('team', tab);
-    ['units', 'platform', 'plug_type', 'status', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
+    ['units', 'platform', 'plug_type', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
     if (!isGrid && q) p.set('q', q);
     return p;
-  }, [tab, filt.units, filt.platform, filt.plug_type, filt.status, filt.from, filt.to, q, isGrid]);
+  }, [tab, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q, isGrid]);
 
   // Summary cards / tab badges follow every filter except the team tab ("today" = the browser's local date)
   const loadStats = useCallback(async () => {
@@ -216,10 +216,10 @@ export default function Workload() {
   const setCell = (key, k, val) => setGrid((g) => ({
     ...g, rows: g.rows.map((r) => (r._key === key ? { ...withAutoPlatform(meta.platformRules, r, k, val), _dirty: true } : r)),
   }));
-  const isEmptyRow = (r) => meta.views[tab].filter((k) => k !== 'work_date' && k !== 'units_concerned' && k !== 'work_status').every((k) => !String(r[k] ?? '').trim());
+  const isEmptyRow = (r) => meta.views[tab].filter((k) => k !== 'work_date' && k !== 'units_concerned').every((k) => !String(r[k] ?? '').trim());
   const addRow = () => setGrid((g) => {
     const last = g.rows.length ? g.rows[g.rows.length - 1].work_date : '';
-    return { ...g, rows: [...g.rows, { _key: newKey(), _new: true, _dirty: false, work_date: last || filt.from || isoDate(), units_concerned: filt.units || meta.tabDefaultUnits[tab], work_status: meta.statusDefault }] };
+    return { ...g, rows: [...g.rows, { _key: newKey(), _new: true, _dirty: false, work_date: last || filt.from || isoDate(), units_concerned: filt.units || meta.tabDefaultUnits[tab] }] };
   });
   const removeRow = async (r) => {
     if (!r._new) {
@@ -270,7 +270,7 @@ export default function Workload() {
   const firstLineOf = (t) => String(t || '').split('\n');
 
   // Cells wrap (pasted line breaks kept) instead of being cut off; data-label feeds the card layout.
-  // The All tab is the summary layout: Length sits under the Plug ID, Billable Party under the program, the Script date under Remarks.
+  // The All tab is the summary layout: Length sits under the Plug ID and Billable Party under the program.
   const cell = (r, k) => {
     const val = r[k];
     const common = { key: k, 'data-k': k, 'data-label': head(k) };
@@ -279,7 +279,6 @@ export default function Workload() {
       case 'platform': return <td {...common}><PlatformCell value={val} /></td>;
       case 'units_concerned': return <td {...common}><UnitsPills value={val} unitTeams={meta.unitTeams} /></td>;
       case 'plug_type': return <td {...common}><TypePill value={val} /></td>;
-      case 'work_status': return <td {...common}><StatusPill value={val} /></td>;
       case 'plug_id': {
         const [first, ...rest] = firstLineOf(val);
         return (
@@ -297,13 +296,6 @@ export default function Workload() {
             {isAll && r.billable_party ? <div className="sub">{r.billable_party}</div> : null}
           </td>
         );
-      case 'remarks':
-        return (
-          <td {...common}>
-            {val}
-            {isAll && r.script ? <div className="clip-note"><PaperclipIcon /> Script: {fmtDate(r.script)}</div> : null}
-          </td>
-        );
       case 'audio_guide': return <td {...common}>{ISO.test(val || '') ? fmtDate(val) : val}</td>;
       default:
         return <td {...common}>{meta.fields[k].kind === 'date' ? fmtDate(val) : val}</td>;
@@ -317,7 +309,6 @@ export default function Workload() {
     { key: 'vgfx', hue: 'purple', icon: <LayersIcon />, label: 'VGFX', value: stats && stats.vgfx, active: tab === 'VGFX', onClick: cardTab('VGFX') },
     { key: 'vedit', hue: 'orange', icon: <FilmIcon />, label: 'VEDIT', value: stats && stats.vedit, active: tab === 'VEDIT', onClick: cardTab('VEDIT') },
     { key: 'audio', hue: 'teal', icon: <SpeakerIcon />, label: 'Audio', value: stats && stats.audio, active: tab === 'AUDIO', onClick: cardTab('AUDIO') },
-    { key: 'pending', hue: 'gray', icon: <ClockIcon />, label: 'Pending', value: stats && stats.pending, active: filt.status === 'PENDING', onClick: cardFilter({ status: filt.status === 'PENDING' ? '' : 'PENDING' }) },
   ];
 
   return (
@@ -377,9 +368,6 @@ export default function Workload() {
           <FilterSelect label="Units" value={filt.units} onChange={setF('units')}><Options list={meta.units} blank="All" /></FilterSelect>
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
           <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
-          <FilterSelect label="Status" value={filt.status} onChange={setF('status')}>
-            <Options list={[{ value: '', label: 'All' }, { value: 'PENDING', label: 'Pending' }, ...meta.statuses]} />
-          </FilterSelect>
           <DateRange from={filt.from} to={filt.to} onChange={setRange} />
         </div>
 
@@ -461,7 +449,7 @@ function WorkloadForm({ rec, defaultUnits, meta, lookups, canWrite, onClose, onS
   const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const initial = Object.keys(meta.fields).reduce((o, k) => ({ ...o, [k]: (rec && rec[k]) ?? '' }), {});
-  if (!rec) { initial.work_date = isoDate(); initial.units_concerned = defaultUnits; initial.work_status = meta.statusDefault; }
+  if (!rec) { initial.work_date = isoDate(); initial.units_concerned = defaultUnits; }
   const [f, , setAll] = useForm(initial);
   const set = (k) => (e) => {
     const val = e && e.target ? e.target.value : e;

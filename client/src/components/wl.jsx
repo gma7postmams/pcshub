@@ -13,9 +13,6 @@ export const Chip = ({ hue, dot, small, children }) => (
   <span className={`chip c-${hue}${small ? ' sm' : ''}`}>{dot ? <i className="dot" /> : null}{children}</span>
 );
 
-const STATUS_HUE = { Draft: 'gray', 'In Progress': 'blue', 'For Review': 'amber', Approved: 'green', Completed: 'teal' };
-export const StatusPill = ({ value }) => (value ? <Chip hue={STATUS_HUE[value] || 'gray'} dot>{value}</Chip> : null);
-
 const TYPE_HUE = { EPISODIC: 'blue', SEASONAL: 'purple', BUMPER: 'orange', 'POP-UP/POP LOGO': 'blue', RADIO: 'green' };
 export const TypePill = ({ value }) => (value ? <Chip hue={TYPE_HUE[value] || hueOf(value)}>{value}</Chip> : null);
 

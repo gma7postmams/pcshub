@@ -23,10 +23,6 @@ const UNIT_TEAMS = {
   'VGFX/VEDIT/Audio': ['VGFX', 'VEDIT', 'AUDIO'],
 };
 const TEAMS = ['VGFX', 'VEDIT', 'AUDIO'];
-// Workflow status shown as a coloured pill; "Pending" (summary card / filter) = everything not yet Approved or Completed
-const STATUSES = ['Draft', 'In Progress', 'For Review', 'Approved', 'Completed'];
-const PENDING = ['Draft', 'In Progress', 'For Review'];
-const STATUS_DEFAULT = 'Draft';
 const TAB_LABEL = { ALL: 'All', VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio' };
 
 // Field kinds: date | select | text | audio_guide. `multiline` = textarea. `hint` = placeholder from the red notes.
@@ -52,19 +48,18 @@ const FIELDS = {
   // Audio sheet's Assigned / Done / Resched-cancelled tables: open columns you can type or paste into
   length:         { label: 'Length', kind: 'text', max: 100, hint: OPEN },
   others:         { label: 'Others', kind: 'text', multiline: true, max: 2000, hint: OPEN },
-  work_status:    { label: 'Status', kind: 'select', options: STATUSES },
 };
 const COLS = Object.keys(FIELDS);
 
 // Columns per tab, in the same order as the template's sheets ("main" for VGFX/VEDIT, "ojo" for Audio)
 const MAIN_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'breakdate', 'breakdate_time',
-  'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats', 'prog_name', 'plug_type', 'work_status'];
-const AUDIO_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'vo', 'script', 'remarks', 'length', 'others', 'plug_type', 'work_status'];
+  'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats', 'prog_name', 'plug_type'];
+const AUDIO_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'vo', 'script', 'remarks', 'length', 'others', 'plug_type'];
 // Audio-only columns; any row that involves Audio (e.g. VGFX/VEDIT/Audio) also gets these in the form
 const AUDIO_EXTRA = ['length', 'others'];
 const VIEWS = {
-  // All tab = the summary layout: Billable Party shows under the program title, Length under the Plug ID, the Script date under Remarks
-  ALL: ['work_date', 'platform', 'plug_id', 'prog_name', 'units_concerned', 'plug_type', 'work_status', 'psd', 'remarks'],
+  // All tab = the summary layout: Billable Party shows under the program title and Length under the Plug ID
+  ALL: ['work_date', 'platform', 'plug_id', 'prog_name', 'units_concerned', 'plug_type', 'psd', 'remarks'],
   VGFX: MAIN_COLS,
   VEDIT: MAIN_COLS,
   AUDIO: AUDIO_COLS,
@@ -105,7 +100,7 @@ const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'billable_party', 'remarks',
 
 router.get('/meta', (req, res) => res.json({
   ready: true, units: UNITS, unitTeams: UNIT_TEAMS, tabs: ['ALL', ...TEAMS].map((key) => ({ key, label: TAB_LABEL[key] })),
-  tabDefaultUnits: TAB_DEFAULT_UNITS, audioExtra: AUDIO_EXTRA, statuses: STATUSES, pendingStatuses: PENDING, statusDefault: STATUS_DEFAULT, fields: FIELDS, views: VIEWS, platformRules: PLATFORM_RULES,
+  tabDefaultUnits: TAB_DEFAULT_UNITS, audioExtra: AUDIO_EXTRA, fields: FIELDS, views: VIEWS, platformRules: PLATFORM_RULES,
 }));
 
 async function assertOption(client, category, value, field, current) {
@@ -137,7 +132,6 @@ async function parseRow(client, body, current) {
     if (k === 'audio_guide') rec[k] = parseAudioGuide(body[k], cur[k]);
     else if (f.kind === 'date') rec[k] = v.date(body[k], { field: f.label, required: !!f.required });
     else if (k === 'units_concerned') rec[k] = v.oneOf(body[k], UNITS, { field: f.label });
-    else if (k === 'work_status') rec[k] = v.oneOf(body[k], STATUSES, { field: f.label, def: STATUS_DEFAULT });
     else rec[k] = v.str(body[k], { field: f.label, max: f.max, required: !!f.required });
   }
   // Platform follows the Plug ID prefix unless one was chosen (only if that option exists and is active)
@@ -191,10 +185,6 @@ function buildFilter(query) {
   if (query.units) add('w.units_concerned = ?', v.oneOf(String(query.units), UNITS, { field: 'units' }));
   if (query.platform) add('w.platform = ?', String(query.platform));
   if (query.plug_type) add('w.plug_type = ?', String(query.plug_type));
-  if (query.status) {
-    if (query.status === 'PENDING') add('w.work_status = ANY(?::text[])', PENDING);
-    else add('w.work_status = ?', v.oneOf(String(query.status), STATUSES, { field: 'status' }));
-  }
   if (query.from) add('w.work_date >= ?', v.date(query.from, { field: 'from' }));
   if (query.to) add('w.work_date <= ?', v.date(query.to, { field: 'to' }));
   if (query.q) {
@@ -216,8 +206,7 @@ router.get('/stats', asyncH(async (req, res) => {
   const { rows } = await db.query(
     `SELECT count(*)::int AS total,
             count(*) FILTER (WHERE w.work_date = ${P(today)})::int AS today,
-            ${team('VGFX')} AS vgfx, ${team('VEDIT')} AS vedit, ${team('AUDIO')} AS audio,
-            count(*) FILTER (WHERE w.work_status = ANY(${P(PENDING)}::text[]))::int AS pending
+            ${team('VGFX')} AS vgfx, ${team('VEDIT')} AS vedit, ${team('AUDIO')} AS audio
        FROM workload_items w ${whereSql(where)}`, params
   );
   res.json(rows[0]);

@@ -199,10 +199,8 @@ ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS length          TEXT;   -- A
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS others          TEXT;   -- Audio: open
 -- (Older installs may still have an unused status column from the first build; it is left untouched.)
 
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS work_status     TEXT NOT NULL DEFAULT 'Draft';  -- Draft / In Progress / For Review / Approved / Completed
-ALTER TABLE workload_items DROP CONSTRAINT IF EXISTS workload_items_status_check;
-ALTER TABLE workload_items ADD CONSTRAINT workload_items_status_check CHECK (work_status IN
-  ('Draft', 'In Progress', 'For Review', 'Approved', 'Completed'));
+-- A workflow "Status" column was tried in a draft of the redesign and removed again; drop it if a database got it.
+ALTER TABLE workload_items DROP COLUMN IF EXISTS work_status;
 ALTER TABLE workload_items DROP CONSTRAINT IF EXISTS workload_items_units_check;
 ALTER TABLE workload_items ADD CONSTRAINT workload_items_units_check CHECK (units_concerned IN
   ('VGFX Only', 'VEDIT Only', 'VGFX/VEDIT', 'Audio - RADIO', 'Audio – AUDIO GUIDE', 'VGFX/VEDIT/Audio'));
