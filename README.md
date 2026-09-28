@@ -1,6 +1,6 @@
 # Promotional Content Hub
 
-Multi-user tracker for promotional content: **Ingest Tracker → Approval**, **Workload Tracker**, Reports, Knowledge Base, Dashboard, Admin.
+Multi-user tracker for promotional content: **Ingest Tracker → Approval**, **Work Load Tracker**, Reports, Dashboard, Admin.
 Node.js (Express) + PostgreSQL API · **React 18 + Vite** front end · themes with dark/light · top navigation only · mobile-ready PWA · no AI.
 
 ## Quick start
@@ -78,10 +78,9 @@ Upgrading: replace the code, `npm ci --omit=dev`, `npm run build`, `npm run migr
 |------|----------|
 | Dashboard | Ingest KPIs · Recent ingest activity |
 | Ingest Tracker | — |
-| Workload Tracker | — |
+| Work Load Tracker | — |
 | Approval | — |
 | Reports | Ingest & Approval summary · CSV export |
-| Knowledge Base | — |
 
 A section only takes effect if its page is also checked.
 
@@ -92,7 +91,7 @@ A section only takes effect if its page is also checked.
 | Create / edit / send ingest | Ingest | ✓ | ✓ | ✓ | — |
 | Delete ingest | Ingest | ✓ | — | — | — |
 | Approve / reject | Approval | ✓ | ✓ | — | — |
-| Edit Workload (when built) | Workload | ✓ | ✓ | — | — |
+| Edit Work Load (when built) | Work Load | ✓ | ✓ | — | — |
 | Users, groups, dropdowns, branding, audit | Admin | ✓ | — | — | — |
 
 Adding a new page or section: add it to `CATALOG`, then guard its route with `requirePageAccess(path)` or `requireSection(key)`. It then shows up as a checkbox in Admin → Groups automatically.
@@ -116,7 +115,7 @@ Status is the approval state and is never set by the client:
 - Every approval request references an `ingest_record_id` (NOT NULL FK); only one pending request per record (partial unique index).
 - Managers/Admins are notified on send; the sender, creator and "Requested by" user are notified on decision. Rejection requires a reason.
 
-**Workload** — page (opened by any group that has it checked; editing will need Manager+ role) and the `workload_items` table (identity/audit columns only) are in place. **Fields are not defined yet**; the page shows an empty placeholder with Table / Excel mode toggles. To build it out: add columns in `src/schema.sql`, list them in `FIELDS` in `src/routes/workload.js`, implement list + batch save guarded by `requireAction('workload.write')`, and render them in `client/src/pages/Workload.jsx`.
+**Work Load** — page (opened by any group that has it checked; editing will need Manager+ role) and the `workload_items` table (identity/audit columns only) are in place. **Fields are not defined yet**; the page shows an empty placeholder with Table / Excel mode toggles. To build it out: add columns in `src/schema.sql`, list them in `FIELDS` in `src/routes/workload.js`, implement list + batch save guarded by `requireAction('workload.write')`, and render them in `client/src/pages/Workload.jsx`.
 
 ## Security
 
@@ -175,12 +174,12 @@ server.js                 app wiring, security headers, page routes behind requi
 src/permissions.js        CATALOG (pages/sections), ROLE_ACTIONS — the single source of truth
 src/middleware.js         loadUser (role + group perms), requirePageAccess, requireSection, requireAction, csrfGuard
 src/schema.sql            idempotent schema (runs on every boot)
-src/routes/*.js           auth, profile, ingest, approvals, workload, reports, knowledge, dashboard, admin, notifications, branding
+src/routes/*.js           auth, profile, ingest, approvals, workload, reports, dashboard, admin, notifications, branding
 client/                   React 18 + Vite front end
   src/App.jsx             routes + client-side page guard (mirrors the server lock)
   src/context.jsx         session (role, group, allowed pages/sections/actions) + branding
   src/components/         TopNav (nav, notifications, user menu), Modal, Confirm, Toast, Pill, Kpi, Bars
-  src/pages/              Login, Dashboard, Ingest, Approval, Workload, Reports, Knowledge, Profile, admin/*
+  src/pages/              Login, Dashboard, Ingest, Approval, Workload, Reports, Profile, admin/*
   src/lib/                api client (CSRF header, auth redirects), theme engine, utils
   public/                 theme-boot.js, sw.js, manifest, icons, offline page
   dist/                   build output served by Express (index.html only after the access check)

@@ -4,7 +4,7 @@ const ACT = {
   'ingest.write': 'Create / edit / send ingest',
   'ingest.delete': 'Delete ingest records',
   'approval.decide': 'Approve / reject',
-  'workload.write': 'Edit Workload',
+  'workload.write': 'Edit Work Load',
   'admin': 'Users, groups, dropdowns, branding, audit',
 };
 

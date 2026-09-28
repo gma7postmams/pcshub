@@ -10,7 +10,6 @@ const Ingest = lazy(() => import('./pages/Ingest.jsx'));
 const Workload = lazy(() => import('./pages/Workload.jsx'));
 const Approval = lazy(() => import('./pages/Approval.jsx'));
 const Reports = lazy(() => import('./pages/Reports.jsx'));
-const Knowledge = lazy(() => import('./pages/Knowledge.jsx'));
 const Admin = lazy(() => import('./pages/admin/Admin.jsx'));
 const Profile = lazy(() => import('./pages/Profile.jsx'));
 
@@ -20,7 +19,6 @@ const PAGES = {
   '/workload': Workload,
   '/approval': Approval,
   '/reports': Reports,
-  '/knowledge': Knowledge,
   '/admin': Admin,
   '/profile': Profile,
 };
