@@ -445,3 +445,45 @@ table.t.xl tr.dirty td, table.t.xl tr.dirty:hover td { background: color-mix(in 
 label.f > small { display: block; margin-top: 4px; font-size: 12px; }
 table.t.xl .ag select { width: 84px; min-width: 84px; flex: none; }
 table.t.xl .ag input[type="date"] { width: auto; min-width: 140px; flex: 1 1 auto; }
+
+/* ---------- Workload: use the whole window; wrap instead of cropping ---------- */
+.container.wide { max-width: none; padding-left: clamp(12px, 2vw, 32px); padding-right: clamp(12px, 2vw, 32px); }
+table.t.wl { font-size: 12.5px; }
+table.t.wl th { padding: 8px 8px; white-space: normal; line-height: 1.25; vertical-align: bottom; }
+table.t.wl td { padding: 7px 8px; }
+/* keep line breaks from pasted multi-line cells; wrap long text rather than cutting it off */
+table.t.wl td { white-space: pre-wrap; overflow-wrap: break-word; }   /* short fields keep their words whole */
+/* free-text columns often hold long unbroken file paths: let those break anywhere so they never force the table wider than the window */
+table.t.wl td[data-k="remarks"], table.t.wl td[data-k="others"], table.t.wl td[data-k="vo"],
+table.t.wl td[data-k="breakdate_time"], table.t.wl td[data-k="total_mats"] { overflow-wrap: anywhere; }
+table.t.wl td[data-k="plug_id"] { min-width: 150px; }
+table.t.wl td[data-k="remarks"], table.t.wl td[data-k="breakdate_time"], table.t.wl td[data-k="vo"],
+table.t.wl td[data-k="others"], table.t.wl td[data-k="total_mats"] { min-width: 120px; }
+table.t.wl td[data-k="prog_name"], table.t.wl td[data-k="billable_party"], table.t.wl td[data-k="units_concerned"] { min-width: 100px; }
+table.t.wl td.actions-cell { white-space: normal; width: 1%; }
+table.t.wl td.actions-cell .btn { display: block; width: 100%; margin: 0 0 4px; }
+table.t.wl td.actions-cell .btn:last-child { margin-bottom: 0; }
+/* Excel grid: wider columns for the long-text fields (textareas grow with their content) */
+table.t.xl td[data-k="plug_id"] textarea, table.t.xl td[data-k="remarks"] textarea, table.t.xl td[data-k="others"] textarea,
+table.t.xl td[data-k="breakdate_time"] textarea, table.t.xl td[data-k="vo"] textarea, table.t.xl td[data-k="total_mats"] textarea { min-width: 190px; }
+table.t.xl td[data-k="units_concerned"] select, table.t.xl td[data-k="platform"] select { min-width: 150px; }
+table.t.xl textarea { overflow: hidden; resize: none; }
+
+/* Card layout: used when the table would need sideways scrolling (phones, tablets, or many columns on a laptop).
+   Every row becomes a card with label-above-value fields; blank fields are skipped. */
+table.t.wl.cards, table.t.wl.cards tbody { display: block; width: 100%; }
+table.t.wl.cards thead { display: none; }
+table.t.wl.cards tbody { padding: 10px; display: grid; gap: 10px; }
+table.t.wl.cards tr { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(160px, 44%), 1fr)); gap: 8px 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+table.t.wl.cards tbody tr:hover { background: var(--surface-2); }
+table.t.wl.cards td, table.t.wl.cards tbody tr:hover td { display: flex; flex-direction: column; gap: 2px; padding: 0; border: 0; min-width: 0 !important; background: none; overflow-wrap: anywhere; }
+table.t.wl.cards td > * { min-width: 0; }
+table.t.wl.cards td::before { content: attr(data-label); color: var(--text-3); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; overflow-wrap: normal; }
+table.t.wl.cards td:empty { display: none; }
+table.t.wl.cards td[data-k="plug_id"] { grid-column: 1 / -1; order: -1; font-size: 14px; }
+table.t.wl.cards td[data-k="plug_id"]::before { content: none; }
+table.t.wl.cards td[data-k="remarks"], table.t.wl.cards td[data-k="breakdate_time"], table.t.wl.cards td[data-k="vo"],
+table.t.wl.cards td[data-k="others"], table.t.wl.cards td[data-k="total_mats"], table.t.wl.cards td[data-k="prog_name"] { grid-column: span 2; }
+table.t.wl.cards td.actions-cell { grid-column: 1 / -1; order: 99; flex-direction: row; justify-content: flex-end; gap: 8px; padding-top: 4px; width: auto; }
+table.t.wl.cards td.actions-cell::before { content: none; }
+table.t.wl.cards td.actions-cell .btn { display: inline-flex; width: auto; margin: 0; }

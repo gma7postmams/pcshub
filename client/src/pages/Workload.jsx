@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { del, get, post, put } from '../lib/api.js';
 import { fmtDate, isoDate } from '../lib/util.js';
@@ -52,7 +52,21 @@ function AudioGuideInput({ value, onChange, disabled }) {
   );
 }
 
-function FieldInput({ def, value, onChange, disabled, lookups }) {
+// Textarea that grows to fit its content (used in the Excel grid so pasted text is never cut off)
+function AutoTextarea({ value, ...props }) {
+  const ref = useRef(null);
+  const fit = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.max(el.scrollHeight + 2, 32)}px`;
+  }, []);
+  useLayoutEffect(fit, [fit, value]);
+  useEffect(() => { window.addEventListener('resize', fit); return () => window.removeEventListener('resize', fit); }, [fit]);
+  return <textarea ref={ref} value={value} {...props} />;
+}
+
+function FieldInput({ def, value, onChange, disabled, lookups, auto }) {
   const v = value ?? '';
   if (def.kind === 'audio_guide') return <AudioGuideInput value={v} onChange={onChange} disabled={disabled} />;
   if (def.kind === 'date') return <input type="date" value={v} disabled={disabled} onChange={onChange} />;
@@ -60,6 +74,7 @@ function FieldInput({ def, value, onChange, disabled, lookups }) {
     const list = def.lookup ? withCurrent(lookups[def.lookup] || [], v) : def.options;
     return <select value={v} disabled={disabled} onChange={onChange}><Options list={list} blank={def.required ? 'Select…' : '—'} /></select>;
   }
+  if (def.multiline && auto) return <AutoTextarea maxLength={def.max} placeholder={def.hint} value={v} disabled={disabled} onChange={onChange} />;
   if (def.multiline) return <textarea maxLength={def.max} placeholder={def.hint} value={v} disabled={disabled} onChange={onChange} />;
   return <input maxLength={def.max} placeholder={def.hint} value={v} disabled={disabled} onChange={onChange} />;
 }
@@ -82,6 +97,26 @@ export default function Workload() {
   const [saving, setSaving] = useState(false);
   const q = useDebounced(filt.q, 300);
   const isGrid = mode === 'excel' && tab !== 'ALL';
+
+  // Table vs cards: use the real table whenever it fits the window; when it would need sideways scrolling,
+  // show each row as a card instead (measured, so it follows the actual columns and content, not fixed breakpoints).
+  const [winW, setWinW] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const on = () => setWinW(window.innerWidth);
+    window.addEventListener('resize', on);
+    return () => window.removeEventListener('resize', on);
+  }, []);
+  const [needW, setNeedW] = useState({});   // tab -> window width the table needs to fit without sideways scrolling
+  const wrapRef = useRef(null);
+  const cards = mode === 'table' && winW < (needW[tab] || 0);
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap || cards || mode !== 'table') return;
+    const t = wrap.querySelector('table');
+    if (t && t.scrollWidth > wrap.clientWidth + 1) {
+      setNeedW((o) => ({ ...o, [tab]: t.scrollWidth + (window.innerWidth - wrap.clientWidth) + 1 }));
+    }
+  }, [data, tab, winW, cards, mode]);
 
   useEffect(() => {
     Promise.all([get('/api/workload/meta'), get('/api/dropdowns?categories=workload_platform,plug_type')])
@@ -200,21 +235,23 @@ export default function Workload() {
     } finally { setSaving(false); }
   };
 
-  if (!meta) return <main className="container"><Empty>Loading…</Empty></main>;
+  if (!meta) return <main className="container wide"><Empty>Loading…</Empty></main>;
 
   const cols = meta.views[tab];
   const total = data && data.total ? data.total : 0;
+  // Cells wrap (pasted line breaks kept) instead of being cut off; data-label feeds the phone card layout
   const cell = (r, k) => {
     const val = r[k];
-    if (meta.fields[k].kind === 'date') return <td key={k} className="nowrap">{fmtDate(val)}</td>;
-    if (k === 'audio_guide') return <td key={k} className="nowrap">{ISO.test(val || '') ? fmtDate(val) : val}</td>;
-    if (k === 'units_concerned') return <td key={k} className="nowrap"><strong>{val}</strong></td>;
-    if (k === 'plug_id') return <td key={k} className="cell-clip mono" title={val || ''}><strong>{val}</strong></td>;
-    return <td key={k} className="cell-clip" title={val || ''}>{val}</td>;
+    const common = { key: k, 'data-k': k, 'data-label': meta.fields[k].label };
+    if (meta.fields[k].kind === 'date') return <td {...common}>{fmtDate(val)}</td>;
+    if (k === 'audio_guide') return <td {...common}>{ISO.test(val || '') ? fmtDate(val) : val}</td>;
+    if (k === 'units_concerned') return <td {...common}><strong>{val}</strong></td>;
+    if (k === 'plug_id') return <td {...common} className="mono"><strong>{val}</strong></td>;
+    return <td {...common}>{val}</td>;
   };
 
   return (
-    <main className="container">
+    <main className="container wide">
       <div className="page-head">
         <div><h1>Workload Tracker</h1><div className="sub">One table for VGFX, VEDIT and Audio — Units Concerned says which team(s) a plug is for.</div></div>
         <div className="actions">
@@ -273,8 +310,8 @@ export default function Workload() {
                         {grid.rows.length ? grid.rows.map((r) => (
                           <tr key={r._key} className={r._dirty ? 'dirty' : ''}>
                             {cols.map((k) => (
-                              <td key={k}>
-                                <FieldInput def={meta.fields[k]} value={r[k]} lookups={lookups} disabled={!canWrite} onChange={(e) => setCell(r._key, k, e.target.value)} />
+                              <td key={k} data-k={k}>
+                                <FieldInput auto def={meta.fields[k]} value={r[k]} lookups={lookups} disabled={!canWrite} onChange={(e) => setCell(r._key, k, e.target.value)} />
                               </td>
                             ))}
                             {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removeRow(r)}>{r._new ? 'Remove' : 'Delete'}</button></td> : null}
@@ -290,19 +327,19 @@ export default function Workload() {
           </>
         ) : (
           <>
-            <div className="table-wrap" id="tbl">
+            <div className="table-wrap" id="tbl" ref={wrapRef}>
               {!data ? <Empty>Loading…</Empty>
                 : data.error ? <Empty>{data.error}</Empty>
                   : !data.rows.length ? <Empty>No workload items match these filters.</Empty>
                     : (
-                      <table className="t">
+                      <table className={`t wl${cards ? ' cards' : ''}`}>
                         <thead><tr>{cols.map((k) => <th key={k}>{meta.fields[k].label}</th>)}{canWrite ? <th /> : null}</tr></thead>
                         <tbody>
                           {data.rows.map((r) => (
                             <tr key={r.id} className="clickable" onClick={() => setForm({ rec: r })}>
                               {cols.map((k) => cell(r, k))}
                               {canWrite ? (
-                                <td className="right nowrap" onClick={(e) => e.stopPropagation()}>
+                                <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
                                   <button type="button" className="btn sm" onClick={() => setForm({ rec: r })}>Edit</button>{' '}
                                   <button type="button" className="btn sm danger row-del" onClick={() => deleteItem(r)}>Delete</button>
                                 </td>
