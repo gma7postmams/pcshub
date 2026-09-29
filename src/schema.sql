@@ -103,8 +103,11 @@ CREATE TABLE IF NOT EXISTS dropdown_options (
 CREATE TABLE IF NOT EXISTS ingest_records (
   id                    SERIAL PRIMARY KEY,
   program               TEXT NOT NULL,
+  billable_party        TEXT,
   platform              TEXT NOT NULL,
   episode_date          DATE,
+  episode_break_date_text TEXT,
+  materials_count       INTEGER,
   source                TEXT,
   destination_folder    TEXT,
   requested_by_user_id  INT REFERENCES users(id) ON DELETE SET NULL,

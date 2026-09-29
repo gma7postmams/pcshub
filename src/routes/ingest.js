@@ -28,18 +28,43 @@ async function assertDropdown(client, category, value, field) {
   if (!rows.length) throw new HttpError(400, `${field} "${value}" is not a valid option`);
 }
 
-async function parseBody(client, body) {
+function episodeDateForText(value) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  try { return v.date(value, { field: 'Episode date' }); } catch (_) { return null; }
+}
+
+async function parseBody(client, body, current = null) {
+  const hasEpisodeText = Object.prototype.hasOwnProperty.call(body, 'episode_break_date_text');
+  let episode_break_date_text;
+  let episode_date;
+  if (hasEpisodeText) {
+    episode_break_date_text = v.str(body.episode_break_date_text, { field: 'Episode / Break Date', max: 500 });
+    episode_date = episodeDateForText(episode_break_date_text);
+  } else {
+    const hasLegacyDate = Object.prototype.hasOwnProperty.call(body, 'episode_date');
+    const legacyDate = v.date(body.episode_date, { field: 'Episode date' });
+    if (current && (!hasLegacyDate || legacyDate === current.episode_date_iso)) {
+      // Older clients send the full form; preserve free-text values when its legacy date is unchanged.
+      episode_break_date_text = current.episode_break_date_text;
+      episode_date = current.episode_date;
+    } else {
+      episode_date = legacyDate;
+      episode_break_date_text = legacyDate;
+    }
+  }
   const rec = {
     program: v.str(body.program, { field: 'Program', max: 200, required: true }),
+    billable_party: v.str(body.billable_party, { field: 'Billable Party', max: 200 }),
     platform: v.str(body.platform, { field: 'Platform', max: 100, required: true }),
-    episode_date: v.date(body.episode_date, { field: 'Episode date' }),
+    episode_date,
+    episode_break_date_text,
+    materials_count: v.int(body.materials_count, { field: 'Materials count', min: 0 }),
     source: v.str(body.source, { field: 'Source', max: 500 }),
     destination_folder: v.str(body.destination_folder, { field: 'Destination folder', max: 1000 }),
     requested_by_user_id: v.int(body.requested_by_user_id, { field: 'Requested by', min: 1 }),
     requested_by_psd: v.str(body.requested_by_psd, { field: 'Requested by (PSD)', max: 200 }),
     remarks: v.str(body.remarks, { field: 'Remarks', max: 4000 }),
   };
-  await assertDropdown(client, 'program', rec.program, 'Program');
   await assertDropdown(client, 'platform', rec.platform, 'Platform');
   if (rec.requested_by_user_id) {
     const { rows } = await client.query('SELECT 1 FROM users WHERE id=$1 AND is_active', [rec.requested_by_user_id]);
@@ -61,7 +86,8 @@ router.get('/', asyncH(async (req, res) => {
     const q = `%${String(req.query.q).slice(0, 100).replace(/[%_\\]/g, '\\$&')}%`;
     params.push(q);
     const p = `$${params.length}`;
-    where.push(`(i.program ILIKE ${p} OR i.source ILIKE ${p} OR i.destination_folder ILIKE ${p}
+    where.push(`(i.program ILIKE ${p} OR i.billable_party ILIKE ${p} OR i.episode_break_date_text ILIKE ${p}
+                 OR i.source ILIKE ${p} OR i.destination_folder ILIKE ${p}
                  OR i.remarks ILIKE ${p} OR i.requested_by_psd ILIKE ${p} OR ru.full_name ILIKE ${p})`);
   }
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
@@ -95,11 +121,13 @@ router.post('/', requireAction('ingest.write'), asyncH(async (req, res) => {
   const created = await db.tx(async (c) => {
     const r = await parseBody(c, req.body);
     const { rows } = await c.query(
-      `INSERT INTO ingest_records (program, platform, episode_date, source, destination_folder,
-         requested_by_user_id, requested_by_psd, remarks, status, created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'New',$9,$9) RETURNING id`,
-      [r.program, r.platform, r.episode_date, r.source, r.destination_folder,
-        r.requested_by_user_id, r.requested_by_psd, r.remarks, req.user.id]
+      `INSERT INTO ingest_records (program, billable_party, platform, episode_date, episode_break_date_text,
+         materials_count, source, destination_folder, requested_by_user_id, requested_by_psd, remarks,
+         status, created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'New',$12,$12) RETURNING id`,
+      [r.program, r.billable_party, r.platform, r.episode_date, r.episode_break_date_text,
+        r.materials_count, r.source, r.destination_folder, r.requested_by_user_id,
+        r.requested_by_psd, r.remarks, req.user.id]
     );
     await audit(req, 'ingest.create', 'ingest_record', rows[0].id, r, c);
     return rows[0];
@@ -110,18 +138,24 @@ router.post('/', requireAction('ingest.write'), asyncH(async (req, res) => {
 router.put('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   await db.tx(async (c) => {
-    const cur = await c.query('SELECT status FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
+    const cur = await c.query(
+      `SELECT status, episode_date, to_char(episode_date, 'YYYY-MM-DD') AS episode_date_iso,
+              episode_break_date_text
+         FROM ingest_records WHERE id=$1 FOR UPDATE`, [id]
+    );
     if (!cur.rows.length) throw new HttpError(404, 'Ingest record not found');
     if (!EDITABLE.includes(cur.rows[0].status)) {
       throw new HttpError(409, `Record is "${cur.rows[0].status}" and can no longer be edited`);
     }
-    const r = await parseBody(c, req.body);
+    const r = await parseBody(c, req.body, cur.rows[0]);
     await c.query(
-      `UPDATE ingest_records SET program=$2, platform=$3, episode_date=$4, source=$5, destination_folder=$6,
-         requested_by_user_id=$7, requested_by_psd=$8, remarks=$9, updated_by=$10, updated_at=now()
+      `UPDATE ingest_records SET program=$2, billable_party=$3, platform=$4, episode_date=$5,
+         episode_break_date_text=$6, materials_count=$7, source=$8, destination_folder=$9,
+         requested_by_user_id=$10, requested_by_psd=$11, remarks=$12, updated_by=$13, updated_at=now()
        WHERE id=$1`,
-      [id, r.program, r.platform, r.episode_date, r.source, r.destination_folder,
-        r.requested_by_user_id, r.requested_by_psd, r.remarks, req.user.id]
+      [id, r.program, r.billable_party, r.platform, r.episode_date, r.episode_break_date_text,
+        r.materials_count, r.source, r.destination_folder, r.requested_by_user_id,
+        r.requested_by_psd, r.remarks, req.user.id]
     );
     await audit(req, 'ingest.update', 'ingest_record', id, r, c);
   });

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { del, get, post, put } from '../lib/api.js';
-import { ago, fmtDate, fmtDateTime } from '../lib/util.js';
+import { ago, fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { PlusIcon } from '../components/Icons.jsx';
 import { Empty, Modal, Options, Pill, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
@@ -28,8 +28,7 @@ export default function Ingest() {
   const q = useDebounced(filt.q, 300);
 
   useEffect(() => {
-    Promise.all([get('/api/dropdowns?categories=program,platform'), get('/api/users/active')])
-      .then(([dd, users]) => setLookups({ ...dd, users }));
+    get('/api/dropdowns?categories=platform').then(setLookups);
   }, []);
 
   const load = useCallback(async () => {
@@ -61,21 +60,14 @@ export default function Ingest() {
         </div>
       </div>
 
-      {lookups && !lookups.program.length ? (
-        <div className="alert warn mb-12">
-          No PROGRAM options exist yet.{' '}
-          {s.canPage('/admin') ? <>Add them in <Link to="/admin#dropdowns">Admin → Dropdowns</Link>.</> : 'Ask an Admin to add them.'}
-        </div>
-      ) : null}
-
       <div className="card">
         <div className="filters">
-          <input type="search" placeholder="Search program, source, folder, remarks…" value={filt.q} onChange={setF('q')} />
+          <input type="search" placeholder="Search program, billable party, episode / break date, source, folder, remarks…" value={filt.q} onChange={setF('q')} />
           <select value={filt.status} onChange={setF('status')}><Options list={STATUSES} blank="All statuses" /></select>
-          <select value={filt.program} onChange={setF('program')}><Options list={lookups ? lookups.program : []} blank="All programs" /></select>
+          <input type="text" placeholder="Program / Project (exact match)" value={filt.program} onChange={setF('program')} />
           <select value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All platforms" /></select>
-          <input type="date" title="Episode date from" value={filt.from} onChange={setF('from')} />
-          <input type="date" title="Episode date to" value={filt.to} onChange={setF('to')} />
+          <input type="date" title="Legacy episode date from (YYYY-MM-DD)" value={filt.from} onChange={setF('from')} />
+          <input type="date" title="Legacy episode date to (YYYY-MM-DD)" value={filt.to} onChange={setF('to')} />
         </div>
         <div className="table-wrap" id="tbl">
           {!data ? <Empty>Loading…</Empty>
@@ -84,8 +76,8 @@ export default function Ingest() {
                 : (
                   <table className="t">
                     <thead><tr>
-                      <th>#</th><th>Program</th><th>Platform</th><th>Episode Date</th><th>Source</th><th>Destination Folder</th>
-                      <th>Requested By</th><th>Requested By (PSD)</th><th>Status</th><th>Updated</th>
+                      <th>#</th><th>Program / Project</th><th>Platform</th><th>Episode / Break Date</th><th>Source</th><th>Destination Folder</th>
+                      <th>Requested By</th><th>Status</th><th>Updated</th>
                     </tr></thead>
                     <tbody>
                       {data.rows.map((r) => (
@@ -93,10 +85,9 @@ export default function Ingest() {
                           <td className="dim mono">{r.id}</td>
                           <td><strong>{r.program}</strong></td>
                           <td>{r.platform}</td>
-                          <td className="nowrap">{fmtDate(r.episode_date)}</td>
+                          <td className="nowrap">{r.episode_break_date_text || r.episode_date || ''}</td>
                           <td className="cell-clip" title={r.source || ''}>{r.source}</td>
                           <td className="cell-clip mono" title={r.destination_folder || ''}>{r.destination_folder}</td>
-                          <td className="nowrap">{r.requested_by_name || ''}</td>
                           <td>{r.requested_by_psd || ''}</td>
                           <td><Pill s={r.status} /></td>
                           <td className="dim nowrap">{ago(r.updated_at)}</td>
@@ -115,7 +106,7 @@ export default function Ingest() {
       </div>
 
       {form && lookups ? (
-        <IngestForm rec={form.id ? form : null} lookups={lookups} me={s.user} onClose={() => setForm(null)} onSaved={() => { setForm(null); load(); }} />
+        <IngestForm rec={form.id ? form : null} lookups={lookups} onClose={() => setForm(null)} onSaved={() => { setForm(null); load(); }} />
       ) : null}
 
       {detail ? (
@@ -139,24 +130,39 @@ export default function Ingest() {
   );
 }
 
-function IngestForm({ rec, lookups, me, onClose, onSaved }) {
+function IngestForm({ rec, lookups, onClose, onSaved }) {
   const toast = useToast();
   const r = rec || {};
+  const initialEpisodeText = rec ? (r.episode_break_date_text || r.episode_date || '') : '';
   const [f, set] = useForm({
-    program: r.program || '', platform: r.platform || '', episode_date: r.episode_date || '', source: r.source || '',
-    destination_folder: r.destination_folder || '', requested_by_user_id: r.requested_by_user_id || (rec ? '' : me.id),
+    program: r.program || '', platform: r.platform || '', billable_party: r.billable_party || '',
+    episode_break_date_text: initialEpisodeText,
+    materials_count: r.materials_count == null ? '' : String(r.materials_count),
+    source: r.source || '', destination_folder: r.destination_folder || '',
+    requested_by_user_id: r.requested_by_user_id ?? '',
     requested_by_psd: r.requested_by_psd || '', remarks: r.remarks || '',
   });
   const [busy, setBusy] = useState(false);
-  const userOpts = lookups.users.map((u) => ({ value: u.id, label: u.full_name }));
 
   const submit = async (send) => {
-    if (!f.program || !f.platform) { toast('PROGRAM and Platform are required', 'err'); return; }
+    if (!f.program || !f.platform) { toast('Program / Project and Platform are required', 'err'); return; }
+    const materialsCount = f.materials_count === '' ? null : Number(f.materials_count);
+    if (materialsCount !== null && (!Number.isInteger(materialsCount) || materialsCount < 0)) {
+      toast('Number of Materials must be a nonnegative integer', 'err');
+      return;
+    }
+    const payload = {
+      ...f,
+      materials_count: materialsCount,
+      requested_by_user_id: f.requested_by_user_id || null,
+    };
+    // Omit an unchanged fallback value so older records keep their stored compatibility fields.
+    if (rec && f.episode_break_date_text === initialEpisodeText) delete payload.episode_break_date_text;
     setBusy(true);
     try {
       let id = rec && rec.id;
-      if (rec) await put(`/api/ingest/${rec.id}`, f);
-      else id = (await post('/api/ingest', f)).id;
+      if (rec) await put(`/api/ingest/${rec.id}`, payload);
+      else id = (await post('/api/ingest', payload)).id;
       if (send) await post(`/api/ingest/${id}/send`);
       toast(send ? 'Saved and sent for approval' : 'Saved');
       onSaved();
@@ -176,16 +182,16 @@ function IngestForm({ rec, lookups, me, onClose, onSaved }) {
       )}
     >
       <form id="ing-form" className="form-grid" noValidate onSubmit={(e) => e.preventDefault()}>
-        <label className="f"><span>PROGRAM <span className="req">*</span></span>
-          <select name="program" value={f.program} onChange={set('program')}><Options list={withCurrent(lookups.program, r.program)} blank="Select program…" /></select></label>
+        <label className="f"><span>Program / Project <span className="req">*</span></span>
+          <input name="program" maxLength={200} value={f.program} onChange={set('program')} /></label>
         <label className="f"><span>Platform <span className="req">*</span></span>
           <select name="platform" value={f.platform} onChange={set('platform')}><Options list={withCurrent(lookups.platform, r.platform)} blank="Select platform…" /></select></label>
-        <label className="f"><span>Episode date</span><input type="date" name="episode_date" value={f.episode_date} onChange={set('episode_date')} /></label>
+        <label className="f"><span>Billable Party</span><input name="billable_party" maxLength={200} value={f.billable_party} onChange={set('billable_party')} /></label>
+        <label className="f"><span>Episode / Break Date</span><input name="episode_break_date_text" maxLength={500} value={f.episode_break_date_text} onChange={set('episode_break_date_text')} placeholder="e.g. SEP 1, SEP 7-12, 2026-09-15" /></label>
+        <label className="f"><span>Number of Materials</span><input type="number" name="materials_count" min="0" step="1" value={f.materials_count} onChange={set('materials_count')} /></label>
         <label className="f"><span>Source</span><input name="source" maxLength={500} value={f.source} onChange={set('source')} placeholder="e.g. Tape, drive, server path" /></label>
         <label className="f full"><span>Destination Folder</span><input name="destination_folder" maxLength={1000} className="mono" value={f.destination_folder} onChange={set('destination_folder')} placeholder="\\server\share\promos\…" /></label>
-        <label className="f"><span>Requested by</span>
-          <select name="requested_by_user_id" value={f.requested_by_user_id} onChange={set('requested_by_user_id')}><Options list={userOpts} blank="—" /></select></label>
-        <label className="f"><span>Requested by (PSD)</span><input name="requested_by_psd" maxLength={200} value={f.requested_by_psd} onChange={set('requested_by_psd')} /></label>
+        <label className="f"><span>Requested By</span><input name="requested_by_psd" maxLength={200} value={f.requested_by_psd} onChange={set('requested_by_psd')} /></label>
         <label className="f full"><span>Remarks</span><textarea name="remarks" maxLength={4000} value={f.remarks} onChange={set('remarks')} /></label>
         {!rec ? <div className="full dim">Status will be set to <strong>New</strong>. Send it for approval when ready.</div> : null}
       </form>
@@ -215,13 +221,15 @@ function IngestDetail({ r, canWrite, canDelete, onClose, onEdit, onSend, onDelet
       {r.status === 'Rejected' && r.last_approval && r.last_approval.decision_note
         ? <div className="alert err mb-12"><strong>Rejected:</strong> {r.last_approval.decision_note}</div> : null}
       <dl className="kv">
-        <KV k="PROGRAM">{r.program}</KV>
+        <KV k="Program / Project">{r.program}</KV>
         <KV k="Platform">{r.platform}</KV>
-        <KV k="Episode date">{fmtDate(r.episode_date)}</KV>
+        <KV k="Billable Party">{r.billable_party}</KV>
+        <KV k="Episode / Break Date">{r.episode_break_date_text || r.episode_date}</KV>
+        <KV k="Number of Materials">{r.materials_count != null ? String(r.materials_count) : null}</KV>
         <KV k="Source">{r.source}</KV>
         <KV k="Destination Folder">{r.destination_folder ? <span className="mono">{r.destination_folder}</span> : null}</KV>
-        <KV k="Requested by">{r.requested_by_name}</KV>
-        <KV k="Requested by (PSD)">{r.requested_by_psd}</KV>
+        <KV k="Requested By">{r.requested_by_psd}</KV>
+        {r.requested_by_name ? <KV k="Historical Requested By Account">{r.requested_by_name}</KV> : null}
         <KV k="Remarks">{r.remarks}</KV>
         <KV k="Last updated">{fmtDateTime(r.updated_at)}{r.updated_by_name ? ` by ${r.updated_by_name}` : ''}</KV>
       </dl>
