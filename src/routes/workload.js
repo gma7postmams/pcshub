@@ -373,7 +373,7 @@ router.get('/export', asyncH(async (req, res) => {
       column.width = Math.ceil(max * 1.15) + 3;   // no cap: the point is that nothing gets cropped
     });
   }
-  const stamp = req.query.from || req.query.to ? `${req.query.from || ''}_${req.query.to || ''}` : 'all';
+  const stamp = req.query.from || req.query.to ? `${req.query.from || ''}_${req.query.to || ''}` : 'ALL';
   // Buffer the whole file and send it with an explicit Content-Length, rather than streaming it with chunked
   // transfer encoding straight to res: some reverse proxies (this app is commonly deployed behind one) can
   // truncate or mishandle a chunked response, which shows up as "the file format is invalid" when opened.
