@@ -238,6 +238,38 @@ router.get('/', asyncH(async (req, res) => {
 // (rows that involve Audio). A VGFX/VEDIT/Audio row appears on both, like it does in the template.
 // With ?team=VGFX|VEDIT|AUDIO only that team's sheet is written. exceljs is loaded lazily so the app
 // still starts if `npm install` has not been run yet after pulling this change.
+
+// ---------- Excel export styling: mirror the web table's colours/pills/grid ----------
+// Category colours are fixed regardless of the admin-selected theme (see client/src/app.css light-mode block);
+// only the neutral tones (header/grid) pick up a touch of the org's theme tint, same as the web app.
+const HUE_HEX = { blue: '1f6fc5', purple: '6d4fd1', teal: '0d8a84', orange: 'b95a12', green: '12805a', pink: 'b8326b', gray: '626b7a', red: 'c93838' };
+const EXPORT_PALETTE = ['blue', 'purple', 'teal', 'orange', 'green', 'pink', 'gray'];
+const hueOf = (s) => EXPORT_PALETTE[[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % EXPORT_PALETTE.length];
+const TEAM_HUE = { VGFX: 'purple', VEDIT: 'orange', AUDIO: 'teal' };
+const TYPE_HUE = { EPISODIC: 'blue', SEASONAL: 'purple', BUMPER: 'orange', 'POP-UP/POP LOGO': 'blue', RADIO: 'green' };
+const THEME_TINT = { midnight: '4f8cff', sunset: 'ff7a45', purple: '8b5cf6', ocean: '14b8c4', forest: '22c55e', rose: 'f43f5e', graphite: '94a3b8' };
+const hex2rgb = (h) => [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+const rgb2hex = (rgb) => rgb.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
+// Same blend CSS color-mix(in srgb, A pct%, B) uses: linear per-channel interpolation.
+const mix = (aHex, pct, bHex) => { const a = hex2rgb(aHex); const b = hex2rgb(bHex); return rgb2hex(a.map((v, i) => v * (pct / 100) + b[i] * (1 - pct / 100))); };
+const argb = (hex) => `FF${hex.toUpperCase()}`;
+const oneLineText = (t) => String(t ?? '').replace(/\s*\n+\s*/g, ' \u00b7 ');   // matches the web table's " · " join for wrapped fields
+
+async function exportPalette(db_) {
+  const row = await db_.query("SELECT value FROM app_settings WHERE key='theme'");
+  const tint = THEME_TINT[(row.rows[0] || {}).value] || THEME_TINT.midnight;
+  const surface3 = mix(tint, 9, 'e7eaef');
+  const border = mix(tint, 8, 'e1e4ea');
+  const border2 = mix(tint, 12, 'cdd2da');
+  const pillBg = (hue) => argb(mix(HUE_HEX[hue], 14, 'ffffff'));
+  const pillFg = (hue) => argb(HUE_HEX[hue]);
+  return {
+    headerFill: argb(surface3), headerBorder: argb(border2), gridBorder: argb(border),
+    text2: argb('4a5160'), pillBg, pillFg,
+    dateBg: argb(mix('475569', 14, 'ffffff')), dateFg: argb('475569'),
+  };
+}
+
 router.get('/export', asyncH(async (req, res) => {
   let ExcelJS;
   try { ExcelJS = require('exceljs'); } catch (e) {
@@ -256,18 +288,29 @@ router.get('/export', asyncH(async (req, res) => {
       { name: 'AUDIO', cols: AUDIO_COLS, pick: (r) => involves(r, ['AUDIO']) },
     ];
 
+  const pal = await exportPalette(db);
   const wb = new ExcelJS.Workbook();
   wb.creator = 'PromoHub';
   const asDate = (s) => (s ? new Date(`${s}T00:00:00Z`) : null);
+  const thinGrid = { style: 'thin', color: { argb: pal.gridBorder } };
+  const platformFamily = (v) => String(v || '').replace(/\s*\(.*\)\s*$/, '') || v;
+
   for (const sh of sheets) {
     const ws = wb.addWorksheet(sh.name);
     ws.columns = sh.cols.map((k) => {
       const f = FIELDS[k];
-      return { header: f.label, key: k, width: f.multiline ? 34 : f.kind === 'date' ? 14 : 22,
+      return { header: f.label, key: k, width: f.multiline ? 34 : f.kind === 'date' ? 14 : f.kind === 'datetime' ? 20 : 22,
         style: f.kind === 'date' ? { numFmt: 'mmm d, yyyy' } : f.kind === 'datetime' ? { numFmt: 'mmm d, yyyy h:mm AM/PM' } : {} };
     });
-    ws.getRow(1).font = { bold: true };
+    // Header row: same fill/border treatment as the web table's header (Excel-mode style)
+    ws.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: pal.text2 }, size: 11 };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pal.headerFill } };
+      cell.border = { bottom: { style: 'thin', color: { argb: pal.headerBorder } }, right: thinGrid };
+      cell.alignment = { vertical: 'middle' };
+    });
     ws.views = [{ state: 'frozen', ySplit: 1 }];
+
     rows.filter(sh.pick).forEach((r) => {
       const row = ws.addRow(sh.cols.reduce((o, k) => {
         const f = FIELDS[k];
@@ -275,12 +318,45 @@ router.get('/export', asyncH(async (req, res) => {
         if (f.kind === 'date') val = asDate(val);
         else if (f.kind === 'datetime') { const t = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(val || ''); val = t ? new Date(Date.UTC(+t[1], +t[2] - 1, +t[3], +t[4], +t[5])) : null; }
         else if (k === 'audio_guide' && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = asDate(val);
+        else if (k !== 'remarks') val = oneLineText(val);   // every field except Remarks is one line, like the web table
         return { ...o, [k]: val };
       }, {}));
-      row.alignment = { wrapText: true, vertical: 'top' };
-      if (sh.cols.includes('audio_guide') && r.audio_guide && /^\d{4}-\d{2}-\d{2}$/.test(r.audio_guide)) {
-        row.getCell('audio_guide').numFmt = 'mmm d, yyyy';
-      }
+      row.alignment = { wrapText: false, vertical: 'top' };
+
+      sh.cols.forEach((k) => {
+        const cell = row.getCell(k);
+        const f = FIELDS[k];
+        cell.border = { right: thinGrid };   // vertical grid line, matching the web table
+        if (k === 'audio_guide' && r.audio_guide && /^\d{4}-\d{2}-\d{2}$/.test(r.audio_guide)) cell.numFmt = 'mmm d, yyyy';
+
+        if (f.kind === 'date' || f.kind === 'datetime' || k === 'audio_guide') {
+          // date chip: soft neutral fill, matching the web table's date/time chips
+          if (cell.value != null) { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pal.dateBg } }; cell.font = { color: { argb: pal.dateFg } }; }
+        } else if (k === 'platform' && r.platform) {
+          const hue = TYPE_HUE[r.platform] ? null : hueOf(platformFamily(r.platform));   // platforms use the family-name hash, not the type map
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pal.pillBg(hue) } };
+          cell.font = { bold: true, color: { argb: pal.pillFg(hue) } };
+        } else if (k === 'plug_type' && r.plug_type) {
+          const hue = TYPE_HUE[r.plug_type] || hueOf(r.plug_type);
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pal.pillBg(hue) } };
+          cell.font = { bold: true, color: { argb: pal.pillFg(hue) } };
+        } else if (k === 'units_concerned' && r.units_concerned) {
+          // Excel can't give one cell several coloured pill backgrounds, so each team name is coloured text instead
+          const teams = UNIT_TEAMS[r.units_concerned] || [];
+          if (teams.length > 1) {
+            cell.value = { richText: teams.flatMap((t, i) => [
+              ...(i ? [{ text: ' / ', font: { color: { argb: pal.text2 } } }] : []),
+              { text: t, font: { bold: true, color: { argb: pal.pillFg(TEAM_HUE[t]) } } },
+            ]) };
+          } else if (teams.length === 1) {
+            cell.font = { bold: true, color: { argb: pal.pillFg(TEAM_HUE[teams[0]]) } };
+          }
+        } else if (k === 'plug_id' || k === 'prog_name') {
+          cell.font = { bold: true };
+        } else if (k === 'remarks') {
+          cell.alignment = { wrapText: true, vertical: 'top' };
+        }
+      });
     });
   }
   const stamp = req.query.from || req.query.to ? `${req.query.from || ''}_${req.query.to || ''}` : 'all';
