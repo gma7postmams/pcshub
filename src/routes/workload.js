@@ -367,7 +367,10 @@ router.get('/export', asyncH(async (req, res) => {
         if (column.key === 'audio_guide' && cell.value instanceof Date) { max = Math.max(max, 13); return; }
         max = Math.max(max, cellText(cell.value).length);
       });
-      column.width = max + 3;   // no cap: the point is that nothing gets cropped
+      // +15% then +3: plain character-count math undershoots for this app's content, which is heavy with wide,
+      // all-caps text (platform codes, plug IDs) — those render wider per character than Excel's column-width
+      // unit assumes, so a flat "+3" isn't quite enough once the value gets some real length to it.
+      column.width = Math.ceil(max * 1.15) + 3;   // no cap: the point is that nothing gets cropped
     });
   }
   const stamp = req.query.from || req.query.to ? `${req.query.from || ''}_${req.query.to || ''}` : 'all';
