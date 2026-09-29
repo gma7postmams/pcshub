@@ -4,7 +4,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { DownloadIcon, PlusIcon, SearchIcon } from '../components/Icons.jsx';
-import { DateRange, FilterSelect, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
+import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
 // Workload Tracker — ONE table. "Units Concerned" says which team(s) a plug is for; the tabs
@@ -339,11 +339,11 @@ export default function Workload() {
             {val ? <span className="strong">{oneLine(val)}</span> : null}
           </td>
         );
-      case 'audio_guide': return <td {...common}>{ISO.test(val || '') ? fmtDate(val) : oneLine(val)}</td>;
-      case 'breakdate': return <td {...common}>{fmtBreakdate(val)}</td>;
+      case 'audio_guide': return <td {...common}><DateChip>{val ? (ISO.test(val) ? fmtDate(val) : oneLine(val)) : null}</DateChip></td>;
+      case 'breakdate': return <td {...common}><DateChip>{fmtBreakdate(val)}</DateChip></td>;
       case 'remarks': return <td {...common}>{val ? <div className="rem">{val}</div> : null}</td>;
       default:
-        return <td {...common}>{meta.fields[k].kind === 'date' ? fmtDate(val) : oneLine(val)}</td>;
+        return <td {...common}>{meta.fields[k].kind === 'date' ? <DateChip>{fmtDate(val)}</DateChip> : oneLine(val)}</td>;
     }
   };
 
