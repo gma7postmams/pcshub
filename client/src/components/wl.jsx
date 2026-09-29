@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fmtDate, isoDate } from '../lib/util.js';
-import { CalendarIcon, ChevronDownIcon, KebabIcon, PencilIcon, TrashIcon } from './Icons.jsx';
+import { CalendarIcon, ChevronDownIcon, CopyIcon, KebabIcon, PencilIcon, TrashIcon } from './Icons.jsx';
 
 // Presentational pieces for the Workload Tracker (pills, summary cards, filters, row menu, pager).
 // Colours come from the app's theme variables (see .c-* in app.css), so they follow every theme and light/dark mode.
@@ -96,7 +96,7 @@ export function DateRange({ from, to, onChange }) {
 }
 
 /** Row "⋮" menu: fixed-position so it is never clipped by the scrolling table */
-export function RowMenu({ onEdit, onDelete }) {
+export function RowMenu({ onEdit, onDuplicate, onDelete }) {
   const [pos, setPos] = useState(null);
   const btn = useRef(null);
   const menu = useRef(null);
@@ -133,6 +133,7 @@ export function RowMenu({ onEdit, onDelete }) {
       {pos ? (
         <div className="rowmenu" role="menu" style={pos} ref={menu}>
           <button type="button" role="menuitem" onClick={() => { close(); onEdit(); }}><PencilIcon /> Edit</button>
+          <button type="button" role="menuitem" onClick={() => { close(); onDuplicate(); }}><CopyIcon /> Duplicate</button>
           <button type="button" role="menuitem" className="danger row-del" onClick={() => { close(); onDelete(); }}><TrashIcon /> Delete</button>
         </div>
       ) : null}

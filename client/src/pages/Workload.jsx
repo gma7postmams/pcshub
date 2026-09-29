@@ -14,6 +14,7 @@ import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } fr
 const PAGE = 50;
 const GRID_LIMIT = 200;
 const CARDS_BELOW = 900;   // window width under which table rows become cards
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const withCurrent = (list, v) => (v && !list.includes(v) ? [...list, v] : list);
 const firstLine = (s) => String(s || '').split('\n')[0];
@@ -249,7 +250,8 @@ export default function Workload() {
       const blob = await res.blob();
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `Workload_${tab}_${isoDate()}.xlsx`;   // tab is already 'ALL' or a team key like 'VGFX', both already upper case
+      const now = new Date();
+      a.download = `Workload_${tab}_${MONTH_ABBR[now.getMonth()]}_${now.getFullYear()}.xlsx`;   // tab is already 'ALL' or a team key like 'VGFX', both already upper case
       document.body.appendChild(a);
       a.click();
       setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
@@ -468,7 +470,7 @@ export default function Workload() {
                               {cols.map((k) => cell(r, k))}
                               {canWrite ? (
                                 <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
-                                  <RowMenu onEdit={() => setForm({ rec: r })} onDelete={() => deleteItem(r)} />
+                                  <RowMenu onEdit={() => setForm({ rec: r })} onDuplicate={() => setForm({ rec: null, duplicateFrom: r })} onDelete={() => deleteItem(r)} />
                                 </td>
                               ) : null}
                             </tr>
@@ -485,6 +487,7 @@ export default function Workload() {
       {form ? (
         <WorkloadForm
           rec={form.rec}
+          duplicateFrom={form.duplicateFrom}
           defaultUnits={tab === 'ALL' ? '' : meta.tabDefaultUnits[tab]}
           meta={meta}
           lookups={lookups}
@@ -497,12 +500,12 @@ export default function Workload() {
   );
 }
 
-function WorkloadForm({ rec, defaultUnits, meta, lookups, canWrite, onClose, onSaved }) {
+function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrite, onClose, onSaved }) {
   const toast = useToast();
   const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
-  const initial = Object.keys(meta.fields).reduce((o, k) => ({ ...o, [k]: (rec && rec[k]) ?? '' }), {});
-  if (!rec) { initial.work_date = isoDate(); initial.units_concerned = defaultUnits; }
+  const initial = Object.keys(meta.fields).reduce((o, k) => ({ ...o, [k]: (rec && rec[k]) ?? (duplicateFrom && duplicateFrom[k]) ?? '' }), {});
+  if (!rec && !duplicateFrom) { initial.work_date = isoDate(); initial.units_concerned = defaultUnits; }
   const [f, , setAll] = useForm(initial);
   const set = (k) => (e) => {
     const val = e && e.target ? e.target.value : e;
@@ -539,7 +542,7 @@ function WorkloadForm({ rec, defaultUnits, meta, lookups, canWrite, onClose, onS
 
   return (
     <Modal
-      title={rec ? `${canWrite ? 'Edit' : 'View'} Workload #${rec.id}` : 'New Workload'}
+      title={rec ? `${canWrite ? 'Edit' : 'View'} Workload #${rec.id}` : duplicateFrom ? 'Duplicate Workload' : 'New Workload'}
       onClose={onClose}
       footer={(
         <>

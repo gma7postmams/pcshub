@@ -373,13 +373,15 @@ router.get('/export', asyncH(async (req, res) => {
       column.width = Math.ceil(max * 1.15) + 3;   // no cap: the point is that nothing gets cropped
     });
   }
-  const stamp = req.query.from || req.query.to ? `${req.query.from || ''}_${req.query.to || ''}` : 'ALL';
+  const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
+  const exportedAt = new Date();
+  const stamp = `${MONTH_ABBR[exportedAt.getMonth()]}_${exportedAt.getFullYear()}`;   // month/year the export happened, not the data's date filter
   // Buffer the whole file and send it with an explicit Content-Length, rather than streaming it with chunked
   // transfer encoding straight to res: some reverse proxies (this app is commonly deployed behind one) can
   // truncate or mishandle a chunked response, which shows up as "the file format is invalid" when opened.
   const buffer = await wb.xlsx.writeBuffer();
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.set('Content-Disposition', `attachment; filename="Workload_${stamp}.xlsx"`);
+  res.set('Content-Disposition', `attachment; filename="Workload_${team || 'ALL'}_${stamp}.xlsx"`);
   res.set('Content-Length', String(buffer.length));
   res.end(buffer);
 }));
