@@ -342,7 +342,8 @@ export default function Workload() {
           </td>
         );
       case 'audio_guide': return <td {...common}><DateChip hue="fuchsia">{val ? (ISO.test(val) ? fmtDate(val) : oneLine(val)) : null}</DateChip></td>;
-      case 'breakdate': return <td {...common}><DateChip hue="fuchsia">{fmtBreakdate(val)}</DateChip></td>;   // matches Audio Guide's colour, by request
+      case 'breakdate_vgfx': return <td {...common}><DateChip hue="purple">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VGFX in Units Concerned
+      case 'breakdate_vedit': return <td {...common}><DateChip hue="orange">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VEDIT in Units Concerned
       case 'remarks': return <td {...common}>{val ? <div className="rem">{val}</div> : null}</td>;
       default:
         return <td {...common}>{meta.fields[k].kind === 'date' ? <DateChip>{fmtDate(val)}</DateChip> : oneLine(val)}</td>;
@@ -515,11 +516,18 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
   // Audio-only units use the template's Audio sheet columns; everything else uses the main sheet columns
   const teams = meta.unitTeams[f.units_concerned] || [];
   const audioOnly = teams.length === 1 && teams[0] === 'AUDIO';
-  const base = meta.views[audioOnly ? 'AUDIO' : 'VGFX'].filter((k) => k !== 'work_date' && k !== 'units_concerned');
+  const base = meta.views[audioOnly ? 'AUDIO' : 'VGFX'].filter((k) => k !== 'work_date' && k !== 'units_concerned'
+    // Breakdate/Time (VGFX or VEDIT): only shown for a team that's actually involved; the note follows whichever time field(s) show
+    && !(k === 'breakdate_vgfx' && !teams.includes('VGFX'))
+    && !(k === 'breakdate_vedit' && !teams.includes('VEDIT'))
+    && !(k === 'breakdate_note' && !teams.includes('VGFX') && !teams.includes('VEDIT')));
   // Any row that involves Audio also gets the Audio-only columns (Length, Others)
   const shown = f.units_concerned
     ? [...base, ...(teams.includes('AUDIO') ? meta.audioExtra.filter((k) => !base.includes(k)) : [])]
     : [];
+  const bothVgfxVedit = teams.includes('VGFX') && teams.includes('VEDIT');
+  // Only one of the two teams involved: drop the "(VGFX)"/"(VEDIT)" suffix since there's no ambiguity to resolve
+  const fieldLabel = (k, def) => (!bothVgfxVedit && (k === 'breakdate_vgfx' || k === 'breakdate_vedit') ? 'Breakdate / Time' : def.label);
   const plugText = String(f.plug_id || '').trim();
 
   const submit = async () => {
@@ -562,7 +570,7 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
           const def = meta.fields[k];
           return (
             <label key={k} className={`f${def.multiline ? ' full' : ''}`}>
-              <span>{def.label}{def.required ? <span className="req"> *</span> : null}</span>
+              <span>{fieldLabel(k, def)}{def.required ? <span className="req"> *</span> : null}</span>
               <FieldInput def={def} value={f[k]} onChange={set(k)} disabled={!canWrite} lookups={lookups} />
               {k === 'platform' && plugText && !f.platform ? (
                 <small className="dim">{/PD_/i.test(plugText) ? 'PD_ plugs are digital — choose DIGITAL or INTL DIGITAL.' : 'Could not tell the platform from the Plug ID — choose one.'}</small>

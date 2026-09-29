@@ -226,6 +226,27 @@ BEGIN
   END IF;
 END $$;
 
+-- Breakdate/Time is now two separate times (VGFX's and VEDIT's) plus a short note, matching the template's
+-- practice of listing both when a plug needs both teams. Runs only while the old single 'breakdate' column
+-- still exists. There is no historical record of which team a single old value belonged to, so it is assigned
+-- by this row's Units Concerned: VGFX's slot when VGFX is involved, otherwise VEDIT's slot.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+              AND table_name = 'workload_items' AND column_name = 'breakdate') THEN
+    ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate_vgfx TIMESTAMP;
+    ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate_vedit TIMESTAMP;
+    UPDATE workload_items SET breakdate_vgfx = breakdate
+      WHERE breakdate IS NOT NULL AND units_concerned IN ('VGFX Only', 'VGFX/VEDIT', 'VGFX/VEDIT/Audio');
+    UPDATE workload_items SET breakdate_vedit = breakdate
+      WHERE breakdate IS NOT NULL AND units_concerned = 'VEDIT Only';
+    ALTER TABLE workload_items DROP COLUMN breakdate;
+  END IF;
+END $$;
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate_vgfx  TIMESTAMP;   -- Breakdate/Time (VGFX)
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate_vedit TIMESTAMP;   -- Breakdate/Time (VEDIT)
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate_note  TEXT;        -- open: short note attached to the time(s)
+
 -- A workflow "Status" column was tried in a draft of the redesign and removed again; drop it if a database got it.
 ALTER TABLE workload_items DROP COLUMN IF EXISTS work_status;
 ALTER TABLE workload_items DROP CONSTRAINT IF EXISTS workload_items_units_check;

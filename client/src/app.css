@@ -605,6 +605,8 @@ table.t.wl td.editing { padding: 4px; white-space: normal; }   /* the cell itsel
 .cell-editor input, .cell-editor select, .cell-editor textarea { width: 100%; min-width: 150px; height: 32px; padding: 4px 8px; font-size: 13px; }
 .cell-editor textarea { min-width: 260px; min-height: 32px; resize: none; overflow: hidden; line-height: 1.35; }
 .cell-editor input[type="datetime-local"] { min-width: 215px; }
+.cell-editor .ag { flex-wrap: wrap; max-width: 230px; }   /* wrap instead of overflowing into the next column if the cell is narrow */
+.cell-editor .ag select { min-width: 84px; }   /* the generic ".cell-editor select" rule above (150px) was overriding this back up, which is what pushed the date input into the Remarks column */
 .cell-editor .ag input[type="date"] { min-width: 130px; }
 table.t.xl input[type="datetime-local"] { min-width: 215px; }
 table.t.wl.cards td.editing { padding: 0; }
