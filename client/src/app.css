@@ -530,6 +530,7 @@ html[data-mode="light"] .c-fuchsia { --c: #a21caf; }
 /* table polish */
 table.t.wl { font-size: 13px; }
 table.t.wl thead th { background: var(--surface-3); font-size: 11px; letter-spacing: .05em; color: var(--text-2); vertical-align: middle; border-bottom: 1px solid var(--border-2); }   /* same header treatment as the Excel-mode grid */
+table.t.wl th { text-align: center; }
 table.t.wl th.right { text-align: right; }
 table.t.wl th, table.t.wl td { padding: 9px 10px; }
 table.t.wl td { vertical-align: middle; }

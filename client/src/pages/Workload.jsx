@@ -340,7 +340,7 @@ export default function Workload() {
           </td>
         );
       case 'audio_guide': return <td {...common}><DateChip hue="fuchsia">{val ? (ISO.test(val) ? fmtDate(val) : oneLine(val)) : null}</DateChip></td>;
-      case 'breakdate': return <td {...common}><DateChip>{fmtBreakdate(val)}</DateChip></td>;
+      case 'breakdate': return <td {...common}><DateChip hue="fuchsia">{fmtBreakdate(val)}</DateChip></td>;   // matches Audio Guide's colour, by request
       case 'remarks': return <td {...common}>{val ? <div className="rem">{val}</div> : null}</td>;
       default:
         return <td {...common}>{meta.fields[k].kind === 'date' ? <DateChip>{fmtDate(val)}</DateChip> : oneLine(val)}</td>;
