@@ -29,8 +29,7 @@ export function UnitsPills({ value, unitTeams }) {
 /** Platform as one pill, exactly as chosen (e.g. "REG/TDMD (GMA MUSIC)"); the colour follows the family before the bracket */
 export function PlatformCell({ value }) {
   if (!value) return null;
-  const family = value.replace(/\s*\(.*\)\s*$/, '') || value;
-  return <Chip hue={hueOf(family)}>{value}</Chip>;
+  return <Chip hue="fuchsia">{value}</Chip>;   // fixed colour, matching Audio Guide (by request), not hashed per platform
 }
 
 const dayNum = (iso) => { const [y, m, d] = iso.split('-').map(Number); return Date.UTC(y, m - 1, d) / 86400000; };
