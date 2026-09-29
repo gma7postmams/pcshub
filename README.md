@@ -142,7 +142,7 @@ Status is the approval state and is never set by the client:
 2. `.env`: `NODE_ENV=production`, `TRUST_PROXY=1`, fresh `SESSION_SECRET` and `TOTP_ENC_KEY` (store the key in your password manager/secret store), strong `ADMIN_PASSWORD`.
 3. Database: owner login for `npm run migrate`; app runs as `promohub_app` from `db/app-role.sql` with `MIGRATE_ON_START=false`.
 4. First sign-in as Admin: change password, enrol 2FA. Consider `REQUIRE_2FA=all`.
-5. Backups: nightly `pg_dump` + `uploads/branding/`, tested restore. Keep `TOTP_ENC_KEY` with (but separate from) backups.
+5. Backups: nightly `pg_dump` + `uploads/branding/` + `uploads/knowledge/` (Knowledge Base PDFs), tested restore. Keep `TOTP_ENC_KEY` with (but separate from) backups.
 6. Keep dependencies patched: `npm audit` monthly; run under systemd (`deploy/promo-hub.service`, auto-restart + sandboxing).
 7. Get an independent penetration test before announcing the URL.
 
@@ -165,8 +165,13 @@ Status is the approval state and is never set by the client:
 | `COOKIE_SECURE` | override; set `false` for plain-HTTP LAN deployments in production mode |
 | `SESSION_HOURS` | session lifetime, default 12 |
 | `PGSSL` | `true` to connect to Postgres over TLS |
+| `KNOWLEDGE_MAX_MB` | max size of one Knowledge Base PDF, default 25 (keep nginx `client_max_body_size` above it) |
 
 Note: PWA install and service workers require HTTPS (or `localhost`).
+
+### Knowledge Base
+
+`/knowledge` holds reference PDFs. Anyone whose group has the Knowledge Base page can open and download them; **Admin and Manager** roles can drag & drop (or browse) up to 10 PDFs at a time, rename and delete. Files are checked to be real PDFs, duplicates are rejected, and every upload/rename/delete is written to the audit log. PDFs live in `uploads/knowledge/` (back it up with the database). PDFs placed in `knowledge-seed/` are added to the list once, on the first visit to the page.
 
 ## Layout
 

@@ -586,3 +586,18 @@ table.t.wl td.editing { padding: 4px; white-space: normal; }   /* the cell itsel
 .cell-editor .ag input[type="date"] { min-width: 130px; }
 table.t.xl input[type="datetime-local"] { min-width: 215px; }
 table.t.wl.cards td.editing { padding: 0; }
+
+/* ---------- Knowledge Base (PDF drop zone + list) ---------- */
+.dropzone { display: flex; align-items: center; gap: 16px; padding: 22px 24px; border: 2px dashed var(--border-2); border-radius: var(--radius); background: var(--surface); color: var(--text-2); cursor: pointer; transition: border-color .12s, background .12s; }
+.dropzone svg { width: 34px; height: 34px; flex: none; color: var(--accent); }
+.dropzone strong { color: var(--text); font-size: 15px; }
+.dropzone:hover, .dropzone:focus-visible { border-color: var(--accent); outline: none; }
+.dropzone.over { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone.busy { opacity: .7; cursor: progress; }
+.doc-link { display: inline-flex; align-items: center; gap: 8px; font-weight: 550; color: var(--text); }
+.doc-link svg { width: 18px; height: 18px; flex: none; color: var(--text-3); }
+.doc-link:hover { color: var(--accent); text-decoration: none; }
+.doc-file { margin: 2px 0 0 26px; }
+td.doc-actions { text-align: right; white-space: nowrap; }
+td.doc-actions .iconbtn { display: inline-grid; place-items: center; width: 32px; height: 32px; vertical-align: middle; }
+td.doc-actions .iconbtn svg { width: 17px; height: 17px; }
