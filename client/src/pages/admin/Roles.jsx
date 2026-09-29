@@ -5,6 +5,7 @@ const ACT = {
   'ingest.delete': 'Delete ingest records',
   'approval.decide': 'Approve / reject',
   'workload.write': 'Edit Workload',
+  'knowledge.write': 'Upload / rename / delete Knowledge Base PDFs',
   'admin': 'Users, groups, dropdowns, branding, audit',
 };
 

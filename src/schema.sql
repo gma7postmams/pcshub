@@ -239,6 +239,21 @@ CREATE TABLE IF NOT EXISTS app_settings (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Knowledge Base: PDF reference documents (files live on disk under uploads/knowledge/)
+CREATE TABLE IF NOT EXISTS knowledge_docs (
+  id            SERIAL PRIMARY KEY,
+  title         TEXT NOT NULL,
+  filename      TEXT NOT NULL,            -- original file name, used for downloads
+  stored_name   TEXT NOT NULL UNIQUE,     -- random name on disk
+  size_bytes    BIGINT NOT NULL,
+  sha256        TEXT NOT NULL,
+  uploaded_by   INT REFERENCES users(id) ON DELETE SET NULL,
+  uploaded_name TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS knowledge_docs_created_idx ON knowledge_docs (created_at DESC);
+
 INSERT INTO app_settings (key, value) VALUES
   ('app_name', 'Promotional Content Hub'),
   ('tagline',  'Ingest · Approval · Workload'),
