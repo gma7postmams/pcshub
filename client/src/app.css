@@ -507,7 +507,7 @@ html[data-mode="light"] .c-slate { --c: #475569; }
 .wl-search svg { width: 15px; height: 15px; flex: none; }
 .wl-search input { flex: 1; min-width: 0; height: auto; padding: 0; border: 0; background: transparent; box-shadow: none; color: var(--text); }
 .wl-search:focus-within, .fsel:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.fsel { position: relative; display: flex; flex-direction: row; align-items: center; gap: 6px; min-width: 128px; height: 38px; padding: 0 28px 0 12px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); }
+.fsel { position: relative; display: flex; flex-direction: row; align-items: center; gap: 14px; min-width: 150px; height: 38px; padding: 0 28px 0 12px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); }
 .fsel > span { flex: none; font-size: 12px; line-height: 1; color: var(--text-2); font-weight: 550; white-space: nowrap; }
 .fsel select { flex: 1; width: auto; min-width: 0; height: auto; padding: 0; border: 0; background: transparent; box-shadow: none; font-weight: 600; font-size: 13.5px; line-height: 1.2; appearance: none; cursor: pointer; text-overflow: ellipsis; }
 .fsel svg { position: absolute; right: 10px; top: 50%; width: 13px; height: 13px; transform: translateY(-50%); pointer-events: none; color: var(--text-2); }
@@ -520,10 +520,14 @@ html[data-mode="light"] .c-slate { --c: #475569; }
 
 /* table polish */
 table.t.wl { font-size: 13px; }
-table.t.wl thead th { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); font-size: 11px; letter-spacing: .05em; color: var(--text-2); vertical-align: middle; border-bottom: 2px solid color-mix(in srgb, var(--accent) 30%, var(--border-2)); }
+table.t.wl thead th { background: var(--surface-3); font-size: 11px; letter-spacing: .05em; color: var(--text-2); vertical-align: middle; border-bottom: 1px solid var(--border-2); }   /* same header treatment as the Excel-mode grid */
 table.t.wl th.right { text-align: right; }
 table.t.wl th, table.t.wl td { padding: 9px 10px; }
 table.t.wl td { vertical-align: middle; }
+/* Light grid: vertical lines between columns, softer than the Excel-mode grid (which uses --border-2), so the two
+   don't look identical. Cards mode stays borderless (each row is already its own bordered card). */
+table.t.wl:not(.cards) th, table.t.wl:not(.cards) td { border-right: 1px solid var(--border); }
+table.t.wl:not(.cards) th:last-child, table.t.wl:not(.cards) td:last-child { border-right: 0; }
 table.t.wl .strong { font-weight: 650; color: var(--text); }
 table.t.wl .sub { margin-top: 2px; font-size: 12px; color: var(--text-2); }
 table.t.wl .sub.pre { white-space: pre-wrap; }
