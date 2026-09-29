@@ -523,6 +523,11 @@ table.t.wl { font-size: 13px; }
 table.t.wl thead th { background: transparent; font-size: 11px; letter-spacing: .05em; color: var(--text-3); vertical-align: middle; }
 table.t.wl th.right { text-align: right; }
 table.t.wl th, table.t.wl td { padding: 9px 10px; }
+/* Grid lines: vertical borders between columns, in addition to the row separators, so the table reads like a spreadsheet.
+   Cards mode stays borderless (each row is already its own bordered card). */
+table.t.wl:not(.cards) th, table.t.wl:not(.cards) td { border-right: 1px solid var(--border); }
+table.t.wl:not(.cards) th:last-child, table.t.wl:not(.cards) td:last-child { border-right: 0; }
+table.t.wl:not(.cards) thead th { border-bottom: 1px solid var(--border-2); }
 table.t.wl td { vertical-align: middle; }
 table.t.wl .strong { font-weight: 650; color: var(--text); }
 table.t.wl .sub { margin-top: 2px; font-size: 12px; color: var(--text-2); }
