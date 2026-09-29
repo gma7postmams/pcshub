@@ -339,7 +339,7 @@ export default function Workload() {
             {val ? <span className="strong">{oneLine(val)}</span> : null}
           </td>
         );
-      case 'audio_guide': return <td {...common}><DateChip hue="lime">{val ? (ISO.test(val) ? fmtDate(val) : oneLine(val)) : null}</DateChip></td>;
+      case 'audio_guide': return <td {...common}><DateChip hue="fuchsia">{val ? (ISO.test(val) ? fmtDate(val) : oneLine(val)) : null}</DateChip></td>;
       case 'breakdate': return <td {...common}><DateChip>{fmtBreakdate(val)}</DateChip></td>;
       case 'remarks': return <td {...common}>{val ? <div className="rem">{val}</div> : null}</td>;
       default:

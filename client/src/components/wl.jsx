@@ -5,7 +5,7 @@ import { CalendarIcon, ChevronDownIcon, KebabIcon, PencilIcon, TrashIcon } from 
 // Presentational pieces for the Workload Tracker (pills, summary cards, filters, row menu, pager).
 // Colours come from the app's theme variables (see .c-* in app.css), so they follow every theme and light/dark mode.
 
-const PALETTE = ['blue', 'purple', 'teal', 'orange', 'green', 'pink', 'amber'];   // no plain gray; kept clear of the two reserved date/audio-guide hues below
+const PALETTE = ['blue', 'green', 'pink', 'amber', 'red'];   // Platform/Plug-Type-fallback/Units-fallback only — kept clear of every reserved hue below
 /** Stable colour for any text (platforms, plug types added later by an Admin, ...) */
 const hueOf = (s) => PALETTE[[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % PALETTE.length];
 
@@ -13,10 +13,10 @@ export const Chip = ({ hue, dot, small, children }) => (
   <span className={`chip c-${hue}${small ? ' sm' : ''}`}>{dot ? <i className="dot" /> : null}{children}</span>
 );
 
-const TYPE_HUE = { EPISODIC: 'blue', SEASONAL: 'purple', BUMPER: 'orange', 'POP-UP/POP LOGO': 'blue', RADIO: 'green' };
+const TYPE_HUE = { EPISODIC: 'blue', SEASONAL: 'pink', BUMPER: 'red', 'POP-UP/POP LOGO': 'blue', RADIO: 'green' };   // avoids purple/orange/teal (the team colours)
 export const TypePill = ({ value }) => (value ? <Chip hue={TYPE_HUE[value] || hueOf(value)}>{value}</Chip> : null);
 
-const TEAM_HUE = { VGFX: 'purple', VEDIT: 'orange', AUDIO: 'teal' };
+const TEAM_HUE = { VGFX: 'purple', VEDIT: 'orange', AUDIO: 'teal' };   // reserved: never appear in PALETTE above
 const TEAM_LABEL = { VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio' };
 /** One team -> one pill with the option's own wording ("VGFX Only", "Audio - RADIO"); several teams -> one pill each */
 export function UnitsPills({ value, unitTeams }) {
@@ -35,8 +35,8 @@ export function PlatformCell({ value }) {
 
 const dayNum = (iso) => { const [y, m, d] = iso.split('-').map(Number); return Date.UTC(y, m - 1, d) / 86400000; };
 // Dates/times get a soft neutral chip, same family as the dropdown pills, so the table doesn't read as plain black-on-white text.
-// "cyan" and "lime" are reserved for these two and never appear in the hash palette above, so a date chip
-// can never coincidentally match a Platform/Plug Type/Units pill.
+// "cyan" (dates) and "fuchsia" (Audio Guide) are reserved: never in PALETTE, never a TEAM_HUE/TYPE_HUE value,
+// and chosen to be unmistakably different from each other (cool blue vs warm magenta), not just technically distinct.
 export const DateChip = ({ children, hue = 'cyan' }) => (children ? <Chip hue={hue}>{children}</Chip> : null);
 export const WorkDate = ({ value }) => <DateChip>{fmtDate(value)}</DateChip>;
 

@@ -243,10 +243,10 @@ router.get('/', asyncH(async (req, res) => {
 // Category colours are fixed regardless of the admin-selected theme (see client/src/app.css light-mode block);
 // only the neutral tones (header/grid) pick up a touch of the org's theme tint, same as the web app.
 const HUE_HEX = { blue: '1f6fc5', purple: '6d4fd1', teal: '0d8a84', orange: 'b95a12', green: '12805a', pink: 'b8326b', gray: '626b7a', red: 'c93838', amber: 'a4650a' };
-const EXPORT_PALETTE = ['blue', 'purple', 'teal', 'orange', 'green', 'pink', 'amber'];   // matches the web app's hash palette
+const EXPORT_PALETTE = ['blue', 'green', 'pink', 'amber', 'red'];   // matches the web app's hash palette (Platform/Plug-Type-fallback/Units-fallback only)
 const hueOf = (s) => EXPORT_PALETTE[[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % EXPORT_PALETTE.length];
 const TEAM_HUE = { VGFX: 'purple', VEDIT: 'orange', AUDIO: 'teal' };
-const TYPE_HUE = { EPISODIC: 'blue', SEASONAL: 'purple', BUMPER: 'orange', 'POP-UP/POP LOGO': 'blue', RADIO: 'green' };
+const TYPE_HUE = { EPISODIC: 'blue', SEASONAL: 'pink', BUMPER: 'red', 'POP-UP/POP LOGO': 'blue', RADIO: 'green' };   // matches the web app; avoids purple/orange/teal (team colours)
 const THEME_TINT = { midnight: '4f8cff', sunset: 'ff7a45', purple: '8b5cf6', ocean: '14b8c4', forest: '22c55e', rose: 'f43f5e', graphite: '94a3b8' };
 const hex2rgb = (h) => [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
 const rgb2hex = (rgb) => rgb.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
