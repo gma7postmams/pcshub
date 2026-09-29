@@ -242,8 +242,8 @@ router.get('/', asyncH(async (req, res) => {
 // ---------- Excel export styling: mirror the web table's colours/pills/grid ----------
 // Category colours are fixed regardless of the admin-selected theme (see client/src/app.css light-mode block);
 // only the neutral tones (header/grid) pick up a touch of the org's theme tint, same as the web app.
-const HUE_HEX = { blue: '1f6fc5', purple: '6d4fd1', teal: '0d8a84', orange: 'b95a12', green: '12805a', pink: 'b8326b', gray: '626b7a', red: 'c93838', indigo: '4f46e5' };
-const EXPORT_PALETTE = ['blue', 'purple', 'teal', 'orange', 'green', 'pink', 'indigo'];   // matches the web app's hash palette (no plain grey)
+const HUE_HEX = { blue: '1f6fc5', purple: '6d4fd1', teal: '0d8a84', orange: 'b95a12', green: '12805a', pink: 'b8326b', gray: '626b7a', red: 'c93838', amber: 'a4650a' };
+const EXPORT_PALETTE = ['blue', 'purple', 'teal', 'orange', 'green', 'pink', 'amber'];   // matches the web app's hash palette
 const hueOf = (s) => EXPORT_PALETTE[[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % EXPORT_PALETTE.length];
 const TEAM_HUE = { VGFX: 'purple', VEDIT: 'orange', AUDIO: 'teal' };
 const TYPE_HUE = { EPISODIC: 'blue', SEASONAL: 'purple', BUMPER: 'orange', 'POP-UP/POP LOGO': 'blue', RADIO: 'green' };

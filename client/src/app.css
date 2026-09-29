@@ -486,11 +486,13 @@ table.t.wl.cards td.actions-cell .btn { display: inline-flex; width: auto; margi
 .c-blue { --c: var(--blue); } .c-green { --c: var(--green); } .c-amber { --c: var(--amber); }
 .c-purple { --c: var(--purple); } .c-gray { --c: var(--gray); } .c-red { --c: var(--red); }
 .c-orange { --c: #f0883e; } .c-teal { --c: #26b5ad; } .c-pink { --c: #e5568f; }
-.c-slate { --c: #64748b; }   /* kept defined, no longer used by default (dates now use indigo) */
-.c-indigo { --c: #8183f4; }   /* dates/times + hashed fallback: vibrant, distinct from every category hue */
+.c-slate { --c: #64748b; }   /* kept defined, currently unused */
+.c-cyan { --c: #22d3ee; }    /* Work Date / Breakdate / Script / Artwork-STB — reserved, not in the hash palette */
+.c-lime { --c: #a3e635; }    /* Audio Guide only — reserved, not in the hash palette, distinct from cyan and from green/amber */
 html[data-mode="light"] .c-orange { --c: #b95a12; } html[data-mode="light"] .c-teal { --c: #0d8a84; } html[data-mode="light"] .c-pink { --c: #b8326b; }
 html[data-mode="light"] .c-slate { --c: #475569; }
-html[data-mode="light"] .c-indigo { --c: #4f46e5; }
+html[data-mode="light"] .c-cyan { --c: #0e7490; }
+html[data-mode="light"] .c-lime { --c: #4d7c0f; }
 
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.4; white-space: nowrap; color: var(--c); background: color-mix(in srgb, var(--c) 14%, var(--surface)); }
 .chip.sm { padding: 1px 8px; font-size: 11px; font-weight: 550; }

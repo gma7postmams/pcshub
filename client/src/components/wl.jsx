@@ -5,7 +5,7 @@ import { CalendarIcon, ChevronDownIcon, KebabIcon, PencilIcon, TrashIcon } from 
 // Presentational pieces for the Workload Tracker (pills, summary cards, filters, row menu, pager).
 // Colours come from the app's theme variables (see .c-* in app.css), so they follow every theme and light/dark mode.
 
-const PALETTE = ['blue', 'purple', 'teal', 'orange', 'green', 'pink', 'indigo'];   // no plain gray: every hashed hue should read as a colour
+const PALETTE = ['blue', 'purple', 'teal', 'orange', 'green', 'pink', 'amber'];   // no plain gray; kept clear of the two reserved date/audio-guide hues below
 /** Stable colour for any text (platforms, plug types added later by an Admin, ...) */
 const hueOf = (s) => PALETTE[[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % PALETTE.length];
 
@@ -35,7 +35,9 @@ export function PlatformCell({ value }) {
 
 const dayNum = (iso) => { const [y, m, d] = iso.split('-').map(Number); return Date.UTC(y, m - 1, d) / 86400000; };
 // Dates/times get a soft neutral chip, same family as the dropdown pills, so the table doesn't read as plain black-on-white text.
-export const DateChip = ({ children }) => (children ? <Chip hue="indigo">{children}</Chip> : null);
+// "cyan" and "lime" are reserved for these two and never appear in the hash palette above, so a date chip
+// can never coincidentally match a Platform/Plug Type/Units pill.
+export const DateChip = ({ children, hue = 'cyan' }) => (children ? <Chip hue={hue}>{children}</Chip> : null);
 export const WorkDate = ({ value }) => <DateChip>{fmtDate(value)}</DateChip>;
 
 /** Select with its label inside the box (like the design). The select itself is invisible but still the
