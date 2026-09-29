@@ -38,12 +38,17 @@ const dayNum = (iso) => { const [y, m, d] = iso.split('-').map(Number); return D
 export const DateChip = ({ children }) => (children ? <Chip hue="slate">{children}</Chip> : null);
 export const WorkDate = ({ value }) => <DateChip>{fmtDate(value)}</DateChip>;
 
-/** Select with its label inside the box (like the design) */
-export function FilterSelect({ label, value, onChange, children }) {
+/** Select with its label inside the box (like the design). The select itself is invisible but still the
+    real clickable/keyboard control; a plain span shows the value so its rendering never depends on how a
+    given browser draws a native select's own (right-aligned) text, which is unreliable. */
+export function FilterSelect({ label, value, onChange, blank = 'All', children }) {
   return (
     <label className="fsel">
-      <span>{label}</span>
-      <select value={value} onChange={onChange}>{children}</select>
+      <span className="fsel-row">
+        <span className="fsel-label">{label}</span>
+        <span className="fsel-value">{value || blank}</span>
+      </span>
+      <select value={value} onChange={onChange} aria-label={label}>{children}</select>
       <ChevronDownIcon />
     </label>
   );
