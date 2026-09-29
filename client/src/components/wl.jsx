@@ -34,18 +34,9 @@ export function PlatformCell({ value }) {
 }
 
 const dayNum = (iso) => { const [y, m, d] = iso.split('-').map(Number); return Date.UTC(y, m - 1, d) / 86400000; };
-export const WorkDate = ({ value }) => <span className="strong nowrap">{fmtDate(value)}</span>;
-
-/** Summary card: coloured icon tile + label + big number. Clickable when onClick is given. */
-export function KpiCard({ hue, icon, label, value, active, onClick }) {
-  const Tag = onClick ? 'button' : 'div';
-  return (
-    <Tag type={onClick ? 'button' : undefined} className={`wl-kpi c-${hue}${active ? ' active' : ''}`} onClick={onClick}>
-      <span className="ico">{icon}</span>
-      <span className="txt"><span className="lbl">{label}</span><span className="num">{value ?? '–'}</span></span>
-    </Tag>
-  );
-}
+// Dates/times get a soft neutral chip, same family as the dropdown pills, so the table doesn't read as plain black-on-white text.
+export const DateChip = ({ children }) => (children ? <Chip hue="slate">{children}</Chip> : null);
+export const WorkDate = ({ value }) => <DateChip>{fmtDate(value)}</DateChip>;
 
 /** Select with its label inside the box (like the design) */
 export function FilterSelect({ label, value, onChange, children }) {

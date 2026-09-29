@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { cloneElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { del, get, post, put } from '../lib/api.js';
-import { fmtDate, fmtTime, isoDate, TIME_OPTIONS } from '../lib/util.js';
+import { del, get, patch, post, put } from '../lib/api.js';
+import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { CalendarIcon, DocIcon, DownloadIcon, FilmIcon, LayersIcon, PlusIcon, SearchIcon, SpeakerIcon } from '../components/Icons.jsx';
-import { DateRange, FilterSelect, KpiCard, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
+import { DownloadIcon, PlusIcon, SearchIcon } from '../components/Icons.jsx';
+import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
 // Workload Tracker — ONE table. "Units Concerned" says which team(s) a plug is for; the tabs
@@ -68,16 +68,10 @@ function AutoTextarea({ value, ...props }) {
   return <textarea ref={ref} value={value} {...props} />;
 }
 
-// Time of day picked from a list (15-minute steps), not typed. Stored as 'HH:MM'.
-function TimeSelect({ value, onChange, disabled }) {
-  const v = value || '';
-  const list = v && !TIME_OPTIONS.some((o) => o.value === v) ? [...TIME_OPTIONS, { value: v, label: fmtTime(v) }] : TIME_OPTIONS;
-  return <select value={v} disabled={disabled} onChange={onChange}><Options list={list} blank="—" /></select>;
-}
-
 function FieldInput({ def, value, onChange, disabled, lookups, auto }) {
   const v = value ?? '';
-  if (def.kind === 'time') return <TimeSelect value={v} onChange={onChange} disabled={disabled} />;
+  // date and time picked together (the browser's own calendar + time picker); 15-minute steps
+  if (def.kind === 'datetime') return <input type="datetime-local" step={900} value={v} disabled={disabled} onChange={onChange} />;
   if (def.kind === 'audio_guide') return <AudioGuideInput value={v} onChange={onChange} disabled={disabled} />;
   if (def.kind === 'date') return <input type="date" value={v} disabled={disabled} onChange={onChange} />;
   if (def.kind === 'select') {
@@ -87,6 +81,50 @@ function FieldInput({ def, value, onChange, disabled, lookups, auto }) {
   if (def.multiline && auto) return <AutoTextarea maxLength={def.max} placeholder={def.hint} value={v} disabled={disabled} onChange={onChange} />;
   if (def.multiline) return <textarea maxLength={def.max} placeholder={def.hint} value={v} disabled={disabled} onChange={onChange} />;
   return <input maxLength={def.max} placeholder={def.hint} value={v} disabled={disabled} onChange={onChange} />;
+}
+
+// One table cell turned into its own editor. Enter or clicking away saves, Esc cancels; dropdowns save as soon as you pick.
+// A failed save (e.g. an invalid value) keeps the editor open with the message shown.
+function CellEditor({ def, initial, lookups, onSave, onCancel }) {
+  const [val, setVal] = useState(initial ?? '');
+  const [busy, setBusy] = useState(false);
+  const box = useRef(null);
+  const finished = useRef(false);
+  const field = () => box.current && box.current.querySelector('input, select, textarea');
+  useEffect(() => {
+    const el = field();
+    if (!el) return;
+    el.focus();
+    if (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type === 'text')) el.setSelectionRange(el.value.length, el.value.length);
+    // dropdowns open straight away; date fields open focused (the browser's own picker would swallow Enter while it is open)
+    try { if (el.tagName === 'SELECT') el.showPicker(); } catch (e) { /* needs a user gesture; the field is focused anyway */ }
+  }, []);
+  const save = async (value) => {
+    if (finished.current) return;
+    finished.current = true;
+    setBusy(true);
+    try { await onSave(value); } catch (e) {
+      finished.current = false;
+      setBusy(false);
+      setTimeout(() => { const el = field(); if (el) el.focus(); }, 0);
+    }
+  };
+  const change = (e) => {
+    const nv = e.target.value;
+    setVal(nv);
+    if (def.kind === 'select') save(nv);
+  };
+  const blur = (e) => { if (box.current && !box.current.contains(e.relatedTarget)) save(val); };
+  const key = (e) => {
+    if (e.key === 'Escape') { finished.current = true; onCancel(); return; }
+    const tag = e.target.tagName;
+    if (e.key === 'Enter' && tag !== 'SELECT' && (tag !== 'TEXTAREA' || e.ctrlKey || e.metaKey)) { e.preventDefault(); save(val); }
+  };
+  return (
+    <div className={`cell-editor${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key}>
+      <FieldInput auto def={def} value={val} lookups={lookups} disabled={busy} onChange={change} />
+    </div>
+  );
 }
 
 export default function Workload() {
@@ -106,6 +144,8 @@ export default function Workload() {
   const [grid, setGrid] = useState(null);   // excel mode: { total, rows } | { error }
   const [form, setForm] = useState(null);   // null | { rec } (rec null = new)
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(null);   // { id, k } while one table cell is open for editing
+  useEffect(() => { setEditing(null); }, [tab, mode, offset]);
   const q = useDebounced(filt.q, 300);
   const isGrid = mode === 'excel' && tab !== 'ALL';
 
@@ -133,7 +173,7 @@ export default function Workload() {
     return p;
   }, [tab, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q, isGrid]);
 
-  // Summary cards / tab badges follow every filter except the team tab ("today" = the browser's local date)
+  // Tab badges (the counts next to All / VGFX / VEDIT / Audio) follow every filter except the team tab
   const loadStats = useCallback(async () => {
     if (!meta) return;
     const p = query();
@@ -184,12 +224,17 @@ export default function Workload() {
     setFilt((f) => ({ ...f, from, to }));
     setOffset(0);
   };
-  const today = isoDate();
-  const cardTab = (t) => async () => { await changeTab(t); };
-  const cardFilter = (patch) => async () => {
-    if (!(await okToLeave())) return;
-    setFilt((f) => ({ ...f, ...patch }));
-    setOffset(0);
+
+  // ---- click-to-edit: save ONE cell (PATCH writes only that column, so other people's edits to the row are kept) ----
+  const saveCell = async (r, k, value) => {
+    if (String(value ?? '') === String(r[k] ?? '')) { setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur)); return; }
+    try {
+      const out = await patch(`/api/workload/${r.id}`, { field: k, value });
+      setData((d) => (d && d.rows ? { ...d, rows: d.rows.map((x) => (x.id === r.id ? { ...x, ...out.values } : x)) } : d));
+      // close only THIS cell's editor: the person may already have opened another cell while this one was saving
+      setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur));
+      if (['work_date', 'units_concerned', 'platform', 'plug_type'].includes(k)) load();   // may change the row's place, filters or the counts
+    } catch (e) { toast(e.message, 'err'); throw e; }
   };
 
   // ---- Excel export (sheets mirror the template: MAIN + AUDIO, or just the open team tab) ----
@@ -271,7 +316,7 @@ export default function Workload() {
   const oneLine = (t) => String(t ?? '').replace(/\s*\n+\s*/g, ' · ');
 
   // Cells wrap (pasted line breaks kept) instead of being cut off; data-label feeds the card layout.
-  const cell = (r, k) => {
+  const cellView = (r, k) => {
     const val = r[k];
     const common = { key: k, 'data-k': k, 'data-label': head(k) };
     switch (k) {
@@ -294,31 +339,39 @@ export default function Workload() {
             {val ? <span className="strong">{oneLine(val)}</span> : null}
           </td>
         );
-      case 'audio_guide': return <td {...common}>{ISO.test(val || '') ? fmtDate(val) : oneLine(val)}</td>;
-      case 'breakdate_time': return <td {...common}>{fmtTime(val)}</td>;
+      case 'audio_guide': return <td {...common}><DateChip>{val ? (ISO.test(val) ? fmtDate(val) : oneLine(val)) : null}</DateChip></td>;
+      case 'breakdate': return <td {...common}><DateChip>{fmtBreakdate(val)}</DateChip></td>;
       case 'remarks': return <td {...common}>{val ? <div className="rem">{val}</div> : null}</td>;
       default:
-        return <td {...common}>{meta.fields[k].kind === 'date' ? fmtDate(val) : oneLine(val)}</td>;
+        return <td {...common}>{meta.fields[k].kind === 'date' ? <DateChip>{fmtDate(val)}</DateChip> : oneLine(val)}</td>;
     }
   };
 
+  // Managers click a cell to edit just that cell (nothing else opens); viewers just read.
+  const cell = (r, k) => {
+    const td = cellView(r, k);
+    if (!canWrite) return td;
+    if (editing && editing.id === r.id && editing.k === k) {
+      return (
+        <td key={k} data-k={k} data-label={head(k)} className="editing" onClick={(e) => e.stopPropagation()}>
+          <CellEditor def={meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value) => saveCell(r, k, value)} onCancel={() => setEditing(null)} />
+        </td>
+      );
+    }
+    const open = () => setEditing({ id: r.id, k });
+    return cloneElement(td, {
+      className: 'editable', title: 'Click to edit', tabIndex: 0,
+      onClick: (e) => { e.stopPropagation(); open(); },
+      onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); open(); } },
+    });
+  };
+
   const tabCount = { ALL: stats && stats.total, VGFX: stats && stats.vgfx, VEDIT: stats && stats.vedit, AUDIO: stats && stats.audio };
-  const KPIS = [
-    { key: 'total', hue: 'blue', icon: <DocIcon />, label: 'Total Workloads', value: stats && stats.total, active: isAll, onClick: cardTab('ALL') },
-    { key: 'today', hue: 'green', icon: <CalendarIcon />, label: 'Today', value: stats && stats.today, active: filt.from === today && filt.to === today, onClick: cardFilter({ from: today, to: today }) },
-    { key: 'vgfx', hue: 'purple', icon: <LayersIcon />, label: 'VGFX', value: stats && stats.vgfx, active: tab === 'VGFX', onClick: cardTab('VGFX') },
-    { key: 'vedit', hue: 'orange', icon: <FilmIcon />, label: 'VEDIT', value: stats && stats.vedit, active: tab === 'VEDIT', onClick: cardTab('VEDIT') },
-    { key: 'audio', hue: 'teal', icon: <SpeakerIcon />, label: 'Audio', value: stats && stats.audio, active: tab === 'AUDIO', onClick: cardTab('AUDIO') },
-  ];
 
   return (
     <main className="container wide wl-page">
       <div className="page-head">
         <div><h1>Workload Tracker</h1><div className="sub">Track and monitor promotional plug workloads across VGFX, VEDIT and Audio.</div></div>
-      </div>
-
-      <div className="wl-kpis" id="wl-kpis">
-        {KPIS.map(({ key, ...k }) => <KpiCard key={key} {...k} />)}
       </div>
 
       {!lookups.workload_platform.length || !lookups.plug_type.length ? (
@@ -411,7 +464,7 @@ export default function Workload() {
                         <thead><tr>{cols.map((k) => <th key={k}>{head(k)}</th>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {data.rows.map((r) => (
-                            <tr key={r.id} className="clickable" onClick={() => setForm({ rec: r })}>
+                            <tr key={r.id} className={canWrite ? '' : 'clickable'} onClick={canWrite ? undefined : () => setForm({ rec: r })}>
                               {cols.map((k) => cell(r, k))}
                               {canWrite ? (
                                 <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>

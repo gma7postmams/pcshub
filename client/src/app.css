@@ -486,24 +486,14 @@ table.t.wl.cards td.actions-cell .btn { display: inline-flex; width: auto; margi
 .c-blue { --c: var(--blue); } .c-green { --c: var(--green); } .c-amber { --c: var(--amber); }
 .c-purple { --c: var(--purple); } .c-gray { --c: var(--gray); } .c-red { --c: var(--red); }
 .c-orange { --c: #f0883e; } .c-teal { --c: #26b5ad; } .c-pink { --c: #e5568f; }
+.c-slate { --c: #64748b; }   /* neutral chip colour for dates/times, distinct from the category pill colours */
 html[data-mode="light"] .c-orange { --c: #b95a12; } html[data-mode="light"] .c-teal { --c: #0d8a84; } html[data-mode="light"] .c-pink { --c: #b8326b; }
+html[data-mode="light"] .c-slate { --c: #475569; }
 
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.4; white-space: nowrap; color: var(--c); background: color-mix(in srgb, var(--c) 14%, var(--surface)); }
 .chip.sm { padding: 1px 8px; font-size: 11px; font-weight: 550; }
 .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
 .chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
-
-.wl-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 16px; }
-.wl-kpi { display: flex; align-items: center; gap: 14px; padding: 16px 18px; text-align: left; font: inherit; color: var(--text); border: 1px solid var(--border); border-radius: 14px;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--c) 9%, var(--surface)), var(--surface) 70%); }
-button.wl-kpi { cursor: pointer; transition: transform .12s, border-color .12s, box-shadow .12s; }
-button.wl-kpi:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--c) 45%, var(--border)); box-shadow: 0 6px 18px rgba(0,0,0,.10); }
-.wl-kpi.active { border-color: color-mix(in srgb, var(--c) 60%, var(--border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 16%, transparent); }
-.wl-kpi .ico { flex: none; width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; color: var(--c); background: color-mix(in srgb, var(--c) 16%, var(--surface)); }
-.wl-kpi .ico svg { width: 24px; height: 24px; }
-.wl-kpi .txt { display: flex; flex-direction: column; min-width: 0; }
-.wl-kpi .lbl { font-size: 13px; color: var(--text-2); }
-.wl-kpi .num { font-size: 28px; font-weight: 700; line-height: 1.15; }
 
 .wl-tabbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 0 16px; border-bottom: 1px solid var(--border); }
 .wl-tabbar .tabs { margin: 0; border: 0; }
@@ -564,9 +554,6 @@ table.t.wl.cards td { align-items: flex-start; }
   .wl-tabbar { padding: 0 6px; }
   .wl-tabbar .tabs button { padding: 13px 9px; gap: 6px; font-size: 13.5px; }
   .wl-tabbar .tabs { overflow-x: auto; max-width: 100%; }
-  .wl-kpi { padding: 12px 12px; gap: 10px; }
-  .wl-kpi .ico { width: 40px; height: 40px; }
-  .wl-kpi .num { font-size: 24px; }
 }
 
 /* cards: put the ⋮ menu in the card's top-right corner instead of a row of its own */
@@ -585,3 +572,17 @@ table.t.wl.cards td .rem { min-width: 0; max-width: none; }
 /* cards: long pills (e.g. "REG/TDMD (GMA MUSIC)") get the whole card width and may wrap rather than spill into the next column */
 table.t.wl.cards td[data-k="platform"], table.t.wl.cards td[data-k="units_concerned"] { grid-column: 1 / -1; }
 table.t.wl.cards .chip { white-space: normal; max-width: 100%; }
+
+/* click-to-edit cells */
+table.t.wl td.editable { cursor: pointer; }
+table.t.wl td.editable:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }   /* clearly visible tint (stronger than the row's own hover), no box */
+table.t.wl td.editable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+table.t.wl td.editing { padding: 4px; white-space: normal; }   /* the cell itself looks normal; only the input inside is highlighted */
+.cell-editor { display: flex; align-items: center; min-width: 170px; }
+.cell-editor.busy { opacity: .6; }
+.cell-editor input, .cell-editor select, .cell-editor textarea { width: 100%; min-width: 150px; height: 32px; padding: 4px 8px; font-size: 13px; }
+.cell-editor textarea { min-width: 260px; min-height: 32px; resize: none; overflow: hidden; line-height: 1.35; }
+.cell-editor input[type="datetime-local"] { min-width: 215px; }
+.cell-editor .ag input[type="date"] { min-width: 130px; }
+table.t.xl input[type="datetime-local"] { min-width: 215px; }
+table.t.wl.cards td.editing { padding: 0; }

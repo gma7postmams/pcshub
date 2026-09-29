@@ -50,8 +50,9 @@ export function fmtTime(t) {
   return `${h % 12 || 12}:${m[2]} ${h >= 12 ? 'PM' : 'AM'}`;
 }
 
-/** Times of day in 15-minute steps, for picking instead of typing */
-export const TIME_OPTIONS = Array.from({ length: 96 }, (_, i) => {
-  const value = `${String(Math.floor(i / 4)).padStart(2, '0')}:${String((i % 4) * 15).padStart(2, '0')}`;
-  return { value, label: fmtTime(value) };
-});
+/** 'YYYY-MM-DDTHH:MM' -> 'Sep 28, 2026 2:45 PM' (12:00 AM is treated as "no time" and shows the date only) */
+export function fmtBreakdate(v) {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/.exec(v || '');
+  if (!m) return v || '';
+  return m[2] === '00' && m[3] === '00' ? fmtDate(m[1]) : `${fmtDate(m[1])} ${fmtTime(`${m[2]}:${m[3]}`)}`;
+}
