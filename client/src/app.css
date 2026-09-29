@@ -510,6 +510,7 @@ html[data-mode="light"] .c-slate { --c: #475569; }
 .fsel { position: relative; display: flex; flex-direction: row; align-items: center; gap: 14px; min-width: 150px; height: 38px; padding: 0 28px 0 12px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); }
 .fsel > span { flex: none; font-size: 12px; line-height: 1; color: var(--text-2); font-weight: 550; white-space: nowrap; }
 .fsel select { flex: 1; width: auto; min-width: 0; height: auto; padding: 0; border: 0; background: transparent; box-shadow: none; font-weight: 600; font-size: 13.5px; line-height: 1.2; -webkit-appearance: none; -moz-appearance: none; appearance: none; cursor: pointer; text-overflow: ellipsis; text-align: right; text-align-last: right; }
+.fsel select:-moz-focusring { color: transparent; text-shadow: 0 0 0 var(--text); }   /* hide Firefox's inner dotted focus ring without hiding the value */
 .fsel svg { position: absolute; right: 10px; top: 50%; width: 13px; height: 13px; transform: translateY(-50%); pointer-events: none; color: var(--text-2); }
 .daterange { position: relative; display: flex; }
 .daterange-btn { display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; height: 38px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); color: var(--text); font: 600 13px var(--font); cursor: pointer; white-space: nowrap; }
@@ -528,6 +529,7 @@ table.t.wl td { vertical-align: middle; }
    don't look identical. Cards mode stays borderless (each row is already its own bordered card). */
 table.t.wl:not(.cards) { border-collapse: separate; border-spacing: 0; }
 table.t.wl:not(.cards) th, table.t.wl:not(.cards) td { border-right: 1px solid var(--border); }
+table.t.wl:not(.cards) thead th { border-right-color: var(--border-2); }   /* more contrast against the tinted header background */
 table.t.wl:not(.cards) th:last-child, table.t.wl:not(.cards) td:last-child { border-right: 0; }
 table.t.wl .strong { font-weight: 650; color: var(--text); }
 table.t.wl .sub { margin-top: 2px; font-size: 12px; color: var(--text-2); }
