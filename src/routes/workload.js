@@ -42,7 +42,7 @@ const FIELDS = {
   audio_guide:    { label: 'Audio Guide', kind: 'audio_guide' },
   remarks:        { label: 'Remarks', kind: 'text', multiline: true, max: 4000, hint: OPEN },
   total_mats:     { label: 'Total Mats', kind: 'text', multiline: true, max: 500, hint: OPEN },
-  prog_name:      { label: 'Prog Name / Project Title', kind: 'text', max: 300, hint: FROM_PSD },
+  prog_name:      { label: 'Prog. Name / Project Title', kind: 'text', max: 300, hint: FROM_PSD },
   plug_type:      { label: 'Plug Type', kind: 'select', lookup: 'plug_type', max: 100 },
   // Audio sheet's Assigned / Done / Resched-cancelled tables: open columns you can type or paste into
   length:         { label: 'Length', kind: 'text', max: 100, hint: OPEN },
@@ -238,6 +238,32 @@ router.get('/', asyncH(async (req, res) => {
 // (rows that involve Audio). A VGFX/VEDIT/Audio row appears on both, like it does in the template.
 // With ?team=VGFX|VEDIT|AUDIO only that team's sheet is written. exceljs is loaded lazily so the app
 // still starts if `npm install` has not been run yet after pulling this change.
+
+// ---------- Excel export styling: mirror the web table's colours/pills/grid ----------
+// Category colours are fixed regardless of the admin-selected theme (see client/src/app.css light-mode block);
+// only the neutral tones (header/grid) pick up a touch of the org's theme tint, same as the web app.
+const HUE_HEX = { blue: '1f6fc5', purple: '6d4fd1', teal: '0d8a84', orange: 'b95a12', green: '12805a', pink: 'b8326b', gray: '626b7a', red: 'c93838', amber: 'a4650a' };
+const EXPORT_PALETTE = ['blue', 'green', 'pink', 'amber', 'red'];   // matches the web app's hash palette (Platform/Plug-Type-fallback/Units-fallback only)
+const hueOf = (s) => EXPORT_PALETTE[[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % EXPORT_PALETTE.length];
+const TEAM_HUE = { VGFX: 'purple', VEDIT: 'orange', AUDIO: 'teal' };
+const TYPE_HUE = { EPISODIC: 'blue', SEASONAL: 'pink', BUMPER: 'red', 'POP-UP/POP LOGO': 'blue', RADIO: 'green' };   // matches the web app; avoids purple/orange/teal (team colours)
+const THEME_TINT = { midnight: '4f8cff', sunset: 'ff7a45', purple: '8b5cf6', ocean: '14b8c4', forest: '22c55e', rose: 'f43f5e', graphite: '94a3b8' };
+const hex2rgb = (h) => [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+const rgb2hex = (rgb) => rgb.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
+// Same blend CSS color-mix(in srgb, A pct%, B) uses: linear per-channel interpolation.
+const mix = (aHex, pct, bHex) => { const a = hex2rgb(aHex); const b = hex2rgb(bHex); return rgb2hex(a.map((v, i) => v * (pct / 100) + b[i] * (1 - pct / 100))); };
+const argb = (hex) => `FF${hex.toUpperCase()}`;
+const oneLineText = (t) => String(t ?? '').replace(/\s*\n+\s*/g, ' \u00b7 ');   // matches the web table's " · " join for wrapped fields
+
+async function exportPalette(db_) {
+  const row = await db_.query("SELECT value FROM app_settings WHERE key='theme'");
+  const tint = THEME_TINT[(row.rows[0] || {}).value] || THEME_TINT.midnight;
+  const border = mix(tint, 8, 'e1e4ea');    // grid lines
+  const headerFill = mix(tint, 9, 'e7eaef'); // header background, tinted like the web table's header
+  const pillFg = (hue) => argb(HUE_HEX[hue]);
+  return { gridBorder: argb(border), headerFill: argb(headerFill), black: argb('000000'), pillFg };
+}
+
 router.get('/export', asyncH(async (req, res) => {
   let ExcelJS;
   try { ExcelJS = require('exceljs'); } catch (e) {
@@ -256,18 +282,35 @@ router.get('/export', asyncH(async (req, res) => {
       { name: 'AUDIO', cols: AUDIO_COLS, pick: (r) => involves(r, ['AUDIO']) },
     ];
 
+  const pal = await exportPalette(db);
   const wb = new ExcelJS.Workbook();
   wb.creator = 'PromoHub';
   const asDate = (s) => (s ? new Date(`${s}T00:00:00Z`) : null);
+  const thinGrid = { style: 'thin', color: { argb: pal.gridBorder } };
+  const platformFamily = (v) => String(v || '').replace(/\s*\(.*\)\s*$/, '') || v;
+
+  const cellText = (v) => {
+    if (v == null) return '';
+    if (v.richText) return v.richText.map((t) => t.text).join('');
+    if (v instanceof Date) return '';   // dates are sized by format below, not by scanning the stored Date value
+    return String(v);
+  };
   for (const sh of sheets) {
     const ws = wb.addWorksheet(sh.name);
     ws.columns = sh.cols.map((k) => {
       const f = FIELDS[k];
-      return { header: f.label, key: k, width: f.multiline ? 34 : f.kind === 'date' ? 14 : 22,
+      return { header: f.label, key: k, width: f.multiline ? 34 : f.kind === 'date' ? 14 : f.kind === 'datetime' ? 20 : 22,
         style: f.kind === 'date' ? { numFmt: 'mmm d, yyyy' } : f.kind === 'datetime' ? { numFmt: 'mmm d, yyyy h:mm AM/PM' } : {} };
     });
-    ws.getRow(1).font = { bold: true };
+    // Header row: same fill/border treatment as the web table's header (Excel-mode style)
+    ws.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: pal.black }, size: 11 };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pal.headerFill } };
+      cell.border = { bottom: thinGrid, right: thinGrid };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
     ws.views = [{ state: 'frozen', ySplit: 1 }];
+
     rows.filter(sh.pick).forEach((r) => {
       const row = ws.addRow(sh.cols.reduce((o, k) => {
         const f = FIELDS[k];
@@ -275,19 +318,72 @@ router.get('/export', asyncH(async (req, res) => {
         if (f.kind === 'date') val = asDate(val);
         else if (f.kind === 'datetime') { const t = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(val || ''); val = t ? new Date(Date.UTC(+t[1], +t[2] - 1, +t[3], +t[4], +t[5])) : null; }
         else if (k === 'audio_guide' && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = asDate(val);
+        else if (k !== 'remarks') val = oneLineText(val);   // every field except Remarks is one line, like the web table
         return { ...o, [k]: val };
       }, {}));
-      row.alignment = { wrapText: true, vertical: 'top' };
-      if (sh.cols.includes('audio_guide') && r.audio_guide && /^\d{4}-\d{2}-\d{2}$/.test(r.audio_guide)) {
-        row.getCell('audio_guide').numFmt = 'mmm d, yyyy';
-      }
+      row.alignment = { wrapText: false, vertical: 'middle', horizontal: 'center' };
+
+      sh.cols.forEach((k) => {
+        const cell = row.getCell(k);
+        const f = FIELDS[k];
+        cell.border = { right: thinGrid };   // vertical grid line, matching the web table
+        if (k === 'audio_guide' && r.audio_guide && /^\d{4}-\d{2}-\d{2}$/.test(r.audio_guide)) cell.numFmt = 'mmm d, yyyy';
+
+        if (f.kind === 'date' || f.kind === 'datetime' || k === 'audio_guide') {
+          if (cell.value != null) cell.font = { color: { argb: pal.black } };
+        } else if (k === 'platform' && r.platform) {
+          cell.font = { bold: true, color: { argb: pal.black } };
+        } else if (k === 'plug_type' && r.plug_type) {
+          const hue = TYPE_HUE[r.plug_type] || hueOf(r.plug_type);
+          cell.font = { bold: true, color: { argb: pal.pillFg(hue) } };
+        } else if (k === 'units_concerned' && r.units_concerned) {
+          // Excel can't give one cell several coloured pill backgrounds, so each team name is coloured text instead
+          const teams = UNIT_TEAMS[r.units_concerned] || [];
+          if (teams.length > 1) {
+            cell.value = { richText: teams.flatMap((t, i) => [
+              ...(i ? [{ text: ' / ', font: { color: { argb: pal.black } } }] : []),
+              { text: t, font: { bold: true, color: { argb: pal.pillFg(TEAM_HUE[t]) } } },
+            ]) };
+          } else if (teams.length === 1) {
+            cell.font = { bold: true, color: { argb: pal.pillFg(TEAM_HUE[teams[0]]) } };
+          }
+        } else if (k === 'plug_id' || k === 'prog_name') {
+          cell.font = { bold: true };
+        } else if (k === 'remarks') {
+          cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+        }
+      });
+    });
+
+    // Auto-size every column except Remarks (which wraps instead) so single-line values are never cropped.
+    ws.columns.forEach((column) => {
+      if (column.key === 'remarks') return;
+      const f = FIELDS[column.key];
+      let max = String(f.label).length;
+      if (f.kind === 'date') max = Math.max(max, 13);           // 'Sep 28, 2026'
+      if (f.kind === 'datetime') max = Math.max(max, 22);       // 'Sep 28, 2026 11:45 PM'
+      column.eachCell({ includeEmpty: false }, (cell) => {
+        if ((f.kind === 'date' || f.kind === 'datetime') && cell.value instanceof Date) return; // already sized above
+        if (column.key === 'audio_guide' && cell.value instanceof Date) { max = Math.max(max, 13); return; }
+        max = Math.max(max, cellText(cell.value).length);
+      });
+      // +15% then +3: plain character-count math undershoots for this app's content, which is heavy with wide,
+      // all-caps text (platform codes, plug IDs) — those render wider per character than Excel's column-width
+      // unit assumes, so a flat "+3" isn't quite enough once the value gets some real length to it.
+      column.width = Math.ceil(max * 1.15) + 3;   // no cap: the point is that nothing gets cropped
     });
   }
-  const stamp = req.query.from || req.query.to ? `${req.query.from || ''}_${req.query.to || ''}` : 'all';
+  const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
+  const exportedAt = new Date();
+  const stamp = `${MONTH_ABBR[exportedAt.getMonth()]}_${exportedAt.getFullYear()}`;   // month/year the export happened, not the data's date filter
+  // Buffer the whole file and send it with an explicit Content-Length, rather than streaming it with chunked
+  // transfer encoding straight to res: some reverse proxies (this app is commonly deployed behind one) can
+  // truncate or mishandle a chunked response, which shows up as "the file format is invalid" when opened.
+  const buffer = await wb.xlsx.writeBuffer();
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.set('Content-Disposition', `attachment; filename="Workload_${stamp}.xlsx"`);
-  await wb.xlsx.write(res);
-  res.end();
+  res.set('Content-Disposition', `attachment; filename="Workload_${team || 'ALL'}_${stamp}.xlsx"`);
+  res.set('Content-Length', String(buffer.length));
+  res.end(buffer);
 }));
 
 router.post('/', requireAction('workload.write'), asyncH(async (req, res) => {

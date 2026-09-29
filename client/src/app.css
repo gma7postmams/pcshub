@@ -486,9 +486,15 @@ table.t.wl.cards td.actions-cell .btn { display: inline-flex; width: auto; margi
 .c-blue { --c: var(--blue); } .c-green { --c: var(--green); } .c-amber { --c: var(--amber); }
 .c-purple { --c: var(--purple); } .c-gray { --c: var(--gray); } .c-red { --c: var(--red); }
 .c-orange { --c: #f0883e; } .c-teal { --c: #26b5ad; } .c-pink { --c: #e5568f; }
-.c-slate { --c: #64748b; }   /* neutral chip colour for dates/times, distinct from the category pill colours */
+.c-slate { --c: #64748b; }   /* kept defined, currently unused */
+.c-cyan { --c: #22d3ee; }      /* Work Date / Breakdate / Script / Artwork-STB — reserved, not in the hash palette */
+.c-lime { --c: #a3e635; }      /* kept defined, currently unused */
+.c-fuchsia { --c: #e879f9; }   /* Audio Guide only — reserved; a warm magenta, deliberately far from cyan's cool blue */
 html[data-mode="light"] .c-orange { --c: #b95a12; } html[data-mode="light"] .c-teal { --c: #0d8a84; } html[data-mode="light"] .c-pink { --c: #b8326b; }
 html[data-mode="light"] .c-slate { --c: #475569; }
+html[data-mode="light"] .c-cyan { --c: #0e7490; }
+html[data-mode="light"] .c-lime { --c: #4d7c0f; }
+html[data-mode="light"] .c-fuchsia { --c: #a21caf; }
 
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.4; white-space: nowrap; color: var(--c); background: color-mix(in srgb, var(--c) 14%, var(--surface)); }
 .chip.sm { padding: 1px 8px; font-size: 11px; font-weight: 550; }
@@ -502,28 +508,38 @@ html[data-mode="light"] .c-slate { --c: #475569; }
 .tabs button.on .count { color: var(--accent); background: var(--accent-soft); }
 .wl-tabactions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0; }
 
-.wl-filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: stretch; padding: 14px 16px; border-bottom: 1px solid var(--border); }
-.wl-search { flex: 1 1 260px; display: flex; align-items: center; gap: 10px; padding: 0 14px; min-height: 52px; border: 1px solid var(--border-2); border-radius: 10px; background: var(--bg-2); color: var(--text-3); }
-.wl-search svg { width: 18px; height: 18px; flex: none; }
+.wl-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: stretch; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.wl-search { flex: 1 1 260px; display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 38px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); color: var(--text-3); }
+.wl-search svg { width: 15px; height: 15px; flex: none; }
 .wl-search input { flex: 1; min-width: 0; height: auto; padding: 0; border: 0; background: transparent; box-shadow: none; color: var(--text); }
 .wl-search:focus-within, .fsel:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.fsel { position: relative; display: flex; flex-direction: column; justify-content: center; gap: 1px; min-width: 130px; padding: 6px 34px 6px 14px; border: 1px solid var(--border-2); border-radius: 10px; background: var(--bg-2); }
-.fsel > span { font-size: 11px; color: var(--text-2); font-weight: 550; }
-.fsel select { width: 100%; min-width: 0; height: 22px; padding: 0; border: 0; background: transparent; box-shadow: none; font-weight: 600; font-size: 13.5px; appearance: none; cursor: pointer; }
-.fsel svg { position: absolute; right: 12px; top: 50%; width: 15px; height: 15px; transform: translateY(-50%); pointer-events: none; color: var(--text-2); }
+.fsel { position: relative; display: block; min-width: 150px; height: 38px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); }
+.fsel-row { display: flex; align-items: center; gap: 14px; height: 100%; padding: 0 28px 0 12px; pointer-events: none; }
+.fsel-label { flex: none; font-size: 12px; line-height: 1; color: var(--text-2); font-weight: 550; white-space: nowrap; }
+.fsel-value { flex: 1; min-width: 0; text-align: right; font-weight: 600; font-size: 13.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fsel select { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; border-radius: inherit; background: transparent; box-shadow: none; color: transparent; -webkit-appearance: none; -moz-appearance: none; appearance: none; cursor: pointer; }
+.fsel select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }   /* the select is invisible, but keep a real focus indicator for keyboard use */
+.fsel svg { position: absolute; right: 10px; top: 50%; width: 13px; height: 13px; transform: translateY(-50%); pointer-events: none; color: var(--text-2); z-index: 1; }
 .daterange { position: relative; display: flex; }
-.daterange-btn { display: inline-flex; align-items: center; gap: 10px; padding: 0 16px; min-height: 52px; border: 1px solid var(--border-2); border-radius: 10px; background: var(--bg-2); color: var(--text); font: 600 13.5px var(--font); cursor: pointer; white-space: nowrap; }
-.daterange-btn svg { width: 18px; height: 18px; color: var(--text-2); }
+.daterange-btn { display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; height: 38px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); color: var(--text); font: 600 13px var(--font); cursor: pointer; white-space: nowrap; }
+.daterange-btn svg { width: 15px; height: 15px; color: var(--text-2); }
 .popover { position: absolute; z-index: 60; top: calc(100% + 6px); right: 0; width: 280px; padding: 14px; display: grid; gap: 10px; background: var(--surface); border: 1px solid var(--border-2); border-radius: 12px; box-shadow: var(--shadow); }
 .daterange-pop .presets { display: flex; flex-wrap: wrap; gap: 6px; }
 @media (max-width: 680px) { .fsel { flex: 1 1 45%; min-width: 0; } .daterange { flex: 1 1 100%; } .daterange-btn { flex: 1; justify-content: center; } .popover { left: 0; right: 0; width: auto; } }
 
 /* table polish */
 table.t.wl { font-size: 13px; }
-table.t.wl thead th { background: transparent; font-size: 11px; letter-spacing: .05em; color: var(--text-3); vertical-align: middle; }
+table.t.wl thead th { background: var(--surface-3); font-size: 11px; letter-spacing: .05em; color: var(--text-2); vertical-align: middle; border-bottom: 1px solid var(--border-2); }   /* same header treatment as the Excel-mode grid */
+table.t.wl th { text-align: center; }
 table.t.wl th.right { text-align: right; }
 table.t.wl th, table.t.wl td { padding: 9px 10px; }
 table.t.wl td { vertical-align: middle; }
+/* Light grid: vertical lines between columns, softer than the Excel-mode grid (which uses --border-2), so the two
+   don't look identical. Cards mode stays borderless (each row is already its own bordered card). */
+table.t.wl:not(.cards) { border-collapse: separate; border-spacing: 0; }
+table.t.wl:not(.cards) th, table.t.wl:not(.cards) td { border-right: 1px solid var(--border); }
+table.t.wl:not(.cards) thead th { border-right-color: var(--border-2); }   /* more contrast against the tinted header background */
+table.t.wl:not(.cards) th:last-child, table.t.wl:not(.cards) td:last-child { border-right: 0; }
 table.t.wl .strong { font-weight: 650; color: var(--text); }
 table.t.wl .sub { margin-top: 2px; font-size: 12px; color: var(--text-2); }
 table.t.wl .sub.pre { white-space: pre-wrap; }
@@ -569,6 +585,12 @@ table.t.wl th { white-space: nowrap; }
 /* ...but on phones each row is a card, where text has to wrap */
 table.t.wl.cards td { white-space: pre-wrap; }
 table.t.wl.cards td .rem { min-width: 0; max-width: none; }
+
+/* Centre every cell's content except Remarks, which stays left-aligned (it's the one column meant to be read as text) */
+table.t.wl:not(.cards) td { text-align: center; }
+table.t.wl:not(.cards) td[data-k="remarks"] { text-align: left; }
+table.t.wl:not(.cards) td .stack { align-items: center; }
+
 /* cards: long pills (e.g. "REG/TDMD (GMA MUSIC)") get the whole card width and may wrap rather than spill into the next column */
 table.t.wl.cards td[data-k="platform"], table.t.wl.cards td[data-k="units_concerned"] { grid-column: 1 / -1; }
 table.t.wl.cards .chip { white-space: normal; max-width: 100%; }
