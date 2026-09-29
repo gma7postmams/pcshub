@@ -258,9 +258,10 @@ const oneLineText = (t) => String(t ?? '').replace(/\s*\n+\s*/g, ' \u00b7 ');   
 async function exportPalette(db_) {
   const row = await db_.query("SELECT value FROM app_settings WHERE key='theme'");
   const tint = THEME_TINT[(row.rows[0] || {}).value] || THEME_TINT.midnight;
-  const border = mix(tint, 8, 'e1e4ea');   // grid lines only; no cell fills, no gray text — plain black on white
+  const border = mix(tint, 8, 'e1e4ea');    // grid lines
+  const headerFill = mix(tint, 9, 'e7eaef'); // header background, tinted like the web table's header
   const pillFg = (hue) => argb(HUE_HEX[hue]);
-  return { gridBorder: argb(border), black: argb('000000'), pillFg };
+  return { gridBorder: argb(border), headerFill: argb(headerFill), black: argb('000000'), pillFg };
 }
 
 router.get('/export', asyncH(async (req, res) => {
@@ -288,6 +289,12 @@ router.get('/export', asyncH(async (req, res) => {
   const thinGrid = { style: 'thin', color: { argb: pal.gridBorder } };
   const platformFamily = (v) => String(v || '').replace(/\s*\(.*\)\s*$/, '') || v;
 
+  const cellText = (v) => {
+    if (v == null) return '';
+    if (v.richText) return v.richText.map((t) => t.text).join('');
+    if (v instanceof Date) return '';   // dates are sized by format below, not by scanning the stored Date value
+    return String(v);
+  };
   for (const sh of sheets) {
     const ws = wb.addWorksheet(sh.name);
     ws.columns = sh.cols.map((k) => {
@@ -298,6 +305,7 @@ router.get('/export', asyncH(async (req, res) => {
     // Header row: same fill/border treatment as the web table's header (Excel-mode style)
     ws.getRow(1).eachCell((cell) => {
       cell.font = { bold: true, color: { argb: pal.black }, size: 11 };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pal.headerFill } };
       cell.border = { bottom: thinGrid, right: thinGrid };
       cell.alignment = { vertical: 'middle', horizontal: 'center' };
     });
@@ -324,8 +332,7 @@ router.get('/export', asyncH(async (req, res) => {
         if (f.kind === 'date' || f.kind === 'datetime' || k === 'audio_guide') {
           if (cell.value != null) cell.font = { color: { argb: pal.black } };
         } else if (k === 'platform' && r.platform) {
-          const hue = TYPE_HUE[r.platform] ? null : hueOf(platformFamily(r.platform));   // platforms use the family-name hash, not the type map
-          cell.font = { bold: true, color: { argb: pal.pillFg(hue) } };
+          cell.font = { bold: true, color: { argb: pal.black } };
         } else if (k === 'plug_type' && r.plug_type) {
           const hue = TYPE_HUE[r.plug_type] || hueOf(r.plug_type);
           cell.font = { bold: true, color: { argb: pal.pillFg(hue) } };
@@ -346,6 +353,21 @@ router.get('/export', asyncH(async (req, res) => {
           cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
         }
       });
+    });
+
+    // Auto-size every column except Remarks (which wraps instead) so single-line values are never cropped.
+    ws.columns.forEach((column) => {
+      if (column.key === 'remarks') return;
+      const f = FIELDS[column.key];
+      let max = String(f.label).length;
+      if (f.kind === 'date') max = Math.max(max, 13);           // 'Sep 28, 2026'
+      if (f.kind === 'datetime') max = Math.max(max, 22);       // 'Sep 28, 2026 11:45 PM'
+      column.eachCell({ includeEmpty: false }, (cell) => {
+        if ((f.kind === 'date' || f.kind === 'datetime') && cell.value instanceof Date) return; // already sized above
+        if (column.key === 'audio_guide' && cell.value instanceof Date) { max = Math.max(max, 13); return; }
+        max = Math.max(max, cellText(cell.value).length);
+      });
+      column.width = max + 3;   // no cap: the point is that nothing gets cropped
     });
   }
   const stamp = req.query.from || req.query.to ? `${req.query.from || ''}_${req.query.to || ''}` : 'all';
