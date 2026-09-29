@@ -584,6 +584,12 @@ table.t.wl th { white-space: nowrap; }
 /* ...but on phones each row is a card, where text has to wrap */
 table.t.wl.cards td { white-space: pre-wrap; }
 table.t.wl.cards td .rem { min-width: 0; max-width: none; }
+
+/* Centre every cell's content except Remarks, which stays left-aligned (it's the one column meant to be read as text) */
+table.t.wl:not(.cards) td { text-align: center; }
+table.t.wl:not(.cards) td[data-k="remarks"] { text-align: left; }
+table.t.wl:not(.cards) td .stack { align-items: center; }
+
 /* cards: long pills (e.g. "REG/TDMD (GMA MUSIC)") get the whole card width and may wrap rather than spill into the next column */
 table.t.wl.cards td[data-k="platform"], table.t.wl.cards td[data-k="units_concerned"] { grid-column: 1 / -1; }
 table.t.wl.cards .chip { white-space: normal; max-width: 100%; }
