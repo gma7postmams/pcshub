@@ -258,16 +258,9 @@ const oneLineText = (t) => String(t ?? '').replace(/\s*\n+\s*/g, ' \u00b7 ');   
 async function exportPalette(db_) {
   const row = await db_.query("SELECT value FROM app_settings WHERE key='theme'");
   const tint = THEME_TINT[(row.rows[0] || {}).value] || THEME_TINT.midnight;
-  const surface3 = mix(tint, 9, 'e7eaef');
-  const border = mix(tint, 8, 'e1e4ea');
-  const border2 = mix(tint, 12, 'cdd2da');
-  const pillBg = (hue) => argb(mix(HUE_HEX[hue], 14, 'ffffff'));
+  const border = mix(tint, 8, 'e1e4ea');   // grid lines only; no cell fills, no gray text — plain black on white
   const pillFg = (hue) => argb(HUE_HEX[hue]);
-  return {
-    headerFill: argb(surface3), headerBorder: argb(border2), gridBorder: argb(border),
-    text2: argb('4a5160'), pillBg, pillFg,
-    dateBg: argb(mix('475569', 14, 'ffffff')), dateFg: argb('475569'),
-  };
+  return { gridBorder: argb(border), black: argb('000000'), pillFg };
 }
 
 router.get('/export', asyncH(async (req, res) => {
@@ -304,10 +297,9 @@ router.get('/export', asyncH(async (req, res) => {
     });
     // Header row: same fill/border treatment as the web table's header (Excel-mode style)
     ws.getRow(1).eachCell((cell) => {
-      cell.font = { bold: true, color: { argb: pal.text2 }, size: 11 };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pal.headerFill } };
-      cell.border = { bottom: { style: 'thin', color: { argb: pal.headerBorder } }, right: thinGrid };
-      cell.alignment = { vertical: 'middle' };
+      cell.font = { bold: true, color: { argb: pal.black }, size: 11 };
+      cell.border = { bottom: thinGrid, right: thinGrid };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
     });
     ws.views = [{ state: 'frozen', ySplit: 1 }];
 
@@ -321,7 +313,7 @@ router.get('/export', asyncH(async (req, res) => {
         else if (k !== 'remarks') val = oneLineText(val);   // every field except Remarks is one line, like the web table
         return { ...o, [k]: val };
       }, {}));
-      row.alignment = { wrapText: false, vertical: 'top' };
+      row.alignment = { wrapText: false, vertical: 'middle', horizontal: 'center' };
 
       sh.cols.forEach((k) => {
         const cell = row.getCell(k);
@@ -330,22 +322,19 @@ router.get('/export', asyncH(async (req, res) => {
         if (k === 'audio_guide' && r.audio_guide && /^\d{4}-\d{2}-\d{2}$/.test(r.audio_guide)) cell.numFmt = 'mmm d, yyyy';
 
         if (f.kind === 'date' || f.kind === 'datetime' || k === 'audio_guide') {
-          // date chip: soft neutral fill, matching the web table's date/time chips
-          if (cell.value != null) { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pal.dateBg } }; cell.font = { color: { argb: pal.dateFg } }; }
+          if (cell.value != null) cell.font = { color: { argb: pal.black } };
         } else if (k === 'platform' && r.platform) {
           const hue = TYPE_HUE[r.platform] ? null : hueOf(platformFamily(r.platform));   // platforms use the family-name hash, not the type map
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pal.pillBg(hue) } };
           cell.font = { bold: true, color: { argb: pal.pillFg(hue) } };
         } else if (k === 'plug_type' && r.plug_type) {
           const hue = TYPE_HUE[r.plug_type] || hueOf(r.plug_type);
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pal.pillBg(hue) } };
           cell.font = { bold: true, color: { argb: pal.pillFg(hue) } };
         } else if (k === 'units_concerned' && r.units_concerned) {
           // Excel can't give one cell several coloured pill backgrounds, so each team name is coloured text instead
           const teams = UNIT_TEAMS[r.units_concerned] || [];
           if (teams.length > 1) {
             cell.value = { richText: teams.flatMap((t, i) => [
-              ...(i ? [{ text: ' / ', font: { color: { argb: pal.text2 } } }] : []),
+              ...(i ? [{ text: ' / ', font: { color: { argb: pal.black } } }] : []),
               { text: t, font: { bold: true, color: { argb: pal.pillFg(TEAM_HUE[t]) } } },
             ]) };
           } else if (teams.length === 1) {
@@ -354,7 +343,7 @@ router.get('/export', asyncH(async (req, res) => {
         } else if (k === 'plug_id' || k === 'prog_name') {
           cell.font = { bold: true };
         } else if (k === 'remarks') {
-          cell.alignment = { wrapText: true, vertical: 'top' };
+          cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
         }
       });
     });
