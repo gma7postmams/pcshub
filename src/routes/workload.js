@@ -307,6 +307,27 @@ const rgb2hex = (rgb) => rgb.map((v) => Math.round(Math.max(0, Math.min(255, v))
 // Same blend CSS color-mix(in srgb, A pct%, B) uses: linear per-channel interpolation.
 const mix = (aHex, pct, bHex) => { const a = hex2rgb(aHex); const b = hex2rgb(bHex); return rgb2hex(a.map((v, i) => v * (pct / 100) + b[i] * (1 - pct / 100))); };
 const argb = (hex) => `FF${hex.toUpperCase()}`;
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** 'YYYY-MM-DDTHH:MM' -> 'Sep 28, 2026 2:45 PM' (12:00 AM = no time -> date only), same text as the web table's pill. */
+function fmtBreakdateText(v) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(v || '');
+  if (!m) return String(v || '');
+  const date = `${MON[+m[2] - 1]} ${+m[3]}, ${m[1]}`;
+  if (m[4] === '00' && m[5] === '00') return date;
+  const h = +m[4];
+  return `${date} ${h % 12 || 12}:${m[5]} ${h >= 12 ? 'PM' : 'AM'}`;
+}
+/** Inverse of fmtBreakdateText: 'Sep 28, 2026 2:45 PM' / 'Sep 28, 2026' -> 'YYYY-MM-DDTHH:MM' (null if it isn't that shape). */
+function parseBreakdateText(t) {
+  const m = /^([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{1,2}),?\s+(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*(AM|PM))?$/i.exec(String(t || '').trim());
+  if (!m) return null;
+  const mon = MON.findIndex((x) => x.toLowerCase() === m[1].toLowerCase());
+  if (mon < 0) return null;
+  let h = m[4] ? +m[4] % 12 : 0;
+  if (m[6] && m[6].toUpperCase() === 'PM') h += 12;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${m[3]}-${pad(mon + 1)}-${pad(+m[2])}T${pad(h)}:${m[5] || '00'}`;
+}
 const oneLineText = (t) => String(t ?? '').replace(/\s*\n+\s*/g, ' \u00b7 ');   // matches the web table's " · " join for wrapped fields
 
 async function exportPalette(db_) {
@@ -333,10 +354,13 @@ router.get('/export', asyncH(async (req, res) => {
   const rows = rawRows.map(flattenCustom);
   const involves = (r, teams) => teams.some((t) => (UNIT_TEAMS[r.units_concerned] || []).includes(t));
   const team = req.query.team ? v.oneOf(String(req.query.team), TEAMS, { field: 'team' }) : null;
+  // Breakdate / Time (VGFX) and (VEDIT) share ONE column, like the web table: 'breakdate_vgfx' keeps that column's
+  // position and its cell holds one line per involved team (VGFX above VEDIT); 'breakdate_vedit' gets no column of its own.
+  const oneBreakdate = (cols) => cols.filter((k) => k !== 'breakdate_vedit');
   const sheets = team
-    ? [{ name: TAB_LABEL[team].toUpperCase(), cols: [...VIEWS[team], ...customKeys], pick: (r) => involves(r, [team]) }]
+    ? [{ name: TAB_LABEL[team].toUpperCase(), cols: [...oneBreakdate(VIEWS[team]), ...customKeys], pick: (r) => involves(r, [team]) }]
     : [
-      { name: 'MAIN', cols: [...MAIN_COLS, ...customKeys], pick: (r) => involves(r, ['VGFX', 'VEDIT']) },
+      { name: 'MAIN', cols: [...oneBreakdate(MAIN_COLS), ...customKeys], pick: (r) => involves(r, ['VGFX', 'VEDIT']) },
       { name: 'AUDIO', cols: [...AUDIO_COLS, ...customKeys], pick: (r) => involves(r, ['AUDIO']) },
     ];
 
@@ -357,8 +381,9 @@ router.get('/export', asyncH(async (req, res) => {
     const ws = wb.addWorksheet(sh.name);
     ws.columns = sh.cols.map((k) => {
       const f = fieldsExt[k];
-      return { header: f.label, key: k, width: f.multiline ? 34 : f.kind === 'date' ? 14 : f.kind === 'datetime' ? 20 : 22,
-        style: f.kind === 'date' ? { numFmt: 'mmm d, yyyy' } : f.kind === 'datetime' ? { numFmt: 'mmm d, yyyy h:mm AM/PM' } : {} };
+      const merged = k === 'breakdate_vgfx';   // the shared Breakdate / Time column (text, not a single date)
+      return { header: merged ? 'Breakdate / Time' : f.label, key: k, width: f.multiline ? 34 : f.kind === 'date' ? 14 : f.kind === 'datetime' && !merged ? 20 : 26,
+        style: merged ? {} : f.kind === 'date' ? { numFmt: 'mmm d, yyyy' } : f.kind === 'datetime' ? { numFmt: 'mmm d, yyyy h:mm AM/PM' } : {} };
     });
     // Header row: same fill/border treatment as the web table's header (Excel-mode style)
     ws.getRow(1).eachCell((cell) => {
@@ -373,7 +398,8 @@ router.get('/export', asyncH(async (req, res) => {
       const row = ws.addRow(sh.cols.reduce((o, k) => {
         const f = fieldsExt[k];
         let val = r[k];
-        if (f.kind === 'date') val = asDate(val);
+        if (k === 'breakdate_vgfx') val = null;   // filled in below as two labelled lines (VGFX / VEDIT)
+        else if (f.kind === 'date') val = asDate(val);
         else if (f.kind === 'datetime') { const t = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(val || ''); val = t ? new Date(Date.UTC(+t[1], +t[2] - 1, +t[3], +t[4], +t[5])) : null; }
         else if (k === 'audio_guide' && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = asDate(val);
         else if (k !== 'remarks') val = oneLineText(val);   // every field except Remarks is one line, like the web table
@@ -391,7 +417,21 @@ router.get('/export', asyncH(async (req, res) => {
         }
         if (k === 'audio_guide' && r.audio_guide && /^\d{4}-\d{2}-\d{2}$/.test(r.audio_guide)) cell.numFmt = 'mmm d, yyyy';
 
-        if (f.kind === 'date' || f.kind === 'datetime' || k === 'audio_guide') {
+        if (k === 'breakdate_vgfx') {
+          // Same as the web table: one labelled line per involved team, VGFX on top, VEDIT below (each only if it has a time)
+          const teams = UNIT_TEAMS[r.units_concerned] || [];
+          const lines = [];
+          if (teams.includes('VGFX') && r.breakdate_vgfx) lines.push({ tag: 'VGFX', hue: TEAM_HUE.VGFX, text: fmtBreakdateText(r.breakdate_vgfx) });
+          if (teams.includes('VEDIT') && r.breakdate_vedit) lines.push({ tag: 'VEDIT', hue: TEAM_HUE.VEDIT, text: fmtBreakdateText(r.breakdate_vedit) });
+          if (lines.length) {
+            cell.value = { richText: lines.flatMap((l, i) => [
+              ...(i ? [{ text: '\n', font: { color: { argb: pal.black } } }] : []),
+              { text: `${l.tag}  `, font: { bold: true, color: { argb: pal.pillFg(l.hue) } } },
+              { text: l.text, font: { color: { argb: pal.black } } },
+            ]) };
+          }
+          cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+        } else if (f.kind === 'date' || f.kind === 'datetime' || k === 'audio_guide') {
           if (cell.value != null) cell.font = { color: { argb: pal.black } };
         } else if (k === 'platform' && r.platform) {
           cell.font = { bold: true, color: { argb: pal.black } };
@@ -423,8 +463,10 @@ router.get('/export', asyncH(async (req, res) => {
       const f = fieldsExt[column.key];
       let max = String(f.label).length;
       if (f.kind === 'date') max = Math.max(max, 13);           // 'Sep 28, 2026'
-      if (f.kind === 'datetime') max = Math.max(max, 22);       // 'Sep 28, 2026 11:45 PM'
+      if (f.kind === 'datetime' && column.key !== 'breakdate_vgfx') max = Math.max(max, 22);       // 'Sep 28, 2026 11:45 PM'
+      if (column.key === 'breakdate_vgfx') max = Math.max(max, 'Breakdate / Time'.length);
       column.eachCell({ includeEmpty: false }, (cell) => {
+        if (column.key === 'breakdate_vgfx') { max = Math.max(max, ...cellText(cell.value).split('\n').map((t) => t.length)); return; }
         if ((f.kind === 'date' || f.kind === 'datetime') && cell.value instanceof Date) return; // already sized above
         if (column.key === 'audio_guide' && cell.value instanceof Date) { max = Math.max(max, 13); return; }
         max = Math.max(max, cellText(cell.value).length);
@@ -661,18 +703,21 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
     });
     for (const colNumber of Object.keys(colKeyAt)) {
       const label = String(cellText(headerRow.getCell(Number(colNumber)).value) ?? '').trim();
-      colKeyAt[colNumber] = await keyForHeader(label);
+      // this app's export puts VGFX + VEDIT times in one 'Breakdate / Time' column (one labelled line per team)
+      colKeyAt[colNumber] = label.toLowerCase() === 'breakdate / time' ? '__breakdate' : await keyForHeader(label);
     }
     for (let r = 2; r <= ws.rowCount; r++) {
       const row = ws.getRow(r);
       if (row.cellCount === 0) continue;
       const obj = {};
       let hasAny = false;
+      let breakdateRaw = null;
       for (const [colNumber, key] of Object.entries(colKeyAt)) {
         let val = row.getCell(Number(colNumber)).value;
         if (val == null || val === '') continue;
         hasAny = true;
         const f = fieldsExt[key];
+        if (key === '__breakdate') { breakdateRaw = val; continue; }
         if (key === 'units_concerned') obj[key] = unitsFromCell(val);
         else { val = cellText(val);
           if (f.kind === 'date') obj[key] = val instanceof Date ? isoDate(val) : String(val);
@@ -681,6 +726,19 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
           else obj[key] = String(val); }
       }
       if (!hasAny) continue;
+      if (breakdateRaw != null) {
+        // lines like 'VGFX  Sep 28, 2026 10:00 AM' / 'VEDIT  Sep 28, 2026 10:00 PM'; an unlabelled value goes to the
+        // row's only VGFX/VEDIT team (a real Excel date/time typed by hand is accepted too)
+        const soleTeam = (() => { const ts = (UNIT_TEAMS[obj.units_concerned] || []).filter((t) => t === 'VGFX' || t === 'VEDIT'); return ts.length === 1 ? ts[0] : null; })();
+        const lines = (breakdateRaw instanceof Date ? [isoDateTime(breakdateRaw)] : String(cellText(breakdateRaw)).split(/\r?\n/)).map((x) => x.trim()).filter(Boolean);
+        for (const line of lines) {
+          const lm = /^(VGFX|VEDIT)\b[:\s-]*(.*)$/i.exec(line);
+          const team = lm ? lm[1].toUpperCase() : soleTeam;
+          const text = lm ? lm[2] : line;
+          const iso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text) ? text.slice(0, 16) : parseBreakdateText(text);
+          if (team && iso) obj[team === 'VGFX' ? 'breakdate_vgfx' : 'breakdate_vedit'] = iso;
+        }
+      }
       const rowKey = `${obj.work_date || ''}|||${String(obj.plug_id || '').split('\n')[0].trim()}`;
       merged.set(rowKey, { ...(merged.get(rowKey) || {}), ...obj });
     }
