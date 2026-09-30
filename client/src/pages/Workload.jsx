@@ -171,8 +171,15 @@ export default function Workload() {
   const fileRef = useRef(null);
   const boxRef = useRef(null);    // Excel mode: the focusable wrapper that receives copy / cut / paste / Delete for a range or whole rows
   const drag = useRef(null);      // Excel mode: 'cell' | 'row' | 'col' while the mouse is held down selecting
+  const moveRef = useRef(null);   // Excel mode: latest mouse-move handler for drag selection (kept fresh every render)
   useEffect(() => { setEditing(null); setGridSel(null); }, [tab, mode, offset]);
-  useEffect(() => { const up = () => { drag.current = null; }; window.addEventListener('mouseup', up); return () => window.removeEventListener('mouseup', up); }, []);
+  useEffect(() => {
+    const up = () => { drag.current = null; };
+    const move = (e) => { if (moveRef.current) moveRef.current(e); };
+    window.addEventListener('mouseup', up);
+    window.addEventListener('mousemove', move);
+    return () => { window.removeEventListener('mouseup', up); window.removeEventListener('mousemove', move); };
+  }, []);
   const q = useDebounced(filt.q, 300);
   const isGrid = mode === 'excel' && tab !== 'ALL';
 
@@ -334,8 +341,8 @@ export default function Workload() {
     const multi = next.r0 !== next.r1 || next.c0 !== next.c1;
     if (kind !== 'cell' || multi) { e.preventDefault(); focusBox(); }   // the wrapper (not one cell's input) now owns the keyboard
   };
-  const extendSel = (kind, r, c, e) => {
-    if (drag.current !== kind || !gridSel || !(e.buttons & 1)) return;
+  const extendSel = (kind, r, c) => {
+    if (drag.current !== kind || !gridSel) return;
     const nR = grid.rows.length; const nC = meta.views[tab].length;
     const next = kind === 'row' ? { ...gridSel, r1: r, c0: 0, c1: nC - 1 }
       : kind === 'col' ? { ...gridSel, r0: 0, r1: nR - 1, c1: c }
@@ -343,6 +350,28 @@ export default function Workload() {
     if (next.r0 === gridSel.r0 && next.c0 === gridSel.c0 && next.r1 === gridSel.r1 && next.c1 === gridSel.c1) return;
     setGridSel(next);
     if (next.r0 !== next.r1 || next.c0 !== next.c1) focusBox();
+  };
+  // Drag-selecting: follow the pointer with a window-level mousemove and look up the cell under it, because a mouse
+  // drag that starts inside a text box does not reliably fire mouseenter on the cells it passes over.
+  moveRef.current = (e) => {
+    const kind = drag.current;
+    if (!kind) return;
+    if (!(e.buttons & 1)) { drag.current = null; return; }
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el || !el.closest) return;
+    if (kind === 'row') { const tr = el.closest('tr[data-ri]'); if (tr) extendSel('row', +tr.dataset.ri, 0); return; }
+    const hit = el.closest('[data-c]');
+    if (!hit) return;
+    if (kind === 'col') extendSel('col', 0, +hit.dataset.c);
+    else if (hit.dataset.r !== undefined) extendSel('cell', +hit.dataset.r, +hit.dataset.c);
+  };
+  // Mouse down anywhere in a cell (its padding included, not just the text box) selects it and puts the cursor in it
+  const cellMouseDown = (ri, ci) => (e) => {
+    startSel('cell', ri, ci, e);
+    if (e.shiftKey || isTextTarget(e.target)) return;
+    e.preventDefault();
+    const f = e.currentTarget.querySelector('input, textarea');
+    if (f) { f.focus(); try { const n = f.value.length; f.setSelectionRange(n, n); } catch (err) { /* not a text control */ } }
   };
   // Real spreadsheets quote a cell's text (wrapping in "…", doubling any internal ") when it contains a tab or a
   // newline, so a multi-line cell (Remarks, VO, ...) survives being copied as part of a larger range. Match that.
@@ -694,23 +723,22 @@ export default function Workload() {
                           <th className="rn" title="Select all" onMouseDown={(e) => startSel('all', 0, 0, e)} />
                           {cols.map((k, ci) => (
                             <th key={k} className={`xl-colhead${colInSel(ci) ? ' hl' : ''}`} title="Click to select the column"
-                              onMouseDown={(e) => startSel('col', 0, ci, e)} onMouseEnter={(e) => extendSel('col', 0, ci, e)}>{meta.fields[k].label}</th>
+                              data-c={ci} onMouseDown={(e) => startSel('col', 0, ci, e)}>{meta.fields[k].label}</th>
                           ))}
                           {canWrite ? <th /> : null}
                         </tr>
                       </thead>
                       <tbody>
                         {grid.rows.length ? grid.rows.map((r, ri) => (
-                          <tr key={r._key} className={r._dirty ? 'dirty' : ''}>
+                          <tr key={r._key} data-ri={ri} className={r._dirty ? 'dirty' : ''}>
                             <td className={`rn${rowInSel(ri) ? ' hl' : ''}`} title="Click to select the whole row (Ctrl+C to copy)"
-                              onMouseDown={(e) => startSel('row', ri, 0, e)} onMouseEnter={(e) => extendSel('row', ri, 0, e)}>{ri + 1}</td>
+                              onMouseDown={(e) => startSel('row', ri, 0, e)}>{ri + 1}</td>
                             {cols.map((k, ci) => (
-                              <td key={k} data-k={k} onMouseEnter={(e) => extendSel('cell', ri, ci, e)}
+                              <td key={k} data-k={k} data-r={ri} data-c={ci} onMouseDown={cellMouseDown(ri, ci)}
                                 className={`${selClass(ri, ci)}${r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit') ? ' prio' : ''}`.trim()}>
                                 <GridCellInput
                                   def={meta.fields[k]} value={r[k]} disabled={!canWrite}
                                   onChange={(e) => setCell(r._key, k, e.target.value)}
-                                  onMouseDown={(e) => startSel('cell', ri, ci, e)}
                                 />
                               </td>
                             ))}
@@ -722,7 +750,7 @@ export default function Workload() {
                   )}
             </div>
             {canWrite && grid && !grid.error ? (
-              <div className="xl-hint dim">Click a row number to select the whole row, then Ctrl+C / Ctrl+X / Ctrl+V · drag or Shift+click for a range · paste below the last row adds rows · Delete clears</div>
+              <div className="xl-hint dim">Click a cell to edit it · drag across cells or Shift+click to select just those cells · click a row number for the whole row · Ctrl+C / Ctrl+X / Ctrl+V · paste below the last row adds rows · Delete clears</div>
             ) : null}
             {grid && grid.total > GRID_LIMIT ? (
               <div className="pager"><span>Showing the first {GRID_LIMIT} of {grid.total} rows — narrow the date range to edit the rest.</span></div>
