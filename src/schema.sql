@@ -301,3 +301,16 @@ WHERE NOT EXISTS (SELECT 1 FROM dropdown_options WHERE category = 'plug_type');
 -- Themes: older installs stored the Midnight accent as an explicit override; clear it so the theme's own accent applies
 INSERT INTO app_settings (key, value) VALUES ('theme', 'midnight') ON CONFLICT (key) DO NOTHING;
 UPDATE app_settings SET value = '' WHERE key = 'accent_color' AND lower(value) = '#4f8cff';
+
+-- Custom Workload columns: admins can add extra columns beyond the template's fixed fields. Values live in
+-- workload_items.custom_fields as {col_key: text}, so adding/removing a column never requires an ALTER TABLE
+-- or a migration; col_key is 'custom_<id>' (not the label) so renaming/duplicate labels are never a problem.
+CREATE TABLE IF NOT EXISTS workload_custom_columns (
+  id          SERIAL PRIMARY KEY,
+  col_key     TEXT UNIQUE,   -- set to 'custom_'||id right after insert
+  label       TEXT NOT NULL,
+  sort_order  INT NOT NULL DEFAULT 0,
+  created_by  INT REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS custom_fields JSONB NOT NULL DEFAULT '{}'::jsonb;

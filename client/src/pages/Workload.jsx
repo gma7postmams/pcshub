@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { DownloadIcon, PlusIcon, SearchIcon } from '../components/Icons.jsx';
+import { ColumnIcon, DownloadIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
 import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
@@ -146,6 +146,9 @@ export default function Workload() {
   const [form, setForm] = useState(null);   // null | { rec } (rec null = new)
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(null);   // { id, k } while one table cell is open for editing
+  const [addingColumn, setAddingColumn] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const fileRef = useRef(null);
   useEffect(() => { setEditing(null); }, [tab, mode, offset]);
   const q = useDebounced(filt.q, 300);
   const isGrid = mode === 'excel' && tab !== 'ALL';
@@ -160,11 +163,12 @@ export default function Workload() {
   }, []);
   const cards = mode === 'table' && winW < CARDS_BELOW;
 
-  useEffect(() => {
+  const loadMeta = useCallback(() => {
     Promise.all([get('/api/workload/meta'), get('/api/dropdowns?categories=workload_platform,plug_type')])
       .then(([m, dd]) => { setMeta(m); setLookups(dd); })
       .catch((e) => toast(e.message, 'err'));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(loadMeta, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const query = useCallback((extra = {}) => {
     const p = new URLSearchParams(extra);
@@ -258,7 +262,25 @@ export default function Workload() {
     } catch (e) { toast(e.message, 'err'); }
   };
 
-  // ---- grid operations ----
+  // ---- Import: reads a .xlsx shaped like this page's own Export (MAIN/AUDIO sheets, matching headers) ----
+  const importFile = async (file) => {
+    if (!file) return;
+    const form2 = new FormData();
+    form2.append('file', file);
+    setImporting(true);
+    try {
+      const out = await post('/api/workload/import', form2);
+      const bits = [`${out.created} row${out.created === 1 ? '' : 's'} imported`];
+      if (out.skipped) bits.push(`${out.skipped} skipped`);
+      if (out.newColumns && out.newColumns.length) bits.push(`new column${out.newColumns.length === 1 ? '' : 's'}: ${out.newColumns.join(', ')}`);
+      toast(bits.join(' — '), out.skipped ? 'err' : undefined);
+      if (out.errors && out.errors.length) console.warn('Import errors:', out.errors);
+      if (out.newColumns && out.newColumns.length) loadMeta();
+      load();
+    } catch (e) { toast(e.message, 'err'); } finally { setImporting(false); if (fileRef.current) fileRef.current.value = ''; }
+  };
+
+
   const setCell = (key, k, val) => setGrid((g) => ({
     ...g, rows: g.rows.map((r) => (r._key === key ? { ...withAutoPlatform(meta.platformRules, r, k, val), _dirty: true } : r)),
   }));
@@ -400,6 +422,17 @@ export default function Workload() {
               <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
             </div>
             <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
+            {canWrite ? (
+              <>
+                <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} />
+                <button type="button" className="btn" id="import-btn" disabled={importing} onClick={() => fileRef.current.click()}>
+                  <UploadIcon /> {importing ? 'Importing…' : 'Import'}
+                </button>
+              </>
+            ) : null}
+            {s.canPage('/admin') ? (
+              <button type="button" className="btn" id="add-column-btn" onClick={() => setAddingColumn(true)}><ColumnIcon /> Add Column</button>
+            ) : null}
             {canWrite && !isGrid ? (
               <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({ rec: null })}><PlusIcon /> New Workload</button>
             ) : null}
@@ -497,7 +530,52 @@ export default function Workload() {
           onSaved={() => { setForm(null); load(); }}
         />
       ) : null}
+      {addingColumn ? (
+        <AddColumnModal
+          onClose={() => setAddingColumn(false)}
+          onAdded={() => { setAddingColumn(false); loadMeta(); }}
+        />
+      ) : null}
     </main>
+  );
+}
+
+// Admin-only: name a new column. It shows up everywhere (Table, Excel grid, the add/edit form, Excel export)
+// as a plain open-text field, appended after the template's own columns.
+function AddColumnModal({ onClose, onAdded }) {
+  const toast = useToast();
+  const [label, setLabel] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    const name = label.trim();
+    if (!name) { toast('Enter a name for the column', 'err'); return; }
+    setBusy(true);
+    try {
+      const out = await post('/api/admin/workload-columns', { label: name });
+      toast('Column added');
+      onAdded(out.column);
+    } catch (e) { toast(e.message, 'err'); setBusy(false); }
+  };
+  return (
+    <Modal
+      title="Add Column"
+      onClose={onClose}
+      footer={(
+        <>
+          <span className="grow" />
+          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn primary" disabled={busy} onClick={submit}>Add</button>
+        </>
+      )}
+    >
+      <form className="form-grid" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <label className="f full">
+          <span>Column name</span>
+          <input autoFocus maxLength={60} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Client Approval" />
+        </label>
+        <div className="full dim">Shows up as a plain text column everywhere — Table, Excel, the form, and the export — for every row.</div>
+      </form>
+    </Modal>
   );
 }
 
