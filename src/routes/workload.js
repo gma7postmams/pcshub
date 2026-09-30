@@ -129,16 +129,16 @@ function parseCustomFields(customCols, body) {
 const flattenCustom = (row) => ({ ...row, ...(row.custom_fields || {}) });
 
 // ---------- Date locks: an Admin can freeze a date range so its rows can't be edited/deleted, and no new row
-// can be created dated inside it. Admins themselves can still override (a period lock, not a hard wall). ----------
+// can be created dated inside it. The lock applies to everyone, Admins included; an Admin lifts it via Lock Dates → Unlock. ----------
 async function loadLocks(client) {
   const { rows } = await client.query('SELECT id, from_date, to_date, note FROM workload_locks ORDER BY from_date DESC');
   return rows;
 }
-/** Throws if `dateStr` (a work_date, 'YYYY-MM-DD') falls in any lock, unless the user is Admin. */
-function assertNotLocked(locks, dateStr, user) {
-  if (!dateStr || (user && user.role === 'Admin')) return;
+/** Throws if `dateStr` (a work_date, 'YYYY-MM-DD') falls in any lock (no role is exempt; unlock the range first). */
+function assertNotLocked(locks, dateStr) {
+  if (!dateStr) return;
   const hit = locks.find((l) => dateStr >= l.from_date && dateStr <= l.to_date);
-  if (hit) throw new HttpError(423, `${dateStr} is in a locked period${hit.note ? ` (${hit.note})` : ''} and can't be edited. Ask an Admin.`);
+  if (hit) throw new HttpError(423, `${dateStr} is in a locked period${hit.note ? ` (${hit.note})` : ''} and can't be edited. An Admin must unlock it first (Lock Dates).`);
 }
 
 router.get('/meta', asyncH(async (req, res) => {
@@ -148,7 +148,7 @@ router.get('/meta', asyncH(async (req, res) => {
     ready: true, units: UNITS, unitTeams: UNIT_TEAMS, tabs: ['ALL', ...TEAMS].map((key) => ({ key, label: TAB_LABEL[key] })),
     tabDefaultUnits: TAB_DEFAULT_UNITS, audioExtra: AUDIO_EXTRA, fields: extendFields(customCols), views: extendViews(customCols),
     platformRules: PLATFORM_RULES, customColumns: customCols.map((c) => ({ id: c.id, key: c.col_key, label: c.label })),
-    locks, canOverrideLocks: req.user.role === 'Admin',
+    locks,
   });
 }));
 
@@ -446,7 +446,7 @@ router.post('/', requireAction('workload.write'), asyncH(async (req, res) => {
   const locks = await loadLocks(db);
   const id = await db.tx(async (c) => {
     const rec = await parseRow(c, req.body, null, customCols);
-    assertNotLocked(locks, rec.work_date, req.user);
+    assertNotLocked(locks, rec.work_date);
     const newId = await insertRow(c, rec, req.user.id);
     await audit(req, 'workload.create', 'workload_item', newId, rec, c);
     return newId;
@@ -471,15 +471,15 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           const id = v.id(row.id);
           const cur = await c.query(`SELECT ${CUR_COLS} FROM workload_items WHERE id=$1 FOR UPDATE`, [id]);
           if (!cur.rows.length) throw new HttpError(404, 'Row no longer exists (deleted by someone else?)');
-          assertNotLocked(locks, cur.rows[0].work_date, req.user);
+          assertNotLocked(locks, cur.rows[0].work_date);
           const rec = await parseRow(c, row, cur.rows[0], customCols);
-          assertNotLocked(locks, rec.work_date, req.user);
+          assertNotLocked(locks, rec.work_date);
           await updateRow(c, id, rec, req.user.id);
           await audit(req, 'workload.update', 'workload_item', id, rec, c);
           updated++;
         } else {
           const rec = await parseRow(c, row, null, customCols);
-          assertNotLocked(locks, rec.work_date, req.user);
+          assertNotLocked(locks, rec.work_date);
           const id = await insertRow(c, rec, req.user.id);
           await audit(req, 'workload.create', 'workload_item', id, rec, c);
           created++;
@@ -507,7 +507,7 @@ router.patch('/:id', requireAction('workload.write'), asyncH(async (req, res) =>
   if (customCol) {
     const curRow = await db.query('SELECT work_date FROM workload_items WHERE id=$1', [id]);
     if (!curRow.rows.length) throw new HttpError(404, 'Workload item not found');
-    assertNotLocked(locks, curRow.rows[0].work_date, req.user);
+    assertNotLocked(locks, curRow.rows[0].work_date);
     // Custom columns live in one shared JSONB blob; merge just this key so two people editing different
     // custom columns on the same row (or a custom column and a regular one) never overwrite each other.
     const value = v.str(req.body.value, { field: customCol.label, max: 2000 });
@@ -523,13 +523,13 @@ router.patch('/:id', requireAction('workload.write'), asyncH(async (req, res) =>
     const found = await c.query('SELECT * FROM workload_items WHERE id=$1 FOR UPDATE', [id]);
     if (!found.rows.length) throw new HttpError(404, 'Workload item not found');
     const cur = found.rows[0];
-    assertNotLocked(locks, cur.work_date, req.user);
+    assertNotLocked(locks, cur.work_date);
     const merged = {};
     COLS.forEach((k) => { merged[k] = cur[k]; });
     merged[field] = req.body.value;
     if (field === 'plug_id' && (!cur.platform || cur.platform === derivePlatform(cur.plug_id))) merged.platform = '';
     const rec = await parseRow(c, merged, cur, customCols);
-    assertNotLocked(locks, rec.work_date, req.user);
+    assertNotLocked(locks, rec.work_date);
     const changed = field === 'plug_id' ? ['plug_id', 'platform'] : [field];
     await c.query(
       `UPDATE workload_items SET ${changed.map((k, i) => `"${k}"=$${i + 2}`).join(', ')}, updated_by=$${changed.length + 2}, updated_at=now() WHERE id=$1`,
@@ -550,9 +550,9 @@ router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
   await db.tx(async (c) => {
     const cur = await c.query(`SELECT ${CUR_COLS} FROM workload_items WHERE id=$1 FOR UPDATE`, [id]);
     if (!cur.rows.length) throw new HttpError(404, 'Workload item not found');
-    assertNotLocked(locks, cur.rows[0].work_date, req.user);
+    assertNotLocked(locks, cur.rows[0].work_date);
     const rec = await parseRow(c, req.body, cur.rows[0], customCols);
-    assertNotLocked(locks, rec.work_date, req.user);
+    assertNotLocked(locks, rec.work_date);
     await updateRow(c, id, rec, req.user.id);
     await audit(req, 'workload.update', 'workload_item', id, rec, c);
   });
@@ -564,7 +564,7 @@ router.delete('/:id', requireAction('workload.write'), asyncH(async (req, res) =
   const locks = await loadLocks(db);
   const cur = await db.query('SELECT work_date FROM workload_items WHERE id=$1', [id]);
   if (!cur.rows.length) throw new HttpError(404, 'Workload item not found');
-  assertNotLocked(locks, cur.rows[0].work_date, req.user);
+  assertNotLocked(locks, cur.rows[0].work_date);
   const { rows } = await db.query(
     'DELETE FROM workload_items WHERE id=$1 RETURNING work_date, units_concerned, plug_id', [id]
   );
@@ -693,7 +693,7 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
     for (const fields of merged.values()) {
       try {
         const rec = await parseRow(c, fields, null, customCols);
-        assertNotLocked(locks, rec.work_date, req.user);
+        assertNotLocked(locks, rec.work_date);
         const id = await insertRow(c, rec, req.user.id);
         await audit(req, 'workload.create', 'workload_item', id, { imported: true, plug_id: fields.plug_id }, c);
         created++;

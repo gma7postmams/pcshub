@@ -425,7 +425,7 @@ export default function Workload() {
     const val = r[k];
     const common = { key: k, 'data-k': k, 'data-label': head(k) };
     switch (k) {
-      case 'work_date': return <td {...common}><WorkDate value={val} />{isLocked(val, meta.locks) ? <span className="row-lock" title={`Locked: ${lockNote(val, meta.locks)}${meta.canOverrideLocks ? ' (Admins can still edit)' : ''}`}><LockIcon /></span> : null}</td>;
+      case 'work_date': return <td {...common}><WorkDate value={val} />{isLocked(val, meta.locks) ? <span className="row-lock" title={`Locked: ${lockNote(val, meta.locks)}`}><LockIcon /></span> : null}</td>;
       case 'platform': return <td {...common}><PlatformCell value={val} /></td>;
       case 'units_concerned': return <td {...common}><UnitsPills value={val} unitTeams={meta.unitTeams} /></td>;
       case 'plug_type': return <td {...common}><TypePill value={val} /></td>;
@@ -454,7 +454,7 @@ export default function Workload() {
   };
 
   // Managers click a cell to edit just that cell (nothing else opens); viewers just read.
-  const rowLocked = (r) => !meta.canOverrideLocks && isLocked(r.work_date, meta.locks);
+  const rowLocked = (r) => isLocked(r.work_date, meta.locks);
   const cell = (r, k) => {
     const td = cellView(r, k);
     if (!canWrite) return td;
@@ -631,9 +631,9 @@ export default function Workload() {
                               {canWrite ? (
                                 <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
                                   <RowMenu
-                                  onEdit={() => (rowLocked(r) ? toast(`Locked: ${lockNote(r.work_date, meta.locks)}. Ask an Admin.`, 'err') : setForm({ rec: r }))}
+                                  onEdit={() => (rowLocked(r) ? toast(`Locked: ${lockNote(r.work_date, meta.locks)}. An Admin must unlock it first.`, 'err') : setForm({ rec: r }))}
                                   onDuplicate={() => setForm({ rec: null, duplicateFrom: r })}
-                                  onDelete={() => (rowLocked(r) ? toast(`Locked: ${lockNote(r.work_date, meta.locks)}. Ask an Admin.`, 'err') : deleteItem(r))}
+                                  onDelete={() => (rowLocked(r) ? toast(`Locked: ${lockNote(r.work_date, meta.locks)}. An Admin must unlock it first.`, 'err') : deleteItem(r))}
                                 />
                                 </td>
                               ) : null}
@@ -662,8 +662,10 @@ export default function Workload() {
       ) : null}
       {addingColumn ? (
         <AddColumnModal
+          columns={meta.customColumns || []}
           onClose={() => setAddingColumn(false)}
           onAdded={() => { setAddingColumn(false); loadMeta(); }}
+          onChanged={() => { loadMeta(); load(); }}
         />
       ) : null}
       {managingLocks ? (
@@ -679,10 +681,15 @@ export default function Workload() {
 
 // Admin-only: name a new column. It shows up everywhere (Table, Excel grid, the add/edit form, Excel export)
 // as a plain open-text field, appended after the template's own columns.
-function AddColumnModal({ onClose, onAdded }) {
+function AddColumnModal({ columns, onClose, onAdded, onChanged }) {
   const toast = useToast();
   const [label, setLabel] = useState('');
   const [busy, setBusy] = useState(false);
+  const confirm = useConfirm();
+  const removeColumn = async (col) => {
+    if (!(await confirm(`Delete the "${col.label}" column?`, 'It disappears from the Table, Excel grid, form and export. Values already entered are kept in the database but hidden.', { danger: true }))) return;
+    try { await del(`/api/admin/workload-columns/${col.id}`); toast('Column deleted'); onChanged(); } catch (e) { toast(e.message, 'err'); }
+  };
   const submit = async () => {
     const name = label.trim();
     if (!name) { toast('Enter a name for the column', 'err'); return; }
@@ -705,6 +712,19 @@ function AddColumnModal({ onClose, onAdded }) {
         </>
       )}
     >
+      {columns.length ? (
+        <>
+          <div className="dim" style={{ marginBottom: 8 }}>Added columns</div>
+          <ul className="lock-list">
+            {columns.map((c) => (
+              <li key={c.id}>
+                <span><strong>{c.label}</strong></span>
+                <button type="button" className="btn" onClick={() => removeColumn(c)}>Delete</button>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
       <form className="form-grid" onSubmit={(e) => { e.preventDefault(); submit(); }}>
         <label className="f full">
           <span>Column name</span>
@@ -717,7 +737,7 @@ function AddColumnModal({ onClose, onAdded }) {
 }
 
 // Admin-only: freeze a date range so its rows can't be edited/deleted, and no new row can be created dated
-// inside it. Admins can still override; this is a period lock, not a hard permission wall.
+// inside it. Applies to everyone (Admins included) until the range is unlocked here.
 function LockManagerModal({ locks, onClose, onChanged }) {
   const toast = useToast();
   const confirm = useConfirm();
@@ -741,7 +761,7 @@ function LockManagerModal({ locks, onClose, onChanged }) {
   };
   return (
     <Modal title="Lock Dates" onClose={onClose} footer={<><span className="grow" /><button type="button" className="btn" onClick={onClose}>Close</button></>}>
-      <div className="dim" style={{ marginBottom: 12 }}>Rows dated inside a locked range can't be edited or deleted by Managers (Admins can still override).</div>
+      <div className="dim" style={{ marginBottom: 12 }}>Rows dated inside a locked range can't be edited, deleted, or added to by anyone — Admins included — until you unlock the range.</div>
       {locks.length ? (
         <ul className="lock-list">
           {locks.map((l) => (
