@@ -485,7 +485,7 @@ export default function Workload() {
     const locked = canWrite && rowLocked(r);
     return (
       <td key="breakdate_vgfx" data-k="breakdate_vgfx" className={r.is_priority ? 'prio' : undefined} title={locked ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}>
-        <span className="chips">
+        <span className="chips bd-chips">
           {parts.map(({ k, hue, tag }) => {
             if (editing && editing.id === r.id && editing.k === k) {
               return (
