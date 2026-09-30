@@ -207,18 +207,21 @@ async function parseRow(client, body, current, customCols = []) {
   }
   await assertOption(client, 'workload_platform', rec.platform, 'Platform', cur.platform);
   await assertOption(client, 'plug_type', rec.plug_type, 'Plug Type', cur.plug_type);
+  // Priority flag (not a template column, so it lives outside FIELDS): keep the stored value when the request doesn't mention it
+  const p = body.is_priority;
+  rec.is_priority = p === undefined || p === null ? !!cur.is_priority : (p === true || p === 'true' || p === 1 || p === '1');
   rec.custom_fields = parseCustomFields(customCols, body);
   return rec;
 }
 
 const colList = COLS.map((c) => `"${c}"`);
-const CUR_COLS = 'platform, plug_type, audio_guide, work_date';
+const CUR_COLS = 'platform, plug_type, audio_guide, work_date, is_priority';
 
 async function insertRow(client, rec, userId) {
-  const params = [...COLS.map((c) => rec[c]), JSON.stringify(rec.custom_fields || {}), userId];
+  const params = [...COLS.map((c) => rec[c]), !!rec.is_priority, JSON.stringify(rec.custom_fields || {}), userId];
   const { rows } = await client.query(
-    `INSERT INTO workload_items (${colList.join(',')}, custom_fields, created_by, updated_by)
-     VALUES (${COLS.map((_, i) => `$${i + 1}`).join(',')}, $${COLS.length + 1}::jsonb, $${COLS.length + 2}, $${COLS.length + 2}) RETURNING id`,
+    `INSERT INTO workload_items (${colList.join(',')}, is_priority, custom_fields, created_by, updated_by)
+     VALUES (${COLS.map((_, i) => `$${i + 1}`).join(',')}, $${COLS.length + 1}, $${COLS.length + 2}::jsonb, $${COLS.length + 3}, $${COLS.length + 3}) RETURNING id`,
     params
   );
   return rows[0].id;
@@ -226,9 +229,9 @@ async function insertRow(client, rec, userId) {
 
 async function updateRow(client, id, rec, userId) {
   const sets = COLS.map((c, i) => `"${c}"=$${i + 2}`).join(', ');
-  const params = [id, ...COLS.map((c) => rec[c]), JSON.stringify(rec.custom_fields || {}), userId];
+  const params = [id, ...COLS.map((c) => rec[c]), !!rec.is_priority, JSON.stringify(rec.custom_fields || {}), userId];
   await client.query(
-    `UPDATE workload_items SET ${sets}, custom_fields=$${COLS.length + 2}::jsonb, updated_by=$${COLS.length + 3}, updated_at=now() WHERE id=$1`, params
+    `UPDATE workload_items SET ${sets}, is_priority=$${COLS.length + 2}, custom_fields=$${COLS.length + 3}::jsonb, updated_by=$${COLS.length + 4}, updated_at=now() WHERE id=$1`, params
   );
 }
 

@@ -484,7 +484,7 @@ export default function Workload() {
     if (teams.includes('VEDIT')) parts.push({ k: 'breakdate_vedit', hue: 'orange' });
     const locked = canWrite && rowLocked(r);
     return (
-      <td key="breakdate_vgfx" data-k="breakdate_vgfx" title={locked ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}>
+      <td key="breakdate_vgfx" data-k="breakdate_vgfx" className={r.is_priority ? 'prio' : undefined} title={locked ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}>
         <span className="chips">
           {parts.map(({ k, hue }) => {
             if (editing && editing.id === r.id && editing.k === k) {
@@ -596,7 +596,7 @@ export default function Workload() {
                         {grid.rows.length ? grid.rows.map((r, ri) => (
                           <tr key={r._key} className={r._dirty ? 'dirty' : ''}>
                             {cols.map((k, ci) => (
-                              <td key={k} data-k={k} className={inGridSel(ri, ci) ? 'xl-sel' : ''}>
+                              <td key={k} data-k={k} className={`${inGridSel(ri, ci) ? 'xl-sel' : ''}${r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit') ? ' prio' : ''}`.trim()}>
                                 <GridCellInput
                                   def={meta.fields[k]} value={r[k]} disabled={!canWrite}
                                   onChange={(e) => setCell(r._key, k, e.target.value)}
@@ -788,6 +788,7 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
   const [busy, setBusy] = useState(false);
   const initial = Object.keys(meta.fields).reduce((o, k) => ({ ...o, [k]: (rec && rec[k]) ?? (duplicateFrom && duplicateFrom[k]) ?? '' }), {});
   if (!rec && !duplicateFrom) { initial.work_date = isoDate(); initial.units_concerned = defaultUnits; }
+  initial.is_priority = !!(rec && rec.is_priority);   // a duplicate is a new item, so it starts un-prioritised
   const [f, , setAll] = useForm(initial);
   const set = (k) => (e) => {
     const val = e && e.target ? e.target.value : e;
@@ -846,6 +847,12 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
           <FieldInput def={meta.fields.work_date} value={f.work_date} onChange={set('work_date')} disabled={!canWrite} lookups={lookups} /></label>
         <label className="f"><span>Units Concerned <span className="req">*</span></span>
           <FieldInput def={meta.fields.units_concerned} value={f.units_concerned} onChange={set('units_concerned')} disabled={!canWrite} lookups={lookups} /></label>
+        <label className="f full prio-toggle">
+          <span>
+            <input type="checkbox" checked={!!f.is_priority} disabled={!canWrite} onChange={(e) => setAll((prev) => ({ ...prev, is_priority: e.target.checked }))} />
+            {' '}Priority <span className="dim">— highlights this item's Breakdate / Time</span>
+          </span>
+        </label>
         {!f.units_concerned ? <div className="full dim">Choose Units Concerned to see the fields.</div> : shown.map((k) => {
           const def = meta.fields[k];
           return (

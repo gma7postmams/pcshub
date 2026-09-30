@@ -327,3 +327,6 @@ CREATE TABLE IF NOT EXISTS workload_locks (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK (to_date >= from_date)
 );
+
+-- Workload priority flag: a prioritised row gets its Breakdate/Time cell highlighted in the UI.
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS is_priority BOOLEAN NOT NULL DEFAULT false;

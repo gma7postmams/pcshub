@@ -627,3 +627,8 @@ table.t.wl .cell-editor-inline .cell-editor { min-width: 190px; }
 
 .row-lock { display: inline-flex; vertical-align: middle; margin-left: 6px; color: var(--text-2); }
 .row-lock svg { width: 14px; height: 14px; }
+
+/* Prioritised workload row: highlight its Breakdate / Time cell */
+table.t.wl td.prio, table.t.wl tr:hover td.prio { background: color-mix(in srgb, #f59e0b 26%, transparent); box-shadow: inset 3px 0 0 #f59e0b; }
+.prio-toggle > span { display: flex; align-items: center; gap: 4px; font-size: 14px; color: var(--text); font-weight: 600; cursor: pointer; }
+.prio-toggle .dim { font-weight: 400; }
