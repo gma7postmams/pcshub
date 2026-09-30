@@ -92,8 +92,14 @@ function FieldInput({ def, value, onChange, disabled, lookups, auto }) {
 // selection and copy/paste; they pass straight through.
 function GridCellInput({ def, value, onChange, disabled, ...rest }) {
   const v = value ?? '';
-  if (def.multiline) return <AutoTextarea maxLength={def.max} placeholder={def.hint} value={v} disabled={disabled} onChange={onChange} {...rest} />;
-  return <input maxLength={def.max} placeholder={def.hint} value={v} disabled={disabled} onChange={onChange} {...rest} />;
+  // The wrapper's hidden ::after copies the text (data-value) so the cell is exactly as wide (and, for multi-line
+  // fields, as tall) as its content — nothing is cropped — while the real input/textarea fills that same box.
+  const Field = def.multiline ? 'textarea' : 'input';
+  return (
+    <div className={`xl-cell${def.multiline ? ' multi' : ''}`} data-value={`${v}\u200b`}>
+      <Field maxLength={def.max} placeholder={def.hint} value={v} disabled={disabled} onChange={onChange} rows={def.multiline ? 1 : undefined} {...rest} />
+    </div>
+  );
 }
 
 // One table cell turned into its own editor. Enter or clicking away saves, Esc cancels; dropdowns save as soon as you pick.
