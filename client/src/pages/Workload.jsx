@@ -163,7 +163,10 @@ export default function Workload() {
   const [managingLocks, setManagingLocks] = useState(false);
   const [importing, setImporting] = useState(false);
   const fileRef = useRef(null);
+  const boxRef = useRef(null);    // Excel mode: the focusable wrapper that receives copy / cut / paste / Delete for a range or whole rows
+  const drag = useRef(null);      // Excel mode: 'cell' | 'row' | 'col' while the mouse is held down selecting
   useEffect(() => { setEditing(null); setGridSel(null); }, [tab, mode, offset]);
+  useEffect(() => { const up = () => { drag.current = null; }; window.addEventListener('mouseup', up); return () => window.removeEventListener('mouseup', up); }, []);
   const q = useDebounced(filt.q, 300);
   const isGrid = mode === 'excel' && tab !== 'ALL';
 
@@ -299,9 +302,42 @@ export default function Workload() {
     ...g, rows: g.rows.map((r) => (r._key === key ? { ...withAutoPlatform(meta.platformRules, r, k, val), _dirty: true } : r)),
   }));
 
-  // ---- Excel mode: click-and-shift-click cell range selection, plus Excel-style copy/paste across it ----
+  // ---- Excel mode: works like a spreadsheet ----
+  // Click a cell, drag or Shift+click for a range; click a ROW NUMBER to select the whole row (drag / Shift+click for
+  // several rows), a column header for the whole column, the corner for everything. Ctrl+C / Ctrl+X / Ctrl+V copy,
+  // cut and paste whole rows or any range as tab-separated text (so it also pastes into / from a real Excel sheet),
+  // pasting past the last row adds new rows, one copied value fills a selected range, Delete clears the selection.
   // (Excel mode only — Table mode's click-to-edit and the New/Edit form keep their pickers/dropdowns.)
-  const gridClickCell = (r, c, e) => { setGridSel((s) => (e.shiftKey && s ? { ...s, r1: r, c1: c } : { r0: r, c0: c, r1: r, c1: c })); };
+  const normSel = () => (gridSel ? {
+    rLo: Math.min(gridSel.r0, gridSel.r1), rHi: Math.max(gridSel.r0, gridSel.r1),
+    cLo: Math.min(gridSel.c0, gridSel.c1), cHi: Math.max(gridSel.c0, gridSel.c1),
+  } : null);
+  const isTextTarget = (el) => !!el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
+  const focusBox = () => { if (boxRef.current) boxRef.current.focus({ preventScroll: true }); try { window.getSelection().removeAllRanges(); } catch (err) { /* nothing to clear */ } };
+  const startSel = (kind, r, c, e) => {
+    const nR = grid.rows.length; const nC = meta.views[tab].length;
+    if (!nR || !nC) return;
+    drag.current = kind;
+    const ext = e.shiftKey && gridSel;
+    let next;
+    if (kind === 'row') next = ext ? { r0: gridSel.r0, c0: 0, r1: r, c1: nC - 1 } : { r0: r, c0: 0, r1: r, c1: nC - 1 };
+    else if (kind === 'col') next = ext ? { r0: 0, c0: gridSel.c0, r1: nR - 1, c1: c } : { r0: 0, c0: c, r1: nR - 1, c1: c };
+    else if (kind === 'all') { next = { r0: 0, c0: 0, r1: nR - 1, c1: nC - 1 }; drag.current = null; }
+    else next = ext ? { ...gridSel, r1: r, c1: c } : { r0: r, c0: c, r1: r, c1: c };
+    setGridSel(next);
+    const multi = next.r0 !== next.r1 || next.c0 !== next.c1;
+    if (kind !== 'cell' || multi) { e.preventDefault(); focusBox(); }   // the wrapper (not one cell's input) now owns the keyboard
+  };
+  const extendSel = (kind, r, c, e) => {
+    if (drag.current !== kind || !gridSel || !(e.buttons & 1)) return;
+    const nR = grid.rows.length; const nC = meta.views[tab].length;
+    const next = kind === 'row' ? { ...gridSel, r1: r, c0: 0, c1: nC - 1 }
+      : kind === 'col' ? { ...gridSel, r0: 0, r1: nR - 1, c1: c }
+        : { ...gridSel, r1: r, c1: c };
+    if (next.r0 === gridSel.r0 && next.c0 === gridSel.c0 && next.r1 === gridSel.r1 && next.c1 === gridSel.c1) return;
+    setGridSel(next);
+    if (next.r0 !== next.r1 || next.c0 !== next.c1) focusBox();
+  };
   // Real spreadsheets quote a cell's text (wrapping in "…", doubling any internal ") when it contains a tab or a
   // newline, so a multi-line cell (Remarks, VO, ...) survives being copied as part of a larger range. Match that.
   const tsvCell = (v) => { const s = String(v ?? ''); return /[\t\n"]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -322,44 +358,100 @@ export default function Workload() {
     if (rows.length > 1 && rows[rows.length - 1].length === 1 && rows[rows.length - 1][0] === '') rows.pop();   // trailing blank line
     return rows;
   };
-  const inGridSel = (r, c) => {
-    if (!gridSel) return false;
-    const { r0, c0, r1, c1 } = gridSel;
-    return r >= Math.min(r0, r1) && r <= Math.max(r0, r1) && c >= Math.min(c0, c1) && c <= Math.max(c0, c1);
+  // 'xl-sel' plus which edges of the range this cell sits on (so only the OUTLINE of a range is drawn, like Excel)
+  const selClass = (r, c) => {
+    const n = normSel();
+    if (!n || r < n.rLo || r > n.rHi || c < n.cLo || c > n.cHi) return '';
+    return `xl-sel${r === n.rLo ? ' xl-t' : ''}${r === n.rHi ? ' xl-b' : ''}${c === n.cLo ? ' xl-l' : ''}${c === n.cHi ? ' xl-r' : ''}`;
   };
-  const gridCopy = (cols) => (e) => {
-    if (!gridSel || (gridSel.r0 === gridSel.r1 && gridSel.c0 === gridSel.c1)) return;   // one cell: let the browser copy the selected text normally
-    const { r0, c0, r1, c1 } = gridSel;
-    const [rLo, rHi] = [Math.min(r0, r1), Math.max(r0, r1)];
-    const [cLo, cHi] = [Math.min(c0, c1), Math.max(c0, c1)];
+  const rowInSel = (r) => { const n = normSel(); return !!n && r >= n.rLo && r <= n.rHi; };
+  const colInSel = (c) => { const n = normSel(); return !!n && c >= n.cLo && c <= n.cHi; };
+  const clearSel = () => {
+    const n = normSel();
+    if (!n || !canWrite) return;
+    const keys = meta.views[tab];
+    setGrid((g) => ({
+      ...g,
+      rows: g.rows.map((row, ri) => {
+        if (ri < n.rLo || ri > n.rHi) return row;
+        let changed = row;
+        for (let ci = n.cLo; ci <= n.cHi; ci++) changed = withAutoPlatform(meta.platformRules, changed, keys[ci], '');
+        return { ...changed, _dirty: true };
+      }),
+    }));
+  };
+  // Copy (and Cut): a range or whole rows go to the clipboard as tab-separated text. A single cell that is being
+  // edited in its own box is left to the browser so normal text copy still works.
+  const gridCopy = (cols, cut) => (e) => {
+    const n = normSel();
+    if (!n) return;
+    if (n.rLo === n.rHi && n.cLo === n.cHi && isTextTarget(e.target)) return;
     const tsv = [];
-    for (let r = rLo; r <= rHi; r++) {
+    for (let r = n.rLo; r <= n.rHi; r++) {
       const row = grid.rows[r];
-      tsv.push(cols.slice(cLo, cHi + 1).map((k) => tsvCell(row && row[k])).join('\t'));
+      tsv.push(cols.slice(n.cLo, n.cHi + 1).map((k) => tsvCell(row && row[k])).join('\t'));
     }
     e.clipboardData.setData('text/plain', tsv.join('\n'));
     e.preventDefault();
+    const nr = n.rHi - n.rLo + 1;
+    toast(`${cut ? 'Cut' : 'Copied'} ${nr} row${nr === 1 ? '' : 's'} × ${n.cHi - n.cLo + 1} column${n.cHi === n.cLo ? '' : 's'}`);
+    if (cut) clearSel();
   };
+  // Paste: starts at the top-left of the selection (a selected row starts at its first column). Rows past the end are
+  // added as new rows, one copied value (or a block that divides the selection evenly) is repeated to fill the selected
+  // range, and a single value pasted into one cell is left to the browser.
   const gridPaste = (cols) => (e) => {
     const block = parseTsvBlock(e.clipboardData.getData('text/plain'));
-    if (block.length === 1 && block[0].length === 1) return;   // a single value: let it paste into the focused cell normally
+    const bR = block.length;
+    const bC = Math.max(1, ...block.map((row) => row.length));
+    const n = normSel();
+    const multi = !!n && (n.rHi > n.rLo || n.cHi > n.cLo);
+    if (bR === 1 && bC === 1 && !multi) return;   // a single value into one cell: normal paste
     e.preventDefault();
-    const r0 = gridSel ? Math.min(gridSel.r0, gridSel.r1) : 0;
-    const c0 = gridSel ? Math.min(gridSel.c0, gridSel.c1) : 0;
+    if (!canWrite) return;
+    const r0 = n ? n.rLo : 0;
+    const c0 = n ? n.cLo : 0;
+    const selR = n ? n.rHi - n.rLo + 1 : 0;
+    const selC = n ? n.cHi - n.cLo + 1 : 0;
+    let tileR = multi && selR > bR && selR % bR === 0 ? selR : bR;
+    const tileC = multi && selC > bC && selC % bC === 0 ? selC : bC;
+    const roomLeft = Math.max(1, GRID_LIMIT - r0);   // the server saves at most 200 changed rows at a time
+    if (tileR > roomLeft) { toast(`Only the first ${roomLeft} rows were pasted (200 rows per save)`, 'err'); tileR = roomLeft; }
     setGrid((g) => {
-      const rows = g.rows.map((row, ri) => {
-        const bi = ri - r0;
-        if (bi < 0 || bi >= block.length) return row;
-        let changed = row;
-        block[bi].forEach((val, ci) => {
-          const col = cols[c0 + ci];
-          if (col) changed = withAutoPlatform(meta.platformRules, changed, col, val);
-        });
-        return { ...changed, _dirty: true };
-      });
-      return { ...g, rows };
+      let rows = g.rows;
+      if (r0 + tileR > rows.length) {
+        const last = rows.length ? rows[rows.length - 1].work_date : '';
+        const extra = Array.from({ length: r0 + tileR - rows.length }, () => ({ _key: newKey(), _new: true, _dirty: true, work_date: last || filt.from || isoDate(), units_concerned: filt.units || meta.tabDefaultUnits[tab] }));
+        rows = [...rows, ...extra];
+      }
+      return {
+        ...g,
+        rows: rows.map((row, ri) => {
+          const bi = ri - r0;
+          if (bi < 0 || bi >= tileR) return row;
+          let changed = row;
+          for (let ci = 0; ci < tileC; ci++) {
+            const col = cols[c0 + ci];
+            if (!col) break;
+            changed = withAutoPlatform(meta.platformRules, changed, col, (block[bi % bR][ci % bC]) ?? '');
+          }
+          return { ...changed, _dirty: true };
+        }),
+      };
     });
-    setGridSel({ r0, c0, r1: Math.min(r0 + block.length - 1, grid.rows.length - 1), c1: Math.min(c0 + (block[0] || []).length - 1, cols.length - 1) });
+    setGridSel({ r0, c0, r1: r0 + tileR - 1, c1: Math.min(c0 + tileC - 1, cols.length - 1) });
+    focusBox();
+  };
+  // Keys while the wrapper (not a cell's own text box) has focus, i.e. after selecting rows / columns / a range
+  const gridKey = (e) => {
+    if (isTextTarget(e.target)) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      if (grid.rows.length) setGridSel({ r0: 0, c0: 0, r1: grid.rows.length - 1, c1: meta.views[tab].length - 1 });
+    } else if ((e.key === 'Delete' || e.key === 'Backspace') && gridSel) {
+      e.preventDefault();
+      clearSel();
+    } else if (e.key === 'Escape') setGridSel(null);
   };
   const isEmptyRow = (r) => meta.views[tab].filter((k) => k !== 'work_date' && k !== 'units_concerned').every((k) => !String(r[k] ?? '').trim());
   const addRow = () => setGrid((g) => {
@@ -586,31 +678,46 @@ export default function Workload() {
           <Empty>Pick VGFX, VEDIT or Audio above to edit in the Excel grid — each shows its own columns.</Empty>
         ) : isGrid ? (
           <>
-            <div className="table-wrap" id="grid">
+            <div className="table-wrap xl-box" id="grid" ref={boxRef} tabIndex={-1} onCopy={gridCopy(cols)} onCut={gridCopy(cols, true)} onPaste={gridPaste(cols)} onKeyDown={gridKey}>
               {!grid ? <Empty>Loading…</Empty>
                 : grid.error ? <Empty>{grid.error}</Empty>
                   : (
-                    <table className="t xl" onCopy={gridCopy(cols)} onPaste={gridPaste(cols)}>
-                      <thead><tr>{cols.map((k) => <th key={k}>{meta.fields[k].label}</th>)}{canWrite ? <th /> : null}</tr></thead>
+                    <table className="t xl">
+                      <thead>
+                        <tr>
+                          <th className="rn" title="Select all" onMouseDown={(e) => startSel('all', 0, 0, e)} />
+                          {cols.map((k, ci) => (
+                            <th key={k} className={`xl-colhead${colInSel(ci) ? ' hl' : ''}`} title="Click to select the column"
+                              onMouseDown={(e) => startSel('col', 0, ci, e)} onMouseEnter={(e) => extendSel('col', 0, ci, e)}>{meta.fields[k].label}</th>
+                          ))}
+                          {canWrite ? <th /> : null}
+                        </tr>
+                      </thead>
                       <tbody>
                         {grid.rows.length ? grid.rows.map((r, ri) => (
                           <tr key={r._key} className={r._dirty ? 'dirty' : ''}>
+                            <td className={`rn${rowInSel(ri) ? ' hl' : ''}`} title="Click to select the whole row (Ctrl+C to copy)"
+                              onMouseDown={(e) => startSel('row', ri, 0, e)} onMouseEnter={(e) => extendSel('row', ri, 0, e)}>{ri + 1}</td>
                             {cols.map((k, ci) => (
-                              <td key={k} data-k={k} className={`${inGridSel(ri, ci) ? 'xl-sel' : ''}${r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit') ? ' prio' : ''}`.trim()}>
+                              <td key={k} data-k={k} onMouseEnter={(e) => extendSel('cell', ri, ci, e)}
+                                className={`${selClass(ri, ci)}${r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit') ? ' prio' : ''}`.trim()}>
                                 <GridCellInput
                                   def={meta.fields[k]} value={r[k]} disabled={!canWrite}
                                   onChange={(e) => setCell(r._key, k, e.target.value)}
-                                  onMouseDown={(e) => gridClickCell(ri, ci, e)}
+                                  onMouseDown={(e) => startSel('cell', ri, ci, e)}
                                 />
                               </td>
                             ))}
                             {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removeRow(r)}>{r._new ? 'Remove' : 'Delete'}</button></td> : null}
                           </tr>
-                        )) : <tr><td colSpan={cols.length + 1} className="empty">No {meta.tabs.find((t) => t.key === tab).label} rows match these filters.{canWrite ? ' Use “Add row” to start.' : ''}</td></tr>}
+                        )) : <tr><td colSpan={cols.length + 2} className="empty">No {meta.tabs.find((t) => t.key === tab).label} rows match these filters.{canWrite ? ' Use “Add row” to start.' : ''}</td></tr>}
                       </tbody>
                     </table>
                   )}
             </div>
+            {canWrite && grid && !grid.error ? (
+              <div className="xl-hint dim">Click a row number to select the whole row, then Ctrl+C / Ctrl+X / Ctrl+V · drag or Shift+click for a range · paste below the last row adds rows · Delete clears</div>
+            ) : null}
             {grid && grid.total > GRID_LIMIT ? (
               <div className="pager"><span>Showing the first {GRID_LIMIT} of {grid.total} rows — narrow the date range to edit the rest.</span></div>
             ) : null}

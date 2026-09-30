@@ -615,9 +615,22 @@ table.t.wl.cards td.editing { padding: 0; }
 .lock-list { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .lock-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-2); }
 
-/* Excel mode: selected cell range (click, or click + shift-click for a range/whole row) */
+/* Excel mode: selected cell range / whole rows — tinted, with only the OUTLINE of the range drawn (like Excel) */
+.xl-box { outline: none; }
 table.t.xl td.xl-sel { position: relative; background: color-mix(in srgb, var(--accent) 12%, transparent); }
-table.t.xl td.xl-sel::after { content: ''; position: absolute; inset: 0; border: 2px solid var(--accent); pointer-events: none; }
+table.t.xl td.xl-sel::after { content: ''; position: absolute; inset: 0; pointer-events: none; border: 0 solid var(--accent); }
+table.t.xl td.xl-sel.xl-t::after { border-top-width: 2px; }
+table.t.xl td.xl-sel.xl-b::after { border-bottom-width: 2px; }
+table.t.xl td.xl-sel.xl-l::after { border-left-width: 2px; }
+table.t.xl td.xl-sel.xl-r::after { border-right-width: 2px; }
+/* row-number column + clickable column headers */
+table.t.xl th.rn, table.t.xl td.rn { position: sticky; left: 0; width: 44px; min-width: 44px; text-align: center; padding: 0 4px; user-select: none; cursor: pointer; z-index: 1; }
+table.t.xl th.rn { z-index: 4; }
+table.t.xl td.rn { background: var(--surface); color: var(--text-3); font-size: 11.5px; }
+table.t.xl td.rn:hover, table.t.xl th.rn:hover, table.t.xl th.xl-colhead:hover { background: color-mix(in srgb, var(--accent) 16%, var(--surface-3)); }
+table.t.xl td.rn.hl, table.t.xl th.xl-colhead.hl { background: color-mix(in srgb, var(--accent) 28%, var(--surface-3)); color: var(--text); }
+table.t.xl th.xl-colhead { cursor: pointer; user-select: none; }
+.xl-hint { font-size: 12px; padding: 6px 4px 0; }
 
 /* Merged Breakdate/Time cell (Table mode): one or two independently-clickable pills in one cell */
 table.t.wl .wl-pill-edit { cursor: pointer; border-radius: 999px; }
