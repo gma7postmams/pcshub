@@ -385,6 +385,10 @@ router.get('/export', asyncH(async (req, res) => {
         const cell = row.getCell(k);
         const f = fieldsExt[k];
         cell.border = { right: thinGrid };   // vertical grid line, matching the web table
+        // Prioritised row: amber fill on its Breakdate / Time cell(s), like the highlight in the web table
+        if (r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit')) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCD98A' } };
+        }
         if (k === 'audio_guide' && r.audio_guide && /^\d{4}-\d{2}-\d{2}$/.test(r.audio_guide)) cell.numFmt = 'mmm d, yyyy';
 
         if (f.kind === 'date' || f.kind === 'datetime' || k === 'audio_guide') {
