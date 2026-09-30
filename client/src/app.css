@@ -486,9 +486,15 @@ table.t.wl.cards td.actions-cell .btn { display: inline-flex; width: auto; margi
 .c-blue { --c: var(--blue); } .c-green { --c: var(--green); } .c-amber { --c: var(--amber); }
 .c-purple { --c: var(--purple); } .c-gray { --c: var(--gray); } .c-red { --c: var(--red); }
 .c-orange { --c: #f0883e; } .c-teal { --c: #26b5ad; } .c-pink { --c: #e5568f; }
-.c-slate { --c: #64748b; }   /* neutral chip colour for dates/times, distinct from the category pill colours */
+.c-slate { --c: #64748b; }   /* kept defined, currently unused */
+.c-cyan { --c: #22d3ee; }      /* Work Date / Breakdate / Script / Artwork-STB — reserved, not in the hash palette */
+.c-lime { --c: #a3e635; }      /* kept defined, currently unused */
+.c-fuchsia { --c: #e879f9; }   /* Audio Guide only — reserved; a warm magenta, deliberately far from cyan's cool blue */
 html[data-mode="light"] .c-orange { --c: #b95a12; } html[data-mode="light"] .c-teal { --c: #0d8a84; } html[data-mode="light"] .c-pink { --c: #b8326b; }
 html[data-mode="light"] .c-slate { --c: #475569; }
+html[data-mode="light"] .c-cyan { --c: #0e7490; }
+html[data-mode="light"] .c-lime { --c: #4d7c0f; }
+html[data-mode="light"] .c-fuchsia { --c: #a21caf; }
 
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.4; white-space: nowrap; color: var(--c); background: color-mix(in srgb, var(--c) 14%, var(--surface)); }
 .chip.sm { padding: 1px 8px; font-size: 11px; font-weight: 550; }
@@ -502,28 +508,38 @@ html[data-mode="light"] .c-slate { --c: #475569; }
 .tabs button.on .count { color: var(--accent); background: var(--accent-soft); }
 .wl-tabactions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0; }
 
-.wl-filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: stretch; padding: 14px 16px; border-bottom: 1px solid var(--border); }
-.wl-search { flex: 1 1 260px; display: flex; align-items: center; gap: 10px; padding: 0 14px; min-height: 52px; border: 1px solid var(--border-2); border-radius: 10px; background: var(--bg-2); color: var(--text-3); }
-.wl-search svg { width: 18px; height: 18px; flex: none; }
+.wl-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: stretch; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.wl-search { flex: 1 1 260px; display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 38px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); color: var(--text-3); }
+.wl-search svg { width: 15px; height: 15px; flex: none; }
 .wl-search input { flex: 1; min-width: 0; height: auto; padding: 0; border: 0; background: transparent; box-shadow: none; color: var(--text); }
 .wl-search:focus-within, .fsel:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.fsel { position: relative; display: flex; flex-direction: column; justify-content: center; gap: 1px; min-width: 130px; padding: 6px 34px 6px 14px; border: 1px solid var(--border-2); border-radius: 10px; background: var(--bg-2); }
-.fsel > span { font-size: 11px; color: var(--text-2); font-weight: 550; }
-.fsel select { width: 100%; min-width: 0; height: 22px; padding: 0; border: 0; background: transparent; box-shadow: none; font-weight: 600; font-size: 13.5px; appearance: none; cursor: pointer; }
-.fsel svg { position: absolute; right: 12px; top: 50%; width: 15px; height: 15px; transform: translateY(-50%); pointer-events: none; color: var(--text-2); }
+.fsel { position: relative; display: block; min-width: 150px; height: 38px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); }
+.fsel-row { display: flex; align-items: center; gap: 14px; height: 100%; padding: 0 28px 0 12px; pointer-events: none; }
+.fsel-label { flex: none; font-size: 12px; line-height: 1; color: var(--text-2); font-weight: 550; white-space: nowrap; }
+.fsel-value { flex: 1; min-width: 0; text-align: right; font-weight: 600; font-size: 13.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fsel select { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; border-radius: inherit; background: transparent; box-shadow: none; color: transparent; -webkit-appearance: none; -moz-appearance: none; appearance: none; cursor: pointer; }
+.fsel select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }   /* the select is invisible, but keep a real focus indicator for keyboard use */
+.fsel svg { position: absolute; right: 10px; top: 50%; width: 13px; height: 13px; transform: translateY(-50%); pointer-events: none; color: var(--text-2); z-index: 1; }
 .daterange { position: relative; display: flex; }
-.daterange-btn { display: inline-flex; align-items: center; gap: 10px; padding: 0 16px; min-height: 52px; border: 1px solid var(--border-2); border-radius: 10px; background: var(--bg-2); color: var(--text); font: 600 13.5px var(--font); cursor: pointer; white-space: nowrap; }
-.daterange-btn svg { width: 18px; height: 18px; color: var(--text-2); }
+.daterange-btn { display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; height: 38px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); color: var(--text); font: 600 13px var(--font); cursor: pointer; white-space: nowrap; }
+.daterange-btn svg { width: 15px; height: 15px; color: var(--text-2); }
 .popover { position: absolute; z-index: 60; top: calc(100% + 6px); right: 0; width: 280px; padding: 14px; display: grid; gap: 10px; background: var(--surface); border: 1px solid var(--border-2); border-radius: 12px; box-shadow: var(--shadow); }
 .daterange-pop .presets { display: flex; flex-wrap: wrap; gap: 6px; }
 @media (max-width: 680px) { .fsel { flex: 1 1 45%; min-width: 0; } .daterange { flex: 1 1 100%; } .daterange-btn { flex: 1; justify-content: center; } .popover { left: 0; right: 0; width: auto; } }
 
 /* table polish */
 table.t.wl { font-size: 13px; }
-table.t.wl thead th { background: transparent; font-size: 11px; letter-spacing: .05em; color: var(--text-3); vertical-align: middle; }
+table.t.wl thead th { background: var(--surface-3); font-size: 11px; letter-spacing: .05em; color: var(--text-2); vertical-align: middle; border-bottom: 1px solid var(--border-2); }   /* same header treatment as the Excel-mode grid */
+table.t.wl th { text-align: center; }
 table.t.wl th.right { text-align: right; }
 table.t.wl th, table.t.wl td { padding: 9px 10px; }
 table.t.wl td { vertical-align: middle; }
+/* Light grid: vertical lines between columns, softer than the Excel-mode grid (which uses --border-2), so the two
+   don't look identical. Cards mode stays borderless (each row is already its own bordered card). */
+table.t.wl:not(.cards) { border-collapse: separate; border-spacing: 0; }
+table.t.wl:not(.cards) th, table.t.wl:not(.cards) td { border-right: 1px solid var(--border); }
+table.t.wl:not(.cards) thead th { border-right-color: var(--border-2); }   /* more contrast against the tinted header background */
+table.t.wl:not(.cards) th:last-child, table.t.wl:not(.cards) td:last-child { border-right: 0; }
 table.t.wl .strong { font-weight: 650; color: var(--text); }
 table.t.wl .sub { margin-top: 2px; font-size: 12px; color: var(--text-2); }
 table.t.wl .sub.pre { white-space: pre-wrap; }
@@ -569,6 +585,12 @@ table.t.wl th { white-space: nowrap; }
 /* ...but on phones each row is a card, where text has to wrap */
 table.t.wl.cards td { white-space: pre-wrap; }
 table.t.wl.cards td .rem { min-width: 0; max-width: none; }
+
+/* Centre every cell's content except Remarks, which stays left-aligned (it's the one column meant to be read as text) */
+table.t.wl:not(.cards) td { text-align: center; }
+table.t.wl:not(.cards) td[data-k="remarks"] { text-align: left; }
+table.t.wl:not(.cards) td .stack { align-items: center; }
+
 /* cards: long pills (e.g. "REG/TDMD (GMA MUSIC)") get the whole card width and may wrap rather than spill into the next column */
 table.t.wl.cards td[data-k="platform"], table.t.wl.cards td[data-k="units_concerned"] { grid-column: 1 / -1; }
 table.t.wl.cards .chip { white-space: normal; max-width: 100%; }
@@ -583,6 +605,8 @@ table.t.wl td.editing { padding: 4px; white-space: normal; }   /* the cell itsel
 .cell-editor input, .cell-editor select, .cell-editor textarea { width: 100%; min-width: 150px; height: 32px; padding: 4px 8px; font-size: 13px; }
 .cell-editor textarea { min-width: 260px; min-height: 32px; resize: none; overflow: hidden; line-height: 1.35; }
 .cell-editor input[type="datetime-local"] { min-width: 215px; }
+.cell-editor .ag { flex-wrap: wrap; max-width: 230px; }   /* wrap instead of overflowing into the next column if the cell is narrow */
+.cell-editor .ag select { min-width: 84px; }   /* the generic ".cell-editor select" rule above (150px) was overriding this back up, which is what pushed the date input into the Remarks column */
 .cell-editor .ag input[type="date"] { min-width: 130px; }
 table.t.xl input[type="datetime-local"] { min-width: 215px; }
 table.t.wl.cards td.editing { padding: 0; }
@@ -601,3 +625,75 @@ table.t.wl.cards td.editing { padding: 0; }
 td.doc-actions { text-align: right; white-space: nowrap; }
 td.doc-actions .iconbtn { display: inline-grid; place-items: center; width: 32px; height: 32px; vertical-align: middle; }
 td.doc-actions .iconbtn svg { width: 17px; height: 17px; }
+/* Lock Dates modal */
+.lock-list { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.lock-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-2); }
+
+/* Excel mode: selected cell range / whole rows — tinted, with only the OUTLINE of the range drawn (like Excel) */
+.xl-box { outline: none; }
+table.t.xl td.xl-sel { position: relative; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+table.t.xl td.xl-sel::after { content: ''; position: absolute; inset: 0; pointer-events: none; border: 0 solid var(--accent); }
+table.t.xl td.xl-sel.xl-t::after { border-top-width: 2px; }
+table.t.xl td.xl-sel.xl-b::after { border-bottom-width: 2px; }
+table.t.xl td.xl-sel.xl-l::after { border-left-width: 2px; }
+table.t.xl td.xl-sel.xl-r::after { border-right-width: 2px; }
+/* row-number column + clickable column headers */
+table.t.xl th.rn, table.t.xl td.rn { position: sticky; left: 0; width: 44px; min-width: 44px; text-align: center; padding: 0 4px; user-select: none; cursor: pointer; z-index: 1; }
+table.t.xl th.rn { z-index: 4; }
+table.t.xl td.rn { background: var(--surface); color: var(--text-3); font-size: 11.5px; }
+table.t.xl td.rn:hover, table.t.xl th.rn:hover, table.t.xl th.xl-colhead:hover { background: color-mix(in srgb, var(--accent) 16%, var(--surface-3)); }
+table.t.xl td.rn.hl, table.t.xl th.xl-colhead.hl { background: color-mix(in srgb, var(--accent) 28%, var(--surface-3)); color: var(--text); }
+table.t.xl th.xl-colhead { cursor: pointer; user-select: none; }
+.xl-hint { font-size: 12px; padding: 6px 4px 0; }
+
+/* Merged Breakdate/Time cell (Table mode): one or two independently-clickable pills in one cell */
+table.t.wl .wl-pill-edit { cursor: pointer; border-radius: 999px; }
+table.t.wl .wl-pill-edit:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+table.t.wl .cell-editor-inline { display: inline-flex; }
+table.t.wl .cell-editor-inline .cell-editor { min-width: 190px; }
+
+.row-lock { display: inline-flex; vertical-align: middle; margin-left: 6px; color: var(--text-2); }
+.row-lock svg { width: 14px; height: 14px; }
+
+/* Prioritised workload row: highlight its Breakdate / Time cell */
+table.t.wl td.prio, table.t.wl tr:hover td.prio { background: color-mix(in srgb, #ef4444 24%, transparent); box-shadow: inset 3px 0 0 #ef4444, inset 0 0 0 1px color-mix(in srgb, #ef4444 45%, transparent); }   /* red: clearly apart from the VGFX purple / VEDIT orange pills */
+.prio-toggle > span { display: flex; align-items: center; gap: 4px; font-size: 14px; color: var(--text); font-weight: 600; cursor: pointer; }
+.prio-toggle .dim { font-weight: 400; }
+
+/* Team label inside each Breakdate / Time pill (VGFX / VEDIT) */
+.chip-tag { font-size: 10px; font-weight: 700; letter-spacing: .05em; padding: 0 5px; border-radius: 4px; line-height: 1.5; background: color-mix(in srgb, currentColor 20%, transparent); }
+
+/* Breakdate / Time: VGFX pill on top, VEDIT pill below (not side by side) */
+table.t.wl .chips.bd-chips { flex-direction: column; flex-wrap: nowrap; align-items: center; gap: 4px; }
+table.t.wl td[data-k="breakdate_vgfx"] { text-align: center; }
+
+/* Excel grid: all text (headers too) centered, each editable box centered in its cell, and every column as wide as its
+   longest value so nothing is cropped (multi-line fields wrap at ~60 characters and grow taller instead) */
+table.t.xl th { text-align: center; }
+table.t.xl td { vertical-align: middle; text-align: center; }
+.xl-cell { display: grid; min-width: 96px; font-size: 13px; }
+.xl-cell::after { content: attr(data-value); grid-area: 1 / 1; visibility: hidden; pointer-events: none; white-space: pre; line-height: 1.35; padding: 4px calc(8px + 1.5ch); }
+.xl-cell.multi::after { white-space: pre-wrap; max-width: 60ch; overflow-wrap: anywhere; padding: 6px calc(8px + 1.5ch) 9px; }
+table.t.xl .xl-cell > input, table.t.xl .xl-cell > textarea { grid-area: 1 / 1; width: 100%; min-width: 0; box-sizing: border-box; text-align: center; }
+table.t.xl .xl-cell > textarea { height: 100%; min-height: 32px; padding: 6px 8px; line-height: 1.35; overflow: hidden; resize: none; }
+table.t.xl .xl-cell > textarea { border: 0; border-radius: 0; background: transparent; }
+table.t.xl .xl-cell > textarea:focus { box-shadow: inset 0 0 0 2px var(--accent); background: var(--surface); }
+
+/* Excel grid: Plug ID, VO and Remarks get long columns, like in Table mode */
+table.t.xl td[data-k="plug_id"] .xl-cell, table.t.xl td[data-k="vo"] .xl-cell, table.t.xl td[data-k="remarks"] .xl-cell { min-width: 380px; }
+table.t.xl td, table.t.xl .xl-cell, table.t.xl .xl-cell > input, table.t.xl .xl-cell > textarea { cursor: default; }   /* a normal pointer, not the text I-beam (the caret still shows while typing) */
+
+/* Excel look: no separate white edit box — the cell itself is the editor, marked by the selection outline */
+table.t.xl .xl-cell > input:focus, table.t.xl .xl-cell > textarea:focus { box-shadow: none; background: transparent; outline: none; }
+table.t.xl td.xl-sel.xl-single, table.t.xl td.xl-sel.xl-active { background: var(--surface); }
+table.t.xl td.xl-sel.xl-single::after { border-width: 2px; }
+
+/* Right-click menu (Copy / Cut / Paste) */
+.xl-menu { position: fixed; z-index: 1000; min-width: 180px; padding: 4px; background: var(--surface); border: 1px solid var(--border-2); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.28); }
+.xl-menu button { display: flex; width: 100%; justify-content: space-between; gap: 24px; align-items: center; padding: 7px 10px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; cursor: default; text-align: left; }
+.xl-menu button span { color: var(--text-3); font-size: 11.5px; }
+.xl-menu button:hover:not(:disabled) { background: var(--accent-soft, color-mix(in srgb, var(--accent) 16%, transparent)); }
+.xl-menu button:disabled { opacity: .4; }
+
+.xl-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 2px; }
+table.t.xl td[data-k="breakdate_vgfx"] .xl-cell { min-width: 250px; }
