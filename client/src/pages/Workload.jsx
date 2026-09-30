@@ -21,24 +21,25 @@ const lockNote = (workDate, locks) => { const hit = (locks || []).find((l) => wo
 const withCurrent = (list, v) => (v && !list.includes(v) ? [...list, v] : list);
 const firstLine = (s) => String(s || '').split('\n')[0];
 // Breakdate / Time text -> the 'YYYY-MM-DDTHH:MM' the grid cell stores. Accepts what the web table and the Excel export show
-// ('Sep 28, 2026 4:00 PM', 'Sep 28, 2026') as well as ISO. Returns null if it isn't a date/time.
+// ('Sep 28, 2026 4:00 PM', 'Sep 28, 2026', or day-first '28 Sep 2026 4:00 PM' from other locales) as well as ISO.
+// Returns null if it isn't a date/time.
 const MON3 = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 function toBreakdateIso(t) {
   const s = String(t || '').trim();
+  const pad = (n) => String(n).padStart(2, '0');
+  const clock = (hh, mm, ap) => { let h = hh ? Number(hh) % 12 : 0; if (ap && ap.toUpperCase() === 'PM') h += 12; return `${pad(h)}:${mm || '00'}`; };
   const iso = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}))?/.exec(s);
   if (iso) return `${iso[1]}T${iso[2] || '00:00'}`;
-  const m = /^([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{1,2}),?\s+(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*(AM|PM))?$/i.exec(s);
-  if (!m) return null;
-  const mon = MON3.indexOf(m[1].toLowerCase());
-  if (mon < 0) return null;
-  let h = m[4] ? Number(m[4]) % 12 : 0;
-  if (m[6] && m[6].toUpperCase() === 'PM') h += 12;
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${m[3]}-${pad(mon + 1)}-${pad(Number(m[2]))}T${pad(h)}:${m[5] || '00'}`;
+  let m = /^([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{1,2}),?\s+(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*(AM|PM))?$/i.exec(s);
+  if (m) { const mon = MON3.indexOf(m[1].toLowerCase()); return mon < 0 ? null : `${m[3]}-${pad(mon + 1)}-${pad(Number(m[2]))}T${clock(m[4], m[5], m[6])}`; }
+  m = /^(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\.?,?\s+(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*(AM|PM)?)?$/i.exec(s);
+  if (m) { const mon = MON3.indexOf(m[2].toLowerCase()); return mon < 0 ? null : `${m[3]}-${pad(mon + 1)}-${pad(Number(m[1]))}T${clock(m[4], m[5], m[6])}`; }
+  return null;
 }
-// Both teams' times in one pasted cell ('VGFX  Sep 28, 2026 4:00 PM' / 'VEDIT  Sep 28, 2026 10:00 PM', on separate lines or run
-// together as copied from the web table's pills) -> { breakdate_vgfx, breakdate_vedit }
-const BD_PAIR = /(VGFX|VEDIT)\s*[:\-\u2013]?\s*([A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4}(?:\s+\d{1,2}:\d{2}\s*(?:AM|PM))?|\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2})?)/gi;
+// Both teams' times in one pasted cell ('VGFX  Sep 28, 2026 4:00 PM' / 'VEDIT  Sep 28, 2026 10:00 PM', on separate lines, with
+// the label on its own line, or run together as copied from the web table's pills) -> { breakdate_vgfx, breakdate_vedit }
+const BD_DATE = '(?:[A-Za-z]{3,9}\\.?\\s+\\d{1,2},?\\s+\\d{4}(?:\\s+\\d{1,2}:\\d{2}\\s*(?:AM|PM))?|\\d{1,2}\\s+[A-Za-z]{3,9}\\.?,?\\s+\\d{4}(?:\\s+\\d{1,2}:\\d{2}\\s*(?:AM|PM)?)?|\\d{4}-\\d{2}-\\d{2}(?:[T ]\\d{2}:\\d{2})?)';
+const BD_PAIR = new RegExp(`(VGFX|VEDIT)\\s*[:\\-\\u2013]?\\s*(${BD_DATE})`, 'gi');
 function parseBreakdatePairs(raw) {
   const out = {};
   for (const m of String(raw || '').matchAll(BD_PAIR)) {
@@ -46,6 +47,20 @@ function parseBreakdatePairs(raw) {
     if (iso) out[m[1].toUpperCase() === 'VGFX' ? 'breakdate_vgfx' : 'breakdate_vedit'] = iso;
   }
   return out;
+}
+/** Put text on the clipboard. Uses the async API where the page allows it (https / localhost), else a hidden textarea + copy command. */
+async function writeClipboard(text) {
+  try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; } } catch (e) { /* fall through to the older way */ }
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+  document.body.appendChild(ta);
+  const prev = document.activeElement;
+  ta.focus(); ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+  document.body.removeChild(ta);
+  if (prev && prev.focus) prev.focus({ preventScroll: true });
+  return ok;
 }
 const newKey = () => `n${Math.random().toString(36).slice(2)}`;
 
@@ -199,7 +214,20 @@ export default function Workload() {
   const boxRef = useRef(null);    // Excel mode: the focusable wrapper that receives copy / cut / paste / Delete for a range or whole rows
   const drag = useRef(null);      // Excel mode: 'cell' | 'row' | 'col' while the mouse is held down selecting
   const moveRef = useRef(null);   // Excel mode: latest mouse-move handler for drag selection (kept fresh every render)
+  const internalClip = useRef(null);   // Excel mode: the last text copied inside the grid (right-click Paste falls back to it where the browser blocks reading the clipboard)
+  const [ctx, setCtx] = useState(null);   // Excel mode: right-click menu position { x, y } | null
   useEffect(() => { setEditing(null); setGridSel(null); }, [tab, mode, offset]);
+  useEffect(() => {
+    if (!ctx) return undefined;
+    const close = () => setCtx(null);
+    const down = (e) => { if (!(e.target.closest && e.target.closest('.xl-menu'))) close(); };
+    const key = (e) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('mousedown', down);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    window.addEventListener('keydown', key);
+    return () => { window.removeEventListener('mousedown', down); window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close); window.removeEventListener('keydown', key); };
+  }, [ctx]);
   useEffect(() => {
     // Esc drops the current selection (a row, column or range), wherever the keyboard focus is
     if (!gridSel) return undefined;
@@ -369,6 +397,15 @@ export default function Workload() {
   const startSel = (kind, r, c, e) => {
     const nR = grid.rows.length; const nC = meta.views[tab].length;
     if (!nR || !nC) return;
+    if (e.button === 2) {
+      // right-click: keep a selection that already covers this spot, otherwise select just this cell / row / column
+      const n = normSel();
+      const inside = !!n && (kind === 'all' || (kind === 'row' ? r >= n.rLo && r <= n.rHi : kind === 'col' ? c >= n.cLo && c <= n.cHi : r >= n.rLo && r <= n.rHi && c >= n.cLo && c <= n.cHi));
+      if (!inside) setGridSel(kind === 'row' ? { r0: r, c0: 0, r1: r, c1: nC - 1 } : kind === 'col' ? { r0: 0, c0: c, r1: nR - 1, c1: c } : kind === 'all' ? { r0: 0, c0: 0, r1: nR - 1, c1: nC - 1 } : { r0: r, c0: c, r1: r, c1: c });
+      drag.current = null;
+      e.preventDefault(); focusBox();
+      return;
+    }
     drag.current = kind;
     const ext = e.shiftKey && gridSel;
     let next;
@@ -407,7 +444,7 @@ export default function Workload() {
   // Mouse down anywhere in a cell (its padding included, not just the text box) selects it and puts the cursor in it
   const cellMouseDown = (ri, ci) => (e) => {
     startSel('cell', ri, ci, e);
-    if (e.shiftKey || isTextTarget(e.target)) return;
+    if (e.button === 2 || e.shiftKey || isTextTarget(e.target)) return;
     e.preventDefault();
     const f = e.currentTarget.querySelector('input, textarea');
     if (f) { f.focus(); try { const n = f.value.length; f.setSelectionRange(n, n); } catch (err) { /* not a text control */ } }
@@ -436,7 +473,8 @@ export default function Workload() {
   const selClass = (r, c) => {
     const n = normSel();
     if (!n || r < n.rLo || r > n.rHi || c < n.cLo || c > n.cHi) return '';
-    return `xl-sel${r === n.rLo ? ' xl-t' : ''}${r === n.rHi ? ' xl-b' : ''}${c === n.cLo ? ' xl-l' : ''}${c === n.cHi ? ' xl-r' : ''}`;
+    const single = n.rLo === n.rHi && n.cLo === n.cHi;
+    return `xl-sel${single ? ' xl-single' : ''}${gridSel && r === gridSel.r0 && c === gridSel.c0 ? ' xl-active' : ''}${r === n.rLo ? ' xl-t' : ''}${r === n.rHi ? ' xl-b' : ''}${c === n.cLo ? ' xl-l' : ''}${c === n.cHi ? ' xl-r' : ''}`;
   };
   const rowInSel = (r) => { const n = normSel(); return !!n && r >= n.rLo && r <= n.rHi; };
   const colInSel = (c) => { const n = normSel(); return !!n && c >= n.cLo && c <= n.cHi; };
@@ -456,49 +494,93 @@ export default function Workload() {
   };
   // Copy (and Cut): a range or whole rows go to the clipboard as tab-separated text. A single cell that is being
   // edited in its own box is left to the browser so normal text copy still works.
-  const gridCopy = (cols, cut) => (e) => {
+  const selectionTsv = (cols) => {
     const n = normSel();
-    if (!n) return;
-    if (n.rLo === n.rHi && n.cLo === n.cHi && isTextTarget(e.target)) return;
+    if (!n) return '';
     const tsv = [];
     for (let r = n.rLo; r <= n.rHi; r++) {
       const row = grid.rows[r];
       tsv.push(cols.slice(n.cLo, n.cHi + 1).map((k) => tsvCell(row && row[k])).join('\t'));
     }
-    e.clipboardData.setData('text/plain', tsv.join('\n'));
-    e.preventDefault();
+    return tsv.join('\n');
+  };
+  const copiedToast = (cut) => {
+    const n = normSel();
+    if (!n) return;
     const nr = n.rHi - n.rLo + 1;
     toast(`${cut ? 'Cut' : 'Copied'} ${nr} row${nr === 1 ? '' : 's'} × ${n.cHi - n.cLo + 1} column${n.cHi === n.cLo ? '' : 's'}`);
+  };
+  const gridCopy = (cols, cut) => (e) => {
+    const n = normSel();
+    if (!n) return;
+    if (n.rLo === n.rHi && n.cLo === n.cHi && isTextTarget(e.target)) return;
+    const text = selectionTsv(cols);
+    e.clipboardData.setData('text/plain', text);
+    internalClip.current = text;
+    e.preventDefault();
+    copiedToast(cut);
     if (cut) clearSel();
+  };
+  // Right-click menu actions (the clipboard is written / read directly, since no keyboard copy event is involved)
+  const menuCopy = async (cols, cut) => {
+    setCtx(null);
+    if (!normSel() || (cut && !canWrite)) return;
+    const text = selectionTsv(cols);
+    internalClip.current = text;
+    const ok = await writeClipboard(text);
+    if (!ok) toast('Could not reach the system clipboard — Ctrl+C still works', 'err');
+    else copiedToast(cut);
+    if (cut) clearSel();
+  };
+  const menuPaste = async (cols) => {
+    setCtx(null);
+    if (!canWrite) return;
+    let text = null;
+    try { if (navigator.clipboard && navigator.clipboard.readText && window.isSecureContext) text = await navigator.clipboard.readText(); } catch (err) { text = null; }
+    if (text == null || text === '') text = internalClip.current;   // this address may not let a page read the clipboard: use what was last copied in the grid
+    if (text == null || text === '') { toast('Nothing to paste yet — copy something first, or press Ctrl+V', 'err'); return; }
+    doPaste(text, cols, true);   // from the menu there is no browser paste to fall back on, so a single value is applied here too
   };
   // Paste: starts at the top-left of the selection (a selected row starts at its first column). Rows past the end are
   // added as new rows, one copied value (or a block that divides the selection evenly) is repeated to fill the selected
   // range, and a single value pasted into one cell is left to the browser.
-  const gridPaste = (cols) => (e) => {
-    const rawText = e.clipboardData.getData('text/plain');
+  const isBd = (k) => k === 'breakdate_vgfx' || k === 'breakdate_vedit';
+  // Returns false when the paste should be left to the browser (a single value into one cell); true when the grid took it.
+  const doPaste = (rawText, cols, force) => {
     const sel0 = normSel();
-    const isBd = (k) => k === 'breakdate_vgfx' || k === 'breakdate_vedit';
-    // A Breakdate / Time cell holding BOTH teams (VGFX line + VEDIT line, as in the Excel export or the web table) pasted
-    // into either Breakdate column fills that row's VGFX and VEDIT times together — it never becomes extra rows.
-    if (sel0 && isBd(cols[sel0.cLo])) {
-      const pairs = parseBreakdatePairs(rawText);
-      if (Object.keys(pairs).length) {
-        e.preventDefault();
-        if (!canWrite) return;
+    // A Breakdate / Time cell holding BOTH teams (a VGFX line + a VEDIT line, as in the Excel export or copied from the web
+    // table) fills that row's VGFX and VEDIT times together — in whichever cell / row is selected, never as extra rows.
+    const pairs = parseBreakdatePairs(rawText);
+    if (sel0 && Object.keys(pairs).length) {
+      const onlyPairs = rawText.replace(BD_PAIR, '').replace(/["\s]+/g, '') === '';
+      if (onlyPairs || (isBd(cols[sel0.cLo]) && parseTsvBlock(rawText).length === 1)) {
+        if (!canWrite) return true;
         setGrid((g) => ({ ...g, rows: g.rows.map((row, ri) => (ri >= sel0.rLo && ri <= sel0.rHi ? { ...row, ...pairs, _dirty: true } : row)) }));
-        return;
+        return true;
       }
     }
-    const block = parseTsvBlock(rawText);
-    const bR = block.length;
-    const bC = Math.max(1, ...block.map((row) => row.length));
+    let block = parseTsvBlock(rawText);
     const n = normSel();
-    const multi = !!n && (n.rHi > n.rLo || n.cHi > n.cLo);
-    if (bR === 1 && bC === 1 && !multi && !(sel0 && isBd(cols[sel0.cLo]) && toBreakdateIso(block[0][0]))) return;   // a single value into one cell: normal paste (a date typed as 'Sep 28, 2026 4:00 PM' is converted below)
-    e.preventDefault();
-    if (!canWrite) return;
     const r0 = n ? n.rLo : 0;
     const c0 = n ? n.cLo : 0;
+    // Whole rows copied from the Excel export have ONE merged Breakdate / Time column; the grid has two (VGFX, VEDIT).
+    // Split that cell so everything after it lands in the right column.
+    block = block.map((row) => {
+      const out = [];
+      row.forEach((cell) => {
+        if (cols[c0 + out.length] === 'breakdate_vgfx') {
+          const pr = parseBreakdatePairs(cell);
+          if (Object.keys(pr).length) { out.push(pr.breakdate_vgfx || '', pr.breakdate_vedit || ''); return; }
+        }
+        out.push(cell);
+      });
+      return out;
+    });
+    const bR = block.length;
+    const bC = Math.max(1, ...block.map((row) => row.length));
+    const multi = !!n && (n.rHi > n.rLo || n.cHi > n.cLo);
+    if (!force && bR === 1 && bC === 1 && !multi && !(sel0 && isBd(cols[sel0.cLo]) && toBreakdateIso(block[0][0]))) return false;   // a single value into one cell: normal paste (a date like 'Sep 28, 2026 4:00 PM' in a Breakdate column is converted below)
+    if (!canWrite) return true;
     const selR = n ? n.rHi - n.rLo + 1 : 0;
     const selC = n ? n.cHi - n.cLo + 1 : 0;
     let tileR = multi && selR > bR && selR % bR === 0 ? selR : bR;
@@ -530,9 +612,23 @@ export default function Workload() {
     });
     setGridSel({ r0, c0, r1: r0 + tileR - 1, c1: Math.min(c0 + tileC - 1, cols.length - 1) });
     focusBox();
+    return true;
+  };
+  const gridPaste = (cols) => (e) => {
+    if (doPaste(e.clipboardData.getData('text/plain'), cols)) e.preventDefault();
   };
   // Keys while the wrapper (not a cell's own text box) has focus, i.e. after selecting rows / columns / a range
   const gridKey = (e) => {
+    if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
+      // like a spreadsheet: Enter moves to the cell below (Shift+Enter: above); Tab / Shift+Tab move sideways natively
+      const td = e.target.closest('td[data-r]');
+      if (td) {
+        e.preventDefault();
+        const next = boxRef.current && boxRef.current.querySelector(`td[data-r="${Number(td.dataset.r) + (e.shiftKey ? -1 : 1)}"][data-c="${td.dataset.c}"] input, td[data-r="${Number(td.dataset.r) + (e.shiftKey ? -1 : 1)}"][data-c="${td.dataset.c}"] textarea`);
+        if (next) { next.focus(); try { const len = next.value.length; next.setSelectionRange(len, len); } catch (err) { /* not a text control */ } }
+      }
+      return;
+    }
     if (isTextTarget(e.target)) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
       e.preventDefault();
@@ -767,7 +863,8 @@ export default function Workload() {
           <Empty>Pick VGFX, VEDIT or Audio above to edit in the Excel grid — each shows its own columns.</Empty>
         ) : isGrid ? (
           <>
-            <div className="table-wrap xl-box" id="grid" ref={boxRef} tabIndex={-1} onCopy={gridCopy(cols)} onCut={gridCopy(cols, true)} onPaste={gridPaste(cols)} onKeyDown={gridKey}>
+            <div className="table-wrap xl-box" id="grid" ref={boxRef} tabIndex={-1} onCopy={gridCopy(cols)} onCut={gridCopy(cols, true)} onPaste={gridPaste(cols)} onKeyDown={gridKey}
+              onContextMenu={(e) => { if (!gridSel || !grid || grid.error || !grid.rows.length) return; e.preventDefault(); setCtx({ x: Math.min(e.clientX, window.innerWidth - 210), y: Math.min(e.clientY, window.innerHeight - 150) }); }}>
               {!grid ? <Empty>Loading…</Empty>
                 : grid.error ? <Empty>{grid.error}</Empty>
                   : (
@@ -789,6 +886,7 @@ export default function Workload() {
                               onMouseDown={(e) => startSel('row', ri, 0, e)}>{ri + 1}</td>
                             {cols.map((k, ci) => (
                               <td key={k} data-k={k} data-r={ri} data-c={ci} onMouseDown={cellMouseDown(ri, ci)}
+                                onFocus={(e) => { if (isTextTarget(e.target)) setGridSel((sel) => (sel && sel.r0 === ri && sel.r1 === ri && sel.c0 === ci && sel.c1 === ci ? sel : { r0: ri, c0: ci, r1: ri, c1: ci })); }}
                                 className={`${selClass(ri, ci)}${r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit') ? ' prio' : ''}`.trim()}>
                                 <GridCellInput
                                   def={meta.fields[k]} value={r[k]} disabled={!canWrite}
@@ -803,8 +901,15 @@ export default function Workload() {
                     </table>
                   )}
             </div>
+            {ctx ? (
+              <div className="xl-menu" style={{ left: ctx.x, top: ctx.y }} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
+                <button type="button" onClick={() => menuCopy(cols, false)}>Copy<span>Ctrl+C</span></button>
+                <button type="button" disabled={!canWrite} onClick={() => menuCopy(cols, true)}>Cut<span>Ctrl+X</span></button>
+                <button type="button" disabled={!canWrite} onClick={() => menuPaste(cols)}>Paste<span>Ctrl+V</span></button>
+              </div>
+            ) : null}
             {canWrite && grid && !grid.error ? (
-              <div className="xl-hint dim">Click a cell to edit it · drag across cells or Shift+click to select just those cells · click a row number for the whole row · Ctrl+C / Ctrl+X / Ctrl+V · paste below the last row adds rows · Delete clears</div>
+              <div className="xl-hint dim">Click a cell to edit it · drag across cells or Shift+click to select just those cells · click a row number for the whole row · right-click for Copy / Cut / Paste · Ctrl+C / Ctrl+X / Ctrl+V · paste below the last row adds rows · Delete clears</div>
             ) : null}
             {grid && grid.total > GRID_LIMIT ? (
               <div className="pager"><span>Showing the first {GRID_LIMIT} of {grid.total} rows — narrow the date range to edit the rest.</span></div>
