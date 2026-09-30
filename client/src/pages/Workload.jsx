@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { ColumnIcon, DownloadIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
+import { CloseIcon, ColumnIcon, DownloadIcon, LockIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
 import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
@@ -16,6 +16,8 @@ const GRID_LIMIT = 200;
 const CARDS_BELOW = 900;   // window width under which table rows become cards
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
+const isLocked = (workDate, locks) => !!workDate && (locks || []).some((l) => workDate >= l.from_date && workDate <= l.to_date);
+const lockNote = (workDate, locks) => { const hit = (locks || []).find((l) => workDate >= l.from_date && workDate <= l.to_date); return hit ? (hit.note || `${hit.from_date} – ${hit.to_date}`) : ''; };
 const withCurrent = (list, v) => (v && !list.includes(v) ? [...list, v] : list);
 const firstLine = (s) => String(s || '').split('\n')[0];
 const newKey = () => `n${Math.random().toString(36).slice(2)}`;
@@ -84,6 +86,16 @@ function FieldInput({ def, value, onChange, disabled, lookups, auto }) {
   return <input maxLength={def.max} placeholder={def.hint} value={v} disabled={disabled} onChange={onChange} />;
 }
 
+// Excel mode only: every cell is plain text you can type OR paste into — no date picker, no dropdown — closer
+// to how an actual spreadsheet cell behaves. Validation (a real date, a valid Platform, etc.) still happens
+// when you hit Save, same as any other grid error. `onKeyDown`/`onFocus` are wired in by the grid for range
+// selection and copy/paste; they pass straight through.
+function GridCellInput({ def, value, onChange, disabled, ...rest }) {
+  const v = value ?? '';
+  if (def.multiline) return <AutoTextarea maxLength={def.max} placeholder={def.hint} value={v} disabled={disabled} onChange={onChange} {...rest} />;
+  return <input maxLength={def.max} placeholder={def.hint} value={v} disabled={disabled} onChange={onChange} {...rest} />;
+}
+
 // One table cell turned into its own editor. Enter or clicking away saves, Esc cancels; dropdowns save as soon as you pick.
 // A failed save (e.g. an invalid value) keeps the editor open with the message shown.
 function CellEditor({ def, initial, lookups, onSave, onCancel }) {
@@ -143,13 +155,15 @@ export default function Workload() {
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState(null);   // table mode: { total, rows } | { error }
   const [grid, setGrid] = useState(null);   // excel mode: { total, rows } | { error }
+  const [gridSel, setGridSel] = useState(null);   // { r0, c0, r1, c1 } — row/col INDICES into (grid.rows, cols); null = nothing selected
   const [form, setForm] = useState(null);   // null | { rec } (rec null = new)
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(null);   // { id, k } while one table cell is open for editing
   const [addingColumn, setAddingColumn] = useState(false);
+  const [managingLocks, setManagingLocks] = useState(false);
   const [importing, setImporting] = useState(false);
   const fileRef = useRef(null);
-  useEffect(() => { setEditing(null); }, [tab, mode, offset]);
+  useEffect(() => { setEditing(null); setGridSel(null); }, [tab, mode, offset]);
   const q = useDebounced(filt.q, 300);
   const isGrid = mode === 'excel' && tab !== 'ALL';
 
@@ -284,6 +298,69 @@ export default function Workload() {
   const setCell = (key, k, val) => setGrid((g) => ({
     ...g, rows: g.rows.map((r) => (r._key === key ? { ...withAutoPlatform(meta.platformRules, r, k, val), _dirty: true } : r)),
   }));
+
+  // ---- Excel mode: click-and-shift-click cell range selection, plus Excel-style copy/paste across it ----
+  // (Excel mode only — Table mode's click-to-edit and the New/Edit form keep their pickers/dropdowns.)
+  const gridClickCell = (r, c, e) => { setGridSel((s) => (e.shiftKey && s ? { ...s, r1: r, c1: c } : { r0: r, c0: c, r1: r, c1: c })); };
+  // Real spreadsheets quote a cell's text (wrapping in "…", doubling any internal ") when it contains a tab or a
+  // newline, so a multi-line cell (Remarks, VO, ...) survives being copied as part of a larger range. Match that.
+  const tsvCell = (v) => { const s = String(v ?? ''); return /[\t\n"]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const parseTsvBlock = (text) => {
+    const rows = []; let row = []; let field = ''; let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (inQuotes) {
+        if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false; }
+        else field += c;
+      } else if (c === '"') inQuotes = true;
+      else if (c === '\t') { row.push(field); field = ''; }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else if (c === '\r') { /* normalize CRLF: skip, \n below ends the row */ }
+      else field += c;
+    }
+    row.push(field); rows.push(row);
+    if (rows.length > 1 && rows[rows.length - 1].length === 1 && rows[rows.length - 1][0] === '') rows.pop();   // trailing blank line
+    return rows;
+  };
+  const inGridSel = (r, c) => {
+    if (!gridSel) return false;
+    const { r0, c0, r1, c1 } = gridSel;
+    return r >= Math.min(r0, r1) && r <= Math.max(r0, r1) && c >= Math.min(c0, c1) && c <= Math.max(c0, c1);
+  };
+  const gridCopy = (cols) => (e) => {
+    if (!gridSel || (gridSel.r0 === gridSel.r1 && gridSel.c0 === gridSel.c1)) return;   // one cell: let the browser copy the selected text normally
+    const { r0, c0, r1, c1 } = gridSel;
+    const [rLo, rHi] = [Math.min(r0, r1), Math.max(r0, r1)];
+    const [cLo, cHi] = [Math.min(c0, c1), Math.max(c0, c1)];
+    const tsv = [];
+    for (let r = rLo; r <= rHi; r++) {
+      const row = grid.rows[r];
+      tsv.push(cols.slice(cLo, cHi + 1).map((k) => tsvCell(row && row[k])).join('\t'));
+    }
+    e.clipboardData.setData('text/plain', tsv.join('\n'));
+    e.preventDefault();
+  };
+  const gridPaste = (cols) => (e) => {
+    const block = parseTsvBlock(e.clipboardData.getData('text/plain'));
+    if (block.length === 1 && block[0].length === 1) return;   // a single value: let it paste into the focused cell normally
+    e.preventDefault();
+    const r0 = gridSel ? Math.min(gridSel.r0, gridSel.r1) : 0;
+    const c0 = gridSel ? Math.min(gridSel.c0, gridSel.c1) : 0;
+    setGrid((g) => {
+      const rows = g.rows.map((row, ri) => {
+        const bi = ri - r0;
+        if (bi < 0 || bi >= block.length) return row;
+        let changed = row;
+        block[bi].forEach((val, ci) => {
+          const col = cols[c0 + ci];
+          if (col) changed = withAutoPlatform(meta.platformRules, changed, col, val);
+        });
+        return { ...changed, _dirty: true };
+      });
+      return { ...g, rows };
+    });
+    setGridSel({ r0, c0, r1: Math.min(r0 + block.length - 1, grid.rows.length - 1), c1: Math.min(c0 + (block[0] || []).length - 1, cols.length - 1) });
+  };
   const isEmptyRow = (r) => meta.views[tab].filter((k) => k !== 'work_date' && k !== 'units_concerned').every((k) => !String(r[k] ?? '').trim());
   const addRow = () => setGrid((g) => {
     const last = g.rows.length ? g.rows[g.rows.length - 1].work_date : '';
@@ -295,6 +372,7 @@ export default function Workload() {
       try { await del(`/api/workload/${r.id}`); toast('Deleted'); } catch (e) { toast(e.message, 'err'); return; }
     }
     setGrid((g) => ({ ...g, rows: g.rows.filter((x) => x._key !== r._key), total: r._new ? g.total : g.total - 1 }));
+    setGridSel(null);   // row indices shift after a removal; avoid a stale selection pointing at the wrong row
     if (!r._new) loadStats();
   };
   // ---- table-mode delete (per row) ----
@@ -373,9 +451,11 @@ export default function Workload() {
   };
 
   // Managers click a cell to edit just that cell (nothing else opens); viewers just read.
+  const rowLocked = (r) => !meta.canOverrideLocks && isLocked(r.work_date, meta.locks);
   const cell = (r, k) => {
     const td = cellView(r, k);
     if (!canWrite) return td;
+    if (rowLocked(r)) return cloneElement(td, { title: `Locked: ${lockNote(r.work_date, meta.locks)}` });
     if (editing && editing.id === r.id && editing.k === k) {
       return (
         <td key={k} data-k={k} data-label={head(k)} className="editing" onClick={(e) => e.stopPropagation()}>
@@ -431,7 +511,10 @@ export default function Workload() {
               </>
             ) : null}
             {s.canPage('/admin') ? (
-              <button type="button" className="btn" id="add-column-btn" onClick={() => setAddingColumn(true)}><ColumnIcon /> Add Column</button>
+              <>
+                <button type="button" className="btn" id="add-column-btn" onClick={() => setAddingColumn(true)}><ColumnIcon /> Add Column</button>
+                <button type="button" className="btn" id="lock-dates-btn" onClick={() => setManagingLocks(true)}><LockIcon /> Lock Dates</button>
+              </>
             ) : null}
             {canWrite && !isGrid ? (
               <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({ rec: null })}><PlusIcon /> New Workload</button>
@@ -468,14 +551,18 @@ export default function Workload() {
               {!grid ? <Empty>Loading…</Empty>
                 : grid.error ? <Empty>{grid.error}</Empty>
                   : (
-                    <table className="t xl">
+                    <table className="t xl" onCopy={gridCopy(cols)} onPaste={gridPaste(cols)}>
                       <thead><tr>{cols.map((k) => <th key={k}>{meta.fields[k].label}</th>)}{canWrite ? <th /> : null}</tr></thead>
                       <tbody>
-                        {grid.rows.length ? grid.rows.map((r) => (
+                        {grid.rows.length ? grid.rows.map((r, ri) => (
                           <tr key={r._key} className={r._dirty ? 'dirty' : ''}>
-                            {cols.map((k) => (
-                              <td key={k} data-k={k}>
-                                <FieldInput auto def={meta.fields[k]} value={r[k]} lookups={lookups} disabled={!canWrite} onChange={(e) => setCell(r._key, k, e.target.value)} />
+                            {cols.map((k, ci) => (
+                              <td key={k} data-k={k} className={inGridSel(ri, ci) ? 'xl-sel' : ''}>
+                                <GridCellInput
+                                  def={meta.fields[k]} value={r[k]} disabled={!canWrite}
+                                  onChange={(e) => setCell(r._key, k, e.target.value)}
+                                  onMouseDown={(e) => gridClickCell(ri, ci, e)}
+                                />
                               </td>
                             ))}
                             {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removeRow(r)}>{r._new ? 'Remove' : 'Delete'}</button></td> : null}
@@ -504,7 +591,11 @@ export default function Workload() {
                               {cols.map((k) => cell(r, k))}
                               {canWrite ? (
                                 <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
-                                  <RowMenu onEdit={() => setForm({ rec: r })} onDuplicate={() => setForm({ rec: null, duplicateFrom: r })} onDelete={() => deleteItem(r)} />
+                                  <RowMenu
+                                  onEdit={() => (rowLocked(r) ? toast(`Locked: ${lockNote(r.work_date, meta.locks)}. Ask an Admin.`, 'err') : setForm({ rec: r }))}
+                                  onDuplicate={() => setForm({ rec: null, duplicateFrom: r })}
+                                  onDelete={() => (rowLocked(r) ? toast(`Locked: ${lockNote(r.work_date, meta.locks)}. Ask an Admin.`, 'err') : deleteItem(r))}
+                                />
                                 </td>
                               ) : null}
                             </tr>
@@ -534,6 +625,13 @@ export default function Workload() {
         <AddColumnModal
           onClose={() => setAddingColumn(false)}
           onAdded={() => { setAddingColumn(false); loadMeta(); }}
+        />
+      ) : null}
+      {managingLocks ? (
+        <LockManagerModal
+          locks={meta.locks}
+          onClose={() => setManagingLocks(false)}
+          onChanged={loadMeta}
         />
       ) : null}
     </main>
@@ -574,6 +672,52 @@ function AddColumnModal({ onClose, onAdded }) {
           <input autoFocus maxLength={60} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Client Approval" />
         </label>
         <div className="full dim">Shows up as a plain text column everywhere — Table, Excel, the form, and the export — for every row.</div>
+      </form>
+    </Modal>
+  );
+}
+
+// Admin-only: freeze a date range so its rows can't be edited/deleted, and no new row can be created dated
+// inside it. Admins can still override; this is a period lock, not a hard permission wall.
+function LockManagerModal({ locks, onClose, onChanged }) {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const add = async () => {
+    if (!from || !to) { toast('Pick both a From and a To date', 'err'); return; }
+    setBusy(true);
+    try {
+      await post('/api/admin/workload-locks', { from_date: from, to_date: to, note });
+      toast('Date range locked');
+      setFrom(''); setTo(''); setNote('');
+      onChanged();
+    } catch (e) { toast(e.message, 'err'); } finally { setBusy(false); }
+  };
+  const remove = async (lock) => {
+    if (!(await confirm('Remove this lock?', `${lock.from_date} to ${lock.to_date} will be editable again.`, { danger: true }))) return;
+    try { await del(`/api/admin/workload-locks/${lock.id}`); toast('Lock removed'); onChanged(); } catch (e) { toast(e.message, 'err'); }
+  };
+  return (
+    <Modal title="Lock Dates" onClose={onClose} footer={<><span className="grow" /><button type="button" className="btn" onClick={onClose}>Close</button></>}>
+      <div className="dim" style={{ marginBottom: 12 }}>Rows dated inside a locked range can't be edited or deleted by Managers (Admins can still override).</div>
+      {locks.length ? (
+        <ul className="lock-list">
+          {locks.map((l) => (
+            <li key={l.id}>
+              <span><strong>{fmtDate(l.from_date)}</strong> – <strong>{fmtDate(l.to_date)}</strong>{l.note ? <span className="dim"> · {l.note}</span> : null}</span>
+              <button type="button" className="iconbtn" aria-label="Remove lock" onClick={() => remove(l)}><CloseIcon /></button>
+            </li>
+          ))}
+        </ul>
+      ) : <div className="dim" style={{ marginBottom: 12 }}>No locked date ranges yet.</div>}
+      <form className="form-grid" onSubmit={(e) => { e.preventDefault(); add(); }}>
+        <label className="f"><span>From</span><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+        <label className="f"><span>To</span><input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+        <label className="f full"><span>Note (optional)</span><input maxLength={200} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. September closed" /></label>
+        <div className="full"><button type="button" className="btn primary" disabled={busy} onClick={add}>Add lock</button></div>
       </form>
     </Modal>
   );

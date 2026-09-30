@@ -314,3 +314,16 @@ CREATE TABLE IF NOT EXISTS workload_custom_columns (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS custom_fields JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- Workload date locks: an Admin can freeze a date range (e.g. a closed month) so its rows can't be edited,
+-- deleted, or have new rows created in it. Admins themselves can still override — this is a period lock,
+-- not a hard permission wall.
+CREATE TABLE IF NOT EXISTS workload_locks (
+  id          SERIAL PRIMARY KEY,
+  from_date   DATE NOT NULL,
+  to_date     DATE NOT NULL,
+  note        TEXT,
+  created_by  INT REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (to_date >= from_date)
+);

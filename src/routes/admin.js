@@ -329,6 +329,34 @@ router.delete('/workload-columns/:id', asyncH(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---------- Workload Tracker: date locks (freeze a period so its rows can't be edited/deleted/created) ----------
+router.get('/workload-locks', asyncH(async (req, res) => {
+  const { rows } = await db.query('SELECT id, from_date, to_date, note FROM workload_locks ORDER BY from_date DESC');
+  res.json({ locks: rows });
+}));
+
+router.post('/workload-locks', asyncH(async (req, res) => {
+  const from_date = v.date(req.body.from_date, { field: 'From date', required: true });
+  const to_date = v.date(req.body.to_date, { field: 'To date', required: true });
+  if (to_date < from_date) throw new HttpError(400, 'To date must be on or after From date');
+  const note = v.str(req.body.note, { field: 'Note', max: 200 });
+  const { rows: [lock] } = await db.query(
+    'INSERT INTO workload_locks (from_date, to_date, note, created_by) VALUES ($1, $2, $3, $4) RETURNING id, from_date, to_date, note',
+    [from_date, to_date, note, req.user.id]
+  );
+  await audit(req, 'admin.workload_lock_add', 'workload_lock', lock.id, { from_date, to_date, note });
+  res.status(201).json({ ok: true, lock });
+}));
+
+router.delete('/workload-locks/:id', asyncH(async (req, res) => {
+  const id = v.id(req.params.id);
+  const cur = await db.query('SELECT * FROM workload_locks WHERE id=$1', [id]);
+  if (!cur.rows.length) throw new HttpError(404, 'Lock not found');
+  await db.query('DELETE FROM workload_locks WHERE id=$1', [id]);
+  await audit(req, 'admin.workload_lock_delete', 'workload_lock', id, { from_date: cur.rows[0].from_date, to_date: cur.rows[0].to_date });
+  res.json({ ok: true });
+}));
+
 // ---------- Branding ----------
 router.put('/branding', asyncH(async (req, res) => {
   const app_name = v.str(req.body.app_name, { field: 'App name', max: 80, required: true });
