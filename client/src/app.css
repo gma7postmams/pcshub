@@ -637,4 +637,5 @@ table.t.wl td.prio, table.t.wl tr:hover td.prio { background: color-mix(in srgb,
 .chip-tag { font-size: 10px; font-weight: 700; letter-spacing: .05em; padding: 0 5px; border-radius: 4px; line-height: 1.5; background: color-mix(in srgb, currentColor 20%, transparent); }
 
 /* Breakdate / Time: VGFX pill on top, VEDIT pill below (not side by side) */
-table.t.wl .chips.bd-chips { flex-direction: column; flex-wrap: nowrap; align-items: flex-start; gap: 4px; }
+table.t.wl .chips.bd-chips { flex-direction: column; flex-wrap: nowrap; align-items: center; gap: 4px; }
+table.t.wl td[data-k="breakdate_vgfx"] { text-align: center; }
