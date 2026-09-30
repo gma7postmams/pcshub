@@ -20,6 +20,33 @@ const isLocked = (workDate, locks) => !!workDate && (locks || []).some((l) => wo
 const lockNote = (workDate, locks) => { const hit = (locks || []).find((l) => workDate >= l.from_date && workDate <= l.to_date); return hit ? (hit.note || `${hit.from_date} – ${hit.to_date}`) : ''; };
 const withCurrent = (list, v) => (v && !list.includes(v) ? [...list, v] : list);
 const firstLine = (s) => String(s || '').split('\n')[0];
+// Breakdate / Time text -> the 'YYYY-MM-DDTHH:MM' the grid cell stores. Accepts what the web table and the Excel export show
+// ('Sep 28, 2026 4:00 PM', 'Sep 28, 2026') as well as ISO. Returns null if it isn't a date/time.
+const MON3 = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+function toBreakdateIso(t) {
+  const s = String(t || '').trim();
+  const iso = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}))?/.exec(s);
+  if (iso) return `${iso[1]}T${iso[2] || '00:00'}`;
+  const m = /^([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{1,2}),?\s+(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*(AM|PM))?$/i.exec(s);
+  if (!m) return null;
+  const mon = MON3.indexOf(m[1].toLowerCase());
+  if (mon < 0) return null;
+  let h = m[4] ? Number(m[4]) % 12 : 0;
+  if (m[6] && m[6].toUpperCase() === 'PM') h += 12;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${m[3]}-${pad(mon + 1)}-${pad(Number(m[2]))}T${pad(h)}:${m[5] || '00'}`;
+}
+// Both teams' times in one pasted cell ('VGFX  Sep 28, 2026 4:00 PM' / 'VEDIT  Sep 28, 2026 10:00 PM', on separate lines or run
+// together as copied from the web table's pills) -> { breakdate_vgfx, breakdate_vedit }
+const BD_PAIR = /(VGFX|VEDIT)\s*[:\-\u2013]?\s*([A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4}(?:\s+\d{1,2}:\d{2}\s*(?:AM|PM))?|\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2})?)/gi;
+function parseBreakdatePairs(raw) {
+  const out = {};
+  for (const m of String(raw || '').matchAll(BD_PAIR)) {
+    const iso = toBreakdateIso(m[2]);
+    if (iso) out[m[1].toUpperCase() === 'VGFX' ? 'breakdate_vgfx' : 'breakdate_vedit'] = iso;
+  }
+  return out;
+}
 const newKey = () => `n${Math.random().toString(36).slice(2)}`;
 
 /** Platform suggested by the Plug ID prefix (same rules as the template's Platform formula). null = none. */
@@ -173,6 +200,18 @@ export default function Workload() {
   const drag = useRef(null);      // Excel mode: 'cell' | 'row' | 'col' while the mouse is held down selecting
   const moveRef = useRef(null);   // Excel mode: latest mouse-move handler for drag selection (kept fresh every render)
   useEffect(() => { setEditing(null); setGridSel(null); }, [tab, mode, offset]);
+  useEffect(() => {
+    // Esc drops the current selection (a row, column or range), wherever the keyboard focus is
+    if (!gridSel) return undefined;
+    const esc = (e) => {
+      if (e.key !== 'Escape') return;
+      setGridSel(null);
+      const el = document.activeElement;
+      if (el && boxRef.current && boxRef.current.contains(el) && el !== boxRef.current) el.blur();
+    };
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [gridSel]);
   useEffect(() => {
     const up = () => { drag.current = null; };
     const move = (e) => { if (moveRef.current) moveRef.current(e); };
@@ -436,12 +475,26 @@ export default function Workload() {
   // added as new rows, one copied value (or a block that divides the selection evenly) is repeated to fill the selected
   // range, and a single value pasted into one cell is left to the browser.
   const gridPaste = (cols) => (e) => {
-    const block = parseTsvBlock(e.clipboardData.getData('text/plain'));
+    const rawText = e.clipboardData.getData('text/plain');
+    const sel0 = normSel();
+    const isBd = (k) => k === 'breakdate_vgfx' || k === 'breakdate_vedit';
+    // A Breakdate / Time cell holding BOTH teams (VGFX line + VEDIT line, as in the Excel export or the web table) pasted
+    // into either Breakdate column fills that row's VGFX and VEDIT times together — it never becomes extra rows.
+    if (sel0 && isBd(cols[sel0.cLo])) {
+      const pairs = parseBreakdatePairs(rawText);
+      if (Object.keys(pairs).length) {
+        e.preventDefault();
+        if (!canWrite) return;
+        setGrid((g) => ({ ...g, rows: g.rows.map((row, ri) => (ri >= sel0.rLo && ri <= sel0.rHi ? { ...row, ...pairs, _dirty: true } : row)) }));
+        return;
+      }
+    }
+    const block = parseTsvBlock(rawText);
     const bR = block.length;
     const bC = Math.max(1, ...block.map((row) => row.length));
     const n = normSel();
     const multi = !!n && (n.rHi > n.rLo || n.cHi > n.cLo);
-    if (bR === 1 && bC === 1 && !multi) return;   // a single value into one cell: normal paste
+    if (bR === 1 && bC === 1 && !multi && !(sel0 && isBd(cols[sel0.cLo]) && toBreakdateIso(block[0][0]))) return;   // a single value into one cell: normal paste (a date typed as 'Sep 28, 2026 4:00 PM' is converted below)
     e.preventDefault();
     if (!canWrite) return;
     const r0 = n ? n.rLo : 0;
@@ -468,7 +521,8 @@ export default function Workload() {
           for (let ci = 0; ci < tileC; ci++) {
             const col = cols[c0 + ci];
             if (!col) break;
-            changed = withAutoPlatform(meta.platformRules, changed, col, (block[bi % bR][ci % bC]) ?? '');
+            const raw = (block[bi % bR][ci % bC]) ?? '';
+            changed = withAutoPlatform(meta.platformRules, changed, col, isBd(col) ? (toBreakdateIso(raw) || raw) : raw);
           }
           return { ...changed, _dirty: true };
         }),
