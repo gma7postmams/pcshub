@@ -618,3 +618,9 @@ table.t.wl.cards td.editing { padding: 0; }
 /* Excel mode: selected cell range (click, or click + shift-click for a range/whole row) */
 table.t.xl td.xl-sel { position: relative; background: color-mix(in srgb, var(--accent) 12%, transparent); }
 table.t.xl td.xl-sel::after { content: ''; position: absolute; inset: 0; border: 2px solid var(--accent); pointer-events: none; }
+
+/* Merged Breakdate/Time cell (Table mode): one or two independently-clickable pills in one cell */
+table.t.wl .wl-pill-edit { cursor: pointer; border-radius: 999px; }
+table.t.wl .wl-pill-edit:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+table.t.wl .cell-editor-inline { display: inline-flex; }
+table.t.wl .cell-editor-inline .cell-editor { min-width: 190px; }

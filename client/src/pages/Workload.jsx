@@ -410,9 +410,12 @@ export default function Workload() {
   if (!meta) return <main className="container wide"><Empty>Loading…</Empty></main>;
 
   const isAll = tab === 'ALL';
-  const cols = meta.views[tab];
+  const cols = meta.views[tab];   // raw column list: used as-is for Excel mode (one value per cell, so VGFX/VEDIT stay separate there)
+  // Table mode only: Breakdate/Time (VGFX) and (VEDIT) merge into ONE column/cell, holding one or two pills —
+  // 'breakdate_vgfx' is kept as that column's position; breakdateCell() below decides what actually shows in it.
+  const tableCols = cols.filter((k) => k !== 'breakdate_vedit');
   const total = data && data.total ? data.total : 0;
-  const head = (k) => meta.fields[k].label;
+  const head = (k) => (k === 'breakdate_vgfx' ? 'Breakdate / Time' : meta.fields[k].label);   // table header only; Excel mode reads meta.fields directly and keeps the (VGFX)/(VEDIT) labels
   const firstLineOf = (t) => String(t || '').split('\n');
   // every cell except Remarks stays on one line: line breaks in pasted text are shown as " · "
   const oneLine = (t) => String(t ?? '').replace(/\s*\n+\s*/g, ' · ');
@@ -469,6 +472,42 @@ export default function Workload() {
       onClick: (e) => { e.stopPropagation(); open(); },
       onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); open(); } },
     });
+  };
+
+  // The merged Breakdate/Time column/cell: one or two pills (VGFX purple, VEDIT orange) depending on which
+  // team(s) the row involves. Each pill is its own click target, editing only that underlying field — the
+  // outer cell isn't one clickable unit the way every other column is, since it can hold two values at once.
+  const breakdateCell = (r) => {
+    const teams = meta.unitTeams[r.units_concerned] || [];
+    const parts = [];
+    if (teams.includes('VGFX')) parts.push({ k: 'breakdate_vgfx', hue: 'purple' });
+    if (teams.includes('VEDIT')) parts.push({ k: 'breakdate_vedit', hue: 'orange' });
+    const locked = canWrite && rowLocked(r);
+    return (
+      <td key="breakdate_vgfx" data-k="breakdate_vgfx" title={locked ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}>
+        <span className="chips">
+          {parts.map(({ k, hue }) => {
+            if (editing && editing.id === r.id && editing.k === k) {
+              return (
+                <span key={k} className="cell-editor-inline" onClick={(e) => e.stopPropagation()}>
+                  <CellEditor def={meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value) => saveCell(r, k, value)} onCancel={() => setEditing(null)} />
+                </span>
+              );
+            }
+            const clickable = canWrite && !locked;
+            return (
+              <span
+                key={k} className={clickable ? 'wl-pill-edit' : ''} tabIndex={clickable ? 0 : undefined} title={clickable ? 'Click to edit' : undefined}
+                onClick={clickable ? (e) => { e.stopPropagation(); setEditing({ id: r.id, k }); } : undefined}
+                onKeyDown={clickable ? (e) => { if (e.key === 'Enter') { e.preventDefault(); setEditing({ id: r.id, k }); } } : undefined}
+              >
+                <DateChip hue={hue}>{fmtBreakdate(r[k])}</DateChip>
+              </span>
+            );
+          })}
+        </span>
+      </td>
+    );
   };
 
   const tabCount = { ALL: stats && stats.total, VGFX: stats && stats.vgfx, VEDIT: stats && stats.vedit, AUDIO: stats && stats.audio };
@@ -584,11 +623,11 @@ export default function Workload() {
                   : !data.rows.length ? <Empty>No workload items match these filters.</Empty>
                     : (
                       <table className={`t wl${cards ? ' cards' : ''}`}>
-                        <thead><tr>{cols.map((k) => <th key={k}>{head(k)}</th>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
+                        <thead><tr>{tableCols.map((k) => <th key={k}>{head(k)}</th>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {data.rows.map((r) => (
                             <tr key={r.id} className={canWrite ? '' : 'clickable'} onClick={canWrite ? undefined : () => setForm({ rec: r })}>
-                              {cols.map((k) => cell(r, k))}
+                              {tableCols.map((k) => (k === 'breakdate_vgfx' ? breakdateCell(r) : cell(r, k)))}
                               {canWrite ? (
                                 <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
                                   <RowMenu
