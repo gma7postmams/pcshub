@@ -680,3 +680,6 @@ table.t.xl td.xl-sel.xl-single::after { border-width: 2px; }
 .xl-menu button span { color: var(--text-3); font-size: 11.5px; }
 .xl-menu button:hover:not(:disabled) { background: var(--accent-soft, color-mix(in srgb, var(--accent) 16%, transparent)); }
 .xl-menu button:disabled { opacity: .4; }
+
+.xl-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 2px; }
+table.t.xl td[data-k="breakdate_vgfx"] .xl-cell { min-width: 250px; }

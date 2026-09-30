@@ -48,6 +48,59 @@ function parseBreakdatePairs(raw) {
   }
   return out;
 }
+// ---- Excel mode: ONE Breakdate / Time cell for both teams (like Table mode) ----
+// The row still stores two times (breakdate_vgfx / breakdate_vedit); the grid cell shows them as labelled lines
+//   VGFX  Sep 28, 2026 4:00 PM
+//   VEDIT  Sep 28, 2026 10:00 PM
+// and reads whatever is typed / pasted back into the two times. 'breakdate_vgfx' is the column's key.
+const BD_TEAMS = ['VGFX', 'VEDIT'];
+const bdField = (t) => (t === 'VGFX' ? 'breakdate_vgfx' : 'breakdate_vedit');
+const MONTH3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function fmtBdText(v) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(v || '');
+  if (!m) return String(v || '');
+  const date = `${MONTH3[+m[2] - 1]} ${+m[3]}, ${m[1]}`;
+  if (m[4] === '00' && m[5] === '00') return date;
+  const h = +m[4];
+  return `${date} ${h % 12 || 12}:${m[5]} ${h >= 12 ? 'PM' : 'AM'}`;
+}
+const bdTeams = (unitTeams, units) => { const t = ((unitTeams || {})[units] || []).filter((x) => x === 'VGFX' || x === 'VEDIT'); return t.length ? t : BD_TEAMS; };
+const bdText = (row, unitTeams) => bdTeams(unitTeams, row.units_concerned).filter((t) => row[bdField(t)]).map((t) => `${t}  ${fmtBdText(row[bdField(t)])}`).join('\n');
+/** Text typed / pasted into the cell -> the fields to change on the row. `replace` (paste / clear) treats the text as the whole
+    new content; otherwise (typing) a line that is only half written leaves that team's time as it was. */
+function bdApply(row, text, unitTeams, replace) {
+  const teams = bdTeams(unitTeams, row.units_concerned);
+  const raw = String(text ?? '');
+  const patch = {};
+  if (!raw.trim()) { teams.forEach((t) => { patch[bdField(t)] = ''; }); return patch; }
+  const upper = raw.toUpperCase();
+  if (!BD_TEAMS.some((t) => upper.includes(t))) {
+    // no VGFX / VEDIT label: one date goes to the row's only team (else VGFX); two dates go VGFX then VEDIT
+    const isos = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map(toBreakdateIso);
+    if (isos.length === 1 && isos[0]) patch[bdField(teams.length === 1 ? teams[0] : 'VGFX')] = isos[0];
+    else if (isos.length > 1 && isos.every(Boolean)) isos.slice(0, teams.length).forEach((iso, i) => { patch[bdField(teams[i])] = iso; });
+    return patch;
+  }
+  const pairs = parseBreakdatePairs(raw);
+  if (replace && !Object.keys(pairs).length) return patch;   // pasted something that isn't a time: leave the cell alone
+  BD_TEAMS.forEach((t) => {
+    const key = bdField(t);
+    if (pairs[key]) patch[key] = pairs[key];
+    else if (teams.includes(t) && (replace || !upper.includes(t))) patch[key] = '';   // that team's line was removed
+  });
+  return patch;
+}
+const BD_DEF = { multiline: true, max: 300, hint: 'VGFX  Sep 28, 2026 4:00 PM' };
+/** The merged Breakdate / Time grid cell. While it is being edited it shows exactly what was typed; when it loses focus (or a paste /
+    undo changes it) it shows the times as the row now holds them. */
+function BreakdateCellInput({ text, onText, disabled, epoch, ...rest }) {
+  const [draft, setDraft] = useState(null);
+  useEffect(() => { setDraft(null); }, [epoch]);
+  return (
+    <GridCellInput def={BD_DEF} value={draft ?? text} disabled={disabled} onBlur={() => setDraft(null)}
+      onChange={(e) => { setDraft(e.target.value); onText(e.target.value); }} {...rest} />
+  );
+}
 /** Put text on the clipboard. Uses the async API where the page allows it (https / localhost), else a hidden textarea + copy command. */
 async function writeClipboard(text) {
   try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; } } catch (e) { /* fall through to the older way */ }
@@ -215,6 +268,8 @@ export default function Workload() {
   const drag = useRef(null);      // Excel mode: 'cell' | 'row' | 'col' while the mouse is held down selecting
   const moveRef = useRef(null);   // Excel mode: latest mouse-move handler for drag selection (kept fresh every render)
   const internalClip = useRef(null);   // Excel mode: the last text copied inside the grid (right-click Paste falls back to it where the browser blocks reading the clipboard)
+  const hist = useRef({ past: [], future: [], tag: null });   // Excel mode: undo / redo snapshots of the grid rows
+  const [epoch, setEpoch] = useState(0);   // bumped whenever the grid is changed from outside a cell's own typing (paste, undo, clear …)
   const [ctx, setCtx] = useState(null);   // Excel mode: right-click menu position { x, y } | null
   useEffect(() => { setEditing(null); setGridSel(null); }, [tab, mode, offset]);
   useEffect(() => {
@@ -228,6 +283,18 @@ export default function Workload() {
     window.addEventListener('keydown', key);
     return () => { window.removeEventListener('mousedown', down); window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close); window.removeEventListener('keydown', key); };
   }, [ctx]);
+  useEffect(() => {
+    // a click anywhere outside the grid (and its right-click menu) drops the selection
+    if (!gridSel) return undefined;
+    const outside = (e) => {
+      const t = e.target;
+      if (!t || !t.closest) return;
+      if ((boxRef.current && boxRef.current.contains(t)) || t.closest('.xl-menu')) return;
+      setGridSel(null);
+    };
+    window.addEventListener('mousedown', outside);
+    return () => window.removeEventListener('mousedown', outside);
+  }, [gridSel]);
   useEffect(() => {
     // Esc drops the current selection (a row, column or range), wherever the keyboard focus is
     if (!gridSel) return undefined;
@@ -290,6 +357,7 @@ export default function Workload() {
     try {
       if (isGrid) {
         const d = await get(`/api/workload?${query({ limit: GRID_LIMIT })}`);
+        hist.current = { past: [], future: [], tag: null };
         setGrid({ total: d.total, rows: d.rows.map((r) => ({ ...r, _key: `r${r.id}`, _dirty: false })) });
       } else {
         setData(await get(`/api/workload?${query({ limit: PAGE, offset })}`));
@@ -378,9 +446,33 @@ export default function Workload() {
   };
 
 
-  const setCell = (key, k, val) => setGrid((g) => ({
-    ...g, rows: g.rows.map((r) => (r._key === key ? { ...withAutoPlatform(meta.platformRules, r, k, val), _dirty: true } : r)),
-  }));
+  // ---- Excel mode: undo / redo. Typing in one cell is one step; a paste, clear, cut or row add / remove is one step each. ----
+  const pushHistory = (tag) => {
+    const h = hist.current;
+    if (tag && h.tag === tag) return;   // still typing in the same cell: same undo step
+    h.tag = tag || null;
+    h.past.push(grid.rows);
+    if (h.past.length > 100) h.past.shift();
+    h.future = [];
+  };
+  const restoreRows = (rows) => {
+    hist.current.tag = null;
+    setGrid((g) => ({ ...g, rows }));
+    setEpoch((v) => v + 1);
+    setGridSel((sel) => (sel && sel.r0 < rows.length && sel.r1 < rows.length ? sel : null));
+  };
+  const undo = () => { const h = hist.current; if (!h.past.length) return; h.future.push(grid.rows); restoreRows(h.past.pop()); };
+  const redo = () => { const h = hist.current; if (!h.future.length) return; h.past.push(grid.rows); restoreRows(h.future.pop()); };
+  // one place that knows how to put a value into a grid cell (the merged Breakdate / Time cell is text for both teams' times)
+  const setCellValue = (row, k, val, replace) => (k === 'breakdate_vgfx'
+    ? { ...row, ...bdApply(row, val, meta.unitTeams, replace) }
+    : withAutoPlatform(meta.platformRules, row, k, val));
+  const setCell = (key, k, val) => {
+    if (!canWrite) return;
+    pushHistory(`${key}:${k}`);
+    setGrid((g) => ({ ...g, rows: g.rows.map((r) => (r._key === key ? { ...setCellValue(r, k, val, false), _dirty: true } : r)) }));
+  };
+  const xlKeys = () => meta.views[tab].filter((k) => k !== 'breakdate_vedit');   // the grid's columns: VGFX + VEDIT times share one
 
   // ---- Excel mode: works like a spreadsheet ----
   // Click a cell, drag or Shift+click for a range; click a ROW NUMBER to select the whole row (drag / Shift+click for
@@ -395,7 +487,7 @@ export default function Workload() {
   const isTextTarget = (el) => !!el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
   const focusBox = () => { if (boxRef.current) boxRef.current.focus({ preventScroll: true }); try { window.getSelection().removeAllRanges(); } catch (err) { /* nothing to clear */ } };
   const startSel = (kind, r, c, e) => {
-    const nR = grid.rows.length; const nC = meta.views[tab].length;
+    const nR = grid.rows.length; const nC = xlKeys().length;
     if (!nR || !nC) return;
     if (e.button === 2) {
       // right-click: keep a selection that already covers this spot, otherwise select just this cell / row / column
@@ -419,7 +511,7 @@ export default function Workload() {
   };
   const extendSel = (kind, r, c) => {
     if (drag.current !== kind || !gridSel) return;
-    const nR = grid.rows.length; const nC = meta.views[tab].length;
+    const nR = grid.rows.length; const nC = xlKeys().length;
     const next = kind === 'row' ? { ...gridSel, r1: r, c0: 0, c1: nC - 1 }
       : kind === 'col' ? { ...gridSel, r0: 0, r1: nR - 1, c1: c }
         : { ...gridSel, r1: r, c1: c };
@@ -481,13 +573,15 @@ export default function Workload() {
   const clearSel = () => {
     const n = normSel();
     if (!n || !canWrite) return;
-    const keys = meta.views[tab];
+    const keys = xlKeys();
+    pushHistory(null);
+    setEpoch((v) => v + 1);
     setGrid((g) => ({
       ...g,
       rows: g.rows.map((row, ri) => {
         if (ri < n.rLo || ri > n.rHi) return row;
         let changed = row;
-        for (let ci = n.cLo; ci <= n.cHi; ci++) changed = withAutoPlatform(meta.platformRules, changed, keys[ci], '');
+        for (let ci = n.cLo; ci <= n.cHi; ci++) changed = setCellValue(changed, keys[ci], '', true);
         return { ...changed, _dirty: true };
       }),
     }));
@@ -500,7 +594,7 @@ export default function Workload() {
     const tsv = [];
     for (let r = n.rLo; r <= n.rHi; r++) {
       const row = grid.rows[r];
-      tsv.push(cols.slice(n.cLo, n.cHi + 1).map((k) => tsvCell(row && row[k])).join('\t'));
+      tsv.push(cols.slice(n.cLo, n.cHi + 1).map((k) => tsvCell(row && (k === 'breakdate_vgfx' ? bdText(row, meta.unitTeams) : row[k]))).join('\t'));
     }
     return tsv.join('\n');
   };
@@ -544,42 +638,30 @@ export default function Workload() {
   // Paste: starts at the top-left of the selection (a selected row starts at its first column). Rows past the end are
   // added as new rows, one copied value (or a block that divides the selection evenly) is repeated to fill the selected
   // range, and a single value pasted into one cell is left to the browser.
-  const isBd = (k) => k === 'breakdate_vgfx' || k === 'breakdate_vedit';
-  // Returns false when the paste should be left to the browser (a single value into one cell); true when the grid took it.
+  const newRowDefaults = () => {
+    const last = grid.rows.length ? grid.rows[grid.rows.length - 1].work_date : '';
+    return { _key: newKey(), _new: true, _dirty: true, work_date: last || filt.from || isoDate(), units_concerned: filt.units || meta.tabDefaultUnits[tab] };
+  };
+  // Returns false when the paste should be left to the browser (a single value into one ordinary cell); true when the grid took it.
   const doPaste = (rawText, cols, force) => {
     const sel0 = normSel();
-    // A Breakdate / Time cell holding BOTH teams (a VGFX line + a VEDIT line, as in the Excel export or copied from the web
-    // table) fills that row's VGFX and VEDIT times together — in whichever cell / row is selected, never as extra rows.
-    const pairs = parseBreakdatePairs(rawText);
-    if (sel0 && Object.keys(pairs).length) {
-      const onlyPairs = rawText.replace(BD_PAIR, '').replace(/["\s]+/g, '') === '';
-      if (onlyPairs || (isBd(cols[sel0.cLo]) && parseTsvBlock(rawText).length === 1)) {
-        if (!canWrite) return true;
-        setGrid((g) => ({ ...g, rows: g.rows.map((row, ri) => (ri >= sel0.rLo && ri <= sel0.rHi ? { ...row, ...pairs, _dirty: true } : row)) }));
-        return true;
-      }
+    // A Breakdate / Time cell holding BOTH teams (a VGFX line + a VEDIT line) pasted with a row / other cell selected
+    // fills that row's VGFX and VEDIT times together — never extra rows.
+    if (sel0 && Object.keys(parseBreakdatePairs(rawText)).length && rawText.replace(BD_PAIR, '').replace(/["\s]+/g, '') === '') {
+      if (!canWrite) return true;
+      pushHistory(null);
+      setEpoch((v) => v + 1);
+      setGrid((g) => ({ ...g, rows: g.rows.map((row, ri) => (ri >= sel0.rLo && ri <= sel0.rHi ? { ...row, ...bdApply(row, rawText, meta.unitTeams, true), _dirty: true } : row)) }));
+      return true;
     }
-    let block = parseTsvBlock(rawText);
+    const block = parseTsvBlock(rawText);
     const n = normSel();
     const r0 = n ? n.rLo : 0;
     const c0 = n ? n.cLo : 0;
-    // Whole rows copied from the Excel export have ONE merged Breakdate / Time column; the grid has two (VGFX, VEDIT).
-    // Split that cell so everything after it lands in the right column.
-    block = block.map((row) => {
-      const out = [];
-      row.forEach((cell) => {
-        if (cols[c0 + out.length] === 'breakdate_vgfx') {
-          const pr = parseBreakdatePairs(cell);
-          if (Object.keys(pr).length) { out.push(pr.breakdate_vgfx || '', pr.breakdate_vedit || ''); return; }
-        }
-        out.push(cell);
-      });
-      return out;
-    });
     const bR = block.length;
     const bC = Math.max(1, ...block.map((row) => row.length));
     const multi = !!n && (n.rHi > n.rLo || n.cHi > n.cLo);
-    if (!force && bR === 1 && bC === 1 && !multi && !(sel0 && isBd(cols[sel0.cLo]) && toBreakdateIso(block[0][0]))) return false;   // a single value into one cell: normal paste (a date like 'Sep 28, 2026 4:00 PM' in a Breakdate column is converted below)
+    if (!force && bR === 1 && bC === 1 && !multi && !(sel0 && cols[sel0.cLo] === 'breakdate_vgfx')) return false;   // a single value into one ordinary cell: normal paste
     if (!canWrite) return true;
     const selR = n ? n.rHi - n.rLo + 1 : 0;
     const selC = n ? n.cHi - n.cLo + 1 : 0;
@@ -587,13 +669,11 @@ export default function Workload() {
     const tileC = multi && selC > bC && selC % bC === 0 ? selC : bC;
     const roomLeft = Math.max(1, GRID_LIMIT - r0);   // the server saves at most 200 changed rows at a time
     if (tileR > roomLeft) { toast(`Only the first ${roomLeft} rows were pasted (200 rows per save)`, 'err'); tileR = roomLeft; }
+    pushHistory(null);
+    setEpoch((v) => v + 1);
     setGrid((g) => {
       let rows = g.rows;
-      if (r0 + tileR > rows.length) {
-        const last = rows.length ? rows[rows.length - 1].work_date : '';
-        const extra = Array.from({ length: r0 + tileR - rows.length }, () => ({ _key: newKey(), _new: true, _dirty: true, work_date: last || filt.from || isoDate(), units_concerned: filt.units || meta.tabDefaultUnits[tab] }));
-        rows = [...rows, ...extra];
-      }
+      if (r0 + tileR > rows.length) rows = [...rows, ...Array.from({ length: r0 + tileR - rows.length }, () => newRowDefaults())];
       return {
         ...g,
         rows: rows.map((row, ri) => {
@@ -603,8 +683,7 @@ export default function Workload() {
           for (let ci = 0; ci < tileC; ci++) {
             const col = cols[c0 + ci];
             if (!col) break;
-            const raw = (block[bi % bR][ci % bC]) ?? '';
-            changed = withAutoPlatform(meta.platformRules, changed, col, isBd(col) ? (toBreakdateIso(raw) || raw) : raw);
+            changed = setCellValue(changed, col, (block[bi % bR][ci % bC]) ?? '', true);
           }
           return { ...changed, _dirty: true };
         }),
@@ -614,11 +693,62 @@ export default function Workload() {
     focusBox();
     return true;
   };
+  // Right-click on a row number: put the copied rows in ABOVE this row as new rows (nothing is overwritten)
+  const menuInsertRows = async (cols) => {
+    setCtx(null);
+    const n = normSel();
+    if (!canWrite || !n) return;
+    let text = null;
+    try { if (navigator.clipboard && navigator.clipboard.readText && window.isSecureContext) text = await navigator.clipboard.readText(); } catch (err) { text = null; }
+    if (text == null || text === '') text = internalClip.current;
+    if (text == null || text === '') { toast('Nothing to insert yet — copy one or more rows first', 'err'); return; }
+    const block = parseTsvBlock(text).slice(0, GRID_LIMIT);
+    pushHistory(null);
+    setEpoch((v) => v + 1);
+    setGrid((g) => {
+      const fresh = block.map((cells) => {
+        let row = newRowDefaults();
+        cells.forEach((raw, ci) => { if (cols[ci]) row = setCellValue(row, cols[ci], raw, true); });
+        return row;
+      });
+      const rows = [...g.rows];
+      rows.splice(n.rLo, 0, ...fresh);
+      return { ...g, rows };
+    });
+    setGridSel({ r0: n.rLo, c0: 0, r1: n.rLo + block.length - 1, c1: cols.length - 1 });
+    focusBox();
+  };
+  // Right-click → Delete row(s): removes the selected whole rows (saved ones are deleted on the server too, after a confirmation)
+  const deleteSelectedRows = async () => {
+    setCtx(null);
+    const n = normSel();
+    if (!n || !canWrite) return;
+    const target = grid.rows.slice(n.rLo, n.rHi + 1);
+    const saved = target.filter((r) => !r._new);
+    if (saved.length && !(await confirm(`Delete ${saved.length} row${saved.length === 1 ? '' : 's'}`, `Permanently delete ${saved.length === 1 ? `"${firstLine(saved[0].plug_id)}"` : `these ${saved.length} rows`}? This cannot be undone.`, { okText: 'Delete', danger: true }))) return;
+    const gone = new Set(target.filter((r) => r._new).map((r) => r._key));
+    let failure = null;
+    for (const r of saved) {
+      try { await del(`/api/workload/${r.id}`); gone.add(r._key); } catch (err) { failure = err; break; }
+    }
+    const deletedSaved = saved.filter((r) => gone.has(r._key)).length;
+    setGrid((g) => ({ ...g, rows: g.rows.filter((r) => !gone.has(r._key)), total: g.total - deletedSaved }));
+    hist.current = { past: [], future: [], tag: null };   // a deleted saved row can't be brought back by undo
+    setGridSel(null);
+    if (deletedSaved) loadStats();
+    if (failure) toast(failure.message, 'err'); else toast(`Deleted ${target.length} row${target.length === 1 ? '' : 's'}`);
+  };
   const gridPaste = (cols) => (e) => {
     if (doPaste(e.clipboardData.getData('text/plain'), cols)) e.preventDefault();
   };
   // Keys while the wrapper (not a cell's own text box) has focus, i.e. after selecting rows / columns / a range
   const gridKey = (e) => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && ['z', 'y'].includes(e.key.toLowerCase())) {
+      // grid-wide undo / redo (also while a cell has the cursor: the browser's own per-box undo doesn't know about pastes or other cells)
+      e.preventDefault();
+      if (e.key.toLowerCase() === 'y' || e.shiftKey) redo(); else undo();
+      return;
+    }
     if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
       // like a spreadsheet: Enter moves to the cell below (Shift+Enter: above); Tab / Shift+Tab move sideways natively
       const td = e.target.closest('td[data-r]');
@@ -632,14 +762,15 @@ export default function Workload() {
     if (isTextTarget(e.target)) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
       e.preventDefault();
-      if (grid.rows.length) setGridSel({ r0: 0, c0: 0, r1: grid.rows.length - 1, c1: meta.views[tab].length - 1 });
+      if (grid.rows.length) setGridSel({ r0: 0, c0: 0, r1: grid.rows.length - 1, c1: xlKeys().length - 1 });
     } else if ((e.key === 'Delete' || e.key === 'Backspace') && gridSel) {
       e.preventDefault();
       clearSel();
     } else if (e.key === 'Escape') setGridSel(null);
   };
   const isEmptyRow = (r) => meta.views[tab].filter((k) => k !== 'work_date' && k !== 'units_concerned').every((k) => !String(r[k] ?? '').trim());
-  const addRow = () => setGrid((g) => {
+  const addRow = () => { pushHistory(null); addRowNow(); };
+  const addRowNow = () => setGrid((g) => {
     const last = g.rows.length ? g.rows[g.rows.length - 1].work_date : '';
     return { ...g, rows: [...g.rows, { _key: newKey(), _new: true, _dirty: false, work_date: last || filt.from || isoDate(), units_concerned: filt.units || meta.tabDefaultUnits[tab] }] };
   });
@@ -648,6 +779,7 @@ export default function Workload() {
       if (!(await confirm('Delete row', `Permanently delete "${firstLine(r.plug_id)}"?`, { okText: 'Delete', danger: true }))) return;
       try { await del(`/api/workload/${r.id}`); toast('Deleted'); } catch (e) { toast(e.message, 'err'); return; }
     }
+    if (r._new) pushHistory(null); else hist.current = { past: [], future: [], tag: null };   // a deleted saved row can't be brought back by undo
     setGrid((g) => ({ ...g, rows: g.rows.filter((x) => x._key !== r._key), total: r._new ? g.total : g.total - 1 }));
     setGridSel(null);   // row indices shift after a removal; avoid a stale selection pointing at the wrong row
     if (!r._new) loadStats();
@@ -687,7 +819,7 @@ export default function Workload() {
   if (!meta) return <main className="container wide"><Empty>Loading…</Empty></main>;
 
   const isAll = tab === 'ALL';
-  const cols = meta.views[tab];   // raw column list: used as-is for Excel mode (one value per cell, so VGFX/VEDIT stay separate there)
+  const cols = meta.views[tab];   // raw column list (Table mode's tableCols below merges the two Breakdate / Time columns; Excel mode does the same)
   // Table mode only: Breakdate/Time (VGFX) and (VEDIT) merge into ONE column/cell, holding one or two pills —
   // 'breakdate_vgfx' is kept as that column's position; breakdateCell() below decides what actually shows in it.
   const tableCols = cols.filter((k) => k !== 'breakdate_vedit');
@@ -863,7 +995,7 @@ export default function Workload() {
           <Empty>Pick VGFX, VEDIT or Audio above to edit in the Excel grid — each shows its own columns.</Empty>
         ) : isGrid ? (
           <>
-            <div className="table-wrap xl-box" id="grid" ref={boxRef} tabIndex={-1} onCopy={gridCopy(cols)} onCut={gridCopy(cols, true)} onPaste={gridPaste(cols)} onKeyDown={gridKey}
+            <div className="table-wrap xl-box" id="grid" ref={boxRef} tabIndex={-1} onCopy={gridCopy(tableCols)} onCut={gridCopy(tableCols, true)} onPaste={gridPaste(tableCols)} onKeyDown={gridKey}
               onContextMenu={(e) => { if (!gridSel || !grid || grid.error || !grid.rows.length) return; e.preventDefault(); setCtx({ x: Math.min(e.clientX, window.innerWidth - 210), y: Math.min(e.clientY, window.innerHeight - 150) }); }}>
               {!grid ? <Empty>Loading…</Empty>
                 : grid.error ? <Empty>{grid.error}</Empty>
@@ -872,9 +1004,9 @@ export default function Workload() {
                       <thead>
                         <tr>
                           <th className="rn" title="Select all" onMouseDown={(e) => startSel('all', 0, 0, e)} />
-                          {cols.map((k, ci) => (
+                          {tableCols.map((k, ci) => (
                             <th key={k} className={`xl-colhead${colInSel(ci) ? ' hl' : ''}`} title="Click to select the column"
-                              data-c={ci} onMouseDown={(e) => startSel('col', 0, ci, e)}>{meta.fields[k].label}</th>
+                              data-c={ci} onMouseDown={(e) => startSel('col', 0, ci, e)}>{head(k)}</th>
                           ))}
                           {canWrite ? <th /> : null}
                         </tr>
@@ -884,32 +1016,47 @@ export default function Workload() {
                           <tr key={r._key} data-ri={ri} className={r._dirty ? 'dirty' : ''}>
                             <td className={`rn${rowInSel(ri) ? ' hl' : ''}`} title="Click to select the whole row (Ctrl+C to copy)"
                               onMouseDown={(e) => startSel('row', ri, 0, e)}>{ri + 1}</td>
-                            {cols.map((k, ci) => (
-                              <td key={k} data-k={k} data-r={ri} data-c={ci} onMouseDown={cellMouseDown(ri, ci)}
+                            {tableCols.map((k, ci) => (
+                              <td key={k} data-k={k} data-r={ri} data-c={ci} onMouseDown={cellMouseDown(ri, ci)} onBlur={() => { hist.current.tag = null; }}
                                 onFocus={(e) => { if (isTextTarget(e.target)) setGridSel((sel) => (sel && sel.r0 === ri && sel.r1 === ri && sel.c0 === ci && sel.c1 === ci ? sel : { r0: ri, c0: ci, r1: ri, c1: ci })); }}
-                                className={`${selClass(ri, ci)}${r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit') ? ' prio' : ''}`.trim()}>
-                                <GridCellInput
-                                  def={meta.fields[k]} value={r[k]} disabled={!canWrite}
-                                  onChange={(e) => setCell(r._key, k, e.target.value)}
-                                />
+                                className={`${selClass(ri, ci)}${r.is_priority && k === 'breakdate_vgfx' ? ' prio' : ''}`.trim()}>
+                                {k === 'breakdate_vgfx' ? (
+                                  <BreakdateCellInput text={bdText(r, meta.unitTeams)} epoch={epoch} disabled={!canWrite} onText={(t) => setCell(r._key, k, t)} />
+                                ) : (
+                                  <GridCellInput
+                                    def={meta.fields[k]} value={r[k]} disabled={!canWrite}
+                                    onChange={(e) => setCell(r._key, k, e.target.value)}
+                                  />
+                                )}
                               </td>
                             ))}
                             {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removeRow(r)}>{r._new ? 'Remove' : 'Delete'}</button></td> : null}
                           </tr>
-                        )) : <tr><td colSpan={cols.length + 2} className="empty">No {meta.tabs.find((t) => t.key === tab).label} rows match these filters.{canWrite ? ' Use “Add row” to start.' : ''}</td></tr>}
+                        )) : <tr><td colSpan={tableCols.length + 2} className="empty">No {meta.tabs.find((t) => t.key === tab).label} rows match these filters.{canWrite ? ' Use “Add row” to start.' : ''}</td></tr>}
                       </tbody>
                     </table>
                   )}
             </div>
-            {ctx ? (
-              <div className="xl-menu" style={{ left: ctx.x, top: ctx.y }} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
-                <button type="button" onClick={() => menuCopy(cols, false)}>Copy<span>Ctrl+C</span></button>
-                <button type="button" disabled={!canWrite} onClick={() => menuCopy(cols, true)}>Cut<span>Ctrl+X</span></button>
-                <button type="button" disabled={!canWrite} onClick={() => menuPaste(cols)}>Paste<span>Ctrl+V</span></button>
-              </div>
-            ) : null}
+            {ctx ? (() => {
+              const nSel = normSel();
+              const wholeRows = !!nSel && nSel.cLo === 0 && nSel.cHi === tableCols.length - 1;
+              return (
+                <div className="xl-menu" style={{ left: ctx.x, top: ctx.y }} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
+                  <button type="button" disabled={!canWrite || !hist.current.past.length} onClick={() => { setCtx(null); undo(); }}>Undo<span>Ctrl+Z</span></button>
+                  <button type="button" disabled={!canWrite || !hist.current.future.length} onClick={() => { setCtx(null); redo(); }}>Redo<span>Ctrl+Y</span></button>
+                  <hr />
+                  <button type="button" disabled={!canWrite} onClick={() => menuCopy(tableCols, true)}>Cut<span>Ctrl+X</span></button>
+                  <button type="button" onClick={() => menuCopy(tableCols, false)}>Copy<span>Ctrl+C</span></button>
+                  <button type="button" disabled={!canWrite} onClick={() => menuPaste(tableCols)}>Paste<span>Ctrl+V</span></button>
+                  {wholeRows ? <button type="button" disabled={!canWrite} onClick={() => menuInsertRows(tableCols)}>Insert copied row(s) above</button> : null}
+                  <hr />
+                  <button type="button" disabled={!canWrite} onClick={() => { setCtx(null); clearSel(); }}>Delete<span>Del</span></button>
+                  {wholeRows ? <button type="button" disabled={!canWrite} onClick={deleteSelectedRows}>Delete row{nSel.rHi > nSel.rLo ? 's' : ''}</button> : null}
+                </div>
+              );
+            })() : null}
             {canWrite && grid && !grid.error ? (
-              <div className="xl-hint dim">Click a cell to edit it · drag across cells or Shift+click to select just those cells · click a row number for the whole row · right-click for Copy / Cut / Paste · Ctrl+C / Ctrl+X / Ctrl+V · paste below the last row adds rows · Delete clears</div>
+              <div className="xl-hint dim">Click a cell to edit it · drag across cells or Shift+click to select just those cells · click a row number for the whole row · right-click for Undo / Redo / Cut / Copy / Paste / Delete · Ctrl+Z / Ctrl+Y / Ctrl+X / Ctrl+C / Ctrl+V · paste below the last row adds rows · Delete clears</div>
             ) : null}
             {grid && grid.total > GRID_LIMIT ? (
               <div className="pager"><span>Showing the first {GRID_LIMIT} of {grid.total} rows — narrow the date range to edit the rest.</span></div>
