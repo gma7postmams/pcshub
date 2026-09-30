@@ -6,7 +6,7 @@ import { useSession } from '../context.jsx';
 import { PlusIcon } from '../components/Icons.jsx';
 import { Empty, Modal, Options, Pill, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
-const STATUSES = ['New', 'Pending Approval', 'Approved', 'Rejected'];
+const STATUSES = ['New', 'Pending Approval', 'Approved', 'Rejected', 'DONE', 'NON-COMPLIANT'];
 const EDITABLE = ['New', 'Rejected'];
 const PAGE = 50;
 const withCurrent = (list, v) => (v && !list.includes(v) ? [...list, v] : list);
@@ -18,6 +18,7 @@ export default function Ingest() {
   const [params] = useSearchParams();
   const canWrite = s.can('ingest.write');
   const canDelete = s.can('ingest.delete');
+  const canCmComplete = s.can('ingest.cm_complete');
 
   const [lookups, setLookups] = useState(null);
   const [filt, setFilt] = useState({ q: '', status: params.get('status') || '', program: '', platform: '', from: '', to: '' });
@@ -89,7 +90,7 @@ export default function Ingest() {
                           <td className="cell-clip" title={r.source || ''}>{r.source}</td>
                           <td className="cell-clip mono" title={r.destination_folder || ''}>{r.destination_folder}</td>
                           <td>{r.requested_by_psd || ''}</td>
-                          <td><Pill s={r.status} /></td>
+                          <td><Pill s={r.cm_status || r.status} /></td>
                           <td className="dim nowrap">{ago(r.updated_at)}</td>
                         </tr>
                       ))}
@@ -114,11 +115,35 @@ export default function Ingest() {
           r={detail}
           canWrite={canWrite}
           canDelete={canDelete}
+          canCmComplete={canCmComplete}
           onClose={() => setDetail(null)}
           onEdit={() => { setForm(detail); setDetail(null); }}
           onSend={async () => {
             if (!(await confirm('Send for approval', `Send ingest #${detail.id} (${detail.program}) to Managers for approval? It will be locked from editing while pending.`, { okText: 'Send' }))) return;
             try { await post(`/api/ingest/${detail.id}/send`); toast('Sent for approval'); setDetail(null); load(); } catch (e) { toast(e.message, 'err'); }
+          }}
+          onCmDecision={async (decision) => {
+            const result = await confirm(
+              decision === 'DONE' ? 'Mark ingest DONE' : 'Mark ingest NON-COMPLIANT',
+              decision === 'DONE'
+                ? `Mark ingest #${detail.id} (${detail.program}) DONE? This is a final decision.`
+                : `Mark ingest #${detail.id} (${detail.program}) NON-COMPLIANT? A reason is required.`,
+              {
+                okText: `Mark ${decision}`,
+                danger: decision === 'NON-COMPLIANT',
+                ...(decision === 'NON-COMPLIANT' ? { input: { label: 'Reason', required: true } } : {}),
+              }
+            );
+            if (result === null) return;
+            try {
+              await post(`/api/ingest/${detail.id}/cm-decision`, {
+                decision,
+                reason: decision === 'NON-COMPLIANT' ? result.value : '',
+              });
+              toast(`Ingest marked ${decision}`);
+              setDetail(null);
+              load();
+            } catch (e) { toast(e.message, 'err'); }
           }}
           onDelete={async () => {
             if (!(await confirm('Delete ingest record', `Permanently delete ingest #${detail.id} and its approval history?`, { okText: 'Delete', danger: true }))) return;
@@ -138,7 +163,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
     program: r.program || '', platform: r.platform || '', billable_party: r.billable_party || '',
     episode_break_date_text: initialEpisodeText,
     materials_count: r.materials_count == null ? '' : String(r.materials_count),
-    source: r.source || '', destination_folder: r.destination_folder || '',
+    source: r.source || '',
     requested_by_user_id: r.requested_by_user_id ?? '',
     requested_by_psd: r.requested_by_psd || '', remarks: r.remarks || '',
   });
@@ -190,7 +215,6 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
         <label className="f"><span>Episode / Break Date</span><input name="episode_break_date_text" maxLength={500} value={f.episode_break_date_text} onChange={set('episode_break_date_text')} placeholder="e.g. SEP 1, SEP 7-12, 2026-09-15" /></label>
         <label className="f"><span>Number of Materials</span><input type="number" name="materials_count" min="0" step="1" value={f.materials_count} onChange={set('materials_count')} /></label>
         <label className="f"><span>Source</span><input name="source" maxLength={500} value={f.source} onChange={set('source')} placeholder="e.g. Tape, drive, server path" /></label>
-        <label className="f full"><span>Destination Folder</span><input name="destination_folder" maxLength={1000} className="mono" value={f.destination_folder} onChange={set('destination_folder')} placeholder="\\server\share\promos\…" /></label>
         <label className="f"><span>Requested By</span><input name="requested_by_psd" maxLength={200} value={f.requested_by_psd} onChange={set('requested_by_psd')} /></label>
         <label className="f full"><span>Remarks</span><textarea name="remarks" maxLength={4000} value={f.remarks} onChange={set('remarks')} /></label>
         {!rec ? <div className="full dim">Status will be set to <strong>New</strong>. Send it for approval when ready.</div> : null}
@@ -201,23 +225,28 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
 
 const KV = ({ k, children }) => <><dt>{k}</dt><dd>{children || <span className="dim">—</span>}</dd></>;
 
-function IngestDetail({ r, canWrite, canDelete, onClose, onEdit, onSend, onDelete }) {
+function IngestDetail({ r, canWrite, canDelete, canCmComplete, onClose, onEdit, onSend, onCmDecision, onDelete }) {
   const editable = canWrite && EDITABLE.includes(r.status);
+  const cmFinal = Boolean(r.cm_status);
   return (
     <Modal
       title={`Ingest #${r.id}`}
       onClose={onClose}
       footer={(
         <>
-          {canDelete ? <button type="button" className="btn danger" id="del" onClick={onDelete}>Delete</button> : null}
+          {canDelete && !cmFinal ? <button type="button" className="btn danger" id="del" onClick={onDelete}>Delete</button> : null}
           <span className="grow" />
           <button type="button" className="btn" onClick={onClose}>Close</button>
           {editable ? <button type="button" className="btn" id="edit" onClick={onEdit}>Edit</button> : null}
           {editable ? <button type="button" className="btn primary" id="send" onClick={onSend}>{r.status === 'Rejected' ? 'Resubmit for Approval' : 'Send for Approval'}</button> : null}
+          {canCmComplete && r.status === 'Approved' && !cmFinal ? <>
+            <button type="button" className="btn success" id="cm-done" onClick={() => onCmDecision('DONE')}>Mark DONE</button>
+            <button type="button" className="btn danger" id="cm-non-compliant" onClick={() => onCmDecision('NON-COMPLIANT')}>Mark NON-COMPLIANT</button>
+          </> : null}
         </>
       )}
     >
-      <div className="row mb-12"><Pill s={r.status} /><span className="dim">Created {fmtDateTime(r.created_at)} by {r.created_by_name || '—'}</span></div>
+      <div className="row mb-12"><Pill s={r.cm_status || r.status} /><span className="dim">Created {fmtDateTime(r.created_at)} by {r.created_by_name || '—'}</span></div>
       {r.status === 'Rejected' && r.last_approval && r.last_approval.decision_note
         ? <div className="alert err mb-12"><strong>Rejected:</strong> {r.last_approval.decision_note}</div> : null}
       <dl className="kv">
@@ -232,6 +261,12 @@ function IngestDetail({ r, canWrite, canDelete, onClose, onEdit, onSend, onDelet
         {r.requested_by_name ? <KV k="Historical Requested By Account">{r.requested_by_name}</KV> : null}
         <KV k="Remarks">{r.remarks}</KV>
         <KV k="Last updated">{fmtDateTime(r.updated_at)}{r.updated_by_name ? ` by ${r.updated_by_name}` : ''}</KV>
+        {r.cm_status ? <>
+          <KV k="CM decision">{r.cm_status}</KV>
+          <KV k="CM decision by">{r.cm_decided_by_name || '—'}</KV>
+          <KV k="CM decision at">{fmtDateTime(r.cm_decided_at)}</KV>
+          {r.cm_non_compliant_reason ? <KV k="Non-compliant reason">{r.cm_non_compliant_reason}</KV> : null}
+        </> : null}
       </dl>
       {r.approvals.length ? (
         <>

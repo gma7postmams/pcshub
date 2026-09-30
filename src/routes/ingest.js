@@ -8,10 +8,12 @@ const { notifyCapable } = require('../notify');
 const router = express.Router();
 
 const STATUSES = ['New', 'Pending Approval', 'Approved', 'Rejected'];
+const CM_STATUSES = ['DONE', 'NON-COMPLIANT'];
 const EDITABLE = ['New', 'Rejected'];
 
 const SELECT = `
-  SELECT i.*, ru.full_name AS requested_by_name, cu.full_name AS created_by_name, uu.full_name AS updated_by_name,
+  SELECT i.*, ru.full_name AS requested_by_name, cu.full_name AS created_by_name,
+         uu.full_name AS updated_by_name, cmu.full_name AS cm_decided_by_name,
          (SELECT row_to_json(a) FROM (
             SELECT ar.id, ar.status, ar.decision_note, ar.decided_at, du.full_name AS decided_by_name
               FROM approval_requests ar LEFT JOIN users du ON du.id = ar.decided_by
@@ -19,7 +21,8 @@ const SELECT = `
     FROM ingest_records i
     LEFT JOIN users ru ON ru.id = i.requested_by_user_id
     LEFT JOIN users cu ON cu.id = i.created_by
-    LEFT JOIN users uu ON uu.id = i.updated_by`;
+    LEFT JOIN users uu ON uu.id = i.updated_by
+    LEFT JOIN users cmu ON cmu.id = i.cm_decided_by`;
 
 async function assertDropdown(client, category, value, field) {
   const { rows } = await client.query(
@@ -60,7 +63,9 @@ async function parseBody(client, body, current = null) {
     episode_break_date_text,
     materials_count: v.int(body.materials_count, { field: 'Materials count', min: 0 }),
     source: v.str(body.source, { field: 'Source', max: 500 }),
-    destination_folder: v.str(body.destination_folder, { field: 'Destination folder', max: 1000 }),
+    // Destination Folder is assigned during the PCS approval step. Preserve legacy values
+    // when a PSD edits an existing request, but never accept it from this endpoint.
+    destination_folder: current ? current.destination_folder : null,
     requested_by_user_id: v.int(body.requested_by_user_id, { field: 'Requested by', min: 1 }),
     requested_by_psd: v.str(body.requested_by_psd, { field: 'Requested by (PSD)', max: 200 }),
     remarks: v.str(body.remarks, { field: 'Remarks', max: 4000 }),
@@ -77,7 +82,8 @@ router.get('/', asyncH(async (req, res) => {
   const where = [];
   const params = [];
   const add = (sql, val) => { params.push(val); where.push(sql.replace('?', `$${params.length}`)); };
-  if (req.query.status && STATUSES.includes(req.query.status)) add('i.status = ?', req.query.status);
+  if (req.query.status && CM_STATUSES.includes(req.query.status)) add('i.cm_status = ?', req.query.status);
+  else if (req.query.status && STATUSES.includes(req.query.status)) add('i.status = ?', req.query.status);
   if (req.query.program) add('i.program = ?', String(req.query.program));
   if (req.query.platform) add('i.platform = ?', String(req.query.platform));
   if (req.query.from) add('i.episode_date >= ?', v.date(req.query.from, { field: 'from' }));
@@ -140,7 +146,7 @@ router.put('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
   await db.tx(async (c) => {
     const cur = await c.query(
       `SELECT status, episode_date, to_char(episode_date, 'YYYY-MM-DD') AS episode_date_iso,
-              episode_break_date_text
+              episode_break_date_text, destination_folder
          FROM ingest_records WHERE id=$1 FOR UPDATE`, [id]
     );
     if (!cur.rows.length) throw new HttpError(404, 'Ingest record not found');
@@ -187,11 +193,60 @@ router.post('/:id/send', requireAction('ingest.write'), asyncH(async (req, res) 
   res.json({ ok: true, approval_request_id: result.id });
 }));
 
+router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(async (req, res) => {
+  const id = v.id(req.params.id);
+  const decision = v.oneOf(req.body.decision, CM_STATUSES, { field: 'CM decision' });
+  const reason = v.str(req.body.reason, { field: 'Non-compliant reason', max: 2000 });
+  if (decision === 'NON-COMPLIANT' && !reason) throw new HttpError(400, 'A reason is required for NON-COMPLIANT');
+
+  await db.tx(async (c) => {
+    const cur = await c.query(
+      `SELECT i.id, i.status, i.cm_status, i.program, i.created_by, i.requested_by_user_id,
+              ar.requested_by AS submitted_by, ar.decided_by AS approved_by
+         FROM ingest_records i
+         LEFT JOIN LATERAL (
+           SELECT requested_by, decided_by FROM approval_requests
+            WHERE ingest_record_id=i.id AND status='Approved'
+            ORDER BY decided_at DESC NULLS LAST, id DESC LIMIT 1
+         ) ar ON TRUE
+        WHERE i.id=$1 FOR UPDATE OF i`, [id]
+    );
+    const r = cur.rows[0];
+    if (!r) throw new HttpError(404, 'Ingest record not found');
+    if (r.status !== 'Approved') throw new HttpError(409, 'Only approved requests can be completed by CM');
+    if (r.cm_status) throw new HttpError(409, `Already marked ${r.cm_status}`);
+
+    await c.query(
+      `UPDATE ingest_records
+          SET cm_status=$2, cm_decided_by=$3, cm_decided_at=now(), cm_non_compliant_reason=$4,
+              updated_by=$3, updated_at=now()
+        WHERE id=$1`,
+      [id, decision, req.user.id, decision === 'NON-COMPLIANT' ? reason : null]
+    );
+    await audit(req, decision === 'DONE' ? 'ingest.cm_done' : 'ingest.cm_non_compliant',
+      'ingest_record', id, { decision, reason: decision === 'NON-COMPLIANT' ? reason : null }, c);
+
+    const participants = [r.approved_by, r.submitted_by, r.created_by, r.requested_by_user_id]
+      .filter((uid) => uid && uid !== req.user.id);
+    const reasonSuffix = decision === 'NON-COMPLIANT' ? ` — ${reason}` : '';
+    await notifyUsers(participants, {
+      title: `Ingest ${decision}: ${r.program}`,
+      body: `${req.user.full_name} marked ingest #${id} ${decision}${reasonSuffix}`,
+      link: `/ingest?id=${id}`,
+    }, c);
+  });
+  res.json({ ok: true, status: decision });
+}));
+
 router.delete('/:id', requireAction('ingest.delete'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
-  const { rows } = await db.query('DELETE FROM ingest_records WHERE id=$1 RETURNING program, status', [id]);
-  if (!rows.length) throw new HttpError(404, 'Ingest record not found');
-  await audit(req, 'ingest.delete', 'ingest_record', id, rows[0]);
+  await db.tx(async (c) => {
+    const cur = await c.query('SELECT program, status, cm_status FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
+    if (!cur.rows.length) throw new HttpError(404, 'Ingest record not found');
+    if (cur.rows[0].cm_status) throw new HttpError(409, 'CM-completed requests are preserved as historical records');
+    await c.query('DELETE FROM ingest_records WHERE id=$1', [id]);
+    await audit(req, 'ingest.delete', 'ingest_record', id, cur.rows[0], c);
+  });
   res.json({ ok: true });
 }));
 

@@ -3,12 +3,13 @@ const db = require('../db');
 const v = require('../validate');
 const { asyncH, HttpError, requireAction } = require('../middleware');
 const { audit } = require('../audit');
-const { notifyUsers } = require('../notify');
+const { notifyUsers, notifyCapable } = require('../notify');
 
 const router = express.Router();
 
 const SELECT = `
-  SELECT ar.*, i.program, i.platform, i.episode_date, i.source, i.destination_folder, i.requested_by_psd, i.remarks,
+  SELECT ar.*, i.program, i.platform, i.episode_date, i.episode_break_date_text,
+         i.source, i.destination_folder, i.requested_by_psd, i.remarks,
          i.status AS ingest_status, rbu.full_name AS ingest_requested_by_name,
          ru.full_name AS requested_by_name, du.full_name AS decided_by_name
     FROM approval_requests ar
@@ -41,6 +42,10 @@ router.post('/:id/decide', requireAction('approval.decide'), asyncH(async (req, 
   const id = v.id(req.params.id);
   const decision = v.oneOf(req.body.decision, ['Approved', 'Rejected'], { field: 'Decision' });
   const note = v.str(req.body.note, { field: 'Note', max: 2000 });
+  const hasDestinationFolder = Object.prototype.hasOwnProperty.call(req.body, 'destination_folder');
+  const destinationFolder = decision === 'Approved' && hasDestinationFolder
+    ? v.str(req.body.destination_folder, { field: 'Destination Folder', max: 1000 })
+    : null;
   if (decision === 'Rejected' && !note) throw new HttpError(400, 'A reason is required when rejecting');
 
   await db.tx(async (c) => {
@@ -58,11 +63,16 @@ router.post('/:id/decide', requireAction('approval.decide'), asyncH(async (req, 
       [id, decision, req.user.id, note]
     );
     await c.query(
-      `UPDATE ingest_records SET status=$2, updated_by=$3, updated_at=now() WHERE id=$1`,
-      [ar.ingest_record_id, decision, req.user.id]
+      `UPDATE ingest_records
+          SET status=$2,
+              destination_folder=CASE WHEN $4::boolean THEN $5 ELSE destination_folder END,
+              updated_by=$3, updated_at=now()
+        WHERE id=$1`,
+      [ar.ingest_record_id, decision, req.user.id, decision === 'Approved' && hasDestinationFolder, destinationFolder]
     );
     await audit(req, `approval.${decision.toLowerCase()}`, 'approval_request', id,
-      { ingest_record_id: ar.ingest_record_id, note }, c);
+      { ingest_record_id: ar.ingest_record_id, note,
+        ...(decision === 'Approved' && hasDestinationFolder ? { destination_folder: destinationFolder } : {}) }, c);
     await notifyUsers(
       [ar.requested_by, ar.ingest_created_by, ar.requested_by_user_id].filter((x) => x && x !== req.user.id),
       {
@@ -71,6 +81,13 @@ router.post('/:id/decide', requireAction('approval.decide'), asyncH(async (req, 
         link: `/ingest?id=${ar.ingest_record_id}`,
       }, c
     );
+    if (decision === 'Approved') {
+      await notifyCapable('ingest.cm_complete', {
+        title: `Ready for CM: ${ar.program}`,
+        body: `Ingest #${ar.ingest_record_id} (${ar.program}) was approved by ${req.user.full_name}.`,
+        link: `/ingest?id=${ar.ingest_record_id}`,
+      }, { excludeUserId: req.user.id }, c);
+    }
   });
   res.json({ ok: true });
 }));

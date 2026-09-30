@@ -45,8 +45,8 @@ const SECTION_PAGE = Object.fromEntries(CATALOG.flatMap((p) => p.sections.map((s
 
 // Role -> actions
 const ROLE_ACTIONS = {
-  Admin:   ['ingest.write', 'ingest.delete', 'approval.decide', 'workload.write', 'admin'],
-  Manager: ['ingest.write', 'approval.decide', 'workload.write'],
+  Admin:   ['ingest.write', 'ingest.delete', 'approval.decide', 'ingest.cm_complete', 'workload.write', 'admin'],
+  Manager: ['ingest.write', 'approval.decide', 'ingest.cm_complete', 'workload.write'],
   Editor:  ['ingest.write'],
   Viewer:  [],
 };
@@ -54,6 +54,7 @@ const ROLE_ACTIONS = {
 const ACTION_PAGE = {
   'ingest.write': 'ingest',
   'ingest.delete': 'ingest',
+  'ingest.cm_complete': 'ingest',
   'approval.decide': 'approval',
   'workload.write': 'workload',
   'admin': null,

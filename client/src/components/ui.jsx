@@ -4,6 +4,7 @@ import { CloseIcon } from './Icons.jsx';
 // ---------- Status pill ----------
 const PILL = {
   'New': 's-new', 'Pending Approval': 's-pending', 'Pending': 's-pending', 'Approved': 's-approved', 'Rejected': 's-rejected',
+  'DONE': 's-done', 'NON-COMPLIANT': 's-rejected',
   'Not Started': 's-notstarted', 'In Progress': 's-progress', 'On Hold': 's-hold', 'Done': 's-done',
   'Low': 's-low', 'Normal': 's-normal', 'High': 's-high', 'Urgent': 's-urgent',
 };
