@@ -480,13 +480,13 @@ export default function Workload() {
   const breakdateCell = (r) => {
     const teams = meta.unitTeams[r.units_concerned] || [];
     const parts = [];
-    if (teams.includes('VGFX')) parts.push({ k: 'breakdate_vgfx', hue: 'purple' });
-    if (teams.includes('VEDIT')) parts.push({ k: 'breakdate_vedit', hue: 'orange' });
+    if (teams.includes('VGFX')) parts.push({ k: 'breakdate_vgfx', hue: 'purple', tag: 'VGFX' });
+    if (teams.includes('VEDIT')) parts.push({ k: 'breakdate_vedit', hue: 'orange', tag: 'VEDIT' });
     const locked = canWrite && rowLocked(r);
     return (
       <td key="breakdate_vgfx" data-k="breakdate_vgfx" className={r.is_priority ? 'prio' : undefined} title={locked ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}>
         <span className="chips">
-          {parts.map(({ k, hue }) => {
+          {parts.map(({ k, hue, tag }) => {
             if (editing && editing.id === r.id && editing.k === k) {
               return (
                 <span key={k} className="cell-editor-inline" onClick={(e) => e.stopPropagation()}>
@@ -501,7 +501,7 @@ export default function Workload() {
                 onClick={clickable ? (e) => { e.stopPropagation(); setEditing({ id: r.id, k }); } : undefined}
                 onKeyDown={clickable ? (e) => { if (e.key === 'Enter') { e.preventDefault(); setEditing({ id: r.id, k }); } } : undefined}
               >
-                <DateChip hue={hue}>{fmtBreakdate(r[k])}</DateChip>
+                <DateChip hue={hue}>{r[k] ? <><span className="chip-tag">{tag}</span>{fmtBreakdate(r[k])}</> : null}</DateChip>
               </span>
             );
           })}
