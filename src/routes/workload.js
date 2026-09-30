@@ -35,10 +35,9 @@ const FIELDS = {
   units_concerned:{ label: 'Units Concerned', kind: 'select', options: UNITS, required: true },
   plug_id:        { label: 'Plug ID', kind: 'text', multiline: true, max: 1000, required: true, hint: FROM_PSD },
   psd:            { label: 'PSD', kind: 'text', max: 200, hint: FROM_PSD },
-  // Two separate times (the template lists both when a plug needs both teams), plus a short shared note
+  // Two separate times (the template lists both when a plug needs both teams)
   breakdate_vgfx: { label: 'Breakdate / Time (VGFX)', kind: 'datetime' },
   breakdate_vedit:{ label: 'Breakdate / Time (VEDIT)', kind: 'datetime' },
-  breakdate_note: { label: 'Breakdate / Time Notes', kind: 'text', multiline: true, max: 500, hint: OPEN },
   vo:             { label: 'VO', kind: 'text', multiline: true, max: 1000, hint: OPEN },
   script:         { label: 'Script', kind: 'date' },
   art_stb:        { label: 'Artwork / STB', kind: 'date' },
@@ -55,7 +54,7 @@ const COLS = Object.keys(FIELDS);
 
 // Columns per tab, in the same order as the template's sheets ("main" for VGFX/VEDIT, "ojo" for Audio)
 const MAIN_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd',
-  'breakdate_vgfx', 'breakdate_vedit', 'breakdate_note',
+  'breakdate_vgfx', 'breakdate_vedit',
   'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats', 'prog_name', 'plug_type'];
 const AUDIO_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'vo', 'script', 'remarks', 'length', 'others', 'plug_type'];
 // Audio-only columns; any row that involves Audio (e.g. VGFX/VEDIT/Audio) also gets these in the form
@@ -99,7 +98,7 @@ function derivePlatform(plugId) {
 }
 
 const MAX_BATCH = 200;
-const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'billable_party', 'remarks', 'vo', 'total_mats', 'audio_guide', 'length', 'others', 'breakdate_note'];
+const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'billable_party', 'remarks', 'vo', 'total_mats', 'audio_guide', 'length', 'others'];
 
 // ---------- Custom columns ("Add Column"): stored in workload_custom_columns, values in workload_items.custom_fields ----------
 // col_key is always 'custom_<id>' (not the label), so adding/removing/renaming a column never needs a schema change.
@@ -132,7 +131,7 @@ const flattenCustom = (row) => ({ ...row, ...(row.custom_fields || {}) });
 // ---------- Date locks: an Admin can freeze a date range so its rows can't be edited/deleted, and no new row
 // can be created dated inside it. Admins themselves can still override (a period lock, not a hard wall). ----------
 async function loadLocks(client) {
-  const { rows } = await client.query('SELECT from_date, to_date, note FROM workload_locks');
+  const { rows } = await client.query('SELECT id, from_date, to_date, note FROM workload_locks ORDER BY from_date DESC');
   return rows;
 }
 /** Throws if `dateStr` (a work_date, 'YYYY-MM-DD') falls in any lock, unless the user is Admin. */

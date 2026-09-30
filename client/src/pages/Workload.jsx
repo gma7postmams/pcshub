@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { CloseIcon, ColumnIcon, DownloadIcon, LockIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
+import { ColumnIcon, DownloadIcon, LockIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
 import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
@@ -425,7 +425,7 @@ export default function Workload() {
     const val = r[k];
     const common = { key: k, 'data-k': k, 'data-label': head(k) };
     switch (k) {
-      case 'work_date': return <td {...common}><WorkDate value={val} /></td>;
+      case 'work_date': return <td {...common}><WorkDate value={val} />{isLocked(val, meta.locks) ? <span className="row-lock" title={`Locked: ${lockNote(val, meta.locks)}${meta.canOverrideLocks ? ' (Admins can still edit)' : ''}`}><LockIcon /></span> : null}</td>;
       case 'platform': return <td {...common}><PlatformCell value={val} /></td>;
       case 'units_concerned': return <td {...common}><UnitsPills value={val} unitTeams={meta.unitTeams} /></td>;
       case 'plug_type': return <td {...common}><TypePill value={val} /></td>;
@@ -540,7 +540,6 @@ export default function Workload() {
               <button type="button" className={mode === 'table' ? 'on' : ''} onClick={() => changeMode('table')}>Table</button>
               <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
             </div>
-            <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
             {canWrite ? (
               <>
                 <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} />
@@ -549,6 +548,7 @@ export default function Workload() {
                 </button>
               </>
             ) : null}
+            <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
             {s.canPage('/admin') ? (
               <>
                 <button type="button" className="btn" id="add-column-btn" onClick={() => setAddingColumn(true)}><ColumnIcon /> Add Column</button>
@@ -736,8 +736,8 @@ function LockManagerModal({ locks, onClose, onChanged }) {
     } catch (e) { toast(e.message, 'err'); } finally { setBusy(false); }
   };
   const remove = async (lock) => {
-    if (!(await confirm('Remove this lock?', `${lock.from_date} to ${lock.to_date} will be editable again.`, { danger: true }))) return;
-    try { await del(`/api/admin/workload-locks/${lock.id}`); toast('Lock removed'); onChanged(); } catch (e) { toast(e.message, 'err'); }
+    if (!(await confirm('Unlock this date range?', `${fmtDate(lock.from_date)} – ${fmtDate(lock.to_date)} will be editable again.`, { danger: true }))) return;
+    try { await del(`/api/admin/workload-locks/${lock.id}`); toast('Date range unlocked'); onChanged(); } catch (e) { toast(e.message, 'err'); }
   };
   return (
     <Modal title="Lock Dates" onClose={onClose} footer={<><span className="grow" /><button type="button" className="btn" onClick={onClose}>Close</button></>}>
@@ -747,7 +747,7 @@ function LockManagerModal({ locks, onClose, onChanged }) {
           {locks.map((l) => (
             <li key={l.id}>
               <span><strong>{fmtDate(l.from_date)}</strong> – <strong>{fmtDate(l.to_date)}</strong>{l.note ? <span className="dim"> · {l.note}</span> : null}</span>
-              <button type="button" className="iconbtn" aria-label="Remove lock" onClick={() => remove(l)}><CloseIcon /></button>
+              <button type="button" className="btn" onClick={() => remove(l)}>Unlock</button>
             </li>
           ))}
         </ul>
@@ -778,10 +778,9 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
   const teams = meta.unitTeams[f.units_concerned] || [];
   const audioOnly = teams.length === 1 && teams[0] === 'AUDIO';
   const base = meta.views[audioOnly ? 'AUDIO' : 'VGFX'].filter((k) => k !== 'work_date' && k !== 'units_concerned'
-    // Breakdate/Time (VGFX or VEDIT): only shown for a team that's actually involved; the note follows whichever time field(s) show
+    // Breakdate/Time (VGFX or VEDIT): only shown for a team that's actually involved
     && !(k === 'breakdate_vgfx' && !teams.includes('VGFX'))
-    && !(k === 'breakdate_vedit' && !teams.includes('VEDIT'))
-    && !(k === 'breakdate_note' && !teams.includes('VGFX') && !teams.includes('VEDIT')));
+    && !(k === 'breakdate_vedit' && !teams.includes('VEDIT')));
   // Any row that involves Audio also gets the Audio-only columns (Length, Others)
   const shown = f.units_concerned
     ? [...base, ...(teams.includes('AUDIO') ? meta.audioExtra.filter((k) => !base.includes(k)) : [])]

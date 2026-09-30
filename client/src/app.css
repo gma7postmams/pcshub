@@ -624,3 +624,6 @@ table.t.wl .wl-pill-edit { cursor: pointer; border-radius: 999px; }
 table.t.wl .wl-pill-edit:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
 table.t.wl .cell-editor-inline { display: inline-flex; }
 table.t.wl .cell-editor-inline .cell-editor { min-width: 190px; }
+
+.row-lock { display: inline-flex; vertical-align: middle; margin-left: 6px; color: var(--text-2); }
+.row-lock svg { width: 14px; height: 14px; }
