@@ -16,21 +16,34 @@ const ROLES = ['Admin', 'Manager', 'Editor', 'Viewer'];
 // A section is only effective if its page is also granted.
 const CATALOG = [
   {
-    key: 'dashboard', label: 'Dashboard', path: '/dashboard',
+    key: 'dashboard',
+    label: 'Dashboard',
+    path: '/dashboard',
     sections: [
       { key: 'dashboard.kpis', label: 'Ingest KPIs' },
       { key: 'dashboard.recent', label: 'Recent ingest activity' },
     ],
   },
+
   { key: 'ingest', label: 'Ingest Tracker', path: '/ingest', sections: [] },
-  { key: 'workload', label: 'Work Load Tracker', path: '/workload', sections: [] },
+  { key: 'workload', label: 'Workload Tracker', path: '/workload', sections: [] },
   { key: 'approval', label: 'Approval', path: '/approval', sections: [] },
+
   {
-    key: 'reports', label: 'Reports', path: '/reports',
+    key: 'reports',
+    label: 'Reports',
+    path: '/reports',
     sections: [
       { key: 'reports.ingest', label: 'Ingest & Approval summary' },
       { key: 'reports.export', label: 'CSV export' },
     ],
+  },
+
+  {
+    key: 'knowledge',
+    label: 'Knowledge Base',
+    path: '/knowledge',
+    sections: [],
   },
 ];
 

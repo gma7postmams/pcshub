@@ -12,6 +12,8 @@ const ACTION_LABELS = {
 
   'ingest.create': 'Created Ingest Record',
   'ingest.send_for_approval': 'Submitted For Approval',
+  'ingest.cm_done': 'CM Completed',
+  'ingest.cm_non_compliant': 'CM Marked Non-Compliant',
 
   'approval.approved': 'Approved Request',
   'approval.rejected': 'Rejected Request',
@@ -73,7 +75,9 @@ function formatEntity(row) {
     case 'workload_item':
       return 'Workload Item';  
     case 'knowledge_document':
+    case 'knowledge_docs':  
       return 'Knowledge Document';
+     
     default:
       return row.entity || '';
   }
@@ -141,20 +145,28 @@ function formatDetails(row) {
       return `Deleted group: ${d.name || ''}`;
 
     case 'ingest.create':
-      return `Created ingest record (${d.program || 'Program'})`;
+      return d.program
+        ? `Created ingest record (${d.program})`
+        : d.title
+          ? `Created ingest record (${d.title})`
+          : 'Created ingest record';
 
     case 'ingest.send_for_approval':
-      return 'Submitted ingest record for approval';
+      return d.program
+        ? `Submitted ingest record "${d.program}" for approval`
+        : d.title
+          ? `Submitted ingest record "${d.title}" for approval`
+          : 'Submitted ingest record for approval';
 
     case 'approval.approved':
       return d.note
-        ? `Approved request - Note: ${d.note}`
-        : 'Approved request';
+        ? `Approved ingest request${d.title ? `: ${d.title}` : ''} - Note: ${d.note}`
+        : `Approved ingest request${d.title ? `: ${d.title}` : ''}`;
 
     case 'approval.rejected':
       return d.note
-        ? `Rejected request - Reason: ${d.note}`
-        : 'Rejected request';
+        ? `Rejected ingest request${d.title ? `: ${d.title}` : ''} - Reason: ${d.note}`
+        : `Rejected ingest request${d.title ? `: ${d.title}` : ''}`;
 
     case 'reports_export_ingest':
     case 'reports.export_ingest':
@@ -198,6 +210,14 @@ function formatDetails(row) {
 
     case 'knowledge.delete':
       return `Deleted knowledge document: ${d.title || d.filename || ''}`;
+
+    case 'ingest.cm_done':
+      return 'CM completed ingest request';
+
+    case 'ingest.cm_non_compliant':
+      return d.reason
+        ? `Marked ingest request as NON-COMPLIANT - Reason: ${d.reason}`
+        : 'Marked ingest request as NON-COMPLIANT';      
 
     default:
       return '';
