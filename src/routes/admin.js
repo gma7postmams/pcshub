@@ -295,6 +295,68 @@ router.delete('/dropdowns/:id', asyncH(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---------- Workload Tracker: custom columns (Add Column, in both Table and Excel modes) ----------
+const shapeCol = (r) => ({ id: r.id, key: r.col_key, label: r.label, sort_order: r.sort_order });
+router.get('/workload-columns', asyncH(async (req, res) => {
+  const { rows } = await db.query('SELECT id, col_key, label, sort_order FROM workload_custom_columns ORDER BY sort_order, id');
+  res.json({ columns: rows.map(shapeCol) });
+}));
+
+router.post('/workload-columns', asyncH(async (req, res) => {
+  const label = v.str(req.body.label, { field: 'Column name', max: 60, required: true });
+  const dupe = await db.query('SELECT 1 FROM workload_custom_columns WHERE lower(label)=lower($1)', [label]);
+  if (dupe.rows.length) throw new HttpError(409, `A column named "${label}" already exists`);
+  const col = await db.tx(async (c) => {
+    const { rows: [{ id }] } = await c.query(
+      'INSERT INTO workload_custom_columns (label, sort_order, created_by) VALUES ($1, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM workload_custom_columns), $2) RETURNING id',
+      [label, req.user.id]
+    );
+    const { rows: [row] } = await c.query('UPDATE workload_custom_columns SET col_key=$2 WHERE id=$1 RETURNING id, col_key, label, sort_order', [id, `custom_${id}`]);
+    return row;
+  });
+  await audit(req, 'admin.workload_column_add', 'workload_custom_column', col.id, { label });
+  res.status(201).json({ ok: true, column: shapeCol(col) });
+}));
+
+router.delete('/workload-columns/:id', asyncH(async (req, res) => {
+  const id = v.id(req.params.id);
+  const cur = await db.query('SELECT * FROM workload_custom_columns WHERE id=$1', [id]);
+  if (!cur.rows.length) throw new HttpError(404, 'Column not found');
+  await db.query('DELETE FROM workload_custom_columns WHERE id=$1', [id]);
+  // Values already entered under this column are left in place in custom_fields (harmless, just orphaned/hidden)
+  // rather than rewriting every row — removing the column definition is enough to hide it going forward.
+  await audit(req, 'admin.workload_column_delete', 'workload_custom_column', id, { label: cur.rows[0].label });
+  res.json({ ok: true });
+}));
+
+// ---------- Workload Tracker: date locks (freeze a period so its rows can't be edited/deleted/created) ----------
+router.get('/workload-locks', asyncH(async (req, res) => {
+  const { rows } = await db.query('SELECT id, from_date, to_date, note FROM workload_locks ORDER BY from_date DESC');
+  res.json({ locks: rows });
+}));
+
+router.post('/workload-locks', asyncH(async (req, res) => {
+  const from_date = v.date(req.body.from_date, { field: 'From date', required: true });
+  const to_date = v.date(req.body.to_date, { field: 'To date', required: true });
+  if (to_date < from_date) throw new HttpError(400, 'To date must be on or after From date');
+  const note = v.str(req.body.note, { field: 'Note', max: 200 });
+  const { rows: [lock] } = await db.query(
+    'INSERT INTO workload_locks (from_date, to_date, note, created_by) VALUES ($1, $2, $3, $4) RETURNING id, from_date, to_date, note',
+    [from_date, to_date, note, req.user.id]
+  );
+  await audit(req, 'admin.workload_lock_add', 'workload_lock', lock.id, { from_date, to_date, note });
+  res.status(201).json({ ok: true, lock });
+}));
+
+router.delete('/workload-locks/:id', asyncH(async (req, res) => {
+  const id = v.id(req.params.id);
+  const cur = await db.query('SELECT * FROM workload_locks WHERE id=$1', [id]);
+  if (!cur.rows.length) throw new HttpError(404, 'Lock not found');
+  await db.query('DELETE FROM workload_locks WHERE id=$1', [id]);
+  await audit(req, 'admin.workload_lock_delete', 'workload_lock', id, { from_date: cur.rows[0].from_date, to_date: cur.rows[0].to_date });
+  res.json({ ok: true });
+}));
+
 // ---------- Branding ----------
 router.put('/branding', asyncH(async (req, res) => {
   const app_name = v.str(req.body.app_name, { field: 'App name', max: 80, required: true });

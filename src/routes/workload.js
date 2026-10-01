@@ -35,10 +35,12 @@ const FIELDS = {
   units_concerned:{ label: 'Units Concerned', kind: 'select', options: UNITS, required: true },
   plug_id:        { label: 'Plug ID', kind: 'text', multiline: true, max: 1000, required: true, hint: FROM_PSD },
   psd:            { label: 'PSD', kind: 'text', max: 200, hint: FROM_PSD },
-  breakdate:      { label: 'Breakdate/Time', kind: 'datetime' },
+  // Two separate times (the template lists both when a plug needs both teams)
+  breakdate_vgfx: { label: 'Breakdate / Time (VGFX)', kind: 'datetime' },
+  breakdate_vedit:{ label: 'Breakdate / Time (VEDIT)', kind: 'datetime' },
   vo:             { label: 'VO', kind: 'text', multiline: true, max: 1000, hint: OPEN },
   script:         { label: 'Script', kind: 'date' },
-  art_stb:        { label: 'Artwork/STB', kind: 'date' },
+  art_stb:        { label: 'Artwork / STB', kind: 'date' },
   audio_guide:    { label: 'Audio Guide', kind: 'audio_guide' },
   remarks:        { label: 'Remarks', kind: 'text', multiline: true, max: 4000, hint: OPEN },
   total_mats:     { label: 'Total Mats', kind: 'text', multiline: true, max: 500, hint: OPEN },
@@ -51,7 +53,8 @@ const FIELDS = {
 const COLS = Object.keys(FIELDS);
 
 // Columns per tab, in the same order as the template's sheets ("main" for VGFX/VEDIT, "ojo" for Audio)
-const MAIN_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'breakdate',
+const MAIN_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd',
+  'breakdate_vgfx', 'breakdate_vedit',
   'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats', 'prog_name', 'plug_type'];
 const AUDIO_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'vo', 'script', 'remarks', 'length', 'others', 'plug_type'];
 // Audio-only columns; any row that involves Audio (e.g. VGFX/VEDIT/Audio) also gets these in the form
@@ -97,9 +100,56 @@ function derivePlatform(plugId) {
 const MAX_BATCH = 200;
 const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'billable_party', 'remarks', 'vo', 'total_mats', 'audio_guide', 'length', 'others'];
 
-router.get('/meta', (req, res) => res.json({
-  ready: true, units: UNITS, unitTeams: UNIT_TEAMS, tabs: ['ALL', ...TEAMS].map((key) => ({ key, label: TAB_LABEL[key] })),
-  tabDefaultUnits: TAB_DEFAULT_UNITS, audioExtra: AUDIO_EXTRA, fields: FIELDS, views: VIEWS, platformRules: PLATFORM_RULES,
+// ---------- Custom columns ("Add Column"): stored in workload_custom_columns, values in workload_items.custom_fields ----------
+// col_key is always 'custom_<id>' (not the label), so adding/removing/renaming a column never needs a schema change.
+async function loadCustomCols(client) {
+  const { rows } = await client.query('SELECT id, col_key, label, sort_order FROM workload_custom_columns ORDER BY sort_order, id');
+  return rows;
+}
+/** FIELDS plus a plain-text entry for every custom column — the source of truth for a single request. */
+function extendFields(customCols) {
+  const ext = { ...FIELDS };
+  customCols.forEach((c) => { ext[c.col_key] = { label: c.label, kind: 'text', multiline: true, max: 2000, custom: true }; });
+  return ext;
+}
+/** Every view (All/VGFX/VEDIT/Audio) plus every custom column appended at the end — custom columns are not team-specific. */
+function extendViews(customCols) {
+  const keys = customCols.map((c) => c.col_key);
+  const ext = {};
+  Object.keys(VIEWS).forEach((tab) => { ext[tab] = [...VIEWS[tab], ...keys]; });
+  return ext;
+}
+/** Validate the custom-column values present in `body`; returns {col_key: text}. Custom fields are always plain open text. */
+function parseCustomFields(customCols, body) {
+  const out = {};
+  customCols.forEach((c) => { out[c.col_key] = v.str(body[c.col_key], { field: c.label, max: 2000 }); });
+  return out;
+}
+/** Lift custom_fields (a JSONB object) to top-level keys on the row, so the client can read any field the same way. */
+const flattenCustom = (row) => ({ ...row, ...(row.custom_fields || {}) });
+
+// ---------- Date locks: an Admin can freeze a date range so its rows can't be edited/deleted, and no new row
+// can be created dated inside it. The lock applies to everyone, Admins included; an Admin lifts it via Lock Dates → Unlock. ----------
+async function loadLocks(client) {
+  const { rows } = await client.query('SELECT id, from_date, to_date, note FROM workload_locks ORDER BY from_date DESC');
+  return rows;
+}
+/** Throws if `dateStr` (a work_date, 'YYYY-MM-DD') falls in any lock (no role is exempt; unlock the range first). */
+function assertNotLocked(locks, dateStr) {
+  if (!dateStr) return;
+  const hit = locks.find((l) => dateStr >= l.from_date && dateStr <= l.to_date);
+  if (hit) throw new HttpError(423, `${dateStr} is in a locked period${hit.note ? ` (${hit.note})` : ''} and can't be edited. An Admin must unlock it first (Lock Dates).`);
+}
+
+router.get('/meta', asyncH(async (req, res) => {
+  const customCols = await loadCustomCols(db);
+  const locks = await loadLocks(db);
+  res.json({
+    ready: true, units: UNITS, unitTeams: UNIT_TEAMS, tabs: ['ALL', ...TEAMS].map((key) => ({ key, label: TAB_LABEL[key] })),
+    tabDefaultUnits: TAB_DEFAULT_UNITS, audioExtra: AUDIO_EXTRA, fields: extendFields(customCols), views: extendViews(customCols),
+    platformRules: PLATFORM_RULES, customColumns: customCols.map((c) => ({ id: c.id, key: c.col_key, label: c.label })),
+    locks,
+  });
 }));
 
 async function assertOption(client, category, value, field, current) {
@@ -133,8 +183,8 @@ function parseDateTime(raw, field) {
   return `${m[1]} ${m[2] || '00'}:${m[3] || '00'}:00`;
 }
 
-/** Validate one row; returns the values to store. `current` = the stored row when updating. */
-async function parseRow(client, body, current) {
+/** Validate one row; returns the values to store. `current` = the stored row when updating. `customCols` = result of loadCustomCols. */
+async function parseRow(client, body, current, customCols = []) {
   const cur = current || {};
   const rec = {};
   for (const k of COLS) {
@@ -157,17 +207,21 @@ async function parseRow(client, body, current) {
   }
   await assertOption(client, 'workload_platform', rec.platform, 'Platform', cur.platform);
   await assertOption(client, 'plug_type', rec.plug_type, 'Plug Type', cur.plug_type);
+  // Priority flag (not a template column, so it lives outside FIELDS): keep the stored value when the request doesn't mention it
+  const p = body.is_priority;
+  rec.is_priority = p === undefined || p === null ? !!cur.is_priority : (p === true || p === 'true' || p === 1 || p === '1');
+  rec.custom_fields = parseCustomFields(customCols, body);
   return rec;
 }
 
 const colList = COLS.map((c) => `"${c}"`);
-const CUR_COLS = 'platform, plug_type, audio_guide';
+const CUR_COLS = 'platform, plug_type, audio_guide, work_date, is_priority';
 
 async function insertRow(client, rec, userId) {
-  const params = [...COLS.map((c) => rec[c]), userId];
+  const params = [...COLS.map((c) => rec[c]), !!rec.is_priority, JSON.stringify(rec.custom_fields || {}), userId];
   const { rows } = await client.query(
-    `INSERT INTO workload_items (${colList.join(',')}, created_by, updated_by)
-     VALUES (${COLS.map((_, i) => `$${i + 1}`).join(',')}, $${COLS.length + 1}, $${COLS.length + 1}) RETURNING id`,
+    `INSERT INTO workload_items (${colList.join(',')}, is_priority, custom_fields, created_by, updated_by)
+     VALUES (${COLS.map((_, i) => `$${i + 1}`).join(',')}, $${COLS.length + 1}, $${COLS.length + 2}::jsonb, $${COLS.length + 3}, $${COLS.length + 3}) RETURNING id`,
     params
   );
   return rows[0].id;
@@ -175,9 +229,9 @@ async function insertRow(client, rec, userId) {
 
 async function updateRow(client, id, rec, userId) {
   const sets = COLS.map((c, i) => `"${c}"=$${i + 2}`).join(', ');
-  const params = [id, ...COLS.map((c) => rec[c]), userId];
+  const params = [id, ...COLS.map((c) => rec[c]), !!rec.is_priority, JSON.stringify(rec.custom_fields || {}), userId];
   await client.query(
-    `UPDATE workload_items SET ${sets}, updated_by=$${COLS.length + 2}, updated_at=now() WHERE id=$1`, params
+    `UPDATE workload_items SET ${sets}, is_priority=$${COLS.length + 2}, custom_fields=$${COLS.length + 3}::jsonb, updated_by=$${COLS.length + 4}, updated_at=now() WHERE id=$1`, params
   );
 }
 
@@ -231,7 +285,7 @@ router.get('/', asyncH(async (req, res) => {
   const { rows } = await db.query(
     `${SELECT} ${whereSql(where)} ORDER BY w.work_date DESC NULLS LAST, w.id ASC LIMIT ${limit} OFFSET ${offset}`, params
   );
-  res.json({ total: total.rows[0].n, rows });
+  res.json({ total: total.rows[0].n, rows: rows.map(flattenCustom) });
 }));
 
 // Export (.xlsx) mirrors the template: sheet "MAIN" (rows that involve VGFX or VEDIT) and sheet "AUDIO"
@@ -253,6 +307,27 @@ const rgb2hex = (rgb) => rgb.map((v) => Math.round(Math.max(0, Math.min(255, v))
 // Same blend CSS color-mix(in srgb, A pct%, B) uses: linear per-channel interpolation.
 const mix = (aHex, pct, bHex) => { const a = hex2rgb(aHex); const b = hex2rgb(bHex); return rgb2hex(a.map((v, i) => v * (pct / 100) + b[i] * (1 - pct / 100))); };
 const argb = (hex) => `FF${hex.toUpperCase()}`;
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** 'YYYY-MM-DDTHH:MM' -> 'Sep 28, 2026 2:45 PM' (12:00 AM = no time -> date only), same text as the web table's pill. */
+function fmtBreakdateText(v) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(v || '');
+  if (!m) return String(v || '');
+  const date = `${MON[+m[2] - 1]} ${+m[3]}, ${m[1]}`;
+  if (m[4] === '00' && m[5] === '00') return date;
+  const h = +m[4];
+  return `${date} ${h % 12 || 12}:${m[5]} ${h >= 12 ? 'PM' : 'AM'}`;
+}
+/** Inverse of fmtBreakdateText: 'Sep 28, 2026 2:45 PM' / 'Sep 28, 2026' -> 'YYYY-MM-DDTHH:MM' (null if it isn't that shape). */
+function parseBreakdateText(t) {
+  const m = /^([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{1,2}),?\s+(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*(AM|PM))?$/i.exec(String(t || '').trim());
+  if (!m) return null;
+  const mon = MON.findIndex((x) => x.toLowerCase() === m[1].toLowerCase());
+  if (mon < 0) return null;
+  let h = m[4] ? +m[4] % 12 : 0;
+  if (m[6] && m[6].toUpperCase() === 'PM') h += 12;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${m[3]}-${pad(mon + 1)}-${pad(+m[2])}T${pad(h)}:${m[5] || '00'}`;
+}
 const oneLineText = (t) => String(t ?? '').replace(/\s*\n+\s*/g, ' \u00b7 ');   // matches the web table's " · " join for wrapped fields
 
 async function exportPalette(db_) {
@@ -269,17 +344,24 @@ router.get('/export', asyncH(async (req, res) => {
   try { ExcelJS = require('exceljs'); } catch (e) {
     throw new HttpError(501, 'Excel export needs the "exceljs" package. Run "npm install" on the server, then restart.');
   }
+  const customCols = await loadCustomCols(db);
+  const fieldsExt = extendFields(customCols);
+  const customKeys = customCols.map((c) => c.col_key);
   const { where, params } = buildFilter({ ...req.query, team: undefined });
-  const { rows } = await db.query(
+  const { rows: rawRows } = await db.query(
     `SELECT w.* FROM workload_items w ${whereSql(where)} ORDER BY w.work_date ASC, w.id ASC LIMIT 20000`, params
   );
+  const rows = rawRows.map(flattenCustom);
   const involves = (r, teams) => teams.some((t) => (UNIT_TEAMS[r.units_concerned] || []).includes(t));
   const team = req.query.team ? v.oneOf(String(req.query.team), TEAMS, { field: 'team' }) : null;
+  // Breakdate / Time (VGFX) and (VEDIT) share ONE column, like the web table: 'breakdate_vgfx' keeps that column's
+  // position and its cell holds one line per involved team (VGFX above VEDIT); 'breakdate_vedit' gets no column of its own.
+  const oneBreakdate = (cols) => cols.filter((k) => k !== 'breakdate_vedit');
   const sheets = team
-    ? [{ name: TAB_LABEL[team].toUpperCase(), cols: VIEWS[team], pick: (r) => involves(r, [team]) }]
+    ? [{ name: TAB_LABEL[team].toUpperCase(), cols: [...oneBreakdate(VIEWS[team]), ...customKeys], pick: (r) => involves(r, [team]) }]
     : [
-      { name: 'MAIN', cols: MAIN_COLS, pick: (r) => involves(r, ['VGFX', 'VEDIT']) },
-      { name: 'AUDIO', cols: AUDIO_COLS, pick: (r) => involves(r, ['AUDIO']) },
+      { name: 'MAIN', cols: [...oneBreakdate(MAIN_COLS), ...customKeys], pick: (r) => involves(r, ['VGFX', 'VEDIT']) },
+      { name: 'AUDIO', cols: [...AUDIO_COLS, ...customKeys], pick: (r) => involves(r, ['AUDIO']) },
     ];
 
   const pal = await exportPalette(db);
@@ -298,9 +380,10 @@ router.get('/export', asyncH(async (req, res) => {
   for (const sh of sheets) {
     const ws = wb.addWorksheet(sh.name);
     ws.columns = sh.cols.map((k) => {
-      const f = FIELDS[k];
-      return { header: f.label, key: k, width: f.multiline ? 34 : f.kind === 'date' ? 14 : f.kind === 'datetime' ? 20 : 22,
-        style: f.kind === 'date' ? { numFmt: 'mmm d, yyyy' } : f.kind === 'datetime' ? { numFmt: 'mmm d, yyyy h:mm AM/PM' } : {} };
+      const f = fieldsExt[k];
+      const merged = k === 'breakdate_vgfx';   // the shared Breakdate / Time column (text, not a single date)
+      return { header: merged ? 'Breakdate / Time' : f.label, key: k, width: f.multiline ? 34 : f.kind === 'date' ? 14 : f.kind === 'datetime' && !merged ? 20 : 26,
+        style: merged ? {} : f.kind === 'date' ? { numFmt: 'mmm d, yyyy' } : f.kind === 'datetime' ? { numFmt: 'mmm d, yyyy h:mm AM/PM' } : {} };
     });
     // Header row: same fill/border treatment as the web table's header (Excel-mode style)
     ws.getRow(1).eachCell((cell) => {
@@ -313,9 +396,10 @@ router.get('/export', asyncH(async (req, res) => {
 
     rows.filter(sh.pick).forEach((r) => {
       const row = ws.addRow(sh.cols.reduce((o, k) => {
-        const f = FIELDS[k];
+        const f = fieldsExt[k];
         let val = r[k];
-        if (f.kind === 'date') val = asDate(val);
+        if (k === 'breakdate_vgfx') val = null;   // filled in below as two labelled lines (VGFX / VEDIT)
+        else if (f.kind === 'date') val = asDate(val);
         else if (f.kind === 'datetime') { const t = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(val || ''); val = t ? new Date(Date.UTC(+t[1], +t[2] - 1, +t[3], +t[4], +t[5])) : null; }
         else if (k === 'audio_guide' && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = asDate(val);
         else if (k !== 'remarks') val = oneLineText(val);   // every field except Remarks is one line, like the web table
@@ -325,11 +409,29 @@ router.get('/export', asyncH(async (req, res) => {
 
       sh.cols.forEach((k) => {
         const cell = row.getCell(k);
-        const f = FIELDS[k];
+        const f = fieldsExt[k];
         cell.border = { right: thinGrid };   // vertical grid line, matching the web table
+        // Prioritised row: light-red fill on its Breakdate / Time cell(s), like the highlight in the web table
+        if (r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit')) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8B4B4' } };
+        }
         if (k === 'audio_guide' && r.audio_guide && /^\d{4}-\d{2}-\d{2}$/.test(r.audio_guide)) cell.numFmt = 'mmm d, yyyy';
 
-        if (f.kind === 'date' || f.kind === 'datetime' || k === 'audio_guide') {
+        if (k === 'breakdate_vgfx') {
+          // Same as the web table: one labelled line per involved team, VGFX on top, VEDIT below (each only if it has a time)
+          const teams = UNIT_TEAMS[r.units_concerned] || [];
+          const lines = [];
+          if (teams.includes('VGFX') && r.breakdate_vgfx) lines.push({ tag: 'VGFX', hue: TEAM_HUE.VGFX, text: fmtBreakdateText(r.breakdate_vgfx) });
+          if (teams.includes('VEDIT') && r.breakdate_vedit) lines.push({ tag: 'VEDIT', hue: TEAM_HUE.VEDIT, text: fmtBreakdateText(r.breakdate_vedit) });
+          if (lines.length) {
+            cell.value = { richText: lines.flatMap((l, i) => [
+              ...(i ? [{ text: '\n', font: { color: { argb: pal.black } } }] : []),
+              { text: `${l.tag}  `, font: { bold: true, color: { argb: pal.pillFg(l.hue) } } },
+              { text: l.text, font: { color: { argb: pal.black } } },
+            ]) };
+          }
+          cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+        } else if (f.kind === 'date' || f.kind === 'datetime' || k === 'audio_guide') {
           if (cell.value != null) cell.font = { color: { argb: pal.black } };
         } else if (k === 'platform' && r.platform) {
           cell.font = { bold: true, color: { argb: pal.black } };
@@ -358,11 +460,13 @@ router.get('/export', asyncH(async (req, res) => {
     // Auto-size every column except Remarks (which wraps instead) so single-line values are never cropped.
     ws.columns.forEach((column) => {
       if (column.key === 'remarks') return;
-      const f = FIELDS[column.key];
+      const f = fieldsExt[column.key];
       let max = String(f.label).length;
       if (f.kind === 'date') max = Math.max(max, 13);           // 'Sep 28, 2026'
-      if (f.kind === 'datetime') max = Math.max(max, 22);       // 'Sep 28, 2026 11:45 PM'
+      if (f.kind === 'datetime' && column.key !== 'breakdate_vgfx') max = Math.max(max, 22);       // 'Sep 28, 2026 11:45 PM'
+      if (column.key === 'breakdate_vgfx') max = Math.max(max, 'Breakdate / Time'.length);
       column.eachCell({ includeEmpty: false }, (cell) => {
+        if (column.key === 'breakdate_vgfx') { max = Math.max(max, ...cellText(cell.value).split('\n').map((t) => t.length)); return; }
         if ((f.kind === 'date' || f.kind === 'datetime') && cell.value instanceof Date) return; // already sized above
         if (column.key === 'audio_guide' && cell.value instanceof Date) { max = Math.max(max, 13); return; }
         max = Math.max(max, cellText(cell.value).length);
@@ -387,8 +491,11 @@ router.get('/export', asyncH(async (req, res) => {
 }));
 
 router.post('/', requireAction('workload.write'), asyncH(async (req, res) => {
+  const customCols = await loadCustomCols(db);
+  const locks = await loadLocks(db);
   const id = await db.tx(async (c) => {
-    const rec = await parseRow(c, req.body, null);
+    const rec = await parseRow(c, req.body, null, customCols);
+    assertNotLocked(locks, rec.work_date);
     const newId = await insertRow(c, rec, req.user.id);
     await audit(req, 'workload.create', 'workload_item', newId, rec, c);
     return newId;
@@ -401,6 +508,8 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
   const list = req.body && req.body.rows;
   if (!Array.isArray(list) || !list.length) throw new HttpError(400, 'No rows to save');
   if (list.length > MAX_BATCH) throw new HttpError(400, `Save at most ${MAX_BATCH} rows at a time`);
+  const customCols = await loadCustomCols(db);
+  const locks = await loadLocks(db);
   const out = await db.tx(async (c) => {
     let created = 0;
     let updated = 0;
@@ -411,12 +520,15 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           const id = v.id(row.id);
           const cur = await c.query(`SELECT ${CUR_COLS} FROM workload_items WHERE id=$1 FOR UPDATE`, [id]);
           if (!cur.rows.length) throw new HttpError(404, 'Row no longer exists (deleted by someone else?)');
-          const rec = await parseRow(c, row, cur.rows[0]);
+          assertNotLocked(locks, cur.rows[0].work_date);
+          const rec = await parseRow(c, row, cur.rows[0], customCols);
+          assertNotLocked(locks, rec.work_date);
           await updateRow(c, id, rec, req.user.id);
           await audit(req, 'workload.update', 'workload_item', id, rec, c);
           updated++;
         } else {
-          const rec = await parseRow(c, row, null);
+          const rec = await parseRow(c, row, null, customCols);
+          assertNotLocked(locks, rec.work_date);
           const id = await insertRow(c, rec, req.user.id);
           await audit(req, 'workload.create', 'workload_item', id, rec, c);
           created++;
@@ -437,16 +549,36 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
 router.patch('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const field = String((req.body && req.body.field) || '');
-  if (!COLS.includes(field)) throw new HttpError(400, 'Unknown field');
+  const customCols = await loadCustomCols(db);
+  const customCol = customCols.find((c) => c.col_key === field);
+  if (!COLS.includes(field) && !customCol) throw new HttpError(400, 'Unknown field');
+  const locks = await loadLocks(db);
+  if (customCol) {
+    const curRow = await db.query('SELECT work_date FROM workload_items WHERE id=$1', [id]);
+    if (!curRow.rows.length) throw new HttpError(404, 'Workload item not found');
+    assertNotLocked(locks, curRow.rows[0].work_date);
+    // Custom columns live in one shared JSONB blob; merge just this key so two people editing different
+    // custom columns on the same row (or a custom column and a regular one) never overwrite each other.
+    const value = v.str(req.body.value, { field: customCol.label, max: 2000 });
+    const { rows } = await db.query(
+      "UPDATE workload_items SET custom_fields = custom_fields || $2::jsonb, updated_by=$3, updated_at=now() WHERE id=$1 RETURNING id",
+      [id, JSON.stringify({ [field]: value }), req.user.id]
+    );
+    if (!rows.length) throw new HttpError(404, 'Workload item not found');
+    await audit(req, 'workload.update', 'workload_item', id, { field, value });
+    return res.json({ ok: true, values: { [field]: value } });
+  }
   const values = await db.tx(async (c) => {
     const found = await c.query('SELECT * FROM workload_items WHERE id=$1 FOR UPDATE', [id]);
     if (!found.rows.length) throw new HttpError(404, 'Workload item not found');
     const cur = found.rows[0];
+    assertNotLocked(locks, cur.work_date);
     const merged = {};
     COLS.forEach((k) => { merged[k] = cur[k]; });
     merged[field] = req.body.value;
     if (field === 'plug_id' && (!cur.platform || cur.platform === derivePlatform(cur.plug_id))) merged.platform = '';
-    const rec = await parseRow(c, merged, cur);
+    const rec = await parseRow(c, merged, cur, customCols);
+    assertNotLocked(locks, rec.work_date);
     const changed = field === 'plug_id' ? ['plug_id', 'platform'] : [field];
     await c.query(
       `UPDATE workload_items SET ${changed.map((k, i) => `"${k}"=$${i + 2}`).join(', ')}, updated_by=$${changed.length + 2}, updated_at=now() WHERE id=$1`,
@@ -462,10 +594,14 @@ router.patch('/:id', requireAction('workload.write'), asyncH(async (req, res) =>
 
 router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
+  const customCols = await loadCustomCols(db);
+  const locks = await loadLocks(db);
   await db.tx(async (c) => {
     const cur = await c.query(`SELECT ${CUR_COLS} FROM workload_items WHERE id=$1 FOR UPDATE`, [id]);
     if (!cur.rows.length) throw new HttpError(404, 'Workload item not found');
-    const rec = await parseRow(c, req.body, cur.rows[0]);
+    assertNotLocked(locks, cur.rows[0].work_date);
+    const rec = await parseRow(c, req.body, cur.rows[0], customCols);
+    assertNotLocked(locks, rec.work_date);
     await updateRow(c, id, rec, req.user.id);
     await audit(req, 'workload.update', 'workload_item', id, rec, c);
   });
@@ -474,12 +610,164 @@ router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
 
 router.delete('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
+  const locks = await loadLocks(db);
+  const cur = await db.query('SELECT work_date FROM workload_items WHERE id=$1', [id]);
+  if (!cur.rows.length) throw new HttpError(404, 'Workload item not found');
+  assertNotLocked(locks, cur.rows[0].work_date);
   const { rows } = await db.query(
     'DELETE FROM workload_items WHERE id=$1 RETURNING work_date, units_concerned, plug_id', [id]
   );
   if (!rows.length) throw new HttpError(404, 'Workload item not found');
   await audit(req, 'workload.delete', 'workload_item', id, rows[0]);
   res.json({ ok: true });
+}));
+
+// ---------- Import: reads a .xlsx shaped like this app's own Export (MAIN/AUDIO sheets, matching column
+// headers) and creates rows from it. This is the reliable, testable round-trip case; importing the
+// original per-day team template (a very different shape: one sheet per date per section) is not
+// supported here — that needs its own dedicated pass against real sample files.
+// A header that doesn't match any known field or existing custom column gets a new custom column created
+// for it automatically, so nothing in the file is silently dropped.
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
+
+router.post('/import', requireAction('workload.write'), upload.single('file'), asyncH(async (req, res) => {
+  if (!req.file) throw new HttpError(400, 'No file uploaded');
+  let ExcelJS;
+  try { ExcelJS = require('exceljs'); } catch (e) {
+    throw new HttpError(501, 'Import needs the "exceljs" package. Run "npm install" on the server, then restart.');
+  }
+  const wb = new ExcelJS.Workbook();
+  try { await wb.xlsx.load(req.file.buffer); } catch (e) {
+    throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)');
+  }
+  // Sheet NAMES vary (MAIN/AUDIO for a full export, or just VGFX/VEDIT/AUDIO for a single-team export) but
+  // every recognized sheet has the SAME shape: a header row of column labels. readSheet() below works from
+  // the headers, not the sheet name, so every worksheet in the file is given a chance.
+
+  let customCols = await loadCustomCols(db);
+  let fieldsExt = extendFields(customCols);
+  const labelToKey = {};
+  Object.entries(fieldsExt).forEach(([k, f]) => { labelToKey[f.label.trim().toLowerCase()] = k; });
+  const newColumns = [];
+
+  async function keyForHeader(label) {
+    const norm = label.trim().toLowerCase();
+    if (labelToKey[norm]) return labelToKey[norm];
+    const dupe = await db.query('SELECT col_key FROM workload_custom_columns WHERE lower(label)=$1', [norm]);
+    let colKey;
+    if (dupe.rows.length) {
+      colKey = dupe.rows[0].col_key;
+    } else {
+      const created = await db.tx(async (c) => {
+        const { rows: [{ id }] } = await c.query(
+          'INSERT INTO workload_custom_columns (label, sort_order, created_by) VALUES ($1, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM workload_custom_columns), $2) RETURNING id',
+          [label.trim(), req.user.id]
+        );
+        const { rows: [row] } = await c.query('UPDATE workload_custom_columns SET col_key=$2 WHERE id=$1 RETURNING col_key', [id, `custom_${id}`]);
+        return row;
+      });
+      colKey = created.col_key;
+      newColumns.push(label.trim());
+    }
+    labelToKey[norm] = colKey;
+    fieldsExt[colKey] = { label: label.trim(), kind: 'text', multiline: true, max: 2000, custom: true };
+    return colKey;
+  }
+
+  const cellText = (v) => (v && v.richText ? v.richText.map((t) => t.text).join('') : v);
+  const isoDate = (d) => d.toISOString().slice(0, 10);
+  const isoDateTime = (d) => d.toISOString().slice(0, 16);
+  // A multi-team Units Concerned cell is exported as rich text ("VGFX / VEDIT", spaced for readability), which
+  // doesn't match the exact stored value ("VGFX/VEDIT", no spaces). Reconstruct it from which team names appear,
+  // rather than trusting the decorated text.
+  function unitsFromCell(raw) {
+    if (raw && raw.richText) {
+      const teamNames = raw.richText.map((t) => t.text.trim()).filter((t) => TEAMS.includes(t));
+      const hit = UNITS.find((u) => { const ts = UNIT_TEAMS[u]; return ts.length === teamNames.length && ts.every((t) => teamNames.includes(t)); });
+      return hit || null;
+    }
+    return String(raw ?? '');
+  }
+
+  // A row that appears on both sheets (a VGFX/VEDIT/Audio plug is exported to both) is one logical row, keyed
+  // by (Work Date, Plug ID) — merge instead of inserting it twice.
+  const merged = new Map();
+  async function readSheet(ws) {
+    if (!ws || ws.rowCount < 2) return;
+    const headerRow = ws.getRow(1);
+    const colKeyAt = {};
+    headerRow.eachCell((cell, colNumber) => {
+      const label = String(cellText(cell.value) ?? '').trim();
+      if (label && label.toLowerCase() !== 'actions') colKeyAt[colNumber] = null; // resolved below, after all headers are read
+    });
+    for (const colNumber of Object.keys(colKeyAt)) {
+      const label = String(cellText(headerRow.getCell(Number(colNumber)).value) ?? '').trim();
+      // this app's export puts VGFX + VEDIT times in one 'Breakdate / Time' column (one labelled line per team)
+      colKeyAt[colNumber] = label.toLowerCase() === 'breakdate / time' ? '__breakdate' : await keyForHeader(label);
+    }
+    for (let r = 2; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r);
+      if (row.cellCount === 0) continue;
+      const obj = {};
+      let hasAny = false;
+      let breakdateRaw = null;
+      for (const [colNumber, key] of Object.entries(colKeyAt)) {
+        let val = row.getCell(Number(colNumber)).value;
+        if (val == null || val === '') continue;
+        hasAny = true;
+        const f = fieldsExt[key];
+        if (key === '__breakdate') { breakdateRaw = val; continue; }
+        if (key === 'units_concerned') obj[key] = unitsFromCell(val);
+        else { val = cellText(val);
+          if (f.kind === 'date') obj[key] = val instanceof Date ? isoDate(val) : String(val);
+          else if (f.kind === 'datetime') obj[key] = val instanceof Date ? isoDateTime(val) : String(val);
+          else if (key === 'audio_guide') obj[key] = val instanceof Date ? isoDate(val) : String(val);
+          else obj[key] = String(val); }
+      }
+      if (!hasAny) continue;
+      if (breakdateRaw != null) {
+        // lines like 'VGFX  Sep 28, 2026 10:00 AM' / 'VEDIT  Sep 28, 2026 10:00 PM'; an unlabelled value goes to the
+        // row's only VGFX/VEDIT team (a real Excel date/time typed by hand is accepted too)
+        const soleTeam = (() => { const ts = (UNIT_TEAMS[obj.units_concerned] || []).filter((t) => t === 'VGFX' || t === 'VEDIT'); return ts.length === 1 ? ts[0] : null; })();
+        const lines = (breakdateRaw instanceof Date ? [isoDateTime(breakdateRaw)] : String(cellText(breakdateRaw)).split(/\r?\n/)).map((x) => x.trim()).filter(Boolean);
+        for (const line of lines) {
+          const lm = /^(VGFX|VEDIT)\b[:\s-]*(.*)$/i.exec(line);
+          const team = lm ? lm[1].toUpperCase() : soleTeam;
+          const text = lm ? lm[2] : line;
+          const iso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text) ? text.slice(0, 16) : parseBreakdateText(text);
+          if (team && iso) obj[team === 'VGFX' ? 'breakdate_vgfx' : 'breakdate_vedit'] = iso;
+        }
+      }
+      const rowKey = `${obj.work_date || ''}|||${String(obj.plug_id || '').split('\n')[0].trim()}`;
+      merged.set(rowKey, { ...(merged.get(rowKey) || {}), ...obj });
+    }
+  }
+  for (const ws of wb.worksheets) await readSheet(ws);
+  if (merged.size === 0) {
+    throw new HttpError(400, 'Nothing recognisable to import — expected column headers matching this app\'s '
+      + 'fields (Work Date, Units Concerned, Plug ID, ...), the shape this app\'s own Export produces. '
+      + 'Importing the original per-day team template is not supported yet.');
+  }
+
+  customCols = await loadCustomCols(db); // pick up anything auto-created above
+  const locks = await loadLocks(db);
+  let created = 0;
+  const errors = [];
+  await db.tx(async (c) => {
+    for (const fields of merged.values()) {
+      try {
+        const rec = await parseRow(c, fields, null, customCols);
+        assertNotLocked(locks, rec.work_date);
+        const id = await insertRow(c, rec, req.user.id);
+        await audit(req, 'workload.create', 'workload_item', id, { imported: true, plug_id: fields.plug_id }, c);
+        created++;
+      } catch (e) {
+        errors.push(`${fields.plug_id || '(no Plug ID)'}: ${e instanceof HttpError ? e.message : 'unexpected error'}`);
+      }
+    }
+  });
+  res.json({ ok: true, created, skipped: errors.length, errors: errors.slice(0, 20), newColumns });
 }));
 
 module.exports = router;

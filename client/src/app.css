@@ -605,6 +605,8 @@ table.t.wl td.editing { padding: 4px; white-space: normal; }   /* the cell itsel
 .cell-editor input, .cell-editor select, .cell-editor textarea { width: 100%; min-width: 150px; height: 32px; padding: 4px 8px; font-size: 13px; }
 .cell-editor textarea { min-width: 260px; min-height: 32px; resize: none; overflow: hidden; line-height: 1.35; }
 .cell-editor input[type="datetime-local"] { min-width: 215px; }
+.cell-editor .ag { flex-wrap: wrap; max-width: 230px; }   /* wrap instead of overflowing into the next column if the cell is narrow */
+.cell-editor .ag select { min-width: 84px; }   /* the generic ".cell-editor select" rule above (150px) was overriding this back up, which is what pushed the date input into the Remarks column */
 .cell-editor .ag input[type="date"] { min-width: 130px; }
 table.t.xl input[type="datetime-local"] { min-width: 215px; }
 table.t.wl.cards td.editing { padding: 0; }
@@ -662,3 +664,75 @@ td.doc-actions .iconbtn svg { width: 17px; height: 17px; }
   color: var(--text-2);
   border-color: var(--border);
 }
+/* Lock Dates modal */
+.lock-list { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.lock-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-2); }
+
+/* Excel mode: selected cell range / whole rows — tinted, with only the OUTLINE of the range drawn (like Excel) */
+.xl-box { outline: none; }
+table.t.xl td.xl-sel { position: relative; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+table.t.xl td.xl-sel::after { content: ''; position: absolute; inset: 0; pointer-events: none; border: 0 solid var(--accent); }
+table.t.xl td.xl-sel.xl-t::after { border-top-width: 2px; }
+table.t.xl td.xl-sel.xl-b::after { border-bottom-width: 2px; }
+table.t.xl td.xl-sel.xl-l::after { border-left-width: 2px; }
+table.t.xl td.xl-sel.xl-r::after { border-right-width: 2px; }
+/* row-number column + clickable column headers */
+table.t.xl th.rn, table.t.xl td.rn { position: sticky; left: 0; width: 44px; min-width: 44px; text-align: center; padding: 0 4px; user-select: none; cursor: pointer; z-index: 1; }
+table.t.xl th.rn { z-index: 4; }
+table.t.xl td.rn { background: var(--surface); color: var(--text-3); font-size: 11.5px; }
+table.t.xl td.rn:hover, table.t.xl th.rn:hover, table.t.xl th.xl-colhead:hover { background: color-mix(in srgb, var(--accent) 16%, var(--surface-3)); }
+table.t.xl td.rn.hl, table.t.xl th.xl-colhead.hl { background: color-mix(in srgb, var(--accent) 28%, var(--surface-3)); color: var(--text); }
+table.t.xl th.xl-colhead { cursor: pointer; user-select: none; }
+.xl-hint { font-size: 12px; padding: 6px 4px 0; }
+
+/* Merged Breakdate/Time cell (Table mode): one or two independently-clickable pills in one cell */
+table.t.wl .wl-pill-edit { cursor: pointer; border-radius: 999px; }
+table.t.wl .wl-pill-edit:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+table.t.wl .cell-editor-inline { display: inline-flex; }
+table.t.wl .cell-editor-inline .cell-editor { min-width: 190px; }
+
+.row-lock { display: inline-flex; vertical-align: middle; margin-left: 6px; color: var(--text-2); }
+.row-lock svg { width: 14px; height: 14px; }
+
+/* Prioritised workload row: highlight its Breakdate / Time cell */
+table.t.wl td.prio, table.t.wl tr:hover td.prio { background: color-mix(in srgb, #ef4444 24%, transparent); box-shadow: inset 3px 0 0 #ef4444, inset 0 0 0 1px color-mix(in srgb, #ef4444 45%, transparent); }   /* red: clearly apart from the VGFX purple / VEDIT orange pills */
+.prio-toggle > span { display: flex; align-items: center; gap: 4px; font-size: 14px; color: var(--text); font-weight: 600; cursor: pointer; }
+.prio-toggle .dim { font-weight: 400; }
+
+/* Team label inside each Breakdate / Time pill (VGFX / VEDIT) */
+.chip-tag { font-size: 10px; font-weight: 700; letter-spacing: .05em; padding: 0 5px; border-radius: 4px; line-height: 1.5; background: color-mix(in srgb, currentColor 20%, transparent); }
+
+/* Breakdate / Time: VGFX pill on top, VEDIT pill below (not side by side) */
+table.t.wl .chips.bd-chips { flex-direction: column; flex-wrap: nowrap; align-items: center; gap: 4px; }
+table.t.wl td[data-k="breakdate_vgfx"] { text-align: center; }
+
+/* Excel grid: all text (headers too) centered, each editable box centered in its cell, and every column as wide as its
+   longest value so nothing is cropped (multi-line fields wrap at ~60 characters and grow taller instead) */
+table.t.xl th { text-align: center; }
+table.t.xl td { vertical-align: middle; text-align: center; }
+.xl-cell { display: grid; min-width: 96px; font-size: 13px; }
+.xl-cell::after { content: attr(data-value); grid-area: 1 / 1; visibility: hidden; pointer-events: none; white-space: pre; line-height: 1.35; padding: 4px calc(8px + 1.5ch); }
+.xl-cell.multi::after { white-space: pre-wrap; max-width: 60ch; overflow-wrap: anywhere; padding: 6px calc(8px + 1.5ch) 9px; }
+table.t.xl .xl-cell > input, table.t.xl .xl-cell > textarea { grid-area: 1 / 1; width: 100%; min-width: 0; box-sizing: border-box; text-align: center; }
+table.t.xl .xl-cell > textarea { height: 100%; min-height: 32px; padding: 6px 8px; line-height: 1.35; overflow: hidden; resize: none; }
+table.t.xl .xl-cell > textarea { border: 0; border-radius: 0; background: transparent; }
+table.t.xl .xl-cell > textarea:focus { box-shadow: inset 0 0 0 2px var(--accent); background: var(--surface); }
+
+/* Excel grid: Plug ID, VO and Remarks get long columns, like in Table mode */
+table.t.xl td[data-k="plug_id"] .xl-cell, table.t.xl td[data-k="vo"] .xl-cell, table.t.xl td[data-k="remarks"] .xl-cell { min-width: 380px; }
+table.t.xl td, table.t.xl .xl-cell, table.t.xl .xl-cell > input, table.t.xl .xl-cell > textarea { cursor: default; }   /* a normal pointer, not the text I-beam (the caret still shows while typing) */
+
+/* Excel look: no separate white edit box — the cell itself is the editor, marked by the selection outline */
+table.t.xl .xl-cell > input:focus, table.t.xl .xl-cell > textarea:focus { box-shadow: none; background: transparent; outline: none; }
+table.t.xl td.xl-sel.xl-single, table.t.xl td.xl-sel.xl-active { background: var(--surface); }
+table.t.xl td.xl-sel.xl-single::after { border-width: 2px; }
+
+/* Right-click menu (Copy / Cut / Paste) */
+.xl-menu { position: fixed; z-index: 1000; min-width: 180px; padding: 4px; background: var(--surface); border: 1px solid var(--border-2); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.28); }
+.xl-menu button { display: flex; width: 100%; justify-content: space-between; gap: 24px; align-items: center; padding: 7px 10px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; cursor: default; text-align: left; }
+.xl-menu button span { color: var(--text-3); font-size: 11.5px; }
+.xl-menu button:hover:not(:disabled) { background: var(--accent-soft, color-mix(in srgb, var(--accent) 16%, transparent)); }
+.xl-menu button:disabled { opacity: .4; }
+
+.xl-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 2px; }
+table.t.xl td[data-k="breakdate_vgfx"] .xl-cell { min-width: 250px; }

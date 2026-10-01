@@ -239,6 +239,27 @@ BEGIN
   END IF;
 END $$;
 
+-- Breakdate/Time is now two separate times (VGFX's and VEDIT's) plus a short note, matching the template's
+-- practice of listing both when a plug needs both teams. Runs only while the old single 'breakdate' column
+-- still exists. There is no historical record of which team a single old value belonged to, so it is assigned
+-- by this row's Units Concerned: VGFX's slot when VGFX is involved, otherwise VEDIT's slot.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+              AND table_name = 'workload_items' AND column_name = 'breakdate') THEN
+    ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate_vgfx TIMESTAMP;
+    ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate_vedit TIMESTAMP;
+    UPDATE workload_items SET breakdate_vgfx = breakdate
+      WHERE breakdate IS NOT NULL AND units_concerned IN ('VGFX Only', 'VGFX/VEDIT', 'VGFX/VEDIT/Audio');
+    UPDATE workload_items SET breakdate_vedit = breakdate
+      WHERE breakdate IS NOT NULL AND units_concerned = 'VEDIT Only';
+    ALTER TABLE workload_items DROP COLUMN breakdate;
+  END IF;
+END $$;
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate_vgfx  TIMESTAMP;   -- Breakdate/Time (VGFX)
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate_vedit TIMESTAMP;   -- Breakdate/Time (VEDIT)
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate_note  TEXT;        -- open: short note attached to the time(s)
+
 -- A workflow "Status" column was tried in a draft of the redesign and removed again; drop it if a database got it.
 ALTER TABLE workload_items DROP COLUMN IF EXISTS work_status;
 ALTER TABLE workload_items DROP CONSTRAINT IF EXISTS workload_items_units_check;
@@ -308,3 +329,32 @@ WHERE NOT EXISTS (SELECT 1 FROM dropdown_options WHERE category = 'plug_type');
 -- Themes: older installs stored the Midnight accent as an explicit override; clear it so the theme's own accent applies
 INSERT INTO app_settings (key, value) VALUES ('theme', 'midnight') ON CONFLICT (key) DO NOTHING;
 UPDATE app_settings SET value = '' WHERE key = 'accent_color' AND lower(value) = '#4f8cff';
+
+-- Custom Workload columns: admins can add extra columns beyond the template's fixed fields. Values live in
+-- workload_items.custom_fields as {col_key: text}, so adding/removing a column never requires an ALTER TABLE
+-- or a migration; col_key is 'custom_<id>' (not the label) so renaming/duplicate labels are never a problem.
+CREATE TABLE IF NOT EXISTS workload_custom_columns (
+  id          SERIAL PRIMARY KEY,
+  col_key     TEXT UNIQUE,   -- set to 'custom_'||id right after insert
+  label       TEXT NOT NULL,
+  sort_order  INT NOT NULL DEFAULT 0,
+  created_by  INT REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS custom_fields JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- Workload date locks: an Admin can freeze a date range (e.g. a closed month) so its rows can't be edited,
+-- deleted, or have new rows created in it. Admins themselves can still override — this is a period lock,
+-- not a hard permission wall.
+CREATE TABLE IF NOT EXISTS workload_locks (
+  id          SERIAL PRIMARY KEY,
+  from_date   DATE NOT NULL,
+  to_date     DATE NOT NULL,
+  note        TEXT,
+  created_by  INT REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (to_date >= from_date)
+);
+
+-- Workload priority flag: a prioritised row gets its Breakdate/Time cell highlighted in the UI.
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS is_priority BOOLEAN NOT NULL DEFAULT false;
