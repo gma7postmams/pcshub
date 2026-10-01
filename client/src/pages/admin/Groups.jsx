@@ -9,8 +9,8 @@ function PermChips({ perms, catalog }) {
   return (
     <div className="chips">
       {pages.flatMap((p) => [
-        <span className="chip" key={p.key}>{p.label}</span>,
-        ...p.sections.filter((x) => perms.includes(x.key)).map((x) => <span className="chip sec" key={x.key}>{x.label}</span>),
+        <span className="perm-chip" key={p.key}>{p.label}</span>,
+        ...p.sections.filter((x) => perms.includes(x.key)).map((x) => <span className="perm-chip sec" key={x.key}>{x.label}</span>),
       ])}
     </div>
   );
@@ -42,14 +42,26 @@ export default function Groups({ model }) {
         <div className="table-wrap">
           {!list.length ? <Empty>No groups yet. Add one, tick the pages it can open, then enroll users in it.</Empty> : (
             <table className="t">
-              <thead><tr><th>Group</th><th>Pages &amp; sections</th><th className="num">Members</th><th /></tr></thead>
+              <thead>
+                <tr>
+                  <th style={{ width: '22%' }}>Group</th>
+                  <th style={{ width: '50%' }}>Pages & Sections</th>
+                  <th className="num" style={{ width: '8%' }}>Members</th>
+                  <th style={{ width: '20%' }} />
+                </tr>
+              </thead>
               <tbody>
                 {list.map((g) => (
                   <tr key={g.id}>
-                    <td><strong>{g.name}</strong>{g.description ? <div className="dim">{g.description}</div> : null}</td>
-                    <td><PermChips perms={g.perms} catalog={model.catalog} /></td>
+                    <td className="group-col">
+                      <strong>{g.name}</strong>
+                      {g.description ? <div className="dim">{g.description}</div> : null}
+                    </td>
+                    <td className="perm-col">
+                      <PermChips perms={g.perms} catalog={model.catalog} />
+                    </td>
                     <td className="num">{g.members}</td>
-                    <td className="right nowrap">
+                    <td className="right nowrap actions-col">
                       <button type="button" className="btn sm" data-edit={g.id} onClick={() => setEditing(g)}>Edit</button>{' '}
                       <button type="button" className="btn sm ghost" disabled={g.members > 0} title={g.members ? 'Has members' : undefined} onClick={() => remove(g)}>Delete</button>
                     </td>

@@ -623,3 +623,42 @@ table.t.wl.cards td.editing { padding: 0; }
 td.doc-actions { text-align: right; white-space: nowrap; }
 td.doc-actions .iconbtn { display: inline-grid; place-items: center; width: 32px; height: 32px; vertical-align: middle; }
 td.doc-actions .iconbtn svg { width: 17px; height: 17px; }
+
+.group-col {
+  min-width: 220px;
+  white-space: normal;
+}
+
+.perm-col {
+  vertical-align: top;
+}
+
+.actions-col {
+  min-width: 120px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.perm-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.perm-chip.sec {
+  background: var(--surface-3);
+  color: var(--text-2);
+  border-color: var(--border);
+}
