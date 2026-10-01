@@ -135,7 +135,9 @@ app.use('/api/ingest',        requirePageAccess('/ingest'),    require('./src/ro
 app.use('/api/approvals',     requirePageAccess('/approval'),  require('./src/routes/approvals'));
 app.use('/api/workload',      requirePageAccess('/workload'),  require('./src/routes/workload'));
 app.use('/api/reports',       requirePageAccess('/reports'),   require('./src/routes/reports'));
+app.use('/api/knowledge',     requirePageAccess('/knowledge'), require('./src/routes/knowledge'));
 app.use('/api/admin',         requirePageAccess('/admin'),     require('./src/routes/admin'));
+
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 
