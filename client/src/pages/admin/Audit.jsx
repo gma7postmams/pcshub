@@ -41,7 +41,12 @@ const ACTION_LABELS = {
 
   'auth.2fa_failed': '2FA Verification Failed',
   'profile.2fa_enable': 'Enabled 2FA',
-  'profile.2fa_disable': 'Disabled 2FA',  
+  'profile.2fa_disable': 'Disabled 2FA',
+  
+  'knowledge.seed': 'Seeded Knowledge Document',
+  'knowledge.upload': 'Uploaded Knowledge Document',
+  'knowledge.rename': 'Renamed Knowledge Document',
+  'knowledge.delete': 'Deleted Knowledge Document',
 
 };
 
@@ -67,6 +72,8 @@ function formatEntity(row) {
       return 'Report';
     case 'workload_item':
       return 'Workload Item';  
+    case 'knowledge_document':
+      return 'Knowledge Document';
     default:
       return row.entity || '';
   }
@@ -178,7 +185,19 @@ function formatDetails(row) {
       return 'Two-factor authentication enabled';
 
     case 'profile.2fa_disable':
-      return 'Two-factor authentication disabled';      
+      return 'Two-factor authentication disabled';    
+      
+    case 'knowledge.seed':
+      return `Seeded knowledge document: ${d.filename || ''}`;
+
+    case 'knowledge.upload':
+      return `Uploaded knowledge document: ${d.filename || ''}`;
+
+    case 'knowledge.rename':
+      return `Renamed knowledge document to: ${d.title || ''}`;
+
+    case 'knowledge.delete':
+      return `Deleted knowledge document: ${d.title || d.filename || ''}`;
 
     default:
       return '';

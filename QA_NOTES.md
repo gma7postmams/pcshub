@@ -296,21 +296,35 @@ GET /api/profile/activity-history
 
 ### Functional Issues
 
-⚠️ Branding → "Reset Preview" button appears to be non-functional and requires further investigation.
+✅ No functional issues identified during current testing.
 
 ---
 
 ## Enhancements Successfully Delivered
 
-### Audit Log Usability Improvements
+### Audit Log Usability
 
-✅ Converted technical action codes into human-readable descriptions.
+✅ Workload Tracker audit events now display human-readable action names and details.
 
-✅ Converted technical entity types into readable names.
+Examples:
 
-✅ Converted raw JSON details into user-friendly descriptions.
+Before:
+- workload.create
+- workload.update
+- workload.delete
 
-✅ Improved readability for administrators performing audits and investigations.
+After:
+- Created Workload Item
+- Updated Workload Item
+- Deleted Workload Item
+
+✅ Workload audit details now display meaningful descriptions.
+
+✅ Password change events now display user-friendly descriptions.
+
+✅ 2FA-related events now display user-friendly descriptions.
+
+✅ Audit Log consistency has been improved across Authentication, Ingest, Approval, Workload, Administration, and Profile activities.
 
 ---
 
@@ -325,6 +339,35 @@ GET /api/profile/activity-history
 ✅ Added secure backend filtering.
 
 ✅ Improved overall audit transparency for end users.
+
+---
+
+## Knowledge Base
+
+✅ Knowledge Base module loads successfully.
+
+✅ Knowledge Base access is controlled through Group Permissions.
+
+✅ Users with the appropriate group permission can access Knowledge Base.
+
+✅ Users without permission receive the expected Access Locked response.
+
+✅ Document upload functionality is working correctly.
+
+✅ Document rename functionality is working correctly.
+
+✅ Document deletion functionality is working correctly.
+
+✅ Knowledge Base activities are recorded in the Audit Log.
+
+✅ Knowledge Base audit events display user-friendly action names and details.
+
+Examples:
+
+- Uploaded Knowledge Document
+- Renamed Knowledge Document
+- Deleted Knowledge Document
+- Seeded Knowledge Document
 
 ---
 
@@ -357,8 +400,7 @@ GET /api/profile/activity-history
 ## Remaining Activities
 
 - End-to-end workflow testing with multiple users
-- Investigate Branding → Reset Preview functionality
-- Review README setup documentation and provide `.env.example`
+
 
 ---
 
