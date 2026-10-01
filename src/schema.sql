@@ -103,8 +103,11 @@ CREATE TABLE IF NOT EXISTS dropdown_options (
 CREATE TABLE IF NOT EXISTS ingest_records (
   id                    SERIAL PRIMARY KEY,
   program               TEXT NOT NULL,
+  billable_party        TEXT,
   platform              TEXT NOT NULL,
   episode_date          DATE,
+  episode_break_date_text TEXT,
+  materials_count       INTEGER,
   source                TEXT,
   destination_folder    TEXT,
   requested_by_user_id  INT REFERENCES users(id) ON DELETE SET NULL,
@@ -112,10 +115,20 @@ CREATE TABLE IF NOT EXISTS ingest_records (
   remarks               TEXT,
   status                TEXT NOT NULL DEFAULT 'New'
                         CHECK (status IN ('New','Pending Approval','Approved','Rejected')),
+  cm_status             TEXT CHECK (cm_status IN ('DONE','NON-COMPLIANT')),
+  cm_decided_by         INT REFERENCES users(id) ON DELETE SET NULL,
+  cm_decided_at         TIMESTAMPTZ,
+  cm_non_compliant_reason TEXT,
   created_by            INT REFERENCES users(id) ON DELETE SET NULL,
   updated_by            INT REFERENCES users(id) ON DELETE SET NULL,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT ingest_cm_decision_consistent CHECK (
+    (cm_status IS NULL AND cm_decided_by IS NULL AND cm_decided_at IS NULL AND cm_non_compliant_reason IS NULL)
+    OR (cm_status = 'DONE' AND status = 'Approved' AND cm_decided_at IS NOT NULL AND cm_non_compliant_reason IS NULL)
+    OR (cm_status = 'NON-COMPLIANT' AND status = 'Approved' AND cm_decided_at IS NOT NULL
+        AND cm_non_compliant_reason IS NOT NULL AND length(btrim(cm_non_compliant_reason)) > 0)
+  )
 );
 CREATE INDEX IF NOT EXISTS ingest_status_idx ON ingest_records (status);
 CREATE INDEX IF NOT EXISTS ingest_created_idx ON ingest_records (created_at DESC);

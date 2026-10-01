@@ -23,7 +23,7 @@ const CATALOG = [
     ],
   },
   { key: 'ingest', label: 'Ingest Tracker', path: '/ingest', sections: [] },
-  { key: 'workload', label: 'Workload Tracker', path: '/workload', sections: [] },
+  { key: 'workload', label: 'Work Load Tracker', path: '/workload', sections: [] },
   { key: 'approval', label: 'Approval', path: '/approval', sections: [] },
   {
     key: 'reports', label: 'Reports', path: '/reports',
@@ -32,7 +32,6 @@ const CATALOG = [
       { key: 'reports.export', label: 'CSV export' },
     ],
   },
-  { key: 'knowledge', label: 'Knowledge Base', path: '/knowledge', sections: [] },
 ];
 
 const FIXED_PAGES = [
@@ -47,8 +46,8 @@ const SECTION_PAGE = Object.fromEntries(CATALOG.flatMap((p) => p.sections.map((s
 
 // Role -> actions
 const ROLE_ACTIONS = {
-  Admin:   ['ingest.write', 'ingest.delete', 'approval.decide', 'workload.write', 'knowledge.write', 'admin'],
-  Manager: ['ingest.write', 'approval.decide', 'workload.write', 'knowledge.write'],
+  Admin:   ['ingest.write', 'ingest.delete', 'approval.decide', 'ingest.cm_complete', 'workload.write', 'knowledge.write', 'admin'],
+  Manager: ['ingest.write', 'approval.decide', 'ingest.cm_complete', 'workload.write', 'knowledge.write'],
   Editor:  ['ingest.write'],
   Viewer:  [],
 };
@@ -56,6 +55,7 @@ const ROLE_ACTIONS = {
 const ACTION_PAGE = {
   'ingest.write': 'ingest',
   'ingest.delete': 'ingest',
+  'ingest.cm_complete': 'ingest',
   'approval.decide': 'approval',
   'workload.write': 'workload',
   'knowledge.write': 'knowledge',

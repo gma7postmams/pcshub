@@ -7,8 +7,40 @@ async function migrate(db) {
   await upgradeV1(db);
   const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   await db.query(sql);
+  await upgradeIngestRecords(db);
   await require('./totp').migrateSecrets(db);
   await seedAdmin(db);
+}
+
+async function upgradeIngestRecords(db) {
+  await db.tx(async (client) => {
+    await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS billable_party TEXT`);
+    await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS episode_break_date_text TEXT`);
+    await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS materials_count INTEGER`);
+    await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS cm_status TEXT`);
+    await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS cm_decided_by INT`);
+    await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS cm_decided_at TIMESTAMPTZ`);
+    await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS cm_non_compliant_reason TEXT`);
+    await client.query(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ingest_records_cm_decided_by_fkey') THEN
+        ALTER TABLE ingest_records ADD CONSTRAINT ingest_records_cm_decided_by_fkey
+          FOREIGN KEY (cm_decided_by) REFERENCES users(id) ON DELETE SET NULL;
+      END IF;
+      ALTER TABLE ingest_records DROP CONSTRAINT IF EXISTS ingest_cm_decision_consistent;
+      ALTER TABLE ingest_records ADD CONSTRAINT ingest_cm_decision_consistent CHECK (
+        (cm_status IS NULL AND cm_decided_by IS NULL AND cm_decided_at IS NULL AND cm_non_compliant_reason IS NULL)
+        OR (cm_status = 'DONE' AND status = 'Approved' AND cm_decided_at IS NOT NULL AND cm_non_compliant_reason IS NULL)
+        OR (cm_status = 'NON-COMPLIANT' AND status = 'Approved' AND cm_decided_at IS NOT NULL
+            AND cm_non_compliant_reason IS NOT NULL AND length(btrim(cm_non_compliant_reason)) > 0)
+      );
+    END $$`);
+    // Preserve episode_date for existing consumers while backfilling its text form once.
+    await client.query(
+      `UPDATE ingest_records
+          SET episode_break_date_text = to_char(episode_date, 'YYYY-MM-DD')
+        WHERE episode_break_date_text IS NULL AND episode_date IS NOT NULL`
+    );
+  });
 }
 
 /**
