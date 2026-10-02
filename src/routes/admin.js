@@ -378,13 +378,25 @@ router.put('/branding', asyncH(async (req, res) => {
   const accent_color = v.str(req.body.accent_color, { field: 'Accent color', max: 7 }) || '';
   if (accent_color && !/^#[0-9a-fA-F]{6}$/.test(accent_color)) throw new HttpError(400, 'Accent color must be a hex value like #4f8cff (or empty to use the theme accent)');
   await db.tx(async (c) => {
-    for (const [k, val] of Object.entries({ app_name, tagline, theme, accent_color })) {
+    const next = { app_name, tagline, theme, accent_color };
+    const { rows: curRows } = await c.query(
+      'SELECT key, value FROM app_settings WHERE key = ANY($1)', [Object.keys(next)]
+    );
+    const old = Object.fromEntries(curRows.map((r) => [r.key, r.value]));
+    const from = {};
+    const to = {};
+    for (const k of Object.keys(next)) {
+      if ((old[k] ?? '') !== next[k]) { from[k] = old[k] ?? ''; to[k] = next[k]; }
+    }
+    for (const [k, val] of Object.entries(next)) {
       await c.query(
         `INSERT INTO app_settings (key, value, updated_at) VALUES ($1,$2,now())
          ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [k, val]
       );
     }
-    await audit(req, 'admin.branding_update', 'app_settings', null, { app_name, tagline, theme, accent_color }, c);
+    if (Object.keys(to).length) {
+      await audit(req, 'admin.branding_update', 'app_settings', null, { from, to }, c);
+    }
   });
   res.json({ ok: true });
 }));

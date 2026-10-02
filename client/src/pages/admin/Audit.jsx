@@ -122,6 +122,22 @@ function describeUserUpdate(d) {
     : 'Updated user settings';
 }
 
+function describeBrandingUpdate(d) {
+  if (!d.to) return `Updated branding theme: ${d.theme || ''}`; // legacy records
+  const from = d.from || {};
+  const labels = {
+    app_name: 'Application Name',
+    tagline: 'Tagline',
+    theme: 'Theme',
+    accent_color: 'Accent Color',
+  };
+  const q = (v) => (v == null || v === '' ? 'none' : `"${v}"`);
+  const changes = Object.keys(labels)
+    .filter((k) => k in d.to && (from[k] ?? '') !== (d.to[k] ?? ''))
+    .map((k) => `${labels[k]} changed from ${q(from[k])} to ${q(d.to[k])}`);
+  return changes.length ? changes.join(' | ') : 'Updated branding settings (no changes)';
+}
+
 function formatDetails(row) {
   const d = row.details || {};
 
@@ -154,7 +170,7 @@ function formatDetails(row) {
       return `Deleted ${d.category}: ${d.value}`;
 
     case 'admin.branding_update':
-      return `Updated branding theme: ${d.theme || ''}`;
+      return describeBrandingUpdate(d);
 
     case 'admin.branding_logo':
       return 'Uploaded application logo';
