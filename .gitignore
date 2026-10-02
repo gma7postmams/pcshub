@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Node.js
 node_modules/
 client/node_modules/
@@ -28,4 +27,6 @@ client/dist/
 # Temporary files
 *.tmp
 *.swp
+
+# Uploads
 uploads/
