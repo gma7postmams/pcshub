@@ -51,6 +51,9 @@ const ACTION_LABELS = {
   'knowledge.rename': 'Renamed Knowledge Document',
   'knowledge.delete': 'Deleted Knowledge Document',
 
+  'admin.workload_column_add': 'Added Workload Column',
+  'admin.workload_column_delete': 'Deleted Workload Column',
+
 };
 
 function formatAction(action) {
@@ -292,7 +295,13 @@ function formatDetails(row) {
     case 'ingest.cm_non_compliant':
       return d.reason
         ? `Marked ingest request as NON-COMPLIANT - Reason: ${d.reason}`
-        : 'Marked ingest request as NON-COMPLIANT';      
+        : 'Marked ingest request as NON-COMPLIANT';     
+        
+    case 'admin.workload_column_add':
+      return `Added workload column: ${d.label || ''}`;
+
+    case 'admin.workload_column_delete':
+      return `Deleted workload column: ${d.label || ''}`;        
 
     default:
       return '';

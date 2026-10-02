@@ -156,8 +156,6 @@ Examples:
 
 ✅ User update events now display detailed old value → new value audit information.
 
-✅ 2FA reset functionality is working correctly.
-
 ✅ 2FA enable audit logging is functioning correctly.
 
 ✅ 2FA disable audit logging is functioning correctly.
@@ -191,6 +189,7 @@ Full Name changed from "Eugene B. Horfilla"
 to
 "Eugene_editor B. Horfilla"
 ```
+
 
 ---
 
@@ -360,12 +359,22 @@ Deleted group: TESTGROUP
 Examples:
 
 ```text
+Application Name changed from "PCS Hub" to "PCS Hub QA"
+```
+
+```text
 Tagline changed from "Production Tracking" to "Production Tracking QA"
+```
 
+```text
 Theme changed from "midnight" to "ocean"
+```
 
+```text
 Accent Color changed from "#4f8cff" to "#ff5500"
 ```
+
+
 
 ---
 
@@ -427,6 +436,21 @@ Uploaded Knowledge Document
 Updated User
 ```
 
+✅ Audit log entries provide significantly improved traceability compared to raw action keys.
+
+✅ Workload column creation audit events are recorded correctly.
+
+✅ Workload column deletion audit events are recorded correctly.
+
+✅ Workload column audit events display meaningful details and column names.
+
+```text
+Added workload column: Remarks
+
+Deleted workload column: Remarks
+```
+
+
 Additional Examples:
 
 ```text
@@ -469,7 +493,14 @@ Renamed Knowledge Document
 Deleted Knowledge Document
 ```
 
-✅ Audit log entries provide significantly improved traceability compared to raw action keys.
+```text
+Added workload column: Remarks
+```
+
+```text
+Deleted workload column: Remarks
+```
+
 
 ---
 
@@ -517,6 +548,8 @@ Deleted Knowledge Document
 
 ✅ Two-factor authentication (2FA) functionality and audit logging have been validated successfully.
 
+✅ Workload custom column audit logging has been validated successfully.
+
 ### QA Status
 
 **PASS**
@@ -526,5 +559,6 @@ Deleted Knowledge Document
 1. Continue audit-log coverage review for remaining Administration actions.
 2. Verify audit coverage for:
    - User Unlock
-3. Continue API-level security and authorization validation testing.
-4. Perform final regression testing prior to UAT deployment.
+3. Review audit coverage for non-Administration modules owned by other development workstreams.
+4. Continue API-level security and authorization validation testing.
+5. Perform final regression testing prior to UAT deployment.
