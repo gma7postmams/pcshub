@@ -550,6 +550,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
   const out = await db.tx(async (c) => {
     let created = 0;
     let updated = 0;
+    const createdIds = [];
     for (let i = 0; i < list.length; i++) {
       const row = list[i] || {};
       try {
@@ -568,6 +569,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           assertNotLocked(locks, rec.work_date);
           const id = await insertRow(c, rec, req.user.id);
           await audit(req, 'workload.create', 'workload_item', id, rec, c);
+          createdIds.push(id);
           created++;
         }
       } catch (e) {
@@ -575,7 +577,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
         throw e;
       }
     }
-    return { created, updated };
+    return { created, updated, createdIds };
   });
   res.json({ ok: true, ...out });
 }));
