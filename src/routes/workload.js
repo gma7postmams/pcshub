@@ -25,6 +25,7 @@ const UNIT_TEAMS = {
   'VGFX/VEDIT/Audio': ['VGFX', 'VEDIT', 'AUDIO'],
 };
 const TEAMS = ['VGFX', 'VEDIT', 'AUDIO'];
+const NOT_SET = '(Not set)';   // Units filter value for rows copied from the PSD Daily Plug List that haven't been assigned a team yet
 const TAB_LABEL = { ALL: 'All', VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio' };
 
 // Field kinds: date | select | text | audio_guide. `multiline` = textarea. `hint` = placeholder from the red notes.
@@ -149,7 +150,7 @@ router.get('/meta', asyncH(async (req, res) => {
   res.json({
     ready: true, units: UNITS, unitTeams: UNIT_TEAMS, tabs: ['ALL', ...TEAMS].map((key) => ({ key, label: TAB_LABEL[key] })),
     tabDefaultUnits: TAB_DEFAULT_UNITS, audioExtra: AUDIO_EXTRA, fields: extendFields(customCols), views: extendViews(customCols),
-    platformRules: PLATFORM_RULES, customColumns: customCols.map((c) => ({ id: c.id, key: c.col_key, label: c.label })),
+    notSet: NOT_SET, platformRules: PLATFORM_RULES, customColumns: customCols.map((c) => ({ id: c.id, key: c.col_key, label: c.label })),
     locks,
   });
 }));
@@ -199,15 +200,18 @@ async function fillFromPlugList(client, rec) {
   if (!rec.prog_name) rec.prog_name = rows[0].prog_name || null;
 }
 
-async function parseRow(client, body, current, customCols = []) {
+async function parseRow(client, body, current, customCols = [], opts = {}) {
   const cur = current || {};
+  // Units Concerned is required — except for a row that came in from the PSD Daily Plug List and hasn't been assigned yet
+  // (it stays blank, and appears only under All, until someone sets it). A row that HAS units can't be blanked.
+  const unitsMayBeBlank = !!opts.allowBlankUnits || (!!current && current.id != null && !current.units_concerned);
   const rec = {};
   for (const k of COLS) {
     const f = FIELDS[k];
     if (k === 'audio_guide') rec[k] = parseAudioGuide(body[k], cur[k]);
     else if (f.kind === 'date') rec[k] = v.date(body[k], { field: f.label, required: !!f.required });
     else if (f.kind === 'datetime') rec[k] = parseDateTime(body[k], f.label);
-    else if (k === 'units_concerned') rec[k] = v.oneOf(body[k], UNITS, { field: f.label });
+    else if (k === 'units_concerned') rec[k] = unitsMayBeBlank && !body[k] ? null : v.oneOf(body[k], UNITS, { field: f.label });
     else rec[k] = v.str(body[k], { field: f.label, max: f.max, required: !!f.required });
   }
   await fillFromPlugList(client, rec);
@@ -263,7 +267,8 @@ function buildFilter(query) {
     const team = v.oneOf(String(query.team), TEAMS, { field: 'team' });
     add('w.units_concerned = ANY(?::text[])', UNITS.filter((u) => UNIT_TEAMS[u].includes(team)));
   }
-  if (query.units) add('w.units_concerned = ?', v.oneOf(String(query.units), UNITS, { field: 'units' }));
+  if (query.units === NOT_SET) where.push('w.units_concerned IS NULL');
+  else if (query.units) add('w.units_concerned = ?', v.oneOf(String(query.units), UNITS, { field: 'units' }));
   if (query.platform) add('w.platform = ?', String(query.platform));
   if (query.plug_type) add('w.plug_type = ?', String(query.plug_type));
   if (query.from) add('w.work_date >= ?', v.date(query.from, { field: 'from' }));
@@ -383,6 +388,8 @@ router.get('/export', asyncH(async (req, res) => {
     : [
       { name: 'MAIN', cols: [...oneBreakdate(MAIN_COLS), ...customKeys], pick: (r) => involves(r, ['VGFX', 'VEDIT']) },
       { name: 'AUDIO', cols: [...AUDIO_COLS, ...customKeys], pick: (r) => involves(r, ['AUDIO']) },
+      // rows copied from the PSD Daily Plug List that have no Units Concerned yet (they'd otherwise be missing from the file)
+      ...(rows.some((r) => !r.units_concerned) ? [{ name: 'UNASSIGNED', cols: [...oneBreakdate(MAIN_COLS), ...customKeys], pick: (r) => !r.units_concerned }] : []),
     ];
 
   const pal = await exportPalette(db);
@@ -795,7 +802,7 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
   await db.tx(async (c) => {
     for (const fields of merged.values()) {
       try {
-        const rec = await parseRow(c, fields, null, customCols);
+        const rec = await parseRow(c, fields, null, customCols, { allowBlankUnits: true });   // a row with no Units Concerned (e.g. the UNASSIGNED sheet) comes in unassigned
         assertNotLocked(locks, rec.work_date);
         const id = await insertRow(c, rec, req.user.id);
         await audit(req, 'workload.create', 'workload_item', id, { imported: true, plug_id: fields.plug_id }, c);

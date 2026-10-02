@@ -698,3 +698,5 @@ table.t.xl td[data-k="breakdate_vgfx"] .xl-cell { min-width: 250px; }
 .plug-sum > div { display: flex; justify-content: space-between; gap: 16px; padding: 3px 0; }
 .plug-warn { color: var(--danger, #c0392b); font-size: 13px; margin: 8px 0 0 18px; }
 select.plug-pick { margin-top: 6px; font-size: 12.5px; }
+
+.chip.unset { cursor: pointer; opacity: .85; }

@@ -870,7 +870,7 @@ export default function Workload() {
     switch (k) {
       case 'work_date': return <td {...common}><WorkDate value={val} />{isLocked(val, meta.locks) ? <span className="row-lock" title={`Locked: ${lockNote(val, meta.locks)}`}><LockIcon /></span> : null}</td>;
       case 'platform': return <td {...common}><PlatformCell value={val} /></td>;
-      case 'units_concerned': return <td {...common}><UnitsPills value={val} unitTeams={meta.unitTeams} /></td>;
+      case 'units_concerned': return <td {...common}>{val ? <UnitsPills value={val} unitTeams={meta.unitTeams} /> : <span className="chip c-gray unset" title="Copied from the PSD Daily Plug List — click to choose the team(s). It shows under All until then.">Set units</span>}</td>;
       case 'plug_type': return <td {...common}><TypePill value={val} /></td>;
       case 'plug_id': {
         const [first, ...rest] = firstLineOf(val);
@@ -1020,14 +1020,14 @@ export default function Workload() {
               <input type="search" placeholder="Search plug ID, PSD, program, billable party, remarks…" value={filt.q} onChange={setF('q')} />
             </label>
           ) : null}
-          <FilterSelect label="Units" value={filt.units} onChange={setF('units')}><Options list={meta.units} blank="All" /></FilterSelect>
+          <FilterSelect label="Units" value={filt.units} onChange={setF('units')}><Options list={[...meta.units, meta.notSet]} blank="All" /></FilterSelect>
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
           <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
           <DateRange from={filt.from} to={filt.to} onChange={setRange} />
         </div>}
 
         {isPlugs ? (
-          <PlugList canWrite={canWrite} units={meta.units} onCopied={() => { loadStats(); }} />
+          <PlugList canWrite={canWrite} onCopied={() => { loadStats(); }} />
         ) : mode === 'excel' && tab === 'ALL' ? (
           <Empty>Pick VGFX, VEDIT or Audio above to edit in the Excel grid — each shows its own columns.</Empty>
         ) : isGrid ? (

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { del, get, post } from '../lib/api.js';
 import { fmtDate, isoDate } from '../lib/util.js';
 import { PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
-import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
+import { Empty, Modal, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
 
 // PSD Daily Plug List — the "PSD Daily Plug List" tab of the Workload Tracker. One list per day (imported from the PSD's daily plug
 // list workbook: NO / PLUG ID / PROG NAME/PROJ TITLE / PSD / Account By). The Workload Tracker copies Plug ID, PSD and
@@ -11,7 +11,7 @@ import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../co
 const weekday = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' });
 const dateLabel = (iso) => `${weekday(iso)}, ${fmtDate(iso)}`;
 
-export default function PlugList({ canWrite, units, onCopied }) {
+export default function PlugList({ canWrite, onCopied }) {
   const toast = useToast();
   const confirm = useConfirm();
   const fileRef = useRef(null);
@@ -169,7 +169,7 @@ export default function PlugList({ canWrite, units, onCopied }) {
       {adding ? <AddPlugModal date={date} onClose={() => setAdding(false)} onSaved={async (d) => { setAdding(false); await loadDates(true); if (d) setDate(d); loadRows(); }} /> : null}
 
       {copying ? (
-        <CopyModal date={date} units={units} plugs={chosen.length ? chosen : todo} onClose={() => setCopying(false)}
+        <CopyModal date={date} plugs={chosen.length ? chosen : todo} onClose={() => setCopying(false)}
           onDone={(out) => { setCopying(false); setPicked(new Set()); loadRows(); if (onCopied) onCopied(out); }} />
       ) : null}
     </div>
@@ -199,14 +199,13 @@ function AddPlugModal({ date, onClose, onSaved }) {
   );
 }
 
-function CopyModal({ date, units, plugs, onClose, onDone }) {
+function CopyModal({ date, plugs, onClose, onDone }) {
   const toast = useToast();
-  const [u, setU] = useState(units.includes('VGFX/VEDIT') ? 'VGFX/VEDIT' : units[0]);
   const [busy, setBusy] = useState(false);
   const go = async () => {
     setBusy(true);
     try {
-      const out = await post('/api/workload/plugs/copy', { date, units_concerned: u, ids: plugs.map((p) => p.id) });
+      const out = await post('/api/workload/plugs/copy', { date, ids: plugs.map((p) => p.id) });
       const bits = [`${out.created} row${out.created === 1 ? '' : 's'} added to the Workload Tracker`];
       if (out.already) bits.push(`${out.already} already there`);
       if (out.errors && out.errors.length) bits.push(`${out.errors.length} failed`);
@@ -219,11 +218,13 @@ function CopyModal({ date, units, plugs, onClose, onDone }) {
     <Modal title="Copy to Workload Tracker" onClose={onClose} footer={(<><span className="grow" /><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className="btn primary" disabled={busy} onClick={go}>Copy {plugs.length}</button></>)}>
       <p>
         Adds a Workload row for <strong>{plugs.length}</strong> plug{plugs.length === 1 ? '' : 's'} from <strong>{dateLabel(date)}</strong>, with Plug ID, PSD and
-        PROG. NAME / PROJ. TITLE filled in. Plugs that already have a row for that day are left alone. Fill in the rest (breakdate, VO, remarks …) in the tracker.
+        PROG. NAME / PROJ. TITLE filled in. Plugs that already have a row for that day are left alone.
       </p>
-      <label className="f"><span>Units Concerned <span className="req">*</span></span>
-        <select value={u} onChange={(e) => setU(e.target.value)}><Options list={units} /></select>
-      </label>
+      <p>
+        <strong>Units Concerned is left blank.</strong> The new rows show only under <strong>All</strong> (marked “Set units”) until you choose the
+        team(s) for each one — click its Units cell, or edit the row. Once set, the row moves to the VGFX / VEDIT / Audio tabs it belongs to.
+        Use the Units filter “(Not set)” to find the ones still waiting.
+      </p>
     </Modal>
   );
 }

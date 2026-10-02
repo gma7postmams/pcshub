@@ -246,8 +246,9 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
     const t0 = Date.now();
     const body = req.body || {};
     const date = v.date(body.date, { field: 'Date', required: true });
-    const units = v.oneOf(body.units_concerned, UNITS, { field: 'Units Concerned' });
-    if (!units) throw new HttpError(400, 'Units Concerned is required');
+    // Units Concerned is NOT known from the plug list: rows are made with it blank (they show under All until someone sets it).
+    // A value may still be passed in (optional).
+    const units = body.units_concerned ? v.oneOf(body.units_concerned, UNITS, { field: 'Units Concerned' }) : null;
     const ids = Array.isArray(body.ids) ? body.ids.map((n) => parseInt(n, 10)).filter(Number.isInteger).slice(0, 500) : null;
     assertNotLocked(await loadLocks(db), date);
     const { rows: plugs } = await db.query(
@@ -267,7 +268,7 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
         const key = p.plug_id.toUpperCase();
         if (taken.has(key)) { already++; continue; }
         try {
-          const rec = await parseRow(c, { work_date: date, units_concerned: units, plug_id: p.plug_id, psd: p.psd, prog_name: p.prog_name }, null, customCols);
+          const rec = await parseRow(c, { work_date: date, units_concerned: units, plug_id: p.plug_id, psd: p.psd, prog_name: p.prog_name }, null, customCols, { allowBlankUnits: true });
           const id = await insertRow(c, rec, req.user.id);
           await audit(req, 'workload.create', 'workload_item', id, { from_plug_list: true, plug_id: p.plug_id }, c);
           taken.add(key);
@@ -277,7 +278,7 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
         }
       }
     });
-    await logRun(req, 'workload.plugs_copy', { date, units, requested: plugs.length, created, alreadyInWorkload: already, errors: errors.slice(0, 20), ms: Date.now() - t0 });
+    await logRun(req, 'workload.plugs_copy', { date, units: units || '(blank)', requested: plugs.length, created, alreadyInWorkload: already, errors: errors.slice(0, 20), ms: Date.now() - t0 });
     res.json({ ok: true, created, already, errors: errors.slice(0, 20) });
   }));
 };
