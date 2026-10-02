@@ -230,7 +230,21 @@ router.post('/users/:id/reset-2fa', asyncH(async (req, res) => {
 router.post('/users/:id/unlock', asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   await db.query('UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=$1', [id]);
-  await audit(req, 'admin.user_unlock', 'user', id);
+  const cur = await db.query(
+    'SELECT username FROM users WHERE id=$1',
+    [id]
+  );
+
+  if (!cur.rows.length) throw new HttpError(404, 'User not found');
+
+  await db.query(
+    'UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=$1',
+    [id]
+  );
+
+  await audit(req, 'admin.user_unlock', 'user', id, {
+    username: cur.rows[0].username
+  });
   res.json({ ok: true });
 }));
 

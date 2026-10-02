@@ -9,6 +9,8 @@ const ACTION_LABELS = {
   'auth.login': 'User Login',
   'auth.logout': 'User Logout',
   'auth.login_failed': 'Failed Login',
+  'auth.locked': 'Account Locked',
+  'auth.login_blocked_locked': 'Login Blocked (Locked Account)',
 
   'ingest.create': 'Created Ingest Record',
   'ingest.send_for_approval': 'Submitted For Approval',
@@ -17,6 +19,8 @@ const ACTION_LABELS = {
 
   'approval.approved': 'Approved Request',
   'approval.rejected': 'Rejected Request',
+
+  'admin.user_unlock': 'Unlocked User',
 
   'admin.user_create': 'Created User',
   'admin.user_update': 'Updated User',
@@ -53,6 +57,8 @@ const ACTION_LABELS = {
 
   'admin.workload_column_add': 'Added Workload Column',
   'admin.workload_column_delete': 'Deleted Workload Column',
+  'admin.workload_lock_add': 'Added Workload Lock',
+  'admin.workload_lock_delete': 'Deleted Workload Lock',
 
 };
 
@@ -81,6 +87,8 @@ function formatEntity(row) {
     case 'knowledge_document':
     case 'knowledge_docs':  
       return 'Knowledge Document';
+    case 'workload_lock':
+      return 'Workload Lock';      
      
     default:
       return row.entity || '';
@@ -301,7 +309,22 @@ function formatDetails(row) {
       return `Added workload column: ${d.label || ''}`;
 
     case 'admin.workload_column_delete':
-      return `Deleted workload column: ${d.label || ''}`;        
+      return `Deleted workload column: ${d.label || ''}`;    
+      
+    case 'admin.workload_lock_add':
+      return `Locked workload dates from ${d.from_date} to ${d.to_date}${d.note ? ` (${d.note})` : ''}`;
+
+    case 'admin.workload_lock_delete':
+      return `Removed workload date lock from ${d.from_date} to ${d.to_date}`;  
+      
+    case 'auth.locked':
+      return 'Account locked due to multiple failed login attempts';
+
+    case 'auth.login_blocked_locked':
+      return 'Login blocked because account is currently locked';     
+
+    case 'admin.user_unlock':
+      return `Unlocked user: ${d.username || ''}`;      
 
     default:
       return '';

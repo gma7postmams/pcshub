@@ -32,6 +32,14 @@
 
 ✅ No privilege escalation issues identified during RBAC validation.
 
+✅ Account lockout protection is functioning correctly.
+
+✅ Account lockout is enforced at the user-account level.
+
+✅ Failed login attempts against one account do not affect other user accounts.
+
+✅ Locked accounts can be unlocked by an Administrator through the Users module.
+
 ---
 
 ## Main Navigation
@@ -159,6 +167,10 @@ Examples:
 ✅ 2FA enable audit logging is functioning correctly.
 
 ✅ 2FA disable audit logging is functioning correctly.
+
+✅ User unlock functionality is working correctly.
+
+✅ User unlock audit events are recorded successfully.
 
 Examples:
 
@@ -299,6 +311,14 @@ Deleted group: TESTGROUP
 ✅ Role-only page restrictions validated successfully.
 
 ✅ No RBAC bypass identified during page-access testing.
+
+✅ Verified that Administrative users retain full system access regardless of assigned Group configuration.
+
+✅ Confirmed that Group assignments are recorded for Administrator accounts but do not restrict Administrator privileges.
+
+✅ Successfully validated RBAC scenarios across the following role and group combinations:
+
+- Administrator + Dashboard Group
 
 ---
 
@@ -501,6 +521,29 @@ Added workload column: Remarks
 Deleted workload column: Remarks
 ```
 
+✅ User unlock functionality is working correctly.
+
+✅ User unlock audit events are recorded correctly.
+
+Example:
+
+```text
+Unlocked user: viewer
+```
+
+✅ User unlock audit events are recorded successfully.
+
+✅ Account lockout audit events are recorded successfully.
+
+✅ Login attempts against locked accounts are recorded successfully.
+
+```text
+Account Locked
+
+Login Blocked (Locked Account)
+
+Unlocked User
+```
 
 ---
 
@@ -550,6 +593,18 @@ Deleted workload column: Remarks
 
 ✅ Workload custom column audit logging has been validated successfully.
 
+✅ Account lockout protection is functioning correctly.
+
+✅ Account lockout is enforced at the user-account level.
+
+✅ Failed login attempts against one account do not impact other user accounts.
+
+✅ Administrator role behavior has been validated with and without Group assignments.
+
+✅ Administrative users retain full system access regardless of assigned Group configuration.
+
+✅ Account lockout and account unlock workflows have been validated successfully.
+
 ### QA Status
 
 **PASS**
@@ -557,8 +612,11 @@ Deleted workload column: Remarks
 ### Open Items
 
 1. Continue audit-log coverage review for remaining Administration actions.
-2. Verify audit coverage for:
-   - User Unlock
-3. Review audit coverage for non-Administration modules owned by other development workstreams.
-4. Continue API-level security and authorization validation testing.
-5. Perform final regression testing prior to UAT deployment.
+
+2. Review audit coverage for non-Administration modules owned by other development workstreams.
+   - Workload Excel Import
+   - Workload Excel Export
+
+3. Continue API-level security and authorization validation testing.
+
+4. Perform final regression testing prior to UAT deployment.
