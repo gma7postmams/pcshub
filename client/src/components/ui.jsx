@@ -96,21 +96,55 @@ export function ToastProvider({ children }) {
 }
 
 // ---------- Modal ----------
+const modalStack = [];
+const isTopModal = (id) => modalStack[modalStack.length - 1] === id;
+
 export function Modal({ title, size, onClose, footer, children }) {
   const ref = useRef(null);
+  const id = useRef(Symbol('modal'));
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    const modalId = id.current;
+    const previouslyFocused = document.activeElement;
+    modalStack.push(modalId);
+
+    const onKey = (e) => {
+      if (e.key === 'Escape' && isTopModal(modalId)) onCloseRef.current();
+    };
     document.addEventListener('keydown', onKey);
     const first = ref.current && ref.current.querySelector('.modal-body input:not([type=hidden]):not([disabled]), .modal-body select, .modal-body textarea');
-    if (first) setTimeout(() => first.focus(), 30);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    const focusTimer = first ? setTimeout(() => {
+      if (isTopModal(modalId)) first.focus();
+    }, 30) : null;
+
+    return () => {
+      if (focusTimer !== null) clearTimeout(focusTimer);
+      document.removeEventListener('keydown', onKey);
+
+      const wasTopModal = isTopModal(modalId);
+      const index = modalStack.lastIndexOf(modalId);
+      if (index !== -1) modalStack.splice(index, 1);
+
+      if (wasTopModal && previouslyFocused && previouslyFocused.isConnected
+        && typeof previouslyFocused.focus === 'function' && !previouslyFocused.matches?.(':disabled')
+        && !previouslyFocused.closest?.('[inert], [hidden], [aria-hidden="true"]')) {
+        previouslyFocused.focus({ preventScroll: true });
+      }
+    };
+  }, []);
+
+  const close = () => {
+    if (isTopModal(id.current)) onCloseRef.current();
+  };
+
   return (
-    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
       <div className={`modal ${size || ''}`} role="dialog" aria-modal="true" ref={ref}>
         <div className="modal-head">
           <h2>{title}</h2>
-          <button type="button" className="iconbtn" aria-label="Close" onClick={onClose}><CloseIcon /></button>
+          <button type="button" className="iconbtn" aria-label="Close" onClick={close}><CloseIcon /></button>
         </div>
         <div className="modal-body">{children}</div>
         {footer ? <div className="modal-foot">{footer}</div> : null}
