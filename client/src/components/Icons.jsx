@@ -16,9 +16,7 @@ export const KebabIcon = () => <svg {...base} strokeWidth="2.4"><circle cx="12" 
 export const PencilIcon = () => <svg {...base} strokeWidth="1.8"><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="M14 6l4 4" /></svg>;
 export const TrashIcon = () => <svg {...base} strokeWidth="1.8"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" /></svg>;
 export const CopyIcon = () => <svg {...base} strokeWidth="1.8"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" /></svg>
-//export const UploadIcon = () => <svg {...base} strokeWidth="1.8"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" /></svg>;
 export const FileIcon = () => <svg {...base} strokeWidth="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg>;
-
 export const UploadIcon = () => <svg {...base} strokeWidth="1.8"><path d="M12 15V3m0 0l-4 4m4-4l4 4M4 21h16" /></svg>;
 export const ColumnIcon = () => <svg {...base} strokeWidth="1.8"><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M14 4v16M18 9v6" /></svg>;
 export const LockIcon = () => <svg {...base} strokeWidth="1.8"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>;
