@@ -620,3 +620,11 @@ Unlocked User
 3. Continue API-level security and authorization validation testing.
 
 4. Perform final regression testing prior to UAT deployment.
+
+Authentication Investigation
+
+- Review IP-based login rate limiter.
+- Add auth.rate_limited audit logging.
+- Consider separate limiters for Login and 2FA.
+- Consider skipSuccessfulRequests: true.
+- Review UX/message differences between account lockout and IP rate limiting.
