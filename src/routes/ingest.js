@@ -3,7 +3,7 @@ const db = require('../db');
 const v = require('../validate');
 const { asyncH, HttpError, requireAction } = require('../middleware');
 const { audit } = require('../audit');
-const { notifyCapable } = require('../notify');
+const { notifyUsers, notifyCapable } = require('../notify');
 
 const router = express.Router();
 

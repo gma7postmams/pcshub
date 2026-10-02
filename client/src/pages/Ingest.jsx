@@ -157,17 +157,34 @@ export default function Ingest() {
 
 function IngestForm({ rec, lookups, onClose, onSaved }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const r = rec || {};
   const initialEpisodeText = rec ? (r.episode_break_date_text || r.episode_date || '') : '';
-  const [f, set] = useForm({
+  const initialForm = {
     program: r.program || '', platform: r.platform || '', billable_party: r.billable_party || '',
     episode_break_date_text: initialEpisodeText,
     materials_count: r.materials_count == null ? '' : String(r.materials_count),
     source: r.source || '',
     requested_by_user_id: r.requested_by_user_id ?? '',
     requested_by_psd: r.requested_by_psd || '', remarks: r.remarks || '',
-  });
+  };
+  const [f, set] = useForm(initialForm);
   const [busy, setBusy] = useState(false);
+  const dirty = JSON.stringify(f) !== JSON.stringify(initialForm);
+
+  const requestClose = async () => {
+    if (busy) return;
+    if (!dirty) {
+      onClose();
+      return;
+    }
+    const ok = await confirm(
+      'Discard unsaved changes?',
+      'Your changes have not been saved. Discard them and close this form?',
+      { danger: true, okText: 'Discard' }
+    );
+    if (ok) onClose();
+  };
 
   const submit = async (send) => {
     if (!f.program || !f.platform) { toast('Program / Project and Platform are required', 'err'); return; }
@@ -197,10 +214,10 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
   return (
     <Modal
       title={rec ? `Edit Ingest #${rec.id}` : 'New Ingest'}
-      onClose={onClose}
+      onClose={requestClose}
       footer={(
         <>
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn" onClick={requestClose}>Cancel</button>
           {!rec ? <button type="button" className="btn" id="save-send" disabled={busy} onClick={() => submit(true)}>Save &amp; Send for Approval</button> : null}
           <button type="button" className="btn primary" id="save" disabled={busy} onClick={() => submit(false)}>Save</button>
         </>
