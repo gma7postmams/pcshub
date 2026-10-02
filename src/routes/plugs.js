@@ -1,0 +1,285 @@
+// PSD Daily Plug List — mounted by workload.js under /api/workload/plugs (so it sits behind requirePageAccess('/workload');
+// writes need requireAction('workload.write')).
+//
+// The PSD's daily plug list workbook has one sheet per day. Each sheet: a "DATE:" line near the top ("September 28,Monday Plug list"),
+// then a table with NO / PLUG ID / PROG NAME/PROJ TITLE / PSD / Account By:. Late additions sit under an "Additional for …" line.
+// Import reads every sheet, works out each sheet's date, and adds the plugs (re-importing an updated file only adds what is new).
+// The Workload Tracker copies Plug ID, PSD and Prog. Name from this list (see fillFromPlugList in workload.js and the tab in the UI).
+const multer = require('multer');
+const db = require('../db');
+const v = require('../validate');
+const { asyncH, HttpError, requireAction } = require('../middleware');
+const { audit } = require('../audit');
+const { logRun } = require('../transferlog');
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
+
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const pad = (n) => String(n).padStart(2, '0');
+
+/** A cell's value as plain text (rich text, formulas and numbers handled; real dates give '' — callers deal with those). */
+function textOf(val) {
+  if (val == null) return '';
+  if (val.richText) return val.richText.map((t) => t.text).join('');
+  if (val instanceof Date) return '';
+  if (typeof val === 'object' && val.result !== undefined) return textOf(val.result);
+  if (typeof val === 'object' && val.text !== undefined) return textOf(val.text);
+  return String(val);
+}
+/** A Prog. Name cell: Excel turns titles like "23:23" into a time of day, so give those back as HH:MM. */
+function titleOf(val) {
+  if (val instanceof Date) {
+    return val.getUTCFullYear() < 1901 ? `${pad(val.getUTCHours())}:${pad(val.getUTCMinutes())}` : val.toISOString().slice(0, 10);
+  }
+  return textOf(val).replace(/\s+/g, ' ').trim();
+}
+function monthDay(text) {
+  const m = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*(\d{1,2})\b/i.exec(String(text || ''));
+  return m ? { month: MONTHS[m[1].toLowerCase()], day: Number(m[2]) } : null;
+}
+
+/**
+ * Reads the whole workbook. Returns { sheets: [{ sheet, date, plugs: [...], skippedNoId, additional }], warnings: [] }.
+ * A plug is { seq, list_no, plug_id, prog_name, psd, account_by, is_additional }. Pure (no database), so it can be tested alone.
+ */
+function parsePlugWorkbook(wb, year) {
+  const sheets = [];
+  const warnings = [];
+  for (const ws of wb.worksheets) {
+    if (!ws || ws.rowCount < 2) continue;
+    // header row: the one with a "Plug ID" cell (first 15 rows)
+    let headerRow = 0;
+    const col = {};
+    for (let r = 1; r <= Math.min(15, ws.rowCount) && !headerRow; r++) {
+      const found = {};
+      ws.getRow(r).eachCell((cell, c) => {
+        const t = textOf(cell.value).toLowerCase().replace(/[^a-z]/g, '');
+        if (t === 'plugid') found.plug = c;
+        else if (/^prog.*(name|title)|^proj.*title/.test(t)) found.prog = c;
+        else if (t === 'psd') found.psd = c;
+        else if (t.startsWith('accountby')) found.acct = c;
+        else if (t === 'no') found.no = c;
+      });
+      if (found.plug) { headerRow = r; Object.assign(col, found); }
+    }
+    if (!headerRow) { warnings.push(`Sheet "${ws.name}": no PLUG ID column header found, skipped`); continue; }
+
+    // the sheet's date: a "Sept 28,Monday plug list" style line in the first rows, else the sheet's name ("Sept 28")
+    let md = null;
+    let dayText = '';
+    for (let r = 1; r < headerRow && !md; r++) {
+      ws.getRow(r).eachCell((cell) => { if (!md) { const t = textOf(cell.value); const hit = monthDay(t); if (hit) { md = hit; dayText = t; } } });
+    }
+    if (!md) { md = monthDay(ws.name); dayText = ''; }
+    let hasData = false;
+    for (let r = headerRow + 1; r <= ws.rowCount && !hasData; r++) hasData = !!textOf(ws.getRow(r).getCell(col.plug).value).trim();
+    if (!md && !hasData) continue;   // a blank template sheet: nothing to import and nothing to warn about
+    if (!md) { warnings.push(`Sheet "${ws.name}": no date found (expected something like "September 28" in the DATE line or the sheet name), skipped`); continue; }
+    const probe = new Date(Date.UTC(year, md.month - 1, md.day));
+    if (probe.getUTCMonth() !== md.month - 1 || probe.getUTCDate() !== md.day) { warnings.push(`Sheet "${ws.name}": ${md.month}/${md.day} is not a real date, skipped`); continue; }
+    const date = `${year}-${pad(md.month)}-${pad(md.day)}`;
+    const wk = /,\s*([A-Za-z]{3})/.exec(dayText);
+    if (wk && wk[1].toLowerCase() !== WEEKDAYS[probe.getUTCDay()]) {
+      warnings.push(`Sheet "${ws.name}": says ${wk[1]} but ${date} is a ${WEEKDAYS[probe.getUTCDay()]} — check the year (${year}) is right`);
+    }
+
+    const plugs = [];
+    const seen = new Set();
+    let additional = false;
+    let skippedNoId = 0;
+    const cellOf = (row, c) => (c ? row.getCell(c).value : null);
+    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r);
+      const plugId = textOf(cellOf(row, col.plug)).replace(/\s+/g, ' ').trim();
+      const prog = titleOf(cellOf(row, col.prog));
+      const psd = textOf(cellOf(row, col.psd)).replace(/\s+/g, ' ').trim();
+      const acct = textOf(cellOf(row, col.acct)).replace(/\s+/g, ' ').trim();
+      if (!plugId) { if (prog || psd) skippedNoId++; continue; }
+      if (/^additional\b/i.test(plugId) && !prog && !psd) { additional = true; continue; }   // the "Additional for Sept 28" divider
+      const key = `${plugId}|${prog}|${psd}`.toUpperCase();
+      if (seen.has(key)) continue;   // the same line listed twice
+      seen.add(key);
+      const no = Number(textOf(cellOf(row, col.no)));
+      plugs.push({
+        seq: plugs.length + 1, list_no: Number.isInteger(no) && no > 0 ? no : null,
+        plug_id: plugId.slice(0, 200), prog_name: prog.slice(0, 300), psd: psd.slice(0, 200), account_by: acct.slice(0, 100), is_additional: additional,
+      });
+    }
+    if (!plugs.length) continue;   // e.g. the blank template sheet
+    sheets.push({ sheet: ws.name, date, plugs, skippedNoId, additional: plugs.filter((p) => p.is_additional).length });
+  }
+  return { sheets, warnings };
+}
+
+module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked }) {
+  // ---- which days have a list ----
+  router.get('/plugs/dates', asyncH(async (req, res) => {
+    const { rows } = await db.query('SELECT plug_date AS date, count(*)::int AS n FROM workload_plugs GROUP BY plug_date ORDER BY plug_date DESC LIMIT 366');
+    res.json({ dates: rows });
+  }));
+
+  // ---- list: ?date=YYYY-MM-DD, or ?from=&to=, optional ?q= and ?used=1 (adds in_workload: is it already in the Workload Tracker) ----
+  router.get('/plugs', asyncH(async (req, res) => {
+    const params = [];
+    const where = [];
+    const add = (sql, val) => { params.push(val); where.push(sql.replace('?', `$${params.length}`)); };
+    if (req.query.date) add('p.plug_date = ?', v.date(req.query.date, { field: 'Date' }));
+    if (req.query.from) add('p.plug_date >= ?', v.date(req.query.from, { field: 'From' }));
+    if (req.query.to) add('p.plug_date <= ?', v.date(req.query.to, { field: 'To' }));
+    if (req.query.q) {
+      const like = `%${String(req.query.q).slice(0, 80).replace(/[%_\\]/g, '\\$&')}%`;
+      params.push(like);
+      where.push(`(p.plug_id ILIKE $${params.length} OR p.prog_name ILIKE $${params.length} OR p.psd ILIKE $${params.length})`);
+    }
+    const used = req.query.used === '1'
+      ? `, EXISTS (SELECT 1 FROM workload_items w WHERE w.work_date = p.plug_date
+           AND upper(p.plug_id) IN (SELECT upper(btrim(x)) FROM unnest(string_to_array(w.plug_id, E'\\n')) AS x)) AS in_workload`
+      : '';
+    const limit = Math.min(parseInt(req.query.limit, 10) || 3000, 5000);
+    const { rows } = await db.query(
+      `SELECT p.id, p.plug_date, p.seq, p.list_no, p.plug_id, p.prog_name, p.psd, p.account_by, p.is_additional${used}
+         FROM workload_plugs p ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+        ORDER BY p.plug_date, p.seq, p.id LIMIT ${limit}`, params
+    );
+    res.json({ rows });
+  }));
+
+  // ---- import the PSD's daily plug list workbook ----
+  router.post('/plugs/import', requireAction('workload.write'), upload.single('file'), asyncH(async (req, res) => {
+    const t0 = Date.now();
+    const info = { target: 'plug list', file: req.file ? req.file.originalname : null, bytes: req.file ? req.file.size : 0 };
+    try {
+      if (!req.file) throw new HttpError(400, 'No file uploaded');
+      let ExcelJS;
+      try { ExcelJS = require('exceljs'); } catch (e) {
+        throw new HttpError(501, 'Import needs the "exceljs" package. Run "npm install" on the server, then restart.');
+      }
+      const wb = new ExcelJS.Workbook();
+      try { await wb.xlsx.load(req.file.buffer); } catch (e) { throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)'); }
+      // the list has no year in it: use the one typed in, else a year in the file name ("September_2026_Plug_List"), else this year
+      const typed = parseInt(req.body && req.body.year, 10);
+      const inName = /(?<!\d)(20\d{2})(?!\d)/.exec(req.file.originalname || '');   // not \b: "September_2026_Plug_List" has no word boundary around the year
+      const year = typed || (inName ? Number(inName[1]) : new Date().getFullYear());
+      if (year < 2000 || year > 2100) throw new HttpError(400, 'Year must be between 2000 and 2100');
+      info.year = year;
+
+      const { sheets, warnings } = parsePlugWorkbook(wb, year);
+      if (!sheets.length) {
+        throw new HttpError(400, 'No plugs found — expected one sheet per day with the columns NO, PLUG ID, PROG NAME/PROJ TITLE, PSD, Account By '
+          + `and a date such as "September 28" in the DATE line or the sheet name.${warnings.length ? ` (${warnings[0]})` : ''}`);
+      }
+      const result = [];
+      await db.tx(async (c) => {
+        for (const sh of sheets) {
+          const p = sh.plugs;
+          const { rows } = await c.query(
+            `INSERT INTO workload_plugs (plug_date, seq, list_no, plug_id, prog_name, psd, account_by, is_additional, source_file, created_by)
+             SELECT $1::date, t.seq, t.list_no, t.plug_id, t.prog_name, t.psd, t.account_by, t.addl, $2, $3
+               FROM unnest($4::int[], $5::int[], $6::text[], $7::text[], $8::text[], $9::text[], $10::bool[]) AS t(seq, list_no, plug_id, prog_name, psd, account_by, addl)
+             ON CONFLICT (plug_date, plug_id, prog_name, psd)
+             DO UPDATE SET seq = EXCLUDED.seq, list_no = EXCLUDED.list_no, account_by = EXCLUDED.account_by,
+                           is_additional = EXCLUDED.is_additional, source_file = EXCLUDED.source_file, updated_at = now()
+             RETURNING (xmax = 0) AS inserted`,
+            [sh.date, req.file.originalname || null, req.user.id, p.map((x) => x.seq), p.map((x) => x.list_no), p.map((x) => x.plug_id),
+              p.map((x) => x.prog_name), p.map((x) => x.psd), p.map((x) => x.account_by), p.map((x) => x.is_additional)]
+          );
+          const added = rows.filter((r) => r.inserted).length;
+          result.push({ sheet: sh.sheet, date: sh.date, plugs: p.length, added, existing: p.length - added, additional: sh.additional, skipped: sh.skippedNoId });
+        }
+      });
+      const total = result.reduce((o, s) => ({ plugs: o.plugs + s.plugs, added: o.added + s.added, skipped: o.skipped + s.skipped }), { plugs: 0, added: 0, skipped: 0 });
+      await logRun(req, 'workload.plugs_import', { ...info, days: result.length, from: result[0].date, to: result[result.length - 1].date, ...total, warnings: warnings.slice(0, 20), ms: Date.now() - t0 });
+      res.json({ ok: true, year, days: result.length, ...total, existing: total.plugs - total.added, sheets: result, warnings: warnings.slice(0, 20) });
+    } catch (e) {
+      await logRun(req, 'workload.plugs_import_failed', { ...info, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
+      throw e;
+    }
+  }));
+
+  // ---- add / edit / delete a single plug by hand ----
+  const plugBody = (body) => ({
+    plug_date: v.date(body.plug_date, { field: 'Date', required: true }),
+    plug_id: (v.str(body.plug_id, { field: 'Plug ID', max: 200, required: true }) || '').replace(/\s+/g, ' ').trim(),
+    prog_name: v.str(body.prog_name, { field: 'PROG. NAME / PROJ. TITLE', max: 300 }) || '',
+    psd: v.str(body.psd, { field: 'PSD', max: 200 }) || '',
+    account_by: v.str(body.account_by, { field: 'Account By', max: 100 }) || '',
+  });
+  const dupe = (e) => { if (e && e.code === '23505') throw new HttpError(409, 'That plug (same Plug ID, program and PSD) is already on this day\'s list'); throw e; };
+
+  router.post('/plugs', requireAction('workload.write'), asyncH(async (req, res) => {
+    const b = plugBody(req.body || {});
+    let row;
+    try {
+      ({ rows: [row] } = await db.query(
+        `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by)
+         VALUES ($1, (SELECT COALESCE(MAX(seq), 0) + 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6) RETURNING id`,
+        [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by, req.user.id]
+      ));
+    } catch (e) { dupe(e); }
+    await audit(req, 'workload.plug_add', 'workload_plug', row.id, { plug_date: b.plug_date, plug_id: b.plug_id });
+    res.status(201).json({ id: row.id });
+  }));
+
+  router.put('/plugs/:id(\\d+)', requireAction('workload.write'), asyncH(async (req, res) => {
+    const b = plugBody(req.body || {});
+    try {
+      const r = await db.query(
+        `UPDATE workload_plugs SET plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=$6, updated_at=now() WHERE id=$1`,
+        [req.params.id, b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by]
+      );
+      if (!r.rowCount) throw new HttpError(404, 'Plug not found');
+    } catch (e) { dupe(e); }
+    await audit(req, 'workload.plug_edit', 'workload_plug', req.params.id, { plug_date: b.plug_date, plug_id: b.plug_id });
+    res.json({ ok: true });
+  }));
+
+  router.delete('/plugs/:id(\\d+)', requireAction('workload.write'), asyncH(async (req, res) => {
+    const { rows } = await db.query('DELETE FROM workload_plugs WHERE id=$1 RETURNING plug_date, plug_id', [req.params.id]);
+    if (!rows.length) throw new HttpError(404, 'Plug not found');
+    await audit(req, 'workload.plug_delete', 'workload_plug', req.params.id, rows[0]);
+    res.json({ ok: true });
+  }));
+
+  // ---- copy a day's plugs (or the chosen ones) into the Workload Tracker: one new row per plug not already there ----
+  router.post('/plugs/copy', requireAction('workload.write'), asyncH(async (req, res) => {
+    const t0 = Date.now();
+    const body = req.body || {};
+    const date = v.date(body.date, { field: 'Date', required: true });
+    const units = v.oneOf(body.units_concerned, UNITS, { field: 'Units Concerned' });
+    if (!units) throw new HttpError(400, 'Units Concerned is required');
+    const ids = Array.isArray(body.ids) ? body.ids.map((n) => parseInt(n, 10)).filter(Number.isInteger).slice(0, 500) : null;
+    assertNotLocked(await loadLocks(db), date);
+    const { rows: plugs } = await db.query(
+      `SELECT p.id, p.plug_id, p.prog_name, p.psd FROM workload_plugs p
+        WHERE p.plug_date = $1 ${ids ? 'AND p.id = ANY($2::bigint[])' : ''} ORDER BY p.seq, p.id LIMIT 500`, ids ? [date, ids] : [date]
+    );
+    const { rows: have } = await db.query(
+      `SELECT DISTINCT upper(btrim(x)) AS id FROM workload_items w, unnest(string_to_array(w.plug_id, E'\\n')) AS x WHERE w.work_date = $1`, [date]
+    );
+    const taken = new Set(have.map((r) => r.id));
+    const customCols = await loadCustomCols(db);
+    let created = 0;
+    let already = 0;
+    const errors = [];
+    await db.tx(async (c) => {
+      for (const p of plugs) {
+        const key = p.plug_id.toUpperCase();
+        if (taken.has(key)) { already++; continue; }
+        try {
+          const rec = await parseRow(c, { work_date: date, units_concerned: units, plug_id: p.plug_id, psd: p.psd, prog_name: p.prog_name }, null, customCols);
+          const id = await insertRow(c, rec, req.user.id);
+          await audit(req, 'workload.create', 'workload_item', id, { from_plug_list: true, plug_id: p.plug_id }, c);
+          taken.add(key);
+          created++;
+        } catch (e) {
+          errors.push(`${p.plug_id}: ${e instanceof HttpError ? e.message : 'unexpected error'}`);
+        }
+      }
+    });
+    await logRun(req, 'workload.plugs_copy', { date, units, requested: plugs.length, created, alreadyInWorkload: already, errors: errors.slice(0, 20), ms: Date.now() - t0 });
+    res.json({ ok: true, created, already, errors: errors.slice(0, 20) });
+  }));
+};
+
+module.exports.parsePlugWorkbook = parsePlugWorkbook;

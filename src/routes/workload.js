@@ -5,14 +5,7 @@ const v = require('../validate');
 const { asyncH, HttpError, requireAction } = require('../middleware');
 const { audit } = require('../audit');
 
-// Import / export logging: every run writes an audit entry (Admin → Audit, search "import" or "export") AND one line to the
-// server log (stdout -> `journalctl -u pcshub`). Failures are logged too, with the reason. Row contents are never logged.
-const logLine = (event, data) => console.log(`[workload] ${event} ${JSON.stringify(data)}`);
-const who = (req) => (req.user ? `${req.user.username || req.user.id}` : 'unknown');
-async function logRun(req, action, details) {
-  logLine(action, { user: who(req), ip: req.ip, ...details });
-  await audit(req, action, 'workload_transfer', null, details);
-}
+const { logRun } = require('../transferlog');   // import / export logging (audit entry + server log line)
 
 // Mounted behind requirePageAccess('/workload'); writes need requireAction('workload.write').
 //
@@ -36,7 +29,7 @@ const TAB_LABEL = { ALL: 'All', VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio' };
 
 // Field kinds: date | select | text | audio_guide. `multiline` = textarea. `hint` = placeholder from the red notes.
 const OPEN = 'Type or paste anything';
-const FROM_PSD = 'Paste from the PSD daily plug list';
+const FROM_PSD = 'Filled from the PSD Daily Plug List';
 const FIELDS = {
   work_date:      { label: 'Work Date', kind: 'date', required: true },
   platform:       { label: 'Platform', kind: 'select', lookup: 'workload_platform', max: 100 },
@@ -53,7 +46,7 @@ const FIELDS = {
   audio_guide:    { label: 'Audio Guide', kind: 'audio_guide' },
   remarks:        { label: 'Remarks', kind: 'text', multiline: true, max: 4000, hint: OPEN },
   total_mats:     { label: 'Total Mats', kind: 'text', multiline: true, max: 500, hint: OPEN },
-  prog_name:      { label: 'Prog. Name / Project Title', kind: 'text', max: 300, hint: FROM_PSD },
+  prog_name:      { label: 'PROG. NAME / PROJ. TITLE', kind: 'text', max: 300, hint: FROM_PSD },
   plug_type:      { label: 'Plug Type', kind: 'select', lookup: 'plug_type', max: 100 },
   // Audio sheet's Assigned / Done / Resched-cancelled tables: open columns you can type or paste into
   length:         { label: 'Length', kind: 'text', max: 100, hint: OPEN },
@@ -193,6 +186,19 @@ function parseDateTime(raw, field) {
 }
 
 /** Validate one row; returns the values to store. `current` = the stored row when updating. `customCols` = result of loadCustomCols. */
+/** PSD and Prog. Name left blank are copied from the PSD Daily Plug List entry for this Work Date + Plug ID (the first line of the Plug ID cell). */
+async function fillFromPlugList(client, rec) {
+  if (!rec.work_date || !rec.plug_id || (rec.psd && rec.prog_name)) return;
+  const id = String(rec.plug_id).split('\n')[0].trim();
+  if (!id) return;
+  const { rows } = await client.query(
+    'SELECT psd, prog_name FROM workload_plugs WHERE plug_date=$1 AND upper(plug_id)=upper($2) ORDER BY seq, id LIMIT 1', [rec.work_date, id]
+  );
+  if (!rows.length) return;
+  if (!rec.psd) rec.psd = rows[0].psd || null;
+  if (!rec.prog_name) rec.prog_name = rows[0].prog_name || null;
+}
+
 async function parseRow(client, body, current, customCols = []) {
   const cur = current || {};
   const rec = {};
@@ -204,6 +210,7 @@ async function parseRow(client, body, current, customCols = []) {
     else if (k === 'units_concerned') rec[k] = v.oneOf(body[k], UNITS, { field: f.label });
     else rec[k] = v.str(body[k], { field: f.label, max: f.max, required: !!f.required });
   }
+  await fillFromPlugList(client, rec);
   // Platform follows the Plug ID prefix unless one was chosen (only if that option exists and is active)
   if (!rec.platform) {
     const auto = derivePlatform(rec.plug_id);
@@ -675,6 +682,8 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
   let fieldsExt = extendFields(customCols);
   const labelToKey = {};
   Object.entries(fieldsExt).forEach(([k, f]) => { labelToKey[f.label.trim().toLowerCase()] = k; });
+  labelToKey['prog. name / project title'] = 'prog_name';   // the column's old name (files exported before the rename)
+  labelToKey['prog name/proj title'] = 'prog_name';         // as it is written in the PSD Daily Plug List
   const newColumns = [];
 
   async function keyForHeader(label) {
@@ -806,5 +815,8 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
     throw e;
   }
 }));
+
+// ---------- PSD Daily Plug List (tab in the Workload Tracker): /api/workload/plugs/* ----------
+require('./plugs')(router, { UNITS, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked });
 
 module.exports = router;

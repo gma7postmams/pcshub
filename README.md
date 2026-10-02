@@ -192,3 +192,13 @@ Every Workload **Import** and **Export** (and the Ingest report CSV export) is l
 
 - **Admin → Audit** — search `import` or `export`. Actions: `workload.export`, `workload.import`, `workload.export_failed`, `workload.import_failed`, `reports.export_ingest`. Each entry records who, from which IP, when, and the details: file name and size, team / filters, rows per sheet, how many rows were created or skipped (with the first 20 skip reasons), any new columns an import created, how long it took, and — for a failure — the error. Row contents are never logged. (Each imported row still gets its own `workload.create` entry, flagged `imported`.)
 - **The server log** — one line per run, e.g. `[workload] workload.import {...}`; read it with `journalctl -u pcshub -f`.
+
+### PSD Daily Plug List (tab in the Workload Tracker)
+
+The last tab, **PSD Daily Plug List**, holds the PSD's daily plug list — one list per day with NO / PLUG ID / PROG. NAME / PROJ. TITLE / PSD / Account By. The Workload Tracker copies **Plug ID, PSD and PROG. NAME / PROJ. TITLE** from it.
+
+- **Import plug list** reads the PSD's workbook (one sheet per day; each sheet's date comes from its "DATE:" line, else the sheet name). The year isn't in the sheet, so it is taken from the file name (`September_2026_…`) or asked for. Re-importing an updated file only adds what is new; late additions under “Additional for …” are marked *Added*; exact duplicate lines are dropped. Imports are logged like the Workload import (Admin → Audit: `workload.plugs_import`).
+- **Autofill**: in the New / Edit form, pick a plug from the list for the chosen Work Date (or type its Plug ID) and PSD + PROG. NAME / PROJ. TITLE fill in. The same happens in Excel mode when you type or paste a Plug ID, and on the server whenever a row is saved with those two left blank (forms, Excel grid, Workload import). Values you type yourself are kept; ones that were filled in are replaced if you change the Plug ID.
+- **Copy to Workload** makes a Workload row for each selected plug (or every plug of the day not already in the tracker) with the Units Concerned you choose. It skips plugs that already have a row for that day, respects locked dates, and is logged (`workload.plugs_copy`).
+- **Add plug** / **Delete** edit a day's list by hand.
+- The Workload column formerly named “Prog. Name / Project Title” is now **PROG. NAME / PROJ. TITLE** (Import still understands files exported under the old name).

@@ -330,3 +330,24 @@ CREATE TABLE IF NOT EXISTS workload_locks (
 
 -- Workload priority flag: a prioritised row gets its Breakdate/Time cell highlighted in the UI.
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS is_priority BOOLEAN NOT NULL DEFAULT false;
+
+-- PSD Daily Plug List: one row per plug per day, imported from the PSD's daily plug list workbook (one sheet per day:
+-- NO / PLUG ID / PROG NAME/PROJ TITLE / PSD / Account By). The Workload Tracker copies Plug ID, PSD and Prog. Name from here.
+CREATE TABLE IF NOT EXISTS workload_plugs (
+  id             BIGSERIAL PRIMARY KEY,
+  plug_date      DATE NOT NULL,
+  seq            INT NOT NULL DEFAULT 0,
+  list_no        INT,
+  plug_id        TEXT NOT NULL,
+  prog_name      TEXT NOT NULL DEFAULT '',
+  psd            TEXT NOT NULL DEFAULT '',
+  account_by     TEXT NOT NULL DEFAULT '',
+  is_additional  BOOLEAN NOT NULL DEFAULT false,
+  source_file    TEXT,
+  created_by     INT REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS workload_plugs_uniq ON workload_plugs (plug_date, plug_id, prog_name, psd);
+CREATE INDEX IF NOT EXISTS workload_plugs_date_idx ON workload_plugs (plug_date, seq);
+CREATE INDEX IF NOT EXISTS workload_plugs_lookup_idx ON workload_plugs (plug_date, upper(plug_id));

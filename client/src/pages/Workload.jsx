@@ -6,6 +6,7 @@ import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, LockIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
 import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
+import PlugList from './PlugList.jsx';
 
 // Workload Tracker — ONE table. "Units Concerned" says which team(s) a plug is for; the tabs
 // (All / VGFX / VEDIT / Audio) are filters over it. Fields, per-tab columns and the Platform rules come
@@ -118,6 +119,19 @@ async function writeClipboard(text) {
 const newKey = () => `n${Math.random().toString(36).slice(2)}`;
 
 /** Platform suggested by the Plug ID prefix (same rules as the template's Platform formula). null = none. */
+// PSD and PROG. NAME / PROJ. TITLE come from the PSD Daily Plug List: when the Plug ID matches a plug on that Work Date's list, fill them in
+// if they are blank, or still hold what the previous Plug ID's entry had put there (so changing the Plug ID updates them, typed values stay).
+function fillFromPlug(row, prevRow, find) {
+  const plug = find(row.work_date, row.plug_id);
+  if (!plug) return row;
+  const old = prevRow ? find(prevRow.work_date, prevRow.plug_id) : null;
+  // _autoPsd / _autoProg remember what was filled in, so it can be replaced when the Plug ID changes while anything typed by hand is kept
+  const replaceable = (cur, auto, oldVal) => !cur || cur === auto || (!!old && cur === oldVal);
+  const next = { ...row };
+  if (replaceable(row.psd, row._autoPsd, old && old.psd)) { next.psd = plug.psd; next._autoPsd = plug.psd; }
+  if (replaceable(row.prog_name, row._autoProg, old && old.prog_name)) { next.prog_name = plug.prog_name; next._autoProg = plug.prog_name; }
+  return next;
+}
 function derivePlatform(rules, plug) {
   const text = String(plug || '');
   for (const r of rules) if (new RegExp(r.pattern, 'i').test(text)) return r.platform;
@@ -315,7 +329,8 @@ export default function Workload() {
     return () => { window.removeEventListener('mouseup', up); window.removeEventListener('mousemove', move); };
   }, []);
   const q = useDebounced(filt.q, 300);
-  const isGrid = mode === 'excel' && tab !== 'ALL';
+  const isPlugs = tab === 'PLUGS';   // the PSD Daily Plug List tab (its own screen, not a view of the workload table)
+  const isGrid = mode === 'excel' && tab !== 'ALL' && !isPlugs;
 
   // Rows are one line each (Remarks wraps), so a wide table scrolls sideways inside the card, like Excel.
   // Phones and small tablets show each row as a card instead.
@@ -354,6 +369,7 @@ export default function Workload() {
   const load = useCallback(async () => {
     if (!meta) return;
     loadStats();
+    if (isPlugs) return;
     try {
       if (isGrid) {
         const d = await get(`/api/workload?${query({ limit: GRID_LIMIT })}`);
@@ -365,7 +381,7 @@ export default function Workload() {
     } catch (e) {
       (isGrid ? setGrid : setData)({ error: e.message, rows: [], total: 0 });
     }
-  }, [meta, isGrid, query, offset, loadStats]);
+  }, [meta, isGrid, isPlugs, query, offset, loadStats]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -463,10 +479,28 @@ export default function Workload() {
   };
   const undo = () => { const h = hist.current; if (!h.past.length) return; h.future.push(grid.rows); restoreRows(h.past.pop()); };
   const redo = () => { const h = hist.current; if (!h.future.length) return; h.past.push(grid.rows); restoreRows(h.future.pop()); };
+  // ---- PSD Daily Plug List lookups for the grid (plugs of the dates on screen, fetched once per date) ----
+  const plugCache = useRef(new Map());   // 'YYYY-MM-DD' -> plugs of that day
+  const ensurePlugDates = useCallback(async (dates) => {
+    const need = [...new Set(dates.filter((d) => d && ISO.test(d) && !plugCache.current.has(d)))].sort();
+    if (!need.length) return;
+    need.forEach((d) => plugCache.current.set(d, []));   // mark as asked, so a re-render doesn't ask again
+    try {
+      const { rows } = await get(`/api/workload/plugs?from=${need[0]}&to=${need[need.length - 1]}&limit=5000`);
+      rows.forEach((r) => { const list = plugCache.current.get(r.plug_date); if (list) list.push(r); });
+    } catch (e) { need.forEach((d) => plugCache.current.delete(d)); }
+  }, []);
+  useEffect(() => { if (grid && grid.rows) ensurePlugDates(grid.rows.map((r) => r.work_date)); }, [grid, ensurePlugDates]);
+  const findPlug = (date, plugId) => {
+    const id = firstLine(plugId).trim().toUpperCase();
+    return id ? (plugCache.current.get(date) || []).find((p) => p.plug_id.toUpperCase() === id) || null : null;
+  };
   // one place that knows how to put a value into a grid cell (the merged Breakdate / Time cell is text for both teams' times)
-  const setCellValue = (row, k, val, replace) => (k === 'breakdate_vgfx'
-    ? { ...row, ...bdApply(row, val, meta.unitTeams, replace) }
-    : withAutoPlatform(meta.platformRules, row, k, val));
+  const setCellValue = (row, k, val, replace) => {
+    if (k === 'breakdate_vgfx') return { ...row, ...bdApply(row, val, meta.unitTeams, replace) };
+    const next = withAutoPlatform(meta.platformRules, row, k, val);
+    return k === 'plug_id' || k === 'work_date' ? fillFromPlug(next, row, findPlug) : next;
+  };
   const setCell = (key, k, val) => {
     if (!canWrite) return;
     pushHistory(`${key}:${k}`);
@@ -800,7 +834,7 @@ export default function Workload() {
     const rows = [];
     grid.rows.forEach((r, i) => {
       if (!r._dirty || (r._new && isEmptyRow(r))) return;
-      const { _key, _dirty, _new, ...rest } = r; // eslint-disable-line no-unused-vars
+      const { _key, _dirty, _new, _autoPsd, _autoProg, ...rest } = r; // eslint-disable-line no-unused-vars
       idx.push(i);
       rows.push(rest);
     });
@@ -819,7 +853,7 @@ export default function Workload() {
   if (!meta) return <main className="container wide"><Empty>Loading…</Empty></main>;
 
   const isAll = tab === 'ALL';
-  const cols = meta.views[tab];   // raw column list (Table mode's tableCols below merges the two Breakdate / Time columns; Excel mode does the same)
+  const cols = isPlugs ? [] : meta.views[tab];   // raw column list (Table mode's tableCols below merges the two Breakdate / Time columns; Excel mode does the same)
   // Table mode only: Breakdate/Time (VGFX) and (VEDIT) merge into ONE column/cell, holding one or two pills —
   // 'breakdate_vgfx' is kept as that column's position; breakdateCell() below decides what actually shows in it.
   const tableCols = cols.filter((k) => k !== 'breakdate_vedit');
@@ -919,6 +953,7 @@ export default function Workload() {
     );
   };
 
+  const allTabs = [...meta.tabs, { key: 'PLUGS', label: 'PSD Daily Plug List' }];
   const tabCount = { ALL: stats && stats.total, VGFX: stats && stats.vgfx, VEDIT: stats && stats.vedit, AUDIO: stats && stats.audio };
 
   return (
@@ -938,13 +973,13 @@ export default function Workload() {
       <div className="card wl-card">
         <div className="wl-tabbar">
           <div className="tabs" id="section-tabs">
-            {meta.tabs.map((t) => (
+            {allTabs.map((t) => (
               <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => changeTab(t.key)}>
-                {t.label}<span className="count">{tabCount[t.key] ?? '–'}</span>
+                {t.label}{t.key === 'PLUGS' ? null : <span className="count">{tabCount[t.key] ?? '–'}</span>}
               </button>
             ))}
           </div>
-          <div className="wl-tabactions">
+          {isPlugs ? null : <div className="wl-tabactions">
             <div className="segmented" id="mode-seg">
               <button type="button" className={mode === 'table' ? 'on' : ''} onClick={() => changeMode('table')}>Table</button>
               <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
@@ -975,10 +1010,10 @@ export default function Workload() {
                 </button>
               </>
             ) : null}
-          </div>
+          </div>}
         </div>
 
-        <div className="wl-filters">
+        {isPlugs ? null : <div className="wl-filters">
           {!isGrid ? (
             <label className="wl-search">
               <SearchIcon />
@@ -989,9 +1024,11 @@ export default function Workload() {
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
           <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
           <DateRange from={filt.from} to={filt.to} onChange={setRange} />
-        </div>
+        </div>}
 
-        {mode === 'excel' && tab === 'ALL' ? (
+        {isPlugs ? (
+          <PlugList canWrite={canWrite} units={meta.units} onCopied={() => { loadStats(); }} />
+        ) : mode === 'excel' && tab === 'ALL' ? (
           <Empty>Pick VGFX, VEDIT or Audio above to edit in the Excel grid — each shows its own columns.</Empty>
         ) : isGrid ? (
           <>
@@ -1237,9 +1274,28 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
   if (!rec && !duplicateFrom) { initial.work_date = isoDate(); initial.units_concerned = defaultUnits; }
   initial.is_priority = !!(rec && rec.is_priority);   // a duplicate is a new item, so it starts un-prioritised
   const [f, , setAll] = useForm(initial);
+  // the PSD Daily Plug List for the chosen Work Date: pick a plug, or type its Plug ID, and PSD + PROG. NAME / PROJ. TITLE are filled in
+  const [plugs, setPlugs] = useState([]);
+  useEffect(() => {
+    if (!ISO.test(f.work_date || '')) { setPlugs([]); return undefined; }
+    let live = true;
+    get(`/api/workload/plugs?date=${f.work_date}`).then((d) => { if (live) setPlugs(d.rows); }).catch(() => { if (live) setPlugs([]); });
+    return () => { live = false; };
+  }, [f.work_date]);
+  const findPlugIn = (date, plugId) => {
+    const id = firstLine(plugId).trim().toUpperCase();
+    return id ? plugs.find((p) => p.plug_date === date && p.plug_id.toUpperCase() === id) || null : null;
+  };
   const set = (k) => (e) => {
     const val = e && e.target ? e.target.value : e;
-    setAll((prev) => withAutoPlatform(meta.platformRules, prev, k, val));
+    setAll((prev) => {
+      const next = withAutoPlatform(meta.platformRules, prev, k, val);
+      return k === 'plug_id' ? fillFromPlug(next, prev, findPlugIn) : next;
+    });
+  };
+  const pickPlug = (e) => {
+    const p = plugs.find((x) => String(x.id) === e.target.value);
+    if (p) setAll((prev) => ({ ...withAutoPlatform(meta.platformRules, prev, 'plug_id', p.plug_id), psd: p.psd, prog_name: p.prog_name }));
   };
 
   // Audio-only units use the template's Audio sheet columns; everything else uses the main sheet columns
@@ -1306,6 +1362,12 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
             <label key={k} className={`f${def.multiline ? ' full' : ''}`}>
               <span>{fieldLabel(k, def)}{def.required ? <span className="req"> *</span> : null}</span>
               <FieldInput def={def} value={f[k]} onChange={set(k)} disabled={!canWrite} lookups={lookups} />
+              {k === 'plug_id' && canWrite && plugs.length ? (
+                <select className="plug-pick" value="" onChange={pickPlug} aria-label="Pick a plug from the PSD Daily Plug List">
+                  <option value="">Pick from the PSD Daily Plug List ({plugs.length})…</option>
+                  {plugs.map((p) => <option key={p.id} value={p.id}>{p.plug_id} — {p.prog_name || '(no title)'} · {p.psd || '(no PSD)'}</option>)}
+                </select>
+              ) : null}
               {k === 'platform' && plugText && !f.platform ? (
                 <small className="dim">{/PD_/i.test(plugText) ? 'PD_ plugs are digital — choose DIGITAL or INTL DIGITAL.' : 'Could not tell the platform from the Plug ID — choose one.'}</small>
               ) : null}
