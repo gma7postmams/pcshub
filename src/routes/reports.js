@@ -68,7 +68,8 @@ router.get('/ingest.csv', requireSection('reports.export'), asyncH(async (req, r
   const keys = ['id', 'program', 'platform', 'episode_date', 'source', 'destination_folder', 'requested_by',
     'requested_by_psd', 'remarks', 'status', 'created_by', 'created_at', 'updated_at'];
   const csv = [header.join(','), ...rows.map((r) => keys.map((k) => csvCell(r[k])).join(','))].join('\r\n');
-  await audit(req, 'reports.export_ingest', 'report', null, { rows: rows.length, filters: req.query });
+  await audit(req, 'reports.export_ingest', 'report', null, { format: 'csv', rows: rows.length, truncated: rows.length >= 50000, filters: req.query });
+  console.log(`[reports] reports.export_ingest ${JSON.stringify({ user: req.user ? req.user.username : 'unknown', ip: req.ip, rows: rows.length })}`);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="ingest-report-${new Date().toISOString().slice(0, 10)}.csv"`);
   res.send('﻿' + csv);

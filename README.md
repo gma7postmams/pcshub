@@ -185,3 +185,10 @@ client/                   React 18 + Vite front end
   public/                 theme-boot.js, sw.js, manifest, icons, offline page
   dist/                   build output served by Express (index.html only after the access check)
 ```
+
+### Import / export logging
+
+Every Workload **Import** and **Export** (and the Ingest report CSV export) is logged in two places:
+
+- **Admin → Audit** — search `import` or `export`. Actions: `workload.export`, `workload.import`, `workload.export_failed`, `workload.import_failed`, `reports.export_ingest`. Each entry records who, from which IP, when, and the details: file name and size, team / filters, rows per sheet, how many rows were created or skipped (with the first 20 skip reasons), any new columns an import created, how long it took, and — for a failure — the error. Row contents are never logged. (Each imported row still gets its own `workload.create` entry, flagged `imported`.)
+- **The server log** — one line per run, e.g. `[workload] workload.import {...}`; read it with `journalctl -u pcshub -f`.

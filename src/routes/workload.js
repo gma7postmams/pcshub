@@ -5,6 +5,15 @@ const v = require('../validate');
 const { asyncH, HttpError, requireAction } = require('../middleware');
 const { audit } = require('../audit');
 
+// Import / export logging: every run writes an audit entry (Admin → Audit, search "import" or "export") AND one line to the
+// server log (stdout -> `journalctl -u pcshub`). Failures are logged too, with the reason. Row contents are never logged.
+const logLine = (event, data) => console.log(`[workload] ${event} ${JSON.stringify(data)}`);
+const who = (req) => (req.user ? `${req.user.username || req.user.id}` : 'unknown');
+async function logRun(req, action, details) {
+  logLine(action, { user: who(req), ip: req.ip, ...details });
+  await audit(req, action, 'workload_transfer', null, details);
+}
+
 // Mounted behind requirePageAccess('/workload'); writes need requireAction('workload.write').
 //
 // ONE table (workload_items). "Units Concerned" says which team(s) a plug is for; the tabs in the UI
@@ -340,6 +349,9 @@ async function exportPalette(db_) {
 }
 
 router.get('/export', asyncH(async (req, res) => {
+  const t0 = Date.now();
+  const exportInfo = { format: 'xlsx', team: req.query.team || 'ALL', filters: { ...req.query, team: undefined } };
+  try {
   let ExcelJS;
   try { ExcelJS = require('exceljs'); } catch (e) {
     throw new HttpError(501, 'Excel export needs the "exceljs" package. Run "npm install" on the server, then restart.');
@@ -352,6 +364,8 @@ router.get('/export', asyncH(async (req, res) => {
     `SELECT w.* FROM workload_items w ${whereSql(where)} ORDER BY w.work_date ASC, w.id ASC LIMIT 20000`, params
   );
   const rows = rawRows.map(flattenCustom);
+  exportInfo.matched = rows.length;
+  exportInfo.truncated = rawRows.length >= 20000;   // the export stops at 20,000 rows
   const involves = (r, teams) => teams.some((t) => (UNIT_TEAMS[r.units_concerned] || []).includes(t));
   const team = req.query.team ? v.oneOf(String(req.query.team), TEAMS, { field: 'team' }) : null;
   // Breakdate / Time (VGFX) and (VEDIT) share ONE column, like the web table: 'breakdate_vgfx' keeps that column's
@@ -377,6 +391,7 @@ router.get('/export', asyncH(async (req, res) => {
     if (v instanceof Date) return '';   // dates are sized by format below, not by scanning the stored Date value
     return String(v);
   };
+  exportInfo.sheets = {};
   for (const sh of sheets) {
     const ws = wb.addWorksheet(sh.name);
     ws.columns = sh.cols.map((k) => {
@@ -394,7 +409,9 @@ router.get('/export', asyncH(async (req, res) => {
     });
     ws.views = [{ state: 'frozen', ySplit: 1 }];
 
-    rows.filter(sh.pick).forEach((r) => {
+    const sheetRows = rows.filter(sh.pick);
+    exportInfo.sheets[sh.name] = sheetRows.length;
+    sheetRows.forEach((r) => {
       const row = ws.addRow(sh.cols.reduce((o, k) => {
         const f = fieldsExt[k];
         let val = r[k];
@@ -484,10 +501,16 @@ router.get('/export', asyncH(async (req, res) => {
   // transfer encoding straight to res: some reverse proxies (this app is commonly deployed behind one) can
   // truncate or mishandle a chunked response, which shows up as "the file format is invalid" when opened.
   const buffer = await wb.xlsx.writeBuffer();
+  const filename = `Workload_${team || 'ALL'}_${stamp}.xlsx`;
+  await logRun(req, 'workload.export', { ...exportInfo, file: filename, bytes: buffer.length, ms: Date.now() - t0 });
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.set('Content-Disposition', `attachment; filename="Workload_${team || 'ALL'}_${stamp}.xlsx"`);
+  res.set('Content-Disposition', `attachment; filename="${filename}"`);
   res.set('Content-Length', String(buffer.length));
   res.end(buffer);
+  } catch (e) {
+    await logRun(req, 'workload.export_failed', { ...exportInfo, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
+    throw e;
+  }
 }));
 
 router.post('/', requireAction('workload.write'), asyncH(async (req, res) => {
@@ -632,6 +655,9 @@ const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
 
 router.post('/import', requireAction('workload.write'), upload.single('file'), asyncH(async (req, res) => {
+  const t0 = Date.now();
+  const importInfo = { file: req.file ? req.file.originalname : null, bytes: req.file ? req.file.size : 0, sheets: [] };
+  try {
   if (!req.file) throw new HttpError(400, 'No file uploaded');
   let ExcelJS;
   try { ExcelJS = require('exceljs'); } catch (e) {
@@ -694,6 +720,8 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
   // by (Work Date, Plug ID) — merge instead of inserting it twice.
   const merged = new Map();
   async function readSheet(ws) {
+    const sheetInfo = { name: ws ? ws.name : null, rows: 0 };
+    importInfo.sheets.push(sheetInfo);
     if (!ws || ws.rowCount < 2) return;
     const headerRow = ws.getRow(1);
     const colKeyAt = {};
@@ -726,6 +754,7 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
           else obj[key] = String(val); }
       }
       if (!hasAny) continue;
+      sheetInfo.rows++;
       if (breakdateRaw != null) {
         // lines like 'VGFX  Sep 28, 2026 10:00 AM' / 'VEDIT  Sep 28, 2026 10:00 PM'; an unlabelled value goes to the
         // row's only VGFX/VEDIT team (a real Excel date/time typed by hand is accepted too)
@@ -767,7 +796,15 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
       }
     }
   });
+  await logRun(req, 'workload.import', {
+    ...importInfo, rowsRead: importInfo.sheets.reduce((n, sh) => n + sh.rows, 0), uniqueRows: merged.size,
+    created, skipped: errors.length, errors: errors.slice(0, 20), newColumns, ms: Date.now() - t0,
+  });
   res.json({ ok: true, created, skipped: errors.length, errors: errors.slice(0, 20), newColumns });
+  } catch (e) {
+    await logRun(req, 'workload.import_failed', { ...importInfo, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
+    throw e;
+  }
 }));
 
 module.exports = router;
