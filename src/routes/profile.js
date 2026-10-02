@@ -16,8 +16,20 @@ router.put('/', asyncH(async (req, res) => {
   const full_name = v.str(req.body.full_name, { field: 'Full name', max: 120, required: true });
   const email = v.str(req.body.email, { field: 'Email', max: 200 });
   if (email && !validator.isEmail(email)) throw new HttpError(400, 'Invalid email');
+  const { rows } = await db.query('SELECT full_name, email FROM users WHERE id=$1', [req.user.id]);
+  const current = rows[0];
   await db.query('UPDATE users SET full_name=$2, email=$3, updated_at=now() WHERE id=$1', [req.user.id, full_name, email]);
-  await audit(req, 'profile.update', 'user', req.user.id);
+
+  const details = {};
+  if (current.full_name !== full_name) {
+    details.old_full_name = current.full_name;
+    details.new_full_name = full_name;
+  }
+  if (current.email !== email) {
+    details.old_email = current.email;
+    details.new_email = email;
+  }
+  await audit(req, 'profile.update', 'user', req.user.id, details);
   res.json({ ok: true });
 }));
 

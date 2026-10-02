@@ -12,6 +12,26 @@
 
 ✅ Group permission enforcement is working correctly.
 
+✅ Direct URL access validation completed.
+
+✅ Users cannot access modules that are not granted through Group Permissions.
+
+✅ Server-side page access enforcement is functioning correctly.
+
+✅ Unauthorized API requests return the expected access-denied response.
+
+✅ Verified that Administrator-only pages remain inaccessible to non-Administrator roles regardless of Group configuration.
+
+✅ Validated combined Group + Role authorization model.
+
+✅ Confirmed that page access requires Group permission.
+
+✅ Confirmed that privileged actions require Role permission.
+
+✅ Verified that RBAC enforcement functions correctly across Viewer, Editor, Manager, and Administrator roles.
+
+✅ No privilege escalation issues identified during RBAC validation.
+
 ---
 
 ## Main Navigation
@@ -20,10 +40,12 @@
 
 - Dashboard
 - Ingest Tracker
-- Work Load Tracker
+- Workload Tracker
 - Approval
 - Reports
+- Knowledge Base
 - Admin
+- Activity History
 
 ---
 
@@ -32,6 +54,8 @@
 ✅ Dashboard loads successfully.
 
 ✅ Dashboard data and widgets are displayed correctly.
+
+✅ Dashboard sections respect Group Access permissions.
 
 ---
 
@@ -69,6 +93,41 @@
 
 ✅ Report data is displayed correctly.
 
+✅ Reports access is correctly enforced through Group Permissions.
+
+---
+
+## Knowledge Base
+
+✅ Knowledge Base module loads successfully.
+
+✅ Knowledge Base access is controlled through Group Permissions.
+
+✅ Users with the appropriate group permission can access Knowledge Base.
+
+✅ Users without permission receive the expected Access Locked response.
+
+✅ PDF upload functionality is working correctly.
+
+✅ Document rename functionality is working correctly.
+
+✅ Document deletion functionality is working correctly.
+
+✅ Backend Knowledge API routing has been validated.
+
+✅ Knowledge Base permissions were restored and verified following branch merge integration.
+
+✅ Knowledge Base activities are recorded in the Audit Log.
+
+✅ Knowledge Base audit events display user-friendly action names and details.
+
+Examples:
+
+- Uploaded Knowledge Document
+- Renamed Knowledge Document
+- Deleted Knowledge Document
+- Seeded Knowledge Document
+
 ---
 
 ## Administration Module
@@ -81,6 +140,22 @@
 
 ✅ User login and role validation are working as expected.
 
+✅ Password reset functionality is working correctly.
+
+✅ 2FA reset functionality is working correctly.
+
+✅ Profile update audit logging implemented and validated.
+
+✅ Audit trail now displays old value → new value for profile changes.
+
+Example:
+
+```text
+Full Name changed from "Eugene B. Horfilla"
+to
+"Eugene_editor B. Horfilla"
+```
+
 ---
 
 ### Groups
@@ -91,11 +166,76 @@
 
 ✅ Group permission enforcement is working correctly.
 
+✅ Group page and section permissions have been validated across multiple user roles.
+
+✅ Group-based access control correctly controls module visibility and access.
+
+✅ Users only see navigation items granted through their assigned group.
+
+✅ Direct navigation to restricted URLs is blocked as expected.
+
+✅ Full-access QA/QC test group created for permission validation.
+
+✅ Verified that Full-Access groups correctly expose all eligible modules except Administrator-only pages.
+
+✅ Confirmed that Group permissions control navigation visibility.
+
+✅ Confirmed that Group permissions control direct page access.
+
+✅ Validated Group page restrictions across Viewer, Editor, and Manager roles.
+
+✅ Confirmed that Administrator-only modules cannot be granted through Group configuration.
+
 ---
 
 ### Roles
 
 ✅ Roles page loads successfully.
+
+✅ Role assignments are functioning correctly.
+
+✅ Role and Group permission interactions have been validated.
+
+✅ Verified separation of Group Access and Role Permissions.
+
+✅ Confirmed that Groups control which pages and sections a user can open.
+
+✅ Confirmed that Roles control which actions a user can perform within an accessible page.
+
+✅ Verified that a Viewer assigned to a Full-Access group can access all group-granted pages but cannot perform restricted actions.
+
+✅ Verified that an Editor assigned to a Full-Access group can access all group-granted pages but cannot perform Manager or Administrator actions.
+
+✅ Verified that a Manager assigned to a Full-Access group can access all group-granted pages but cannot access Administrator-only functions.
+
+✅ Verified that the Admin page remains restricted to the Administrator role regardless of Group configuration.
+
+✅ Verified that non-Administrator users receive the expected access restriction when attempting to access Administrator-only pages.
+
+✅ Verified that users with role-based action permissions but without the required Group page access cannot perform actions on restricted modules.
+
+✅ Confirmed that action authorization requires BOTH:
+
+- Appropriate Role Permission
+- Appropriate Group Page Access
+
+✅ Verified that Administrative users retain full system access even when no group is assigned.
+
+✅ Successfully validated RBAC scenarios across the following role and group combinations:
+
+- Viewer + Full Access Group
+- Editor + Full Access Group
+- Manager + Full Access Group
+- Manager + Limited Access Group
+- Administrator + No Assigned Group
+
+✅ Direct URL authorization testing completed successfully.
+
+✅ Server-side page authorization enforcement validated successfully.
+
+✅ Role-only page restrictions validated successfully.
+
+✅ No RBAC bypass identified during page-access testing.
 
 ---
 
@@ -147,7 +287,7 @@
 
 ✅ Branding changes are applied correctly across sessions and users.
 
-⚠️ "Reset Preview" button does not appear to function as expected. No visible action occurs when clicked.
+✅ "Reset Preview" button is functioning correctly and restores the preview settings as expected.
 
 ---
 
@@ -159,6 +299,12 @@
 
 ✅ Audit Log usability has been improved with human-readable action names.
 
+✅ Audit log descriptions have been enhanced for improved readability and traceability.
+
+✅ Profile update events now record detailed field-level changes.
+
+✅ Knowledge Base audit events display meaningful descriptions and contextual details.
+
 Examples:
 
 **Before**
@@ -167,290 +313,93 @@ Examples:
 auth.login
 auth.logout
 approval.approved
+knowledge.upload
 ```
 
 **After**
 
 ```text
-User Login
-User Logout
-Approved Request
+User Logged In
+User Logged Out
+Approval Approved
+Uploaded Knowledge Document
 ```
 
-✅ Audit Log entity names are displayed in a more readable format.
-
-**Before**
+Additional Examples:
 
 ```text
-user
-approval_request
-ingest_record
+Full Name changed from
+"Eugene B. Horfilla"
+to
+"Eugene_editor B. Horfilla"
 ```
-
-**After**
 
 ```text
-User
-Approval Request
-Ingest Record
+Uploaded Knowledge Document
 ```
-
-✅ Audit Log detail messages are displayed in a user-friendly format instead of raw JSON where applicable.
-
-**Before**
-
-```json
-{"reason":"unknown_user","username":"admin@example.com"}
-```
-
-**After**
 
 ```text
-Unknown username: admin@example.com
+Renamed Knowledge Document
 ```
-
-✅ Audit Log filtering and search functionality are operational.
-
----
-
-### Activity History
-
-✅ Added Activity History module for non-administrative users.
-
-✅ Activity History appears in the navigation for non-admin users.
-
-✅ Activity History is hidden from Administrators.
-
-✅ Users can view only their own activity records.
-
-✅ Backend security enforcement prevents users from accessing activity records belonging to other users.
-
-✅ Activity History includes:
-
-- Login history
-- Logout history
-- Password changes
-- Ingest activities
-- Approval activities
-- Other account-related events
-
-✅ Activity History supports:
-
-- Search
-- Date filtering
-- Pagination
-
-✅ Activity History search was enhanced to search across:
-
-- Action
-- Username
-- Entity
-- Details
-- IP Address
-
-✅ Full Audit Log remains restricted to Administrators.
-
----
-
-## Security Enhancements Completed
-
-✅ Added secure Activity History endpoint:
 
 ```text
-GET /api/profile/activity-history
+Deleted Knowledge Document
 ```
 
-✅ Backend filtering ensures users can only view their own audit records.
-
-✅ User-level activity filtering is enforced server-side and cannot be bypassed through browser developer tools.
-
-✅ Full system Audit Log remains Administrator-only.
+✅ Audit log entries provide significantly improved traceability compared to raw action keys.
 
 ---
 
-## Repository & Development Environment Improvements
+## Overall QA Assessment
 
-✅ Added project `.gitignore`.
+✅ Authentication, password-change enforcement, and 2FA enrollment workflows are functioning correctly.
 
-✅ Excluded:
+✅ Group-based access control has been validated successfully.
 
-- node_modules
-- client/node_modules
-- dist
-- client/dist
-- .env files
-- IDE files
-- temporary files
+✅ Role-based authorization has been validated successfully.
 
-✅ Removed generated build artifacts from source control tracking.
+✅ Dual-layer authorization model (Group Access + Role Permissions) has been fully validated.
 
-✅ Repository housekeeping completed to prevent Git status noise from generated files.
+✅ RBAC testing confirmed correct behavior for Viewer, Editor, Manager, and Administrator roles.
 
----
+✅ RBAC testing confirmed proper interaction between Role permissions and Group access assignments.
 
-## Findings
+✅ Server-side route protection is functioning correctly.
 
-### Documentation
+✅ Direct URL authorization protection is functioning correctly.
 
-⚠️ README references `.env.example`, but the file is not included in the repository, preventing a fresh installation using the documented setup procedure.
+✅ Administrator-only pages cannot be accessed through Group assignment alone.
 
-### Functional Issues
+✅ Knowledge Base functionality has been restored and validated after route registration fixes.
 
-✅ No functional issues identified during current testing.
+✅ Audit logging improvements have been implemented and verified.
 
----
+✅ Profile change history now provides meaningful old-value → new-value tracking.
 
-## Enhancements Successfully Delivered
+✅ No RBAC bypasses identified.
 
-### Audit Log Usability
+✅ No privilege escalation issues identified during authorization testing.
 
-✅ Workload Tracker audit events now display human-readable action names and details.
+✅ Branding configuration, theme customization, and preview reset functionality are working correctly.
 
-Examples:
+### QA Status
 
-Before:
-- workload.create
-- workload.update
-- workload.delete
+**PASS**
 
-After:
-- Created Workload Item
-- Updated Workload Item
-- Deleted Workload Item
+### Open Items
 
-✅ Workload audit details now display meaningful descriptions.
-
-✅ Password change events now display user-friendly descriptions.
-
-✅ 2FA-related events now display user-friendly descriptions.
-
-✅ Audit Log consistency has been improved across Authentication, Ingest, Approval, Workload, Administration, and Profile activities.
-
----
-
-### Activity History
-
-✅ Added Activity History for non-administrative users.
-
-✅ Reused the Audit framework while maintaining strict data isolation.
-
-✅ Added enhanced search capabilities.
-
-✅ Added secure backend filtering.
-
-✅ Improved overall audit transparency for end users.
-
----
-
-## Knowledge Base
-
-✅ Knowledge Base module loads successfully.
-
-✅ Knowledge Base access is controlled through Group Permissions.
-
-✅ Users with the appropriate group permission can access Knowledge Base.
-
-✅ Users without permission receive the expected Access Locked response.
-
-✅ Document upload functionality is working correctly.
-
-✅ Document rename functionality is working correctly.
-
-✅ Document deletion functionality is working correctly.
-
-✅ Knowledge Base activities are recorded in the Audit Log.
-
-✅ Knowledge Base audit events display user-friendly action names and details.
-
-Examples:
-
-- Uploaded Knowledge Document
-- Renamed Knowledge Document
-- Deleted Knowledge Document
-- Seeded Knowledge Document
-
----
-
-## Overall Status
-
-✅ Initial setup completed successfully.
-
-✅ Authentication, password reset, and 2FA onboarding are working as designed.
-
-✅ Core application navigation is functioning properly.
-
-✅ Dashboard, Ingest, Approval, Reports, and Administration modules are functioning as expected.
-
-✅ User management, role validation, group permissions, dropdown management, and branding configuration are working as expected.
-
-✅ Branding settings persist correctly across sessions and users.
-
-✅ Audit Log access control is functioning correctly.
-
-✅ Activity History has been successfully implemented for non-administrative users.
-
-✅ Audit Log usability has been significantly improved.
-
-✅ Repository housekeeping and Git ignore configuration have been completed.
-
-✅ No critical or blocking issues were identified during testing.
-
----
-
-## Remaining Activities
-
-- End-to-end workflow testing with multiple users
-
-
----
-
-## Future Enhancement Opportunities
-
-### Audit Details Modal
-
-Provide a detailed audit record view containing:
-
-- User
-- Time
-- IP Address
-- Action
-- Entity
-- Raw Audit Data
-
-### Audit Log Export
-
-Allow Administrators to:
-
-- Export CSV
-- Export Excel
-- Filter and export date ranges
-
-### Advanced Audit Analytics
-
-Potential future additions:
-
-- Login trend analysis
-- Failed login monitoring
-- Approval activity reports
-- User activity summaries
-- Security dashboards
-
-### Audit Log Usability
-
-⚠️ Workload Tracker audit events are captured correctly but are not yet translated into user-friendly action names and detail messages.
-
-Examples:
-
-Current:
-- workload.create
-- workload.update
-- workload.delete
-
-Recommended:
-- Created Workload Item
-- Updated Workload Item
-- Deleted Workload Item
-
-Status:
-✅ Enhancement identified
-✅ Formatting update ready for implementation
+1. Continue audit-log coverage review for remaining Administration actions.
+2. Verify audit coverage for User Management actions:
+   - User Creation
+   - User Updates
+   - Password Reset
+   - 2FA Reset
+   - Role Changes
+   - Group Changes
+3. Verify audit coverage for Group Management actions:
+   - Group Creation
+   - Group Updates
+   - Group Deletion
+4. Verify audit coverage for Branding changes.
+5. Continue API-level security and authorization validation testing.
+6. Perform final regression testing prior to UAT deployment.

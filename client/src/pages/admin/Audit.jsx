@@ -39,6 +39,7 @@ const ACTION_LABELS = {
   'workload.update': 'Updated Workload Item',
   'workload.delete': 'Deleted Workload Item',
 
+  'profile.update': 'Updated Profile',  
   'profile.password_change': 'Password Changed',
 
   'auth.2fa_failed': '2FA Verification Failed',
@@ -187,6 +188,26 @@ function formatDetails(row) {
         ? `Deleted workload item (${d.title})`
         : 'Deleted workload item';
 
+    case 'profile.update': {
+      const changes = [];
+
+      if (d.old_full_name !== undefined && d.new_full_name !== undefined) {
+        changes.push(
+          `Full Name changed from "${d.old_full_name}" to "${d.new_full_name}"`
+        );
+      }
+
+      if (d.old_email !== undefined && d.new_email !== undefined) {
+        changes.push(
+          `Email changed from "${d.old_email}" to "${d.new_email}"`
+        );
+      }
+
+      return changes.length
+        ? changes.join(' | ')
+        : 'Updated profile information';
+    }         
+
     case 'profile.password_change':
       return 'Password changed successfully';
 
@@ -245,7 +266,9 @@ export default function Audit() {
         : '/api/admin/audit';
 
     get(`${endpoint}?${p}`)
-      .then(setD)
+      .then((data) => {
+        setD(data);
+      })
       .catch(() => setD({ rows: [], total: 0 }));
   }, [action, user, f.from, f.to, offset]);
 
@@ -310,7 +333,8 @@ export default function Audit() {
 
                     <td title={details}>
                       {formatDetails(r)}
-                    </td>                    
+                    </td>
+
                     <td className="mono dim">{r.ip || ''}</td>
                   </tr>
                 );
