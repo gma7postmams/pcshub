@@ -176,7 +176,12 @@ app.use(errorHandler);
 // (see db/app-role.sql).
 const boot = process.env.MIGRATE_ON_START === 'false' ? db.query('SELECT 1 FROM users LIMIT 1') : migrate(db);
 boot
-  .then(() => {
+  .then(async () => {
+    // Workload rows that have a Plug ID but no PSD / PROG. NAME yet are filled from the PSD Daily Plug List (blanks only; idempotent)
+    try {
+      const n = await require('./src/routes/plugs').backfillWorkload(db);
+      if (n) console.log(`[workload] filled PSD / PROG. NAME on ${n} existing row(s) from the PSD Daily Plug List`);
+    } catch (e) { console.error('[workload] plug list fill skipped:', e.message); }
     // Production default: localhost only — users reach the app through the HTTPS reverse proxy.
     const HOST = process.env.HOST || (PROD ? '127.0.0.1' : '0.0.0.0');
     app.listen(PORT, HOST, () => console.log(`Promotional Content Hub listening on ${HOST}:${PORT} (${PROD ? 'production' : 'development'})`));

@@ -112,6 +112,33 @@ function parsePlugWorkbook(wb, year) {
   return { sheets, warnings };
 }
 
+/**
+ * Fills PSD and PROG. NAME / PROJ. TITLE on EXISTING Workload rows that have a Plug ID but those left blank, from the PSD Daily Plug List
+ * entry for the same Work Date + Plug ID (first line of the Plug ID cell, any letter case; the first match on that day's list wins).
+ * Only blanks are filled — anything already typed stays — and rows in a locked date range are left alone.
+ * Optional { from, to } limit it to those dates. Returns how many rows changed.
+ */
+async function backfillWorkload(runner, { from = null, to = null, userId = null } = {}) {
+  const { rowCount } = await runner.query(
+    `WITH src AS (
+       SELECT DISTINCT ON (plug_date, upper(plug_id)) plug_date, upper(plug_id) AS pid, psd, prog_name
+         FROM workload_plugs
+        WHERE ($1::date IS NULL OR plug_date >= $1::date) AND ($2::date IS NULL OR plug_date <= $2::date)
+        ORDER BY plug_date, upper(plug_id), seq, id)
+     UPDATE workload_items w
+        SET psd = CASE WHEN btrim(COALESCE(w.psd, '')) = '' AND src.psd <> '' THEN src.psd ELSE w.psd END,
+            prog_name = CASE WHEN btrim(COALESCE(w.prog_name, '')) = '' AND src.prog_name <> '' THEN src.prog_name ELSE w.prog_name END,
+            updated_by = COALESCE($3::int, w.updated_by), updated_at = now()
+       FROM src
+      WHERE w.work_date = src.plug_date
+        AND upper(btrim(split_part(w.plug_id, E'\n', 1))) = src.pid
+        AND ((btrim(COALESCE(w.psd, '')) = '' AND src.psd <> '') OR (btrim(COALESCE(w.prog_name, '')) = '' AND src.prog_name <> ''))
+        AND NOT EXISTS (SELECT 1 FROM workload_locks l WHERE w.work_date BETWEEN l.from_date AND l.to_date)`,
+    [from, to, userId]
+  );
+  return rowCount;
+}
+
 module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked }) {
   // ---- which days have a list ----
   router.get('/plugs/dates', asyncH(async (req, res) => {
@@ -188,9 +215,10 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
           result.push({ sheet: sh.sheet, date: sh.date, plugs: p.length, added, existing: p.length - added, additional: sh.additional, skipped: sh.skippedNoId });
         }
       });
+      const filled = await backfillWorkload(db, { from: result[0].date, to: result[result.length - 1].date, userId: req.user.id });   // rows already in the tracker with blank PSD / Prog. Name
       const total = result.reduce((o, s) => ({ plugs: o.plugs + s.plugs, added: o.added + s.added, skipped: o.skipped + s.skipped }), { plugs: 0, added: 0, skipped: 0 });
-      await logRun(req, 'workload.plugs_import', { ...info, days: result.length, from: result[0].date, to: result[result.length - 1].date, ...total, warnings: warnings.slice(0, 20), ms: Date.now() - t0 });
-      res.json({ ok: true, year, days: result.length, ...total, existing: total.plugs - total.added, sheets: result, warnings: warnings.slice(0, 20) });
+      await logRun(req, 'workload.plugs_import', { ...info, days: result.length, from: result[0].date, to: result[result.length - 1].date, ...total, workloadRowsFilled: filled, warnings: warnings.slice(0, 20), ms: Date.now() - t0 });
+      res.json({ ok: true, year, days: result.length, workloadRowsFilled: filled, ...total, existing: total.plugs - total.added, sheets: result, warnings: warnings.slice(0, 20) });
     } catch (e) {
       await logRun(req, 'workload.plugs_import_failed', { ...info, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
       throw e;
@@ -218,7 +246,8 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
       ));
     } catch (e) { dupe(e); }
     await audit(req, 'workload.plug_add', 'workload_plug', row.id, { plug_date: b.plug_date, plug_id: b.plug_id });
-    res.status(201).json({ id: row.id });
+    const filled = await backfillWorkload(db, { from: b.plug_date, to: b.plug_date, userId: req.user.id });
+    res.status(201).json({ id: row.id, workloadRowsFilled: filled });
   }));
 
   router.put('/plugs/:id(\\d+)', requireAction('workload.write'), asyncH(async (req, res) => {
@@ -231,7 +260,8 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
       if (!r.rowCount) throw new HttpError(404, 'Plug not found');
     } catch (e) { dupe(e); }
     await audit(req, 'workload.plug_edit', 'workload_plug', req.params.id, { plug_date: b.plug_date, plug_id: b.plug_id });
-    res.json({ ok: true });
+    const filled = await backfillWorkload(db, { from: b.plug_date, to: b.plug_date, userId: req.user.id });
+    res.json({ ok: true, workloadRowsFilled: filled });
   }));
 
   router.delete('/plugs/:id(\\d+)', requireAction('workload.write'), asyncH(async (req, res) => {
@@ -239,6 +269,16 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
     if (!rows.length) throw new HttpError(404, 'Plug not found');
     await audit(req, 'workload.plug_delete', 'workload_plug', req.params.id, rows[0]);
     res.json({ ok: true });
+  }));
+
+  // ---- fill blank PSD / PROG. NAME / PROJ. TITLE on rows already in the Workload Tracker (optional { from, to }) ----
+  router.post('/plugs/fill', requireAction('workload.write'), asyncH(async (req, res) => {
+    const body = req.body || {};
+    const from = body.from ? v.date(body.from, { field: 'From' }) : null;
+    const to = body.to ? v.date(body.to, { field: 'To' }) : null;
+    const filled = await backfillWorkload(db, { from, to, userId: req.user.id });
+    await logRun(req, 'workload.plugs_fill', { from, to, rowsFilled: filled });
+    res.json({ ok: true, filled });
   }));
 
   // ---- copy a day's plugs (or the chosen ones) into the Workload Tracker: one new row per plug not already there ----
@@ -284,3 +324,4 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
 };
 
 module.exports.parsePlugWorkbook = parsePlugWorkbook;
+module.exports.backfillWorkload = backfillWorkload;

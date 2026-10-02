@@ -27,6 +27,7 @@ export default function PlugList({ canWrite, onCopied }) {
   const [summary, setSummary] = useState(null);    // result of the last import
   const [adding, setAdding] = useState(false);
   const [copying, setCopying] = useState(false);
+  const [filling, setFilling] = useState(false);
 
   const loadDates = useCallback(async (keep) => {
     try {
@@ -62,7 +63,7 @@ export default function PlugList({ canWrite, onCopied }) {
     try {
       const out = await post('/api/workload/plugs/import', form);
       setSummary(out);
-      toast(`${out.added} plug${out.added === 1 ? '' : 's'} added${out.existing ? `, ${out.existing} already there` : ''}`);
+      toast(`${out.added} plug${out.added === 1 ? '' : 's'} added${out.existing ? `, ${out.existing} already there` : ''}${out.workloadRowsFilled ? ` — ${out.workloadRowsFilled} existing Workload row${out.workloadRowsFilled === 1 ? '' : 's'} filled in` : ''}`);
       await loadDates(true);
       if (out.sheets.length && !date) setDate(out.sheets[out.sheets.length - 1].date);
       loadRows();
@@ -74,6 +75,15 @@ export default function PlugList({ canWrite, onCopied }) {
     else setNeedYear(file);                                   // the list has no year in it: ask
   };
 
+  // Existing Workload rows with a Plug ID but no PSD / PROG. NAME / PROJ. TITLE: fill them from the lists (also happens by itself on import / restart)
+  const fillExisting = async () => {
+    setFilling(true);
+    try {
+      const out = await post('/api/workload/plugs/fill', {});
+      toast(out.filled ? `${out.filled} Workload row${out.filled === 1 ? '' : 's'} filled in from the plug list` : 'Nothing to fill — every Workload row with a matching Plug ID already has its PSD and PROG. NAME / PROJ. TITLE');
+      if (out.filled && onCopied) onCopied(out);
+    } catch (e) { toast(e.message, 'err'); } finally { setFilling(false); }
+  };
   const removePlug = async (r) => {
     if (!(await confirm('Delete plug', `Remove "${r.plug_id}" from the ${fmtDate(r.plug_date)} list? Workload rows already made from it are not touched.`, { okText: 'Delete', danger: true }))) return;
     try { await del(`/api/workload/plugs/${r.id}`); toast('Deleted'); await loadDates(true); loadRows(); } catch (e) { toast(e.message, 'err'); }
@@ -104,6 +114,8 @@ export default function PlugList({ canWrite, onCopied }) {
             <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files[0])} />
             <button type="button" className="btn" disabled={importing} onClick={() => fileRef.current.click()}><UploadIcon /> {importing ? 'Importing…' : 'Import plug list'}</button>
             <button type="button" className="btn" onClick={() => setAdding(true)}><PlusIcon /> Add plug</button>
+            <button type="button" className="btn" disabled={filling} onClick={fillExisting}
+              title="Rows already in the Workload Tracker that have a Plug ID but a blank PSD or PROG. NAME / PROJ. TITLE get them from this list (anything typed is kept)">{filling ? 'Filling…' : 'Fill blank rows'}</button>
             <button type="button" className="btn primary" disabled={!date || !todo.length} onClick={() => setCopying(true)}>
               {chosen.length ? `Copy ${chosen.length} to Workload` : `Copy ${todo.length || ''} to Workload`.replace('  ', ' ')}
             </button>
@@ -159,6 +171,7 @@ export default function PlugList({ canWrite, onCopied }) {
             {summary.existing ? <>; {summary.existing} {summary.existing === 1 ? 'was' : 'were'} already on the list</> : null}
             {summary.skipped ? <>; {summary.skipped} line{summary.skipped === 1 ? '' : 's'} skipped (no Plug ID)</> : null}.
           </p>
+          {summary.workloadRowsFilled ? <p><strong>{summary.workloadRowsFilled}</strong> row{summary.workloadRowsFilled === 1 ? '' : 's'} already in the Workload Tracker had a Plug ID but no PSD / PROG. NAME / PROJ. TITLE — now filled in from this list.</p> : null}
           {summary.warnings && summary.warnings.length ? <ul className="plug-warn">{summary.warnings.map((w) => <li key={w}>{w}</li>)}</ul> : null}
           <div className="plug-sum">
             {summary.sheets.map((s) => <div key={s.sheet + s.date}><span>{dateLabel(s.date)}</span><span className="dim">{s.plugs} plugs{s.added ? ` · ${s.added} new` : ''}{s.additional ? ` · ${s.additional} added late` : ''}</span></div>)}
