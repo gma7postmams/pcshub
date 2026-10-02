@@ -170,7 +170,7 @@ router.put('/users/:id', asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const u = await parseUser(req.body, { creating: false });
   await db.tx(async (c) => {
-    const cur = await c.query('SELECT role, group_id, is_active FROM users WHERE id=$1 FOR UPDATE', [id]);
+    const cur = await c.query('SELECT username, full_name, email, role, group_id, is_active FROM users WHERE id=$1 FOR UPDATE', [id]);
     if (!cur.rows.length) throw new HttpError(404, 'User not found');
     const wasAdmin = cur.rows[0].role === 'Admin' && cur.rows[0].is_active;
     const staysAdmin = u.role === 'Admin' && u.is_active;
@@ -182,9 +182,22 @@ router.put('/users/:id', asyncH(async (req, res) => {
     if (!u.is_active) {
       await c.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = $1`, [id]);
     }
-    await audit(req, 'admin.user_update', 'user', id, {
-      from: cur.rows[0], to: { role: u.role, group_id: u.group_id, is_active: u.is_active },
-    }, c);
+    const old = cur.rows[0];
+    const next = { full_name: u.full_name, email: u.email, role: u.role, group_id: u.group_id, is_active: u.is_active };
+    const from = {};
+    const to = {};
+    for (const k of Object.keys(next)) {
+      if ((old[k] ?? null) !== (next[k] ?? null)) { from[k] = old[k] ?? null; to[k] = next[k] ?? null; }
+    }
+    if ('group_id' in to) {
+      const ids = [from.group_id, to.group_id].filter((x) => x != null);
+      const names = ids.length
+        ? (await c.query('SELECT id, name FROM groups WHERE id = ANY($1)', [ids])).rows : [];
+      const nm = (gid) => (gid == null ? null : (names.find((r) => r.id === gid) || {}).name || `#${gid}`);
+      from.group = nm(from.group_id);
+      to.group = nm(to.group_id);
+    }
+    await audit(req, 'admin.user_update', 'user', id, { username: old.username, from, to }, c);
   });
   res.json({ ok: true });
 }));

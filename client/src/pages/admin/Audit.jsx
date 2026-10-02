@@ -84,6 +84,44 @@ function formatEntity(row) {
   }
 }
 
+const USER_FIELD_LABELS = {
+  full_name: 'Full Name',
+  email: 'Email',
+  role: 'Role',
+  group_id: 'Group',
+  is_active: 'Status',
+};
+
+function describeUserUpdate(d) {
+  const from = d.from || {};
+  const to = d.to || {};
+
+  const show = (k, val, side) => {
+    if (k === 'is_active') return val ? 'Active' : 'Inactive';
+    if (k === 'group_id') return side.group ?? (val == null ? 'none' : `#${val}`);
+    return val == null || val === '' ? 'none' : String(val);
+  };
+
+  const labels = {
+    full_name: 'Full Name',
+    email: 'Email',
+    role: 'Role',
+    group_id: 'Group',
+    is_active: 'Status',
+  };
+
+  const changes = Object.keys(labels)
+    .filter((k) => k in to && (from[k] ?? null) !== (to[k] ?? null))
+    .map(
+      (k) =>
+        `${labels[k]} changed from "${show(k, from[k], from)}" to "${show(k, to[k], to)}"`
+    );
+
+  return changes.length
+    ? changes.join(' | ')
+    : 'Updated user settings';
+}
+
 function formatDetails(row) {
   const d = row.details || {};
 
@@ -128,7 +166,7 @@ function formatDetails(row) {
       return `Created user: ${d.username || ''}`;
 
     case 'admin.user_update':
-      return 'Updated user settings';
+      return describeUserUpdate(d);
 
     case 'admin.user_reset_password':
       return 'Password reset';
