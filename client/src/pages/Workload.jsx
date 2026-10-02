@@ -287,6 +287,7 @@ export default function Workload() {
   const tblMouse = useRef({});         // latest mouse handlers for dragging across rows (assigned every render)
   const tblDrag = useRef(null);        // { idx, x, y, moved } while the mouse is down on a row
   const tblSuppress = useRef(false);   // swallow the click that ends a drag / Shift / Ctrl+click, so it doesn't open a cell editor
+  const [tctx, setTctx] = useState(null);   // Table mode: right-click menu position { x, y } | null
   const tblHist = useRef({ past: [], future: [] });   // Table-mode undo / redo (delete, cut, paste, cell edit)
   const fileRef = useRef(null);
   const boxRef = useRef(null);    // Excel mode: the focusable wrapper that receives copy / cut / paste / Delete for a range or whole rows
@@ -297,6 +298,17 @@ export default function Workload() {
   const [epoch, setEpoch] = useState(0);   // bumped whenever the grid is changed from outside a cell's own typing (paste, undo, clear …)
   const [ctx, setCtx] = useState(null);   // Excel mode: right-click menu position { x, y } | null
   useEffect(() => { setEditing(null); setGridSel(null); }, [tab, mode, offset]);
+  useEffect(() => {
+    if (!tctx) return undefined;
+    const close = () => setTctx(null);
+    const down = (e) => { if (!(e.target.closest && e.target.closest('.xl-menu'))) close(); };
+    const key = (e) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('mousedown', down);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    window.addEventListener('keydown', key);
+    return () => { window.removeEventListener('mousedown', down); window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close); window.removeEventListener('keydown', key); };
+  }, [tctx]);
   useEffect(() => {
     if (!ctx) return undefined;
     const close = () => setCtx(null);
@@ -815,6 +827,12 @@ export default function Workload() {
       if (e.key.toLowerCase() === 'y' || e.shiftKey) redo(); else undo();
       return;
     }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a') {
+      // Ctrl/Cmd+A selects every cell of the grid — also while a cell has the cursor (the only way to select all)
+      e.preventDefault();
+      if (grid && grid.rows.length) { setGridSel({ r0: 0, c0: 0, r1: grid.rows.length - 1, c1: xlKeys().length - 1 }); focusBox(); }
+      return;
+    }
     if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
       // like a spreadsheet: Enter moves to the cell below (Shift+Enter: above); Tab / Shift+Tab move sideways natively
       const td = e.target.closest('td[data-r]');
@@ -923,6 +941,7 @@ export default function Workload() {
     const rows = pageRows.filter((r) => picked.has(r.id));
     if (!rows.length) return false;
     const text = rows.map((r) => tableCols.map((k) => tsvCell(k === 'breakdate_vgfx' ? bdText(r, meta.unitTeams) : r[k])).join('\t')).join('\n');
+    internalClip.current = text;
     const ok = await writeClipboard(text);
     const elsewhere = picked.size - rows.length;
     toast(ok ? `Copied ${rows.length} row${rows.length === 1 ? '' : 's'}${elsewhere > 0 ? ` (${elsewhere} selected on other pages not included)` : ''}` : 'Could not reach the clipboard', ok ? undefined : 'err');
@@ -955,6 +974,23 @@ export default function Workload() {
       load();
       loadStats();
     } catch (e) { toast(e.message, 'err'); }
+  };
+
+  // right-click a row: select it (unless it is already part of the selection) and open the same menu Excel mode has
+  const rowMenu = (e, r) => {
+    const t = e.target;
+    if (t.closest && t.closest('.editing, .cell-editor-inline, input, select, textarea')) return;   // inside an open editor keep the browser's own menu
+    e.preventDefault();
+    if (!rowLocked(r) && !(allMatching || picked.has(r.id))) { setAllMatching(false); setPicked(new Set([r.id])); lastPick.current = r.id; }
+    setTctx({ x: Math.min(e.clientX, window.innerWidth - 210), y: Math.min(e.clientY, window.innerHeight - 190) });
+  };
+  const menuPasteRows = async () => {
+    setTctx(null);
+    let text = null;
+    try { if (navigator.clipboard && navigator.clipboard.readText && window.isSecureContext) text = await navigator.clipboard.readText(); } catch (err) { text = null; }
+    if (text == null || text === '') text = internalClip.current;   // plain-http addresses can't read the clipboard: use what was last copied here
+    if (text == null || text === '') { toast('Nothing to paste yet — copy some rows first, or press Ctrl+V', 'err'); return; }
+    pasteRows(text);
   };
 
   // mouse: press on a row and drag over others to select them; Shift+click extends, Ctrl/Cmd+click adds or removes one row
@@ -1003,7 +1039,7 @@ export default function Workload() {
   tblMouse.current.down = (e) => {   // a click anywhere outside the table (and its bar / dialogs) drops the selection
     if (!(picked.size || allMatching)) return;
     const t = e.target;
-    if (t && t.closest && !t.closest('#tbl, .sel-bar, .modal-backdrop')) clearPicks();
+    if (t && t.closest && !t.closest('#tbl, .sel-bar, .modal-backdrop, .xl-menu')) clearPicks();
   };
   const saveGrid = async () => {
     const idx = [];
@@ -1301,9 +1337,6 @@ export default function Workload() {
                 </div>
               );
             })() : null}
-            {grid && !grid.error && grid.rows.length ? (
-              <div className="xl-selall"><button type="button" className="btn sm" id="select-all" onClick={() => { setGridSel({ r0: 0, c0: 0, r1: grid.rows.length - 1, c1: tableCols.length - 1 }); focusBox(); }} title="Select every cell (Ctrl+A)">Select all</button></div>
-            ) : null}
             {canWrite && grid && !grid.error ? (
               <div className="xl-hint dim">Click a cell to edit it · drag across cells or Shift+click to select just those cells · click a row number for the whole row · right-click for Undo / Redo / Cut / Copy / Paste / Delete · Ctrl+Z / Ctrl+Y / Ctrl+X / Ctrl+C / Ctrl+V · paste below the last row adds rows · Delete clears</div>
             ) : null}
@@ -1315,14 +1348,13 @@ export default function Workload() {
           <>
             {canWrite && data && data.rows && data.rows.length ? (
               <div className="sel-bar">
-                <button type="button" className="btn sm" id="select-all-rows" onClick={selectPage} title="Select every row on this page (Ctrl+A)">Select all</button>
                 {pickedCount ? (
                   <span className="sel-count">
                     {allMatching ? <>All <strong>{total}</strong> matching rows selected</> : <><strong>{pickedCount}</strong> selected</>}
-                    {!allMatching && pageAllPicked && isAdminUser && total > pageRows.length ? <button type="button" className="linkbtn" onClick={selectAllMatching}>Select all {total} matching rows</button> : null}
+                    {!allMatching && pageAllPicked && isAdminUser && total > pageRows.length ? <span className="dim">Press Ctrl+A again to select all {total} matching rows</span> : null}
                     <button type="button" className="linkbtn" onClick={clearPicks}>Clear</button>
                   </span>
-                ) : <span className="dim sel-count">Drag across rows to select them (Shift / Ctrl+click to extend)</span>}
+                ) : <span className="dim sel-count">Drag across rows to select them (Shift / Ctrl+click to extend) · Ctrl+A selects all</span>}
                 <span className="grow" />
                 <button type="button" className="btn danger sm" disabled={!pickedCount} onClick={() => deleteSelected()}>Delete selected{pickedCount ? ` (${pickedCount})` : ''}</button>
                 {isAdminUser ? <button type="button" className="btn danger sm" onClick={() => setDeletingAll(true)} title="Delete every row that matches the current tab and filters">Delete all…</button> : null}
@@ -1343,6 +1375,7 @@ export default function Workload() {
                             <tr key={r.id} data-id={r.id}
                               className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}`.trim()}
                               onMouseDown={canWrite ? (e) => rowDown(e, r, idx) : undefined}
+                              onContextMenu={canWrite ? (e) => rowMenu(e, r) : undefined}
                               onClick={canWrite ? undefined : () => setForm({ rec: r })}>
                               {tableCols.map((k) => (k === 'breakdate_vgfx' ? breakdateCell(r) : cell(r, k)))}
                               {canWrite ? (
@@ -1361,7 +1394,19 @@ export default function Workload() {
                     )}
             </div>
             <Pager total={total} offset={offset} size={PAGE} onOffset={setOffset} />
-            {canWrite ? <div className="xl-hint dim">Drag across rows to select them · Shift+click for a range · Ctrl/Cmd+click to add or remove a row · Ctrl+A select all · Ctrl+C / Ctrl+X / Ctrl+V · Ctrl+Z / Ctrl+Y · Delete · Esc clears</div> : null}
+            {tctx ? (
+              <div className="xl-menu" style={{ left: tctx.x, top: tctx.y }} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
+                <button type="button" disabled={!tblHist.current.past.length} onClick={() => { setTctx(null); undoTbl(); }}>Undo<span>Ctrl+Z</span></button>
+                <button type="button" disabled={!tblHist.current.future.length} onClick={() => { setTctx(null); redoTbl(); }}>Redo<span>Ctrl+Y</span></button>
+                <hr />
+                <button type="button" disabled={!picked.size || allMatching} onClick={() => { setTctx(null); cutPicked(); }}>Cut<span>Ctrl+X</span></button>
+                <button type="button" disabled={!picked.size} onClick={() => { setTctx(null); copyPicked(); }}>Copy<span>Ctrl+C</span></button>
+                <button type="button" onClick={menuPasteRows}>Paste<span>Ctrl+V</span></button>
+                <hr />
+                <button type="button" disabled={!pickedCount} onClick={() => { setTctx(null); deleteSelected(); }}>Delete {pickedCount > 1 ? `${pickedCount} rows` : 'row'}<span>Del</span></button>
+              </div>
+            ) : null}
+            {canWrite ? <div className="xl-hint dim">Drag across rows to select them · Shift+click for a range · Ctrl/Cmd+click to add or remove a row · right-click for Undo / Redo / Cut / Copy / Paste / Delete · Ctrl+A select all · Ctrl+C / Ctrl+X / Ctrl+V · Ctrl+Z / Ctrl+Y · Delete · Esc clears</div> : null}
           </>
         )}
       </div>

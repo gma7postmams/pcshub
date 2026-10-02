@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Children, useCallback, useEffect, useRef, useState } from 'react';
 import { fmtDate, isoDate } from '../lib/util.js';
 import { CalendarIcon, ChevronDownIcon, CopyIcon, KebabIcon, PencilIcon, TrashIcon } from './Icons.jsx';
 
@@ -43,16 +43,66 @@ export const WorkDate = ({ value }) => <DateChip>{fmtDate(value)}</DateChip>;
 /** Select with its label inside the box (like the design). The select itself is invisible but still the
     real clickable/keyboard control; a plain span shows the value so its rendering never depends on how a
     given browser draws a native select's own (right-aligned) text, which is unreliable. */
+/** Dropdown filter. Draws its own list (the browser's native popup can't be padded or themed reliably); the items come from the
+    <Options list blank /> child, so call sites stay `<FilterSelect ...><Options .../></FilterSelect>`. onChange gets { target: { value } }. */
 export function FilterSelect({ label, value, onChange, blank = 'All', children }) {
+  const items = [];
+  Children.forEach(children, (ch) => {
+    if (!ch || !ch.props || !Array.isArray(ch.props.list)) return;
+    if (ch.props.blank !== undefined) items.push({ value: '', label: ch.props.blank });
+    ch.props.list.forEach((o) => items.push(typeof o === 'object' ? { value: o.value, label: o.label } : { value: o, label: o }));
+  });
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(-1);
+  const box = useRef(null);
+  const listRef = useRef(null);
+  const selected = items.findIndex((i) => i.value === (value || ''));
+  const shown = selected >= 0 ? items[selected].label : (value || blank);
+  const openList = () => { setHi(selected >= 0 ? selected : 0); setOpen(true); };
+  const pick = (i) => { setOpen(false); if (items[i]) onChange({ target: { value: items[i].value } }); };
+  useEffect(() => {
+    if (!open) return undefined;
+    const down = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', down);
+    return () => document.removeEventListener('mousedown', down);
+  }, [open]);
+  useEffect(() => {
+    const el = open && listRef.current ? listRef.current.children[hi] : null;
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  }, [open, hi]);
+  const onKey = (e) => {
+    const k = e.key;
+    if (k === 'ArrowDown' || k === 'ArrowUp') { e.preventDefault(); if (!open) openList(); else setHi((h) => Math.min(items.length - 1, Math.max(0, h + (k === 'ArrowDown' ? 1 : -1)))); }
+    else if (k === 'Home' || k === 'End') { if (open) { e.preventDefault(); setHi(k === 'Home' ? 0 : items.length - 1); } }
+    else if (k === 'Enter' || k === ' ') { e.preventDefault(); if (open) pick(hi); else openList(); }
+    else if (k === 'Escape') { if (open) { e.preventDefault(); e.stopPropagation(); setOpen(false); } }
+    else if (k === 'Tab') setOpen(false);
+    else if (k.length === 1 && /\S/.test(k)) {   // type a letter to jump to the next item starting with it
+      const start = (open ? hi : selected) + 1;
+      const order = [...items.keys()].map((n) => (n + start) % items.length);
+      const hit = order.find((n) => String(items[n].label).toLowerCase().startsWith(k.toLowerCase()));
+      if (hit !== undefined) { if (!open) setOpen(true); setHi(hit); }
+    }
+  };
   return (
-    <label className="fsel">
-      <span className="fsel-row">
-        <span className="fsel-label">{label}</span>
-        <span className="fsel-value">{value || blank}</span>
-      </span>
-      <select value={value} onChange={onChange} aria-label={label}>{children}</select>
-      <ChevronDownIcon />
-    </label>
+    <div className={`fsel${open ? ' open' : ''}`} ref={box}>
+      <button type="button" className="fsel-btn" aria-haspopup="listbox" aria-expanded={open} aria-label={`${label}: ${shown}`}
+        onClick={() => (open ? setOpen(false) : openList())} onKeyDown={onKey}>
+        <span className="fsel-row">
+          <span className="fsel-label">{label}</span>
+          <span className="fsel-value">{shown}</span>
+        </span>
+        <ChevronDownIcon />
+      </button>
+      {open ? (
+        <ul className="fsel-list" role="listbox" aria-label={label} ref={listRef}>
+          {items.map((it, i) => (
+            <li key={`${it.value}|${i}`} role="option" aria-selected={i === selected} className={`${i === selected ? 'sel' : ''}${i === hi ? ' hi' : ''}`.trim()}
+              onMouseEnter={() => setHi(i)} onMouseDown={(e) => { e.preventDefault(); pick(i); }}>{it.label}</li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 

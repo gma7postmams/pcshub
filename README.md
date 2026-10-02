@@ -206,11 +206,12 @@ The last tab, **PSD Daily Plug List**, holds the PSD's daily plug list — one l
 
 ### Table mode: selecting, deleting and keyboard shortcuts
 
-Table mode selects rows the way Excel mode selects cells — no tick boxes.
+Table mode selects rows the way Excel mode selects cells — no tick boxes and no Select all button.
 
 - **Select rows**: press on a row and **drag** across the rows you want; **Shift+click** extends a range; **Ctrl/Cmd+click** adds or removes one row. A plain click on a cell still opens that cell for editing, and clicking outside the table (or pressing **Esc**) drops the selection. Rows in a locked period can't be selected.
-- **Shortcuts** (the same as Excel mode; not while typing in a field or a cell editor): **Ctrl/Cmd+A** select all rows on the page (press again for every matching row — Admin) · **Ctrl+C** copy the selected rows as tab-separated text (pastes into Excel mode or a spreadsheet) · **Ctrl+X** cut (copy, then delete after a confirmation) · **Ctrl+V** paste rows from the clipboard as new Workload rows (after a confirmation) · **Ctrl+Z / Ctrl+Y** undo / redo a delete, cut, paste or single-cell edit · **Delete** delete the selected rows (after a confirmation) · **Esc** clear.
+- **Select all is Ctrl/Cmd+A only**: in Table mode it selects every row on the page (press again for every matching row — Admin); in Excel mode it selects every cell of the grid, even with the cursor inside a cell.
+- **Right-click a row** (Table mode) for the same menu as Excel mode: Undo, Redo, Cut, Copy, Paste, Delete. (On a plain-http address the browser won't let the menu read the system clipboard, so its Paste uses the rows last copied in the app; Ctrl+V works for anything copied elsewhere.)
+- **Shortcuts** (the same as Excel mode; not while typing in a field or a cell editor): **Ctrl+C** copy the selected rows as tab-separated text (pastes into Excel mode or a spreadsheet) · **Ctrl+X** cut (copy, then delete after a confirmation) · **Ctrl+V** paste rows from the clipboard as new Workload rows (after a confirmation) · **Ctrl+Z / Ctrl+Y** undo / redo a delete, cut, paste or single-cell edit · **Delete** delete the selected rows (after a confirmation) · **Esc** clear.
 - Table mode saves straight to the server, so undo works by doing the opposite on the server: undoing a delete re-creates the rows as new rows (new IDs), undoing a paste deletes what it added. Undo history is kept until the page is reloaded; deleting everything with **Delete all…** can't be undone.
-- **Select all** button above the table; an Admin can then choose “Select all N matching rows” (every page). **Delete selected** and **Delete all…** (Admin only; type `DELETE` to confirm) skip rows in a locked period and say how many, and are logged (`workload.bulk_delete`).
-- **Excel mode** has a **Select all** button under the grid as well as Ctrl+A and the top-left corner.
-- The Units / Platform / Plug Type filter dropdowns show readable, padded option text (the invisible native `<select>` had inherited `color: transparent`, which left the list white-on-white).
+- **Delete selected** and **Delete all…** (Admin only; type `DELETE` to confirm) skip rows in a locked period and say how many, and are logged (`workload.bulk_delete`).
+- The Units / Platform / Plug Type filters are the app's own dropdowns (keyboard: arrows, Enter, Esc, type a letter to jump), so the values are padded and themed instead of using the browser's plain popup.
