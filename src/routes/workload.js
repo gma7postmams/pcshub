@@ -645,6 +645,41 @@ router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---------- Bulk delete: the rows the user ticked ({ ids }), or — Admin only — every row matching the current filters ({ all: true, filters }) ----------
+// Rows in a locked date range are never deleted (they are counted as skipped). One audit entry + one server-log line per run.
+router.post('/bulk-delete', requireAction('workload.write'), asyncH(async (req, res) => {
+  const body = req.body || {};
+  let where;
+  let params;
+  let mode;
+  let filters = null;
+  if (body.all) {
+    if (!req.user || req.user.role !== 'Admin') throw new HttpError(403, 'Only an Admin can delete all rows');
+    mode = 'all matching';
+    filters = {};
+    ['team', 'units', 'platform', 'plug_type', 'from', 'to', 'q'].forEach((k) => { if (body.filters && body.filters[k]) filters[k] = String(body.filters[k]).slice(0, 200); });
+    ({ where, params } = buildFilter(filters));
+  } else {
+    mode = 'selected';
+    const ids = Array.isArray(body.ids) ? [...new Set(body.ids.map((n) => v.id(n)))].slice(0, 1000) : [];
+    if (!ids.length) throw new HttpError(400, 'Nothing selected');
+    where = ['w.id = ANY($1::bigint[])'];
+    params = [ids];
+  }
+  const unlocked = 'NOT EXISTS (SELECT 1 FROM workload_locks l WHERE w.work_date BETWEEN l.from_date AND l.to_date)';
+  const t0 = Date.now();
+  const matched = (await db.query(`SELECT count(*)::int AS n FROM workload_items w ${whereSql(where)}`, params)).rows[0].n;
+  const { rows } = await db.query(
+    `DELETE FROM workload_items w ${whereSql([...where, unlocked])} RETURNING w.id, w.work_date, w.units_concerned, w.plug_id`, params
+  );
+  const skipped = matched - rows.length;
+  await logRun(req, 'workload.bulk_delete', {
+    mode, filters, matched, deleted: rows.length, skippedLocked: skipped,
+    sample: rows.slice(0, 50).map((r) => `${r.work_date} ${String(r.plug_id || '').split('\n')[0]}`), ms: Date.now() - t0,
+  });
+  res.json({ ok: true, deleted: rows.length, skipped });
+}));
+
 router.delete('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const locks = await loadLocks(db);

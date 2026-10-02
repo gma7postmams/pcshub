@@ -277,6 +277,13 @@ export default function Workload() {
   const [addingColumn, setAddingColumn] = useState(false);
   const [managingLocks, setManagingLocks] = useState(false);
   const [importing, setImporting] = useState(false);
+  // Table mode: ticked rows (ids), "every row matching the filters" (Admin), the keyboard-highlighted row, and the delete-all dialog
+  const [picked, setPicked] = useState(() => new Set());
+  const [allMatching, setAllMatching] = useState(false);
+  const [activeId, setActiveId] = useState(null);
+  const [deletingAll, setDeletingAll] = useState(false);
+  const lastPick = useRef(null);
+  const keysRef = useRef(null);
   const fileRef = useRef(null);
   const boxRef = useRef(null);    // Excel mode: the focusable wrapper that receives copy / cut / paste / Delete for a range or whole rows
   const drag = useRef(null);      // Excel mode: 'cell' | 'row' | 'col' while the mouse is held down selecting
@@ -329,6 +336,19 @@ export default function Workload() {
     return () => { window.removeEventListener('mouseup', up); window.removeEventListener('mousemove', move); };
   }, []);
   const q = useDebounced(filt.q, 300);
+  // a different tab / filter / search is a different set of rows: drop the ticks and the highlighted row
+  useEffect(() => { setPicked(new Set()); setAllMatching(false); setActiveId(null); lastPick.current = null; }, [tab, mode, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q]);
+  // Table-mode keyboard shortcuts: one window listener that always calls the latest handler (assigned further down, every render)
+  useEffect(() => {
+    const on = (e) => { if (keysRef.current) keysRef.current(e); };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, []);
+  useEffect(() => {
+    if (activeId == null) return;
+    const el = document.querySelector(`#tbl tr[data-id="${activeId}"]`);
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  }, [activeId]);
   const isPlugs = tab === 'PLUGS';   // the PSD Daily Plug List tab (its own screen, not a view of the workload table)
   const isGrid = mode === 'excel' && tab !== 'ALL' && !isPlugs;
 
@@ -829,6 +849,72 @@ export default function Workload() {
       else load();
     } catch (e) { toast(e.message, 'err'); }
   };
+  // ---- Table mode: tick rows, delete them (or everything that matches), keyboard shortcuts ----
+  const total = data && data.total ? data.total : 0;
+  const isAdminUser = !!(s.user && s.user.role === 'Admin');
+  const pageRows = data && data.rows ? data.rows : [];
+  const pickable = pageRows.filter((r) => !isLocked(r.work_date, meta.locks));   // a row in a locked period can't be deleted, so it can't be ticked
+  const pickedCount = allMatching ? total : picked.size;
+  const pageAllPicked = !!pickable.length && pickable.every((r) => allMatching || picked.has(r.id));
+  const clearPicks = () => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; };
+  const togglePick = (id, withShift) => {
+    setAllMatching(false);
+    const anchor = lastPick.current;   // read now: the updater below runs later, after lastPick has moved on
+    setPicked((cur) => {
+      const next = new Set(cur);
+      if (withShift && anchor != null) {
+        const ids = pickable.map((r) => r.id);
+        const a = ids.indexOf(anchor);
+        const b = ids.indexOf(id);
+        if (a >= 0 && b >= 0) { ids.slice(Math.min(a, b), Math.max(a, b) + 1).forEach((x) => next.add(x)); return next; }
+      }
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+    lastPick.current = id;
+  };
+  const togglePage = () => {
+    setAllMatching(false);
+    setPicked((cur) => {
+      const next = new Set(cur);
+      if (pageAllPicked) pickable.forEach((r) => next.delete(r.id)); else pickable.forEach((r) => next.add(r.id));
+      return next;
+    });
+  };
+  const selectAllMatching = () => { setPicked(new Set(pickable.map((r) => r.id))); setAllMatching(true); };
+  const afterBulk = (out) => {
+    const bits = [`${out.deleted} row${out.deleted === 1 ? '' : 's'} deleted`];
+    if (out.skipped) bits.push(`${out.skipped} skipped — in a locked period`);
+    toast(bits.join(' — '), out.skipped ? 'err' : undefined);
+    clearPicks();
+    setActiveId(null);
+    if (offset > 0 && out.deleted >= pageRows.length) setOffset(Math.max(0, offset - PAGE)); else load();
+    loadStats();
+  };
+  const deleteSelected = async () => {
+    if (allMatching) { setDeletingAll(true); return; }
+    const ids = [...picked];
+    if (!ids.length) { toast('Tick the rows to delete first'); return; }
+    if (!(await confirm(`Delete ${ids.length} row${ids.length === 1 ? '' : 's'}`, `Permanently delete the ${ids.length} selected row${ids.length === 1 ? '' : 's'}? This cannot be undone.`, { okText: 'Delete', danger: true }))) return;
+    try { afterBulk(await post('/api/workload/bulk-delete', { ids })); } catch (e) { toast(e.message, 'err'); }
+  };
+  // Copy the ticked rows (or the highlighted one) as tab-separated text — the same layout Excel mode copies and pastes
+  const copyPicked = async () => {
+    const chosen = pageRows.filter((r) => picked.has(r.id));
+    const rows = chosen.length ? chosen : pageRows.filter((r) => r.id === activeId);
+    if (!rows.length) return;
+    const text = rows.map((r) => tableCols.map((k) => tsvCell(k === 'breakdate_vgfx' ? bdText(r, meta.unitTeams) : r[k])).join('\t')).join('\n');
+    const ok = await writeClipboard(text);
+    const elsewhere = picked.size - chosen.length;
+    toast(ok ? `Copied ${rows.length} row${rows.length === 1 ? '' : 's'}${elsewhere > 0 ? ` (${elsewhere} ticked on other pages not included)` : ''}` : 'Could not reach the clipboard', ok ? undefined : 'err');
+  };
+  const moveActive = (dir, extend) => {
+    if (!pageRows.length) return;
+    const i = pageRows.findIndex((r) => r.id === activeId);
+    const next = pageRows[Math.min(pageRows.length - 1, Math.max(0, i < 0 ? (dir > 0 ? 0 : pageRows.length - 1) : i + dir))];
+    setActiveId(next.id);
+    if (extend && canWrite && !isLocked(next.work_date, meta.locks)) { setAllMatching(false); setPicked((cur) => new Set(cur).add(next.id)); }
+  };
   const saveGrid = async () => {
     const idx = [];
     const rows = [];
@@ -852,12 +938,46 @@ export default function Workload() {
 
   if (!meta) return <main className="container wide"><Empty>Loading…</Empty></main>;
 
+  // Table-mode shortcuts (not while typing in a field, a dialog is open, or in Excel mode / the plug list, which have their own)
+  keysRef.current = (e) => {
+    if (isGrid || isPlugs || e.defaultPrevented || e.altKey) return;
+    const el = e.target;
+    const onTick = !!el && el.tagName === 'INPUT' && el.type === 'checkbox';   // a row's tick box keeps the keyboard shortcuts working (only Space is left to the box itself)
+    if (el && !onTick && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return;
+    if (onTick && e.key === ' ') return;
+    if (document.querySelector('.modal-backdrop') || form || addingColumn || managingLocks || deletingAll) return;
+    const mod = e.ctrlKey || e.metaKey;
+    const key = e.key;
+    const active = pageRows.find((r) => r.id === activeId);
+    const edit = (r) => (isLocked(r.work_date, meta.locks) && canWrite ? toast(`Locked: ${lockNote(r.work_date, meta.locks)}. An Admin must unlock it first.`, 'err') : setForm({ rec: r }));
+    if (mod) {
+      if (key.toLowerCase() === 'a' && canWrite) {
+        e.preventDefault();
+        if (pageAllPicked && !allMatching && isAdminUser && total > pageRows.length) selectAllMatching(); else togglePage();   // pressed again: every matching row
+      } else if (key.toLowerCase() === 'c' && (picked.size || active) && !(window.getSelection && String(window.getSelection()))) {
+        e.preventDefault();
+        copyPicked();
+      }
+      return;
+    }
+    if (key === 'Escape') { clearPicks(); setActiveId(null); return; }
+    if (key === 'ArrowDown' || key === 'ArrowUp') { e.preventDefault(); moveActive(key === 'ArrowDown' ? 1 : -1, e.shiftKey); return; }
+    if (e.shiftKey && key !== '?') return;
+    if (key === '/') { const input = document.querySelector('.wl-search input'); if (input) { e.preventDefault(); input.focus(); } return; }
+    if ((key === 'n' || key === 'N') && canWrite) { e.preventDefault(); setForm({ rec: null }); return; }
+    if ((key === 'Enter' || key === 'e') && active) { e.preventDefault(); edit(active); return; }
+    if (key === ' ' && active && canWrite) { e.preventDefault(); if (!isLocked(active.work_date, meta.locks)) togglePick(active.id, false); return; }
+    if ((key === 'Delete' || key === 'Backspace') && canWrite) {
+      if (pickedCount) { e.preventDefault(); deleteSelected(); }
+      else if (active) { e.preventDefault(); if (isLocked(active.work_date, meta.locks)) toast(`Locked: ${lockNote(active.work_date, meta.locks)}. An Admin must unlock it first.`, 'err'); else deleteItem(active); }
+    }
+  };
+
   const isAll = tab === 'ALL';
   const cols = isPlugs ? [] : meta.views[tab];   // raw column list (Table mode's tableCols below merges the two Breakdate / Time columns; Excel mode does the same)
   // Table mode only: Breakdate/Time (VGFX) and (VEDIT) merge into ONE column/cell, holding one or two pills —
   // 'breakdate_vgfx' is kept as that column's position; breakdateCell() below decides what actually shows in it.
   const tableCols = cols.filter((k) => k !== 'breakdate_vedit');
-  const total = data && data.total ? data.total : 0;
   const head = (k) => (k === 'breakdate_vgfx' ? 'Breakdate / Time' : meta.fields[k].label);   // table header only; Excel mode reads meta.fields directly and keeps the (VGFX)/(VEDIT) labels
   const firstLineOf = (t) => String(t || '').split('\n');
   // every cell except Remarks stays on one line: line breaks in pasted text are shown as " · "
@@ -1092,6 +1212,9 @@ export default function Workload() {
                 </div>
               );
             })() : null}
+            {grid && !grid.error && grid.rows.length ? (
+              <div className="xl-selall"><button type="button" className="btn sm" id="select-all" onClick={() => { setGridSel({ r0: 0, c0: 0, r1: grid.rows.length - 1, c1: tableCols.length - 1 }); focusBox(); }} title="Select every cell (Ctrl+A)">Select all</button></div>
+            ) : null}
             {canWrite && grid && !grid.error ? (
               <div className="xl-hint dim">Click a cell to edit it · drag across cells or Shift+click to select just those cells · click a row number for the whole row · right-click for Undo / Redo / Cut / Copy / Paste / Delete · Ctrl+Z / Ctrl+Y / Ctrl+X / Ctrl+C / Ctrl+V · paste below the last row adds rows · Delete clears</div>
             ) : null}
@@ -1101,16 +1224,40 @@ export default function Workload() {
           </>
         ) : (
           <>
+            {canWrite && data && data.rows && data.rows.length ? (
+              <div className="sel-bar">
+                <label className="sel-all"><input type="checkbox" checked={pageAllPicked} onChange={togglePage} /> Select all</label>
+                {pickedCount ? (
+                  <span className="sel-count">
+                    {allMatching ? <>All <strong>{total}</strong> matching rows selected</> : <><strong>{pickedCount}</strong> selected</>}
+                    {!allMatching && pageAllPicked && isAdminUser && total > pageRows.length ? <button type="button" className="linkbtn" onClick={selectAllMatching}>Select all {total} matching rows</button> : null}
+                    <button type="button" className="linkbtn" onClick={clearPicks}>Clear</button>
+                  </span>
+                ) : <span className="dim sel-count">Tick rows to delete or copy them</span>}
+                <span className="grow" />
+                <button type="button" className="btn danger sm" disabled={!pickedCount} onClick={deleteSelected}>Delete selected{pickedCount ? ` (${pickedCount})` : ''}</button>
+                {isAdminUser ? <button type="button" className="btn danger sm" onClick={() => setDeletingAll(true)} title="Delete every row that matches the current tab and filters">Delete all…</button> : null}
+              </div>
+            ) : null}
             <div className="table-wrap" id="tbl">
               {!data ? <Empty>Loading…</Empty>
                 : data.error ? <Empty>{data.error}</Empty>
                   : !data.rows.length ? <Empty>No workload items match these filters.</Empty>
                     : (
                       <table className={`t wl${cards ? ' cards' : ''}`}>
-                        <thead><tr>{tableCols.map((k) => <th key={k}>{head(k)}</th>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
+                        <thead><tr>{canWrite ? <th className="chk"><input type="checkbox" aria-label="Select all rows on this page" title="Select all rows on this page" checked={pageAllPicked} ref={(el) => { if (el) el.indeterminate = !pageAllPicked && pickable.some((r) => picked.has(r.id)); }} onChange={togglePage} /></th> : null}{tableCols.map((k) => <th key={k}>{head(k)}</th>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {data.rows.map((r) => (
-                            <tr key={r.id} className={canWrite ? '' : 'clickable'} onClick={canWrite ? undefined : () => setForm({ rec: r })}>
+                            <tr key={r.id} data-id={r.id}
+                              className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}${activeId === r.id ? ' active' : ''}`.trim()}
+                              onClick={canWrite ? () => setActiveId(r.id) : () => { setActiveId(r.id); setForm({ rec: r }); }}>
+                              {canWrite ? (
+                                <td className="chk" onClick={(e) => e.stopPropagation()}>
+                                  <input type="checkbox" aria-label="Select row" checked={allMatching || picked.has(r.id)} disabled={rowLocked(r)}
+                                    title={rowLocked(r) ? `Locked: ${lockNote(r.work_date, meta.locks)}` : 'Select row (Shift+click for a range)'}
+                                    onChange={() => {}} onClick={(e) => togglePick(r.id, e.shiftKey)} />
+                                </td>
+                              ) : null}
                               {tableCols.map((k) => (k === 'breakdate_vgfx' ? breakdateCell(r) : cell(r, k)))}
                               {canWrite ? (
                                 <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
@@ -1128,10 +1275,21 @@ export default function Workload() {
                     )}
             </div>
             <Pager total={total} offset={offset} size={PAGE} onOffset={setOffset} />
+            <div className="xl-hint dim">Shortcuts: {canWrite ? 'N new · ' : ''}/ search · ↑ ↓ move{canWrite ? ' (Shift to select)' : ''} · {canWrite ? 'Space tick · Enter / E edit · Ctrl+A select all · Delete delete · Ctrl+C copy rows · ' : 'Enter open · '}Esc clear</div>
           </>
         )}
       </div>
 
+      {deletingAll ? (
+        <DeleteAllModal
+          total={total}
+          scope={[tab === 'ALL' ? 'All tab' : `${meta.tabs.find((t) => t.key === tab).label} tab`, filt.units && `Units: ${filt.units}`, filt.platform && `Platform: ${filt.platform}`, filt.plug_type && `Plug Type: ${filt.plug_type}`,
+            (filt.from || filt.to) && `Dates: ${filt.from || '…'} → ${filt.to || '…'}`, q && `Search: “${q}”`].filter(Boolean)}
+          filters={{ team: tab === 'ALL' ? undefined : tab, units: filt.units || undefined, platform: filt.platform || undefined, plug_type: filt.plug_type || undefined, from: filt.from || undefined, to: filt.to || undefined, q: q || undefined }}
+          onClose={() => setDeletingAll(false)}
+          onDone={(out) => { setDeletingAll(false); afterBulk(out); }}
+        />
+      ) : null}
       {form ? (
         <WorkloadForm
           rec={form.rec}
@@ -1165,6 +1323,27 @@ export default function Workload() {
 
 // Admin-only: name a new column. It shows up everywhere (Table, Excel grid, the add/edit form, Excel export)
 // as a plain open-text field, appended after the template's own columns.
+function DeleteAllModal({ total, scope, filters, onClose, onDone }) {
+  const toast = useToast();
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
+    try { onDone(await post('/api/workload/bulk-delete', { all: true, filters })); } catch (e) { toast(e.message, 'err'); setBusy(false); }
+  };
+  return (
+    <Modal title="Delete all rows" onClose={onClose}
+      footer={(<><span className="grow" /><button type="button" className="btn" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn danger" disabled={busy || typed.trim() !== 'DELETE' || !total} onClick={go}>Delete {total} row{total === 1 ? '' : 's'}</button></>)}>
+      <p>This permanently deletes <strong>{total}</strong> Workload row{total === 1 ? '' : 's'} — every row that matches what you are looking at now:</p>
+      <ul className="plug-warn" style={{ color: 'inherit' }}>{scope.map((x) => <li key={x}>{x}</li>)}</ul>
+      <p>Rows in a locked period are skipped. It cannot be undone — consider an Export first.</p>
+      <label className="f"><span>Type <strong>DELETE</strong> to confirm</span>
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" onKeyDown={(e) => { if (e.key === 'Enter' && typed.trim() === 'DELETE' && !busy) go(); }} /></label>
+    </Modal>
+  );
+}
+
 function AddColumnModal({ columns, onClose, onAdded, onChanged }) {
   const toast = useToast();
   const [label, setLabel] = useState('');

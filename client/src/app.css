@@ -700,3 +700,23 @@ table.t.xl td[data-k="breakdate_vgfx"] .xl-cell { min-width: 250px; }
 select.plug-pick { margin-top: 6px; font-size: 12.5px; }
 
 .chip.unset { cursor: pointer; opacity: .85; }
+
+/* The Units / Platform / Plug Type dropdowns: the real <select> is invisible (color: transparent) and the label above it is drawn by hand,
+   so its option list inherited "transparent" text on the system's white popup. Give the options their own readable colours. */
+.fsel select option, .fsel select optgroup { color: var(--text); background: var(--surface); }
+
+/* Table mode: row ticks, selection bar, highlighted row */
+table.t.wl th.chk, table.t.wl td.chk { width: 34px; min-width: 34px; text-align: center; padding-left: 10px; padding-right: 4px; }
+table.t.wl td.chk input, table.t.wl th.chk input { cursor: pointer; }
+table.t.wl tbody tr.picked td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+table.t.wl tbody tr.active td { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+table.t.wl tbody tr.active td:first-child { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent), inset 3px 0 0 var(--accent); }
+table.t.wl.cards td.chk { position: absolute; top: 10px; right: 12px; width: auto; min-width: 0; z-index: 1; }
+table.t.wl.cards tr.picked { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+table.t.wl.cards tr.active { outline: 2px solid var(--accent); }
+.sel-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.sel-bar .grow { flex: 1; }
+.sel-all { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer; }
+.sel-count { display: inline-flex; align-items: center; gap: 10px; }
+.linkbtn { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; }
+.xl-selall { padding: 8px 4px 0; }
