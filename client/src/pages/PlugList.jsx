@@ -11,11 +11,13 @@ import { Empty, Modal, useConfirm, useDebounced, useToast } from '../components/
 const weekday = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' });
 const dateLabel = (iso) => `${weekday(iso)}, ${fmtDate(iso)}`;
 
-export default function PlugList({ canWrite, onCopied }) {
+export default function PlugList({ canWrite, isAdmin, onCopied }) {
   const toast = useToast();
   const confirm = useConfirm();
   const fileRef = useRef(null);
   const [dates, setDates] = useState(null);       // [{ date, n }] newest first; null = loading
+  const [totals, setTotals] = useState({ plugs: 0, days: 0 });   // across every day (the dropdown is capped at the latest 366)
+  const [deleting, setDeleting] = useState(false);
   const [date, setDate] = useState('');
   const [q, setQ] = useState('');
   const query = useDebounced(q, 250);
@@ -31,8 +33,10 @@ export default function PlugList({ canWrite, onCopied }) {
 
   const loadDates = useCallback(async (keep) => {
     try {
-      const d = (await get('/api/workload/plugs/dates')).dates;
+      const out = await get('/api/workload/plugs/dates');
+      const d = out.dates;
       setDates(d);
+      setTotals({ plugs: out.total ?? d.reduce((n, x) => n + x.n, 0), days: out.days ?? d.length });
       setDate((cur) => {
         if (keep && cur && d.some((x) => x.date === cur)) return cur;
         const today = isoDate();
@@ -116,6 +120,7 @@ export default function PlugList({ canWrite, onCopied }) {
             <button type="button" className="btn" onClick={() => setAdding(true)}><PlusIcon /> Add plug</button>
             <button type="button" className="btn" disabled={filling} onClick={fillExisting}
               title="Rows already in the Workload Tracker that have a Plug ID but a blank PSD or PROG. NAME / PROJ. TITLE get them from this list (anything typed is kept)">{filling ? 'Filling…' : 'Fill blank rows'}</button>
+            {isAdmin ? <button type="button" className="btn danger" disabled={!totals.plugs} onClick={() => setDeleting(true)} title="Delete this day's plug list, or every day's">Delete all…</button> : null}
             <button type="button" className="btn primary" disabled={!date || !todo.length} onClick={() => setCopying(true)}>
               {chosen.length ? `Copy ${chosen.length} to Workload` : `Copy ${todo.length || ''} to Workload`.replace('  ', ' ')}
             </button>
@@ -179,6 +184,11 @@ export default function PlugList({ canWrite, onCopied }) {
         </Modal>
       ) : null}
 
+      {deleting ? (
+        <DeleteAllPlugsModal date={date} dayCount={(dates.find((x) => x.date === date) || {}).n || 0} totals={totals} onClose={() => setDeleting(false)}
+          onDone={async (out) => { setDeleting(false); setPicked(new Set()); toast(`${out.deleted} plug${out.deleted === 1 ? '' : 's'} deleted`); await loadDates(true); loadRows(); }} />
+      ) : null}
+
       {adding ? <AddPlugModal date={date} onClose={() => setAdding(false)} onSaved={async (d) => { setAdding(false); await loadDates(true); if (d) setDate(d); loadRows(); }} /> : null}
 
       {copying ? (
@@ -186,6 +196,31 @@ export default function PlugList({ canWrite, onCopied }) {
           onDone={(out) => { setCopying(false); setPicked(new Set()); loadRows(); if (onCopied) onCopied(out); }} />
       ) : null}
     </div>
+  );
+}
+
+function DeleteAllPlugsModal({ date, dayCount, totals, onClose, onDone }) {
+  const toast = useToast();
+  const [scope, setScope] = useState(dayCount ? 'day' : 'all');
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const count = scope === 'day' ? dayCount : totals.plugs;
+  const go = async () => {
+    setBusy(true);
+    try { onDone(await post('/api/workload/plugs/delete-all', { scope, date })); } catch (e) { toast(e.message, 'err'); setBusy(false); }
+  };
+  return (
+    <Modal title="Delete plug list" onClose={onClose}
+      footer={(<><span className="grow" /><button type="button" className="btn" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn danger" disabled={busy || typed.trim() !== 'DELETE' || !count} onClick={go}>Delete {count} plug{count === 1 ? '' : 's'}</button></>)}>
+      <div className="stack">
+        <label className="radio-row"><input type="radio" name="plug-scope" checked={scope === 'day'} disabled={!dayCount} onChange={() => setScope('day')} /> Only <strong>{date ? dateLabel(date) : 'this day'}</strong> — {dayCount} plug{dayCount === 1 ? '' : 's'}</label>
+        <label className="radio-row"><input type="radio" name="plug-scope" checked={scope === 'all'} onChange={() => setScope('all')} /> <strong>Every day</strong> — {totals.plugs} plug{totals.plugs === 1 ? '' : 's'} on {totals.days} day{totals.days === 1 ? '' : 's'}</label>
+        <p className="dim m-0">This only removes the PSD Daily Plug List. Workload rows that were already made from it are not touched (they just stop being auto-filled until the list is imported again).</p>
+        <label className="f"><span>Type <strong>DELETE</strong> to confirm</span>
+          <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" onKeyDown={(e) => { if (e.key === 'Enter' && typed.trim() === 'DELETE' && !busy && count) go(); }} /></label>
+      </div>
+    </Modal>
   );
 }
 

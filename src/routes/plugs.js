@@ -143,7 +143,8 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
   // ---- which days have a list ----
   router.get('/plugs/dates', asyncH(async (req, res) => {
     const { rows } = await db.query('SELECT plug_date AS date, count(*)::int AS n FROM workload_plugs GROUP BY plug_date ORDER BY plug_date DESC LIMIT 366');
-    res.json({ dates: rows });
+    const all = (await db.query('SELECT count(*)::int AS plugs, count(DISTINCT plug_date)::int AS days FROM workload_plugs')).rows[0];
+    res.json({ dates: rows, total: all.plugs, days: all.days });
   }));
 
   // ---- list: ?date=YYYY-MM-DD, or ?from=&to=, optional ?q= and ?used=1 (adds in_workload: is it already in the Workload Tracker) ----
@@ -279,6 +280,19 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
     const filled = await backfillWorkload(db, { from, to, userId: req.user.id });
     await logRun(req, 'workload.plugs_fill', { from, to, rowsFilled: filled });
     res.json({ ok: true, filled });
+  }));
+
+  // ---- delete all: the selected day's list, or every day's (Admin only). Workload rows already made from plugs are not touched. ----
+  router.post('/plugs/delete-all', requireAction('workload.write'), asyncH(async (req, res) => {
+    if (!req.user || req.user.role !== 'Admin') throw new HttpError(403, 'Only an Admin can delete the whole plug list');
+    const body = req.body || {};
+    const scope = body.scope === 'all' ? 'all' : 'day';
+    const date = scope === 'day' ? v.date(body.date, { field: 'Date', required: true }) : null;
+    const { rowCount } = scope === 'day'
+      ? await db.query('DELETE FROM workload_plugs WHERE plug_date = $1', [date])
+      : await db.query('DELETE FROM workload_plugs');
+    await logRun(req, 'workload.plugs_delete_all', { scope, date, deleted: rowCount });
+    res.json({ ok: true, deleted: rowCount });
   }));
 
   // ---- copy a day's plugs (or the chosen ones) into the Workload Tracker: one new row per plug not already there ----

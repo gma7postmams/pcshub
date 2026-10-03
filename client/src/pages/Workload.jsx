@@ -1272,7 +1272,7 @@ export default function Workload() {
         </div>}
 
         {isPlugs ? (
-          <PlugList canWrite={canWrite} onCopied={() => { loadStats(); }} />
+          <PlugList canWrite={canWrite} isAdmin={isAdminUser} onCopied={() => { loadStats(); }} />
         ) : mode === 'excel' && tab === 'ALL' ? (
           <Empty>Pick VGFX, VEDIT or Audio above to edit in the Excel grid — each shows its own columns.</Empty>
         ) : isGrid ? (
