@@ -215,3 +215,8 @@ Table mode selects rows the way Excel mode selects cells — no tick boxes and n
 - Table mode saves straight to the server, so undo works by doing the opposite on the server: undoing a delete re-creates the rows as new rows (new IDs), undoing a paste deletes what it added. Undo history is kept until the page is reloaded; deleting everything with **Delete all…** can't be undone.
 - **Delete selected** and **Delete all…** (Admin only; type `DELETE` to confirm) skip rows in a locked period and say how many, and are logged (`workload.bulk_delete`).
 - The Units / Platform / Plug Type filters are the app's own dropdowns (keyboard: arrows, Enter, Esc, type a letter to jump), so the values are padded and themed instead of using the browser's plain popup.
+
+### Logo: login page and browser tab
+
+- The logo on the sign-in page is twice its old size (112 px tall, up to 320 px wide); the initials mark used when there is no logo grew to match.
+- The **browser-tab icon** is the logo uploaded on **Admin → Branding**, with a transparent background. It is made in the browser from that logo: a plain solid backdrop (a white or coloured box around the artwork) is removed from the edges inwards — white *inside* the artwork is kept — the empty margin is trimmed, and the result is centred on a 64×64 PNG. A logo that is already transparent is only trimmed and squared. It is cached per logo, so a newly uploaded logo gets a fresh icon; with no logo the built-in icon is used. (A logo whose corners are not one plain colour, such as a photo, is used as it is.) The installed-app / home-screen icons (`manifest.webmanifest`) are not changed.
