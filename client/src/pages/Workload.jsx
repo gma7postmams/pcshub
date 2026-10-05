@@ -165,6 +165,26 @@ function AudioGuideInput({ value, onChange, disabled }) {
   );
 }
 
+// Artwork / STB: either a DATE (date picker) or plain TEXT (open text box) — pick which with the little dropdown. Stored as one value:
+// 'YYYY-MM-DD' for a date, anything else for text. Switching the kind clears the box, since the two don't convert into each other.
+function DateOrTextInput({ value, onChange, disabled, max }) {
+  const v = value || '';
+  const [mode, setMode] = useState(!v || ISO.test(v) ? 'date' : 'text');   // an empty one starts as a date, like the column always did
+  useEffect(() => { if (v) setMode(ISO.test(v) ? 'date' : 'text'); }, [v]);   // follows the value (e.g. a full date typed as text becomes a date)
+  const emit = (x) => onChange({ target: { value: x } });
+  return (
+    <div className="ag">
+      <select value={mode} disabled={disabled} aria-label="Artwork / STB: date or text" onChange={(e) => { setMode(e.target.value); emit(''); }}>
+        <option value="date">Date</option>
+        <option value="text">Text</option>
+      </select>
+      {mode === 'date'
+        ? <input type="date" value={ISO.test(v) ? v : ''} disabled={disabled} onChange={(e) => emit(e.target.value)} />
+        : <input type="text" maxLength={max || 200} value={v} disabled={disabled} onChange={(e) => emit(e.target.value)} />}
+    </div>
+  );
+}
+
 // Textarea that grows to fit its content (used in the Excel grid so pasted text is never cut off)
 function AutoTextarea({ value, ...props }) {
   const ref = useRef(null);
@@ -184,6 +204,7 @@ function FieldInput({ def, value, onChange, disabled, lookups, auto }) {
   // date and time picked together (the browser's own calendar + time picker); 15-minute steps
   if (def.kind === 'datetime') return <input type="datetime-local" step={900} value={v} disabled={disabled} onChange={onChange} />;
   if (def.kind === 'audio_guide') return <AudioGuideInput value={v} onChange={onChange} disabled={disabled} />;
+  if (def.kind === 'date_or_text') return <DateOrTextInput value={v} onChange={onChange} disabled={disabled} max={def.max} />;
   if (def.kind === 'date') return <input type="date" value={v} disabled={disabled} onChange={onChange} />;
   if (def.kind === 'select') {
     const list = def.lookup ? withCurrent(lookups[def.lookup] || [], v) : def.options;
@@ -220,7 +241,7 @@ function CellEditor({ def, initial, lookups, onSave, onCancel }) {
   const finished = useRef(false);
   const field = () => box.current && box.current.querySelector('input, select, textarea');
   useEffect(() => {
-    const el = field();
+    const el = def.kind === 'date_or_text' && box.current ? box.current.querySelector('input') : field();   // Artwork / STB: the date / text box, not its format dropdown
     if (!el) return;
     el.focus();
     if (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type === 'text')) el.setSelectionRange(el.value.length, el.value.length);
@@ -1130,6 +1151,7 @@ export default function Workload() {
             {val ? <span className="strong">{oneLine(val)}</span> : null}
           </td>
         );
+      case 'art_stb': return <td {...common}>{val ? (ISO.test(val) ? <DateChip>{fmtDate(val)}</DateChip> : oneLine(val)) : null}</td>;   // a date shows as a chip, text as text
       case 'audio_guide': return <td {...common}><DateChip hue="fuchsia">{val ? (ISO.test(val) ? fmtDate(val) : oneLine(val)) : null}</DateChip></td>;
       case 'breakdate_vgfx': return <td {...common}><DateChip hue="purple">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VGFX in Units Concerned
       case 'breakdate_vedit': return <td {...common}><DateChip hue="orange">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VEDIT in Units Concerned

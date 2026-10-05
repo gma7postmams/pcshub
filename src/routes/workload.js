@@ -29,7 +29,7 @@ const TEAMS = ['VGFX', 'VEDIT', 'AUDIO'];
 const NOT_SET = '(Not set)';   // Units filter value for rows copied from the PSD Daily Plug List that haven't been assigned a team yet
 const TAB_LABEL = { ALL: 'All', VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio' };
 
-// Field kinds: date | select | text | audio_guide. `multiline` = textarea. `hint` = placeholder from the red notes.
+// Field kinds: date | select | text | audio_guide | date_or_text (a picked date OR typed text). `multiline` = textarea. `hint` = placeholder from the red notes.
 const OPEN = 'Type or paste anything';
 const FROM_PSD = 'Filled from the PSD Daily Plug List';
 const FIELDS = {
@@ -44,7 +44,7 @@ const FIELDS = {
   breakdate_vedit:{ label: 'Breakdate / Time (VEDIT)', kind: 'datetime' },
   vo:             { label: 'VO', kind: 'text', multiline: true, max: 1000, hint: OPEN },
   script:         { label: 'Script', kind: 'date' },
-  art_stb:        { label: 'Artwork / STB', kind: 'date' },
+  art_stb:        { label: 'Artwork / STB', kind: 'date_or_text', max: 200 },
   audio_guide:    { label: 'Audio Guide', kind: 'audio_guide' },
   remarks:        { label: 'Remarks', kind: 'text', multiline: true, max: 4000, hint: OPEN },
   total_mats:     { label: 'Total Mats', kind: 'text', multiline: true, max: 500, hint: OPEN },
@@ -201,6 +201,15 @@ async function fillFromPlugList(client, rec) {
   if (!rec.prog_name) rec.prog_name = rows[0].prog_name || null;
 }
 
+/** Artwork / STB: a date (YYYY-MM-DD, must be a real one) or any single line of text (up to 200 characters). */
+function parseDateOrText(raw, f) {
+  const s = v.str(raw, { field: f.label, max: f.max });
+  if (!s) return s;
+  const one = String(s).replace(/\s*\n\s*/g, ' ').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(one) && !validator.isDate(one, { format: 'YYYY-MM-DD', strictMode: true })) throw new HttpError(400, `${f.label} must be a real date or plain text`);
+  return one;
+}
+
 async function parseRow(client, body, current, customCols = [], opts = {}) {
   const cur = current || {};
   // Units Concerned is required — except for a row that came in from the PSD Daily Plug List and hasn't been assigned yet
@@ -210,6 +219,7 @@ async function parseRow(client, body, current, customCols = [], opts = {}) {
   for (const k of COLS) {
     const f = FIELDS[k];
     if (k === 'audio_guide') rec[k] = parseAudioGuide(body[k], cur[k]);
+    else if (f.kind === 'date_or_text') rec[k] = parseDateOrText(body[k], f);
     else if (f.kind === 'date') rec[k] = v.date(body[k], { field: f.label, required: !!f.required });
     else if (f.kind === 'datetime') rec[k] = parseDateTime(body[k], f.label);
     else if (k === 'units_concerned') rec[k] = unitsMayBeBlank && !body[k] ? null : v.oneOf(body[k], UNITS, { field: f.label });
@@ -433,7 +443,7 @@ router.get('/export', asyncH(async (req, res) => {
         if (k === 'breakdate_vgfx') val = null;   // filled in below as two labelled lines (VGFX / VEDIT)
         else if (f.kind === 'date') val = asDate(val);
         else if (f.kind === 'datetime') { const t = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(val || ''); val = t ? new Date(Date.UTC(+t[1], +t[2] - 1, +t[3], +t[4], +t[5])) : null; }
-        else if (k === 'audio_guide' && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = asDate(val);
+        else if ((k === 'audio_guide' || k === 'art_stb') && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = asDate(val);   // a date becomes a real Excel date; text stays text
         else if (k !== 'remarks') val = oneLineText(val);   // every field except Remarks is one line, like the web table
         return { ...o, [k]: val };
       }, {}));
@@ -447,7 +457,7 @@ router.get('/export', asyncH(async (req, res) => {
         if (r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit')) {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8B4B4' } };
         }
-        if (k === 'audio_guide' && r.audio_guide && /^\d{4}-\d{2}-\d{2}$/.test(r.audio_guide)) cell.numFmt = 'mmm d, yyyy';
+        if ((k === 'audio_guide' || k === 'art_stb') && r[k] && /^\d{4}-\d{2}-\d{2}$/.test(r[k])) cell.numFmt = 'mmm d, yyyy';
 
         if (k === 'breakdate_vgfx') {
           // Same as the web table: one labelled line per involved team, VGFX on top, VEDIT below (each only if it has a time)
@@ -463,7 +473,7 @@ router.get('/export', asyncH(async (req, res) => {
             ]) };
           }
           cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
-        } else if (f.kind === 'date' || f.kind === 'datetime' || k === 'audio_guide') {
+        } else if (f.kind === 'date' || f.kind === 'datetime' || k === 'audio_guide' || k === 'art_stb') {
           if (cell.value != null) cell.font = { color: { argb: pal.black } };
         } else if (k === 'platform' && r.platform) {
           cell.font = { bold: true, color: { argb: pal.black } };
@@ -500,7 +510,7 @@ router.get('/export', asyncH(async (req, res) => {
       column.eachCell({ includeEmpty: false }, (cell) => {
         if (column.key === 'breakdate_vgfx') { max = Math.max(max, ...cellText(cell.value).split('\n').map((t) => t.length)); return; }
         if ((f.kind === 'date' || f.kind === 'datetime') && cell.value instanceof Date) return; // already sized above
-        if (column.key === 'audio_guide' && cell.value instanceof Date) { max = Math.max(max, 13); return; }
+        if ((column.key === 'audio_guide' || column.key === 'art_stb') && cell.value instanceof Date) { max = Math.max(max, 13); return; }
         max = Math.max(max, cellText(cell.value).length);
       });
       // +15% then +3: plain character-count math undershoots for this app's content, which is heavy with wide,
@@ -804,7 +814,7 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
         else { val = cellText(val);
           if (f.kind === 'date') obj[key] = val instanceof Date ? isoDate(val) : String(val);
           else if (f.kind === 'datetime') obj[key] = val instanceof Date ? isoDateTime(val) : String(val);
-          else if (key === 'audio_guide') obj[key] = val instanceof Date ? isoDate(val) : String(val);
+          else if (key === 'audio_guide' || key === 'art_stb') obj[key] = val instanceof Date ? isoDate(val) : String(val);   // an Excel date or text
           else obj[key] = String(val); }
       }
       if (!hasAny) continue;

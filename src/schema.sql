@@ -166,16 +166,11 @@ BEGIN
               AND table_name = 'workload_items' AND column_name = 'breakdate_time') THEN
     ALTER TABLE workload_items RENAME COLUMN breakdate TO breakdate_time;
   END IF;
-  -- Script and Artwork/STB become real dates (only values that are already ISO dates are kept)
+  -- Script becomes a real date (only values that are already ISO dates are kept; Artwork / STB is not converted: it holds a date OR free text, see the end of this file)
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
               AND table_name = 'workload_items' AND column_name = 'script' AND data_type = 'text') THEN
     ALTER TABLE workload_items ALTER COLUMN script TYPE DATE
       USING (CASE WHEN script ~ '^\d{4}-\d{2}-\d{2}$' THEN script::date END);
-  END IF;
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
-              AND table_name = 'workload_items' AND column_name = 'art_stb' AND data_type = 'text') THEN
-    ALTER TABLE workload_items ALTER COLUMN art_stb TYPE DATE
-      USING (CASE WHEN art_stb ~ '^\d{4}-\d{2}-\d{2}$' THEN art_stb::date END);
   END IF;
 END $$;
 
@@ -188,7 +183,7 @@ ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS psd             TEXT;   -- c
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate       TIMESTAMP;   -- Breakdate/Time: date and time picked together (wall-clock, no time zone)
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS vo              TEXT;   -- open
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS script          DATE;   -- date
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS art_stb         DATE;   -- date
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS art_stb         TEXT;   -- a date (YYYY-MM-DD) OR free text
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS audio_guide     TEXT;   -- dropdown: 'N/A' or a date (YYYY-MM-DD)
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS remarks         TEXT;   -- open
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS total_mats      TEXT;   -- open
@@ -359,3 +354,12 @@ SELECT group_id, 'plugs' FROM group_permissions
  WHERE perm_key = 'workload' AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'plugs_page_granted')
 ON CONFLICT DO NOTHING;
 INSERT INTO app_settings (key, value) VALUES ('plugs_page_granted', '1') ON CONFLICT (key) DO NOTHING;
+
+-- Artwork / STB takes either a date (picked) or plain text (typed). It used to be a DATE column: convert it in place, keeping every date
+-- as 'YYYY-MM-DD'. (Runs only while the column is still a DATE, so free text entered afterwards is never touched.)
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+              AND table_name = 'workload_items' AND column_name = 'art_stb' AND data_type = 'date') THEN
+    ALTER TABLE workload_items ALTER COLUMN art_stb TYPE TEXT USING to_char(art_stb, 'YYYY-MM-DD');
+  END IF;
+END $$;

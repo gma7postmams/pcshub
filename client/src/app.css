@@ -441,7 +441,7 @@ table.t.xl tr.dirty td, table.t.xl tr.dirty:hover td { background: color-mix(in 
 /* Audio Guide control: N/A | Date (+ date picker) */
 .ag { display: flex; gap: 6px; align-items: center; }
 .ag select { flex: 0 0 auto; width: auto; min-width: 84px; }
-.ag input[type="date"] { flex: 1 1 auto; min-width: 130px; }
+.ag input[type="date"], .ag input[type="text"] { flex: 1 1 auto; min-width: 130px; }
 label.f > small { display: block; margin-top: 4px; font-size: 12px; }
 table.t.xl .ag select { width: 84px; min-width: 84px; flex: none; }
 table.t.xl .ag input[type="date"] { width: auto; min-width: 140px; flex: 1 1 auto; }
@@ -607,7 +607,7 @@ table.t.wl td.editing { padding: 4px; white-space: normal; }   /* the cell itsel
 .cell-editor input[type="datetime-local"] { min-width: 215px; }
 .cell-editor .ag { flex-wrap: wrap; max-width: 230px; }   /* wrap instead of overflowing into the next column if the cell is narrow */
 .cell-editor .ag select { min-width: 84px; }   /* the generic ".cell-editor select" rule above (150px) was overriding this back up, which is what pushed the date input into the Remarks column */
-.cell-editor .ag input[type="date"] { min-width: 130px; }
+.cell-editor .ag input[type="date"], .cell-editor .ag input[type="text"] { min-width: 130px; }
 table.t.xl input[type="datetime-local"] { min-width: 215px; }
 table.t.wl.cards td.editing { padding: 0; }
 
