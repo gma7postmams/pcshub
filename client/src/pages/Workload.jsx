@@ -1354,7 +1354,7 @@ export default function Workload() {
                     {!allMatching && pageAllPicked && isAdminUser && total > pageRows.length ? <span className="dim">Press Ctrl+A again to select all {total} matching rows</span> : null}
                     <button type="button" className="linkbtn" onClick={clearPicks}>Clear</button>
                   </span>
-                ) : null}
+                ) : <span className="dim sel-count">Drag across rows to select them (Shift / Ctrl+click to extend) · Ctrl+A selects all</span>}
                 <span className="grow" />
                 <button type="button" className="btn danger sm" disabled={!pickedCount} onClick={() => deleteSelected()}>Delete selected{pickedCount ? ` (${pickedCount})` : ''}</button>
                 {isAdminUser ? <button type="button" className="btn danger sm" onClick={() => setDeletingAll(true)} title="Delete every row that matches the current tab and filters">Delete all…</button> : null}
