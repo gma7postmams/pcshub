@@ -6,6 +6,7 @@ import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, LockIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
 import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
+import PlugPicker from '../components/PlugPicker.jsx';
 
 // Workload Tracker — ONE table. "Units Concerned" says which team(s) a plug is for; the tabs
 // (All / VGFX / VEDIT / Audio) are filters over it. Fields, per-tab columns and the Platform rules come
@@ -1151,6 +1152,14 @@ export default function Workload() {
         </td>
       );
     }
+    if (k === 'plug_id') {   // no free-text Plug ID: choose it from the PSD Daily Plug List in the edit form
+      const openForm = () => setForm({ rec: r });
+      return cloneElement(td, {
+        className: 'editable', title: 'Click to choose the plug from the PSD Daily Plug List', tabIndex: 0,
+        onClick: (e) => { e.stopPropagation(); openForm(); },
+        onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); openForm(); } },
+      });
+    }
     const open = () => setEditing({ id: r.id, k });
     return cloneElement(td, {
       className: 'editable', title: 'Click to edit', tabIndex: 0,
@@ -1578,29 +1587,36 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
   if (!rec && !duplicateFrom) { initial.work_date = isoDate(); initial.units_concerned = defaultUnits; }
   initial.is_priority = !!(rec && rec.is_priority);   // a duplicate is a new item, so it starts un-prioritised
   const [f, , setAll] = useForm(initial);
-  // the PSD Daily Plug List for the chosen Work Date: pick a plug, or type its Plug ID, and PSD + PROG. NAME / PROJ. TITLE are filled in
-  const [plugs, setPlugs] = useState([]);
+  // Plug ID is not typed: it is picked from the PSD Daily Plug List of the chosen Work Date, which fills PSD and PROG. NAME / PROJ. TITLE too
+  const session = useSession();
+  const [plugs, setPlugs] = useState(null);   // null = loading
   useEffect(() => {
     if (!ISO.test(f.work_date || '')) { setPlugs([]); return undefined; }
     let live = true;
-    get(`/api/plugs?date=${f.work_date}`).then((d) => { if (live) setPlugs(d.rows); }).catch(() => { if (live) setPlugs([]); });
+    setPlugs(null);
+    get(`/api/plugs?date=${f.work_date}&used=1`).then((d) => { if (live) setPlugs(d.rows); }).catch(() => { if (live) setPlugs([]); });
     return () => { live = false; };
   }, [f.work_date]);
   const findPlugIn = (date, plugId) => {
     const id = firstLine(plugId).trim().toUpperCase();
-    return id ? plugs.find((p) => p.plug_date === date && p.plug_id.toUpperCase() === id) || null : null;
+    return id && plugs ? plugs.find((p) => p.plug_date === date && p.plug_id.toUpperCase() === id) || null : null;
   };
   const set = (k) => (e) => {
     const val = e && e.target ? e.target.value : e;
     setAll((prev) => {
-      const next = withAutoPlatform(meta.platformRules, prev, k, val);
-      return k === 'plug_id' ? fillFromPlug(next, prev, findPlugIn) : next;
+      if (k === 'work_date') {
+        // another day has another list: the plug chosen for the old day (and what it filled in) is cleared
+        if (val === prev.work_date) return prev;
+        const old = findPlugIn(prev.work_date, prev.plug_id);
+        const next = withAutoPlatform(meta.platformRules, { ...prev, work_date: val }, 'plug_id', '');
+        if (old && next.psd === old.psd) next.psd = '';
+        if (old && next.prog_name === old.prog_name) next.prog_name = '';
+        return next;
+      }
+      return withAutoPlatform(meta.platformRules, prev, k, val);
     });
   };
-  const pickPlug = (e) => {
-    const p = plugs.find((x) => String(x.id) === e.target.value);
-    if (p) setAll((prev) => ({ ...withAutoPlatform(meta.platformRules, prev, 'plug_id', p.plug_id), psd: p.psd, prog_name: p.prog_name }));
-  };
+  const pickPlug = (p) => setAll((prev) => ({ ...withAutoPlatform(meta.platformRules, prev, 'plug_id', p.plug_id), psd: p.psd, prog_name: p.prog_name }));
 
   // Audio-only units use the template's Audio sheet columns; everything else uses the main sheet columns
   const teams = meta.unitTeams[f.units_concerned] || [];
@@ -1621,7 +1637,7 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
   const submit = async () => {
     if (!f.work_date) { toast('Work Date is required', 'err'); return; }
     if (!f.units_concerned) { toast('Units Concerned is required', 'err'); return; }
-    if (!plugText) { toast('Plug ID is required', 'err'); return; }
+    if (!plugText) { toast('Choose a Plug ID from the PSD Daily Plug List', 'err'); return; }
     setBusy(true);
     try {
       if (rec) await put(`/api/workload/${rec.id}`, f);
@@ -1662,19 +1678,20 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
         </label>
         {!f.units_concerned ? <div className="full dim">Choose Units Concerned to see the fields.</div> : shown.map((k) => {
           const def = meta.fields[k];
+          if (k === 'plug_id') {
+            return (
+              <div key={k} className="f full">
+                <span>{fieldLabel(k, def)}<span className="req"> *</span></span>
+                <PlugPicker date={f.work_date} value={f.plug_id} plugs={plugs} disabled={!canWrite} onPick={pickPlug}
+                  manageLink={session.canPage('/plug-list') ? <>Import it, or add the plug, on the <Link to="/plug-list">PSD Daily Plug List</Link> page.</> : 'Ask someone who manages the PSD Daily Plug List to import it.'} />
+                {plugText && !f.platform ? <small className="dim">{/PD_/i.test(plugText) ? 'PD_ plugs are digital — choose DIGITAL or INTL DIGITAL.' : 'Could not tell the platform from the Plug ID — choose one.'}</small> : null}
+              </div>
+            );
+          }
           return (
             <label key={k} className={`f${def.multiline ? ' full' : ''}`}>
               <span>{fieldLabel(k, def)}{def.required ? <span className="req"> *</span> : null}</span>
               <FieldInput def={def} value={f[k]} onChange={set(k)} disabled={!canWrite} lookups={lookups} />
-              {k === 'plug_id' && canWrite && plugs.length ? (
-                <select className="plug-pick" value="" onChange={pickPlug} aria-label="Pick a plug from the PSD Daily Plug List">
-                  <option value="">Pick from the PSD Daily Plug List ({plugs.length})…</option>
-                  {plugs.map((p) => <option key={p.id} value={p.id}>{p.plug_id} — {p.prog_name || '(no title)'} · {p.psd || '(no PSD)'}</option>)}
-                </select>
-              ) : null}
-              {k === 'platform' && plugText && !f.platform ? (
-                <small className="dim">{/PD_/i.test(plugText) ? 'PD_ plugs are digital — choose DIGITAL or INTL DIGITAL.' : 'Could not tell the platform from the Plug ID — choose one.'}</small>
-              ) : null}
             </label>
           );
         })}
