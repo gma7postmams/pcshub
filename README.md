@@ -246,3 +246,13 @@ Table mode selects rows the way Excel mode selects cells — no tick boxes and n
 ### Artwork / STB: a date or plain text
 
 The **Artwork / STB** field takes either a **date** (a date picker) or **text** (an open text box): a small **Date / Text** dropdown sits beside the box, in the New / Edit form and when you click the cell in Table mode (an empty one starts as a Date, as the column always did; switching clears the box, since the two don't convert into each other). It is stored as one value — `YYYY-MM-DD` for a date, anything else for text (up to 200 characters, one line; a date-shaped value must be a real date). In Table mode a date shows as a date chip and text as plain text; in Excel mode the cell is just a text cell (type `2026-10-09` or any text); the Export writes a date as a real Excel date and text as text, and Import reads either back. The database column changed from `DATE` to `TEXT`; the first start of this version converts it in place and keeps every existing date as `YYYY-MM-DD`.
+
+### Dashboard
+
+The Dashboard is one screen for everything in flight, refreshed every minute. Each block shows only if the signed-in user may see it:
+
+- **Workload Tracker** (needs the Workload page) — KPI cards for *Today*, *This week* (Monday–Sunday), *Breakdates in the next 7 days*, *Priority* and *Needs units* (items copied from the plug list that have no team yet); **Workload by day** (a column chart of the past week and the week ahead, today highlighted, weekends hatched); **By team** (items per VGFX / VEDIT / Audio — a VGFX/VEDIT item counts for both — plus the ones with no team); **Upcoming breakdates** (the next eight VGFX / VEDIT times with plug, program, PSD and a Priority tag); **Priority items**; **Platforms** (most used); and **Recently updated** (latest changes and who made them).
+- **PSD Daily Plug List** (needs the plug list page) — **coverage** for the current list day (today's, else the latest before today): how many of its plugs are already in the Workload Tracker, how many are still to copy, and a progress bar; plus the days and plugs on file.
+- **Ingest & Approval** (the Dashboard sections *Ingest KPIs* and *Recent ingest activity*, as before) — the four status cards, a **Status mix** bar and the recent ingest table.
+
+Cards and rows are clickable and open the relevant page. A user whose group has none of these sees a message instead.
