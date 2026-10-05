@@ -1339,9 +1339,6 @@ export default function Workload() {
                 </div>
               );
             })() : null}
-            {canWrite && grid && !grid.error ? (
-              <div className="xl-hint dim">Click a cell to edit it · drag across cells or Shift+click to select just those cells · click a row number for the whole row · right-click for Undo / Redo / Cut / Copy / Paste / Delete · Ctrl+Z / Ctrl+Y / Ctrl+X / Ctrl+C / Ctrl+V · paste below the last row adds rows · Delete clears</div>
-            ) : null}
             {grid && grid.total > GRID_LIMIT ? (
               <div className="pager"><span>Showing the first {GRID_LIMIT} of {grid.total} rows — narrow the date range to edit the rest.</span></div>
             ) : null}
@@ -1408,7 +1405,6 @@ export default function Workload() {
                 <button type="button" disabled={!pickedCount} onClick={() => { setTctx(null); deleteSelected(); }}>Delete {pickedCount > 1 ? `${pickedCount} rows` : 'row'}<span>Del</span></button>
               </div>
             ) : null}
-            {canWrite ? <div className="xl-hint dim">Drag across rows to select them · Shift+click for a range · Ctrl/Cmd+click to add or remove a row · right-click for Undo / Redo / Cut / Copy / Paste / Delete · Ctrl+A select all · Ctrl+C / Ctrl+X / Ctrl+V · Ctrl+Z / Ctrl+Y · Delete · Esc clears</div> : null}
           </>
         )}
       </div>
