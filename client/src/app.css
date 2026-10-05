@@ -751,3 +751,23 @@ table.t.xl td[data-k="breakdate_vgfx"] .xl-cell { min-width: 250px; }
 .hist-stats span { color: var(--text-3); font-size: 11.5px; font-weight: 500; text-transform: uppercase; letter-spacing: .03em; }
 .hist-stats strong { font-size: 15px; font-variant-numeric: tabular-nums; }
 @media (max-width: 800px) { .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } }
+
+/* Restore analysis */
+.dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 96px; padding: 16px; border: 2px dashed var(--border-2); border-radius: 10px; cursor: pointer; text-align: center; }
+.dropzone.over, .dropzone:hover { border-color: var(--accent); background: var(--accent-soft); }
+.readiness { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 32px; }
+.readiness .stat-label { display: block; margin-bottom: 4px; }
+.pill.risk { font-size: 14px; padding: 4px 14px; }
+.reasons { list-style: none; margin: 0; padding: 0; }
+.reasons li { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.reasons li:last-child { border-bottom: 0; }
+.c-add { color: var(--green); }
+.c-rem { color: var(--red); }
+.c-mod { color: var(--amber); }
+.diff-row > td { background: var(--surface-2); }
+.diff-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding: 4px 4px 8px; }
+.diff-col ul { margin: 6px 0; padding-left: 18px; }
+.diff-col li { margin-bottom: 4px; overflow-wrap: anywhere; }
+.diff-title { font-weight: 600; font-size: 13px; }
+@media (max-width: 800px) { .diff-grid { grid-template-columns: 1fr; } }
+.sub-tabs { margin-bottom: 14px; }

@@ -160,6 +160,10 @@ function describeBrandingUpdate(d) {
 function describeBackup(action, d) {
   const verb = { 'admin.backup_create': 'create', 'admin.backup_download': 'download', 'admin.backup_delete': 'delete', 'admin.backup_verify': 'verify', 'admin.backup_analyze': 'verify', 'admin.backup_restore': 'restore' }[action];
   const file = d.filename ? ` ${d.filename}` : '';
+  if (action === 'admin.backup_analyze' && d.source === 'upload') {
+    if (d.outcome === 'failed' && !d.riskLevel) return `Restore analysis failed${d.error ? `: ${d.error}` : ''}`;
+    return `Analyzed uploaded backup${file} - risk ${d.riskLevel || 'n/a'}${d.blockers && d.blockers.length ? ` (blocked: ${d.blockers[0]})` : ''}`;
+  }
   if (d.outcome === 'denied') return `Backup ${verb} denied${d.reason ? ` (${d.reason.replace(/_/g, ' ')})` : ''}${file ? ` -${file}` : ''}`;
   if (d.outcome === 'failed') return `Backup ${verb} failed${d.error ? `: ${d.error}` : ''}`;
   const size = d.sizeBytes != null ? ` (${fmtBytes(d.sizeBytes)})` : '';

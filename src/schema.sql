@@ -368,8 +368,8 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 -- Backup & Recovery job history. Rows are never hard-deleted: deleting a backup removes the file and sets deleted_at.
 CREATE TABLE IF NOT EXISTS backup_jobs (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  kind             TEXT NOT NULL DEFAULT 'create' CHECK (kind IN ('create','restore')),
-  status           TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','succeeded','failed','cancelled')),
+  kind             TEXT NOT NULL DEFAULT 'create' CHECK (kind IN ('create','analyze','restore')),
+  status           TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','succeeded','failed','cancelled','rolled_back')),
   progress         TEXT,
   filename         TEXT,
   rel_path         TEXT,
@@ -396,3 +396,15 @@ CREATE TABLE IF NOT EXISTS backup_jobs (
 );
 CREATE INDEX IF NOT EXISTS backup_jobs_created_idx ON backup_jobs (created_at DESC);
 CREATE INDEX IF NOT EXISTS backup_jobs_status_idx ON backup_jobs (kind, status);
+
+-- Phase 3 groundwork: restore/analyze rows reuse this table. Upgrade paths for tables created by the first release.
+ALTER TABLE backup_jobs DROP CONSTRAINT IF EXISTS backup_jobs_kind_check;
+ALTER TABLE backup_jobs ADD CONSTRAINT backup_jobs_kind_check CHECK (kind IN ('create','analyze','restore'));
+ALTER TABLE backup_jobs DROP CONSTRAINT IF EXISTS backup_jobs_status_check;
+ALTER TABLE backup_jobs ADD CONSTRAINT backup_jobs_status_check
+  CHECK (status IN ('queued','running','succeeded','failed','cancelled','rolled_back'));
+ALTER TABLE backup_jobs ADD COLUMN IF NOT EXISTS risk_level TEXT;
+ALTER TABLE backup_jobs ADD COLUMN IF NOT EXISTS duration_ms INT;
+ALTER TABLE backup_jobs ADD COLUMN IF NOT EXISTS source_backup_id UUID;   -- the backup a restore/analysis used, when it is a stored one
+ALTER TABLE backup_jobs DROP CONSTRAINT IF EXISTS backup_jobs_risk_level_check;
+ALTER TABLE backup_jobs ADD CONSTRAINT backup_jobs_risk_level_check CHECK (risk_level IN ('LOW','MEDIUM','HIGH'));

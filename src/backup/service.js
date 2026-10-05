@@ -381,19 +381,26 @@ function resolvePath(rel) {
   return abs;
 }
 
-async function list({ limit, offset, view = 'active' }) {
-  const where = { active: 'WHERE deleted_at IS NULL', deleted: 'WHERE deleted_at IS NOT NULL', all: '' }[view];
+// Unified Backup + Restore history. Restore rows are written by the restore engine in a later phase.
+async function list({ limit, offset, type = 'all', deleted = false }) {
+  const kinds = { all: "kind IN ('create','restore')", backup: "kind = 'create'", restore: "kind = 'restore'" }[type];
   const [rows, tot] = await Promise.all([
-    db.query(`SELECT ${COLS} FROM backup_jobs ${where} ORDER BY created_at DESC LIMIT $1 OFFSET $2`, [limit, offset]),
-    db.query(`SELECT count(*)::int AS total,
-                     count(*) FILTER (WHERE status='succeeded' AND deleted_at IS NULL)::int AS stored,
-                     count(*) FILTER (WHERE deleted_at IS NULL)::int AS active,
-                     count(*) FILTER (WHERE deleted_at IS NOT NULL)::int AS deleted,
-                     COALESCE(sum(size_bytes) FILTER (WHERE status='succeeded' AND deleted_at IS NULL), 0)::text AS bytes
-                FROM backup_jobs`),
+    db.query(`SELECT ${COLS}, risk_level,
+                     COALESCE(duration_ms, (EXTRACT(EPOCH FROM finished_at - started_at) * 1000)::int) AS duration_ms
+                FROM backup_jobs WHERE ${kinds} AND ($3::boolean OR deleted_at IS NULL)
+               ORDER BY created_at DESC LIMIT $1 OFFSET $2`, [limit, offset, deleted]),
+    db.query(`SELECT count(*) FILTER (WHERE kind='create' AND ($1::boolean OR deleted_at IS NULL))::int AS backups,
+                     count(*) FILTER (WHERE kind='restore')::int AS restores,
+                     count(*) FILTER (WHERE kind='create' AND status='succeeded' AND deleted_at IS NULL)::int AS stored,
+                     count(*) FILTER (WHERE kind='create' AND deleted_at IS NOT NULL)::int AS deleted,
+                     count(*) FILTER (WHERE kind='create' AND status IN ('queued','running'))::int AS running,
+                     COALESCE(sum(size_bytes) FILTER (WHERE kind='create' AND status='succeeded' AND deleted_at IS NULL), 0)::text AS bytes
+                FROM backup_jobs`, [deleted]),
   ]);
   const t = tot.rows[0];
-  return { rows: rows.rows, total: { active: t.active, deleted: t.deleted, all: t.total }[view], counts: { active: t.active, deleted: t.deleted, all: t.total }, stored: t.stored, storedBytes: Number(t.bytes) };
+  const counts = { backups: t.backups, restores: t.restores, deleted: t.deleted };
+  const total = { all: t.backups + t.restores, backup: t.backups, restore: t.restores }[type];
+  return { rows: rows.rows, total, counts, stored: t.stored, running: t.running > 0, storedBytes: Number(t.bytes) };
 }
 
 async function getJob(id) {
@@ -458,4 +465,5 @@ async function recoverStale() {
 
 module.exports = {
   preview, startCreate, list, getJob, verify, remove, prepareDownload, issueDownloadToken, consumeDownloadToken, recoverStale, environment,
+  acquire, verifyFile, collectCounts, isBusy: () => state.busy,
 };

@@ -1,5 +1,9 @@
 const fs = require('fs');
+const fsp = require('fs/promises');
+const crypto = require('crypto');
+const path = require('path');
 const express = require('express');
+const multer = require('multer');
 const bcrypt = require('bcrypt');
 const rateLimit = require('express-rate-limit');
 const db = require('../db');
@@ -8,6 +12,8 @@ const totp = require('../totp');
 const { asyncH, HttpError } = require('../middleware');
 const { audit } = require('../audit');
 const svc = require('../backup/service');
+const analysis = require('../backup/analysis');
+const cfg = require('../backup/config');
 
 // Mounted behind requirePageAccess('/admin'); the role is re-checked here as defence in depth.
 const router = express.Router();
@@ -26,6 +32,7 @@ const limiter = (limit) => rateLimit({
 });
 const createLimiter = limiter(10);
 const sensitiveLimiter = limiter(20);
+const analyzeLimiter = limiter(5);
 
 /** Password (plus the current 2FA code when enabled) must be re-entered for delete and download. */
 async function reauth(req, action, id) {
@@ -45,8 +52,8 @@ router.get('/preview', asyncH(async (req, res) => res.json(await svc.preview()))
 router.get('/', asyncH(async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 25, 100);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-  const view = ['active', 'deleted', 'all'].includes(req.query.view) ? req.query.view : 'active';
-  res.json(await svc.list({ limit, offset, view }));
+  const type = ['all', 'backup', 'restore'].includes(req.query.type) ? req.query.type : 'all';
+  res.json(await svc.list({ limit, offset, type, deleted: req.query.deleted === '1' }));
 }));
 
 router.post('/', createLimiter, asyncH(async (req, res) => {
@@ -56,6 +63,46 @@ router.post('/', createLimiter, asyncH(async (req, res) => {
 }));
 
 router.get('/jobs/:id', asyncH(async (req, res) => res.json({ job: await svc.getJob(req.params.id) })));
+
+// ---------- Restore (placeholder: execution arrives in a later phase; restore rows appear in GET / history) ----------
+router.post('/restore', (req, res) => res.status(501).json({ error: 'Restore is not available in this release.' }));
+
+// ---------- Restore analysis (read-only: nothing is restored) ----------
+router.param('aid', (req, res, next, aid) => (/^[0-9a-f]{24}$/.test(aid) ? next() : res.status(404).json({ error: 'Analysis not found or expired' })));
+
+const uploadZip = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => fsp.mkdir(cfg.QUARANTINE_DIR, { recursive: true, mode: 0o700 }).then(() => cb(null, cfg.QUARANTINE_DIR), cb),
+    filename: (req, file, cb) => cb(null, `${crypto.randomBytes(12).toString('hex')}.zip`),
+  }),
+  limits: { fileSize: cfg.MAX_ARCHIVE_BYTES, files: 1 },
+  fileFilter: (req, file, cb) => (path.extname(file.originalname).toLowerCase() === '.zip' ? cb(null, true) : cb(new HttpError(400, 'Choose a .zip backup file'))),
+});
+const receive = (req, res, next) => {
+  if (svc.isBusy()) return next(new HttpError(409, 'Another backup operation is already running'));
+  return uploadZip.single('file')(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === 'LIMIT_FILE_SIZE') return next(new HttpError(413, 'Backup file is larger than the allowed size'));
+    return next(err.code && String(err.code).startsWith('LIMIT_') ? new HttpError(400, 'Upload a single ZIP file') : err);
+  });
+};
+
+router.post('/analyze', analyzeLimiter, receive, asyncH(async (req, res) => {
+  if (!req.file) throw new HttpError(400, 'No file uploaded');
+  try {
+    res.status(202).json({ analysis: await analysis.start(req, req.file, req.file.originalname) });
+  } catch (e) {
+    await fsp.rm(req.file.path, { force: true });
+    throw e;
+  }
+}));
+
+router.get('/analyses/:aid', asyncH(async (req, res) => res.json({ analysis: analysis.pub(analysis.get(req.params.aid, req.user.id)) })));
+
+router.delete('/analyses/:aid', asyncH(async (req, res) => {
+  analysis.discard(analysis.get(req.params.aid, req.user.id));
+  res.json({ ok: true });
+}));
 
 router.post('/:id/verify', sensitiveLimiter, asyncH(async (req, res) => {
   const t0 = Date.now();

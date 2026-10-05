@@ -30,4 +30,11 @@ module.exports = {
   ZIP_MAX_TEXT_BYTES: 5 * 1024 * 1024,
 
   DOWNLOAD_TOKEN_TTL_MS: 2 * 60 * 1000,
+
+  // Restore analysis (uploaded archives wait here, untrusted, until discarded or expired)
+  QUARANTINE_DIR: path.resolve(process.env.BACKUP_DIR || path.join(ROOT, 'backups'), 'quarantine'),
+  ANALYSIS_TTL_MS: 30 * 60 * 1000,
+  RISK: {
+    highRemovedPct: 10, highRemovedTotal: 50, highAgeDays: 30, mediumAgeDays: 7,
+  },
 };

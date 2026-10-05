@@ -67,4 +67,27 @@ async function listDump(file) {
   return stdout.split('\n').filter((l) => l && !l.startsWith(';')).length;
 }
 
-module.exports = { run, toolVersion, dump, listDump, databaseName };
+// Object types a PCS Hub dump may contain. Anything else (functions, triggers, extensions, ...) is refused.
+const ALLOWED_TOC = ['FK CONSTRAINT', 'CHECK CONSTRAINT', 'CONSTRAINT', 'TABLE DATA', 'TABLE', 'SEQUENCE OWNED BY', 'SEQUENCE SET', 'SEQUENCE', 'DEFAULT', 'INDEX', 'COMMENT', 'SCHEMA'];
+
+/** @returns {{total:number, disallowed:string[]}} */
+async function inspectToc(file) {
+  const { stdout } = await run(cfg.PG_RESTORE_BIN, ['--list', file], { timeoutMs: 120000 });
+  const disallowed = new Set();
+  let total = 0;
+  for (const line of stdout.split('\n')) {
+    const m = /^\d+; \d+ \d+ (.+)$/.exec(line);
+    if (!m) continue;
+    total++;
+    if (!ALLOWED_TOC.some((t) => m[1] === t || m[1].startsWith(`${t} `))) disallowed.add(m[1].split(' ').slice(0, 2).join(' '));
+  }
+  return { total, disallowed: [...disallowed] };
+}
+
+async function restoreInto(dumpFile, dbName) {
+  await run(cfg.PG_RESTORE_BIN, [
+    '--no-owner', '--no-privileges', '--single-transaction', '--exit-on-error', `--dbname=${dbName}`, dumpFile,
+  ], { env: connEnv(), timeoutMs: cfg.TIMEOUT_MS });
+}
+
+module.exports = { run, toolVersion, dump, listDump, inspectToc, restoreInto, databaseName };
