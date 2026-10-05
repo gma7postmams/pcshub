@@ -1,5 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const db = require('../db');
 const { asyncH, HttpError, requireAuth } = require('../middleware');
@@ -139,6 +140,9 @@ router.get('/me', requireAuth, (req, res) => {
     sections: allowedSections(u),
     actions: allowedActions(u),
     landing: landingPath(u),
+    // A fingerprint of THIS sign-in (a one-way hash of the session id — the id itself is never sent to the page). It changes every time someone
+    // signs in, so the page can keep a per-sign-in preference (the Dashboard's period menu) and forget it at sign-out.
+    session_key: crypto.createHash('sha256').update(String(req.sessionID || '')).digest('hex').slice(0, 20),
   });
 });
 

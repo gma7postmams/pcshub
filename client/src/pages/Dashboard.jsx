@@ -28,7 +28,13 @@ const dayParts = (iso) => {
 };
 const dayLabel = (iso) => { const p = dayParts(iso); return `${p.dow}, ${monthOf(iso)} ${p.num}`; };
 const RANGE_KEY = 'dash:range';
-const storedRange = () => { try { return localStorage.getItem(RANGE_KEY) || 'week'; } catch (e) { return 'week'; } };
+// The menu choice is remembered only for the sign-in it was made in: it is stored with that sign-in's key (see /api/auth/me → session_key), so
+// reloads and page changes keep it, but after signing out (and in again) it starts at "This week" again — and so does anyone else who signs in.
+const readRange = (sessionKey) => {
+  if (!sessionKey) return 'week';
+  try { const v = JSON.parse(localStorage.getItem(RANGE_KEY)); return v && v.k === sessionKey && typeof v.r === 'string' ? v.r : 'week'; } catch (e) { return 'week'; }
+};
+const saveRange = (sessionKey, r) => { if (!sessionKey) return; try { localStorage.setItem(RANGE_KEY, JSON.stringify({ k: sessionKey, r })); } catch (e) { /* storage unavailable */ } };
 
 /** A card's heading: a tinted icon chip, the title, a little grey hint and an optional control at the right. */
 function CardHead({ icon: Icon, hue, dot, plain, title, hint, sub, right }) {
@@ -184,7 +190,7 @@ export default function Dashboard() {
   const s = useSession();
   const navigate = useNavigate();
   const [d, setD] = useState(null);
-  const [range, setRangeState] = useState(storedRange);
+  const [range, setRangeState] = useState(() => readRange(s.session_key));
   const rangeRef = useRef(range);
   rangeRef.current = range;
 
@@ -210,7 +216,7 @@ export default function Dashboard() {
 
   const changeRange = (key) => {
     setRangeState(key);
-    try { localStorage.setItem(RANGE_KEY, key); } catch (e) { /* storage unavailable */ }
+    saveRange(s.session_key, key);
     get(`/api/dashboard/days?range=${key}`).then((r) => setD((cur) => (cur && cur.workload ? { ...cur, workload: { ...cur.workload, byDay: r.days, bucket: r.bucket, range: r.range, rangeLabel: r.label, rangeSub: r.sub } } : cur))).catch(() => { /* keep the old chart */ });
   };
 
@@ -289,7 +295,7 @@ export default function Dashboard() {
 
       {w ? (
         <section className="dsh-card">
-          <CardHead icon={PulseIcon} hue="blue" title="Workload Tracker" hint={`${w.total} item${w.total === 1 ? '' : 's'} in total`} right={<RangeMenu ranges={w.ranges} value={range} onChange={changeRange} />} />
+          <CardHead icon={PulseIcon} hue="blue" title="Workload Tracker" hint={`${w.total} item${w.total === 1 ? '' : 's'} in total`} right={<RangeMenu ranges={w.ranges} value={w.range} onChange={changeRange} />} />
           <div className="dsh-stats">
             <StatCard icon={CalendarGridIcon} hue="blue" label="Today" value={w.today} foot={w.today === 1 ? 'item to work on' : 'items to work on'} onClick={go('/workload')} />
             <StatCard icon={CalendarGridIcon} hue="purple" label="This week" value={w.thisWeek} foot="Monday to Sunday" onClick={go('/workload')} />
