@@ -28,7 +28,7 @@ const dayParts = (iso) => {
 };
 const dayLabel = (iso) => { const p = dayParts(iso); return `${p.dow}, ${monthOf(iso)} ${p.num}`; };
 const RANGE_KEY = 'dash:range';
-const storedRange = () => { try { return localStorage.getItem(RANGE_KEY) || 'week'; } catch (e) { return 'week'; } };
+const storedRange = () => { try { return localStorage.getItem(RANGE_KEY) || 'all'; } catch (e) { return 'all'; } };
 
 /** A card's heading: a tinted icon chip, the title, a little grey hint and an optional control at the right. */
 function CardHead({ icon: Icon, hue, dot, plain, title, hint, sub, right }) {

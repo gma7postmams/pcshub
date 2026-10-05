@@ -12,14 +12,15 @@ const router = express.Router();
 //   workload           -> they can open the Workload Tracker
 const { ACTIVE_MINUTES } = require('./presence');   // "active now" = used the app within this many minutes
 // The window the "Workload by day" chart covers (the dropdown at the top right of the Workload Tracker block).
-const RANGES = {
+const RANGES = {   // the order here is the order of the menu; the first one is the default
+  all: { label: 'All time', sub: 'all time' },
   week: { label: 'This week', sub: 'past week and the week ahead' },
   month: { label: 'This month', sub: 'the whole month' },
   last30: { label: 'Last 30 days', sub: 'the last 30 days' },
   next30: { label: 'Next 30 days', sub: 'the next 30 days' },
-  all: { label: 'All time', sub: 'all time' },
 };
-const rangeKey = (q) => (RANGES[q] ? q : 'week');
+const DEFAULT_RANGE = 'all';
+const rangeKey = (q) => (RANGES[q] ? q : DEFAULT_RANGE);
 const BUCKET_NAME = { day: 'day', week: 'week', month: 'month', year: 'year' };
 
 /**
@@ -39,8 +40,13 @@ async function workloadDays(range) {
     );
     return { rows, bucket: 'day' };
   }
-  const { rows: [span] } = await db.query('SELECT min(work_date) AS first, max(work_date) AS last, (max(work_date) - min(work_date) + 1) AS days FROM workload_items');
-  if (!span || !span.first) return { rows: [], bucket: 'day' };
+  // from the first to the last day that has work — and always through today, so the chart shows where "now" is even when every item is in the past or the future
+  const { rows: [span] } = await db.query(
+    `SELECT least(min(work_date), CURRENT_DATE) AS first, greatest(max(work_date), CURRENT_DATE) AS last,
+            (greatest(max(work_date), CURRENT_DATE) - least(min(work_date), CURRENT_DATE) + 1) AS days, count(*)::int AS items
+       FROM workload_items`
+  );
+  if (!span || !span.items) return { rows: [], bucket: 'day' };
   const bucket = span.days <= 45 ? 'day' : span.days <= 210 ? 'week' : span.days <= 1830 ? 'month' : 'year';
   const step = { day: '1 day', week: '7 days', month: '1 month', year: '1 year' }[bucket];
   const trunc = { day: 'day', week: 'week', month: 'month', year: 'year' }[bucket];   // weeks start on Monday
