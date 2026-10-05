@@ -1,5 +1,6 @@
-// Import / export logging, shared by the Workload and Plug List routes: every run writes an audit entry (Admin → Audit, search
-// "import" or "export") AND one line to the server log (stdout -> `journalctl -u pcshub`). Row contents are never logged.
+// Action logging for the Workload / Plug List routes that are NOT import / export (bulk delete, copy to Workload, fill, delete all): an audit
+// entry through the app's audit() helper plus one line to the server log (stdout -> `journalctl -u pcshub`). Import / export events go through
+// src/transfer-hook.js instead, which leaves the audit log to whoever owns it. Row contents are never logged.
 const { audit } = require('./audit');
 
 const logLine = (event, data) => console.log(`[workload] ${event} ${JSON.stringify(data)}`);

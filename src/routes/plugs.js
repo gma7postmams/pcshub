@@ -11,6 +11,7 @@ const express = require('express');
 const { asyncH, HttpError, requireAction, requireAnyPage } = require('../middleware');
 const { audit } = require('../audit');
 const { logRun } = require('../transferlog');
+const { emitTransfer } = require('../transfer-hook');   // import events — the audit log subscribes to these (see src/transfer-hook.js)
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
 
@@ -232,10 +233,10 @@ module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, lo
       });
       const filled = await backfillWorkload(db, { from: result[0].date, to: result[result.length - 1].date, userId: req.user.id });   // rows already in the tracker with blank PSD / Prog. Name
       const total = result.reduce((o, s) => ({ plugs: o.plugs + s.plugs, added: o.added + s.added, skipped: o.skipped + s.skipped }), { plugs: 0, added: 0, skipped: 0 });
-      await logRun(req, 'workload.plugs_import', { ...info, days: result.length, from: result[0].date, to: result[result.length - 1].date, ...total, workloadRowsFilled: filled, warnings: warnings.slice(0, 20), ms: Date.now() - t0 });
+      await emitTransfer(req, 'workload.plugs_import', { ...info, days: result.length, from: result[0].date, to: result[result.length - 1].date, ...total, workloadRowsFilled: filled, warnings: warnings.slice(0, 20), ms: Date.now() - t0 });
       res.json({ ok: true, year, days: result.length, workloadRowsFilled: filled, ...total, existing: total.plugs - total.added, sheets: result, warnings: warnings.slice(0, 20) });
     } catch (e) {
-      await logRun(req, 'workload.plugs_import_failed', { ...info, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
+      await emitTransfer(req, 'workload.plugs_import_failed', { ...info, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
       throw e;
     }
   }));

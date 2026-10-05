@@ -186,18 +186,37 @@ client/                   React 18 + Vite front end
   dist/                   build output served by Express (index.html only after the access check)
 ```
 
-### Import / export logging
+### Import / export audit hook (for whoever owns the audit log)
 
-Every Workload **Import** and **Export** (and the Ingest report CSV export) is logged in two places:
+The Import and Export buttons — **Workload Import**, **Workload Export** and the PSD Daily Plug List **Import plug list** — do **not** write to the audit log themselves; that part belongs to someone else. Instead, each run (and each failure) is announced through one small module, `src/transfer-hook.js`, and the audit owner subscribes once:
 
-- **Admin → Audit** — search `import` or `export`. Actions: `workload.export`, `workload.import`, `workload.export_failed`, `workload.import_failed`, `reports.export_ingest`. Each entry records who, from which IP, when, and the details: file name and size, team / filters, rows per sheet, how many rows were created or skipped (with the first 20 skip reasons), any new columns an import created, how long it took, and — for a failure — the error. Row contents are never logged. (Each imported row still gets its own `workload.create` entry, flagged `imported`.)
-- **The server log** — one line per run, e.g. `[workload] workload.import {...}`; read it with `journalctl -u pcshub -f`.
+```js
+const { onTransfer } = require('./src/transfer-hook');
+onTransfer((e) => audit(e.req, e.action, e.entity, e.entityId, e.details));   // e.g. in server.js, once the audit module is loaded
+```
+
+Nothing is wired up yet, so until that line is added these actions simply don't appear in the audit log. (One line per event is also written to the server log — `journalctl -u pcshub -f` — whether or not anything is subscribed.)
+
+**Events** (`e.action`): `workload.export`, `workload.export_failed`, `workload.import`, `workload.import_failed`, `workload.plugs_import`, `workload.plugs_import_failed` — the list is exported as `TRANSFER_ACTIONS`.
+
+**The event** `e`: `action` · `entity` (`'workload_transfer'`, a suggested value for `audit()`'s entity argument) · `entityId` (`null`) · `user` (`{ id, username, role }` or `null`) · `ip` · `at` (ISO time) · `req` (the Express request, so `audit(req, …)` works exactly as elsewhere in the app) · `details`:
+
+| action | `details` |
+|---|---|
+| `workload.export` | `format`, `team`, `filters`, `matched`, `truncated` (hit the 20,000-row cap), `sheets` (rows per sheet), `file`, `bytes`, `ms` |
+| `workload.import` | `file`, `bytes`, `sheets` (`[{ name, rows }]`), `rowsRead`, `uniqueRows`, `created`, `skipped`, `errors` (first 20 skip reasons), `newColumns`, `ms` |
+| `workload.plugs_import` | `target`, `file`, `bytes`, `year`, `days`, `from`, `to`, `plugs`, `added`, `skipped`, `workloadRowsFilled`, `warnings`, `ms` |
+| `*_failed` | what was known at the time (`file`, `bytes`, `team` / `filters` …) plus `error` and `ms` |
+
+Row contents are never included. Listeners may be async; one that throws or rejects is logged and ignored, so it can never break an import or export. `onTransfer` returns a function that unsubscribes.
+
+Separately, the other actions added to Workload and the plug list — bulk delete / **Delete all…**, **Copy to Workload**, **Fill blank rows** — are ordinary action logs written through the existing `audit()` helper (`workload.bulk_delete`, `workload.plugs_copy`, `workload.plugs_fill`, `workload.plugs_delete_all`), like the app's other create / edit / delete entries; each imported Workload row still gets its own `workload.create` entry, flagged `imported`.
 
 ### PSD Daily Plug List (its own page, next to the Workload Tracker)
 
 The **PSD Daily Plug List** page (top navigation, right after the Workload Tracker; `/plug-list`) holds the PSD's daily plug list. The table has a **NO** column first, then a **DATE** column of its own (then PLUG ID / PROG. NAME / PROJ. TITLE / PSD / Account By), and two dropdowns control what you see: **View** — *All*, *Daily*, *Weekly* (Monday–Sunday), *Monthly* or *Custom range* (with ‹ › to step to the previous / next day that has a list, week or month) — and **Rows**, how many rows are visible per page (25 / 50 / 100 / 250 / 500 / All, up to 5,000 at once; the choices are remembered). *All* lists the newest day first. Search works within the current view. The Workload Tracker copies **Plug ID, PSD and PROG. NAME / PROJ. TITLE** from it.
 
-- **Import plug list** reads the PSD's workbook (one sheet per day; each sheet's date comes from its "DATE:" line, else the sheet name). The year isn't in the sheet, so it is taken from the file name (`September_2026_…`) or asked for. Re-importing an updated file only adds what is new; late additions under “Additional for …” are marked *Added*; exact duplicate lines are dropped. Imports are logged like the Workload import (Admin → Audit: `workload.plugs_import`).
+- **Import plug list** reads the PSD's workbook (one sheet per day; each sheet's date comes from its "DATE:" line, else the sheet name). The year isn't in the sheet, so it is taken from the file name (`September_2026_…`) or asked for. Re-importing an updated file only adds what is new; late additions under “Additional for …” are marked *Added*; exact duplicate lines are dropped. The import is announced on the import / export hook (`workload.plugs_import`, see above).
 - **Existing rows get filled too**: a Workload row that already has a Plug ID but a blank PSD or PROG. NAME / PROJ. TITLE is filled in from that day's list — automatically after a plug list is imported or a plug is added / edited, once at every server start, and on demand with **Fill blank rows** (on the plug list page; `workload.plugs_fill` in the audit log). Only blanks are filled (nothing typed is overwritten), the Plug ID matches in any letter case (for a multi-line Plug ID cell, the first line), and rows in a locked date range are left alone.
 - **New / Edit Workload has no free-text Plug ID**: the field is a dropdown of the plugs on the PSD Daily Plug List for the chosen Work Date (“PLUG_ID — program · PSD”). Choosing one fills PSD, PROG. NAME / PROJ. TITLE and the platform; changing the Work Date clears the choice, since another day has another list; a day with no list yet says so (with a link to the plug list page) and can't be saved. A row saved earlier with a Plug ID that isn't on the list shows it as “(not on this day's list)” and can still be saved unchanged. In Table mode, clicking a Plug ID cell opens the edit form for the same reason. Excel mode, Import and the Table-mode paste still take a typed / pasted Plug ID (they fill PSD / PROG. NAME when it matches the list).
 - **Autofill**: in Excel mode when you type or paste a Plug ID, and on the server whenever a row is saved with those two left blank (forms, Excel grid, Workload import). Values you type yourself are kept; ones that were filled in are replaced if you change the Plug ID.

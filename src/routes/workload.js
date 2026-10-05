@@ -5,7 +5,8 @@ const v = require('../validate');
 const { asyncH, HttpError, requireAction } = require('../middleware');
 const { audit } = require('../audit');
 
-const { logRun } = require('../transferlog');   // import / export logging (audit entry + server log line)
+const { logRun } = require('../transferlog');   // action logging (audit entry + server log line) for bulk delete
+const { emitTransfer } = require('../transfer-hook');   // import / export events — the audit log subscribes to these (see src/transfer-hook.js)
 
 // Mounted behind requirePageAccess('/workload'); writes need requireAction('workload.write').
 //
@@ -516,13 +517,13 @@ router.get('/export', asyncH(async (req, res) => {
   // truncate or mishandle a chunked response, which shows up as "the file format is invalid" when opened.
   const buffer = await wb.xlsx.writeBuffer();
   const filename = `Workload_${team || 'ALL'}_${stamp}.xlsx`;
-  await logRun(req, 'workload.export', { ...exportInfo, file: filename, bytes: buffer.length, ms: Date.now() - t0 });
+  await emitTransfer(req, 'workload.export', { ...exportInfo, file: filename, bytes: buffer.length, ms: Date.now() - t0 });
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.set('Content-Disposition', `attachment; filename="${filename}"`);
   res.set('Content-Length', String(buffer.length));
   res.end(buffer);
   } catch (e) {
-    await logRun(req, 'workload.export_failed', { ...exportInfo, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
+    await emitTransfer(req, 'workload.export_failed', { ...exportInfo, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
     throw e;
   }
 }));
@@ -849,13 +850,13 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
       }
     }
   });
-  await logRun(req, 'workload.import', {
+  await emitTransfer(req, 'workload.import', {
     ...importInfo, rowsRead: importInfo.sheets.reduce((n, sh) => n + sh.rows, 0), uniqueRows: merged.size,
     created, skipped: errors.length, errors: errors.slice(0, 20), newColumns, ms: Date.now() - t0,
   });
   res.json({ ok: true, created, skipped: errors.length, errors: errors.slice(0, 20), newColumns });
   } catch (e) {
-    await logRun(req, 'workload.import_failed', { ...importInfo, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
+    await emitTransfer(req, 'workload.import_failed', { ...importInfo, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
     throw e;
   }
 }));

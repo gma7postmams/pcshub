@@ -24,7 +24,7 @@ export default function Audit() {
   return (
     <div className="card">
       <div className="filters">
-        <input type="search" placeholder="Action (e.g. ingest, approval, auth, import, export)" value={f.action} onChange={set('action')} />
+        <input type="search" placeholder="Action (e.g. ingest, approval, auth)" value={f.action} onChange={set('action')} />
         <input type="search" placeholder="Username" value={f.user} onChange={set('user')} />
         <input type="date" value={f.from} onChange={set('from')} />
         <input type="date" value={f.to} onChange={set('to')} />
