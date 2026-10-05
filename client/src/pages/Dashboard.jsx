@@ -90,6 +90,19 @@ function RangeMenu({ ranges, value, onChange }) {
   );
 }
 
+/** "Earlier today · 2": people active in the last 24 hours who aren't now; hover or focus it for their names. (A pill, not a row, so Active users never grows taller.) */
+function EarlierPill({ people }) {
+  if (!people.length) return null;
+  return (
+    <span className="dsh-earlier" tabIndex={0} aria-label={`Earlier today: ${people.map((p) => p.name).join(', ')}`}>
+      Earlier today<b>{people.length}</b>
+      <span className="dsh-earlier-pop" role="tooltip">
+        {people.map((p) => <span key={p.id}><i style={{ background: hueFor(p.name) }} />{p.name}<em>{ago(p.lastActiveAt)}</em></span>)}
+      </span>
+    </span>
+  );
+}
+
 function dayInfo(byDay) {
   const days = byDay.map((x) => ({ iso: String(x.day).slice(0, 10), n: x.n }));
   const total = days.reduce((a, x) => a + x.n, 0);
@@ -213,32 +226,27 @@ export default function Dashboard() {
         <div className={`dsh-row2${us && links.length ? '' : ' one'}`}>
           {us ? (
             <section className="dsh-card dsh-users">
-              <CardHead dot title="Active users" hint={us.active.length ? `${us.active.length} working right now` : `no one in the last ${us.windowMinutes} minutes`} />
+              <CardHead dot title="Active users" hint={us.active.length ? `${us.active.length} working right now` : `no one in the last ${us.windowMinutes} minutes`} right={<EarlierPill people={us.earlier} />} />
               {us.active.length ? (
-                <div className="dsh-userlist">
+                <div className={`dsh-userlist${us.active.length >= 3 ? ' compact' : ''}`}>
                   {us.active.map((p) => {
                     const where = p.you ? 'Dashboard' : p.page;
                     const target = p.you ? null : (p.path && s.canPage(p.path) ? p.path : null);   // a card opens the page that person is on, if you can open it too
                     const Tag = target ? 'button' : 'div';
                     return (
-                      <Tag key={p.id} type={target ? 'button' : undefined} className={`dsh-user${target ? ' link' : ''}`} onClick={target ? () => navigate(target) : undefined}>
-                        <span className="dsh-avatar" style={{ background: hueFor(p.name) }}>{initials(p.name).slice(0, 2)}<i className="dsh-status" title="Active now" /></span>
+                      <Tag key={p.id} type={target ? 'button' : undefined} className={`dsh-user${target ? ' link' : ''}`} onClick={target ? () => navigate(target) : undefined}
+                        title={`${p.name} · ${p.role}${where ? ` · on ${where}` : ''} · ${p.you ? 'just now' : ago(p.lastActiveAt)}`}>
+                        <span className="dsh-avatar" style={{ background: hueFor(p.name) }}>{initials(p.name).slice(0, 2)}<i className="dsh-status" /></span>
                         <span className="dsh-user-info">
-                          <span className="dsh-user-name">{p.name}{p.you ? <span className="dsh-you">You</span> : null}</span>
+                          <span className="dsh-user-name"><span className="dsh-user-nm">{p.name}</span>{p.you ? <span className="dsh-you">You</span> : null}</span>
                           <span className="dsh-user-meta"><RoleBadge role={p.role} />{where ? <span className="dim">on {where}</span> : null}</span>
                         </span>
-                        {target ? <span className="dsh-go"><ChevronRightIcon /></span> : <span className="dsh-ago dim">{p.you ? 'just now' : ago(p.lastActiveAt)}</span>}
+                        {target ? <span className="dsh-go"><ChevronRightIcon /></span> : null}
                       </Tag>
                     );
                   })}
                 </div>
               ) : <Empty>No one has been active in the last {us.windowMinutes} minutes.</Empty>}
-              {us.earlier.length ? (
-                <div className="dsh-earlier">
-                  <span className="dim">Earlier today</span>
-                  {us.earlier.map((p) => <span className="dsh-echip" key={p.id} title={`${p.role}${p.page ? ` · last on ${p.page}` : ''}`}><i style={{ background: hueFor(p.name) }} />{p.name}<em>{ago(p.lastActiveAt)}</em></span>)}
-                </div>
-              ) : null}
             </section>
           ) : null}
 
