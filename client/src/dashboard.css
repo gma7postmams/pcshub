@@ -256,3 +256,11 @@ button.dsh-stat:hover { transform: translateY(-2px); box-shadow: 0 10px 22px col
   .dsh-track { height: 7px; }
   .dsh-note { font-size: 11px; }
 }
+
+/* "All time": week / month / year bars — wider bars, and only some of the labels are shown */
+.dsh-chart.buckets .dsh-bar { width: 58%; max-width: 56px; }
+.dsh-chart.buckets .dsh-xl:not(.today):not(:nth-child(5n+1)) .dsh-xl-date { visibility: visible; }
+.dsh-chart.buckets .dsh-xl-date.skip { visibility: hidden; }
+.dsh-chart.buckets .dsh-xl-date { font-size: 11px; }
+.dsh-chart.buckets .dsh-xl-date.now { color: var(--accent); font-weight: 800; }
+.dsh-chart-empty { flex: 1; display: grid; place-items: center; min-height: 120px; }

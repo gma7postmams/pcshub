@@ -17,19 +17,42 @@ const RANGES = {
   month: { label: 'This month', sub: 'the whole month' },
   last30: { label: 'Last 30 days', sub: 'the last 30 days' },
   next30: { label: 'Next 30 days', sub: 'the next 30 days' },
+  all: { label: 'All time', sub: 'all time' },
 };
 const rangeKey = (q) => (RANGES[q] ? q : 'week');
+const BUCKET_NAME = { day: 'day', week: 'week', month: 'month', year: 'year' };
+
+/**
+ * The chart's bars for a range: [{ day, last, n }] where `day`..`last` is what a bar covers (one day, a week, a month or a year) and n the
+ * items in it. Fixed windows are one bar per day. "All time" runs from the first to the last day that has any work and picks the bar size so the
+ * chart stays readable: up to ~6 weeks of history -> per day, up to ~7 months -> per week, up to ~5 years -> per month, longer -> per year.
+ */
 async function workloadDays(range) {
-  const start = { week: 'CURRENT_DATE - 6', month: `date_trunc('month', CURRENT_DATE)::date`, last30: 'CURRENT_DATE - 29', next30: 'CURRENT_DATE' }[range];
-  const end = { week: 'CURRENT_DATE + 7', month: `(date_trunc('month', CURRENT_DATE) + interval '1 month - 1 day')::date`, last30: 'CURRENT_DATE', next30: 'CURRENT_DATE + 29' }[range];
+  if (range !== 'all') {
+    const start = { week: 'CURRENT_DATE - 6', month: `date_trunc('month', CURRENT_DATE)::date`, last30: 'CURRENT_DATE - 29', next30: 'CURRENT_DATE' }[range];
+    const end = { week: 'CURRENT_DATE + 7', month: `(date_trunc('month', CURRENT_DATE) + interval '1 month - 1 day')::date`, last30: 'CURRENT_DATE', next30: 'CURRENT_DATE + 29' }[range];
+    const { rows } = await db.query(
+      `SELECT d::date AS day, d::date AS last, count(w.id)::int AS n
+         FROM generate_series(${start}, ${end}, interval '1 day') d
+         LEFT JOIN workload_items w ON w.work_date = d::date
+        GROUP BY d ORDER BY d`
+    );
+    return { rows, bucket: 'day' };
+  }
+  const { rows: [span] } = await db.query('SELECT min(work_date) AS first, max(work_date) AS last, (max(work_date) - min(work_date) + 1) AS days FROM workload_items');
+  if (!span || !span.first) return { rows: [], bucket: 'day' };
+  const bucket = span.days <= 45 ? 'day' : span.days <= 210 ? 'week' : span.days <= 1830 ? 'month' : 'year';
+  const step = { day: '1 day', week: '7 days', month: '1 month', year: '1 year' }[bucket];
+  const trunc = { day: 'day', week: 'week', month: 'month', year: 'year' }[bucket];   // weeks start on Monday
   const { rows } = await db.query(
-    `SELECT d::date AS day, count(w.id)::int AS n
-       FROM generate_series(${start}, ${end}, interval '1 day') d
-       LEFT JOIN workload_items w ON w.work_date = d::date
-      GROUP BY d ORDER BY d`
+    `SELECT b::date AS day, (b + interval '${step}' - interval '1 day')::date AS last, count(w.id)::int AS n
+       FROM generate_series(date_trunc('${trunc}', $1::date), date_trunc('${trunc}', $2::date), interval '${step}') b
+       LEFT JOIN workload_items w ON w.work_date >= b::date AND w.work_date < (b + interval '${step}')::date
+      GROUP BY b ORDER BY b`, [span.first, span.last]
   );
-  return rows;
+  return { rows, bucket };
 }
+const rangeSub = (range, bucket) => (range === 'all' ? `all time · one bar per ${BUCKET_NAME[bucket]}` : RANGES[range].sub);
 
 const unitsFor = (team) => Object.entries(UNIT_TEAMS).filter(([, teams]) => teams.includes(team)).map(([u]) => u);
 
@@ -52,7 +75,8 @@ router.get('/days', asyncH(async (req, res) => {
   if (!canPage(req.user, '/workload')) return res.status(403).json({ error: 'No access to the Workload Tracker' });
   const range = rangeKey(req.query.range);
   res.set('Cache-Control', 'no-store');
-  res.json({ range, label: RANGES[range].label, sub: RANGES[range].sub, days: await workloadDays(range) });
+  const { rows, bucket } = await workloadDays(range);
+  res.json({ range, label: RANGES[range].label, sub: rangeSub(range, bucket), bucket, days: rows });
 }));
 
 router.get('/users', asyncH(async (req, res) => {
@@ -119,7 +143,7 @@ router.get('/', asyncH(async (req, res) => {
     const t = totals.rows[0];
     out.workload = {
       total: t.total, today: t.today, thisWeek: t.this_week, priority: t.priority, breakdatesNext7Days: nextWeek,
-      byTeam, byDay, range, rangeLabel: RANGES[range].label, rangeSub: RANGES[range].sub, ranges: Object.entries(RANGES).map(([k, v]) => ({ key: k, label: v.label })),
+      byTeam, byDay: byDay.rows, bucket: byDay.bucket, range, rangeLabel: RANGES[range].label, rangeSub: rangeSub(range, byDay.bucket), ranges: Object.entries(RANGES).map(([k, v]) => ({ key: k, label: v.label })),
     };
   }
 

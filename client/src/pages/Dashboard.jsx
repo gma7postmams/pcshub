@@ -103,21 +103,41 @@ function EarlierPill({ people }) {
   );
 }
 
-function dayInfo(byDay) {
-  const days = byDay.map((x) => ({ iso: String(x.day).slice(0, 10), n: x.n }));
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+const partsOf = (iso) => ({ y: iso.slice(0, 4), m: monthOf(iso), d: Number(iso.slice(8, 10)) });
+/** What one bar covers, for the tooltip: a day, a week ("Sep 28 – Oct 4"), a month ("October 2026") or a year. */
+function barLabel(x, bucket) {
+  if (bucket === 'week') { const a = partsOf(x.iso); const z = partsOf(x.last); return `${a.m} ${a.d}${a.y !== z.y ? `, ${a.y}` : ''} – ${z.m} ${z.d}, ${z.y}`; }
+  if (bucket === 'month') return new Date(`${x.iso}T00:00:00Z`).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  if (bucket === 'year') return x.iso.slice(0, 4);
+  return dayLabel(x.iso);
+}
+/** The short label under a bar (and whether to show it: with many bars only every few are labelled). */
+function axisLabel(x, i, days, bucket) {
+  const a = partsOf(x.iso);
+  if (bucket === 'week') return `${a.m} ${a.d}`;
+  if (bucket === 'month') return i === 0 || a.m === 'Jan' ? `${a.m} '${a.y.slice(2)}` : a.m;
+  return a.y;
+}
+
+function dayInfo(byDay, bucket = 'day') {
+  const days = byDay.map((x) => ({ iso: String(x.day).slice(0, 10), last: String(x.last || x.day).slice(0, 10), n: x.n }));
   const total = days.reduce((a, x) => a + x.n, 0);
   const top = Math.max(...days.map((x) => x.n), 0);
-  return { days, total, top, busiest: days.find((x) => x.n === top && top > 0), avg: total / (days.length || 1) };
+  return { days, bucket, total, top, busiest: days.find((x) => x.n === top && top > 0), avg: total / (days.length || 1) };
 }
 
 function DayChart({ info, todayIso }) {
-  const { days, top } = info;
+  const { days, top, bucket } = info;
   const niceMax = Math.max(4, Math.ceil(top / 4) * 4);   // the axis tops out on a multiple of 4, so the gridlines are whole numbers
   const ticks = [1, 0.75, 0.5, 0.25, 0].map((f) => Math.round(niceMax * f));
-  const dense = days.length > 16;   // a month or 30 days: date numbers only
+  const byDays = bucket === 'day';
+  const dense = !byDays || days.length > 16;   // a month or 30 days, or week / month / year bars: no weekday names
+  const step = byDays ? 1 : Math.max(1, Math.ceil(days.length / 12));   // with many bars only every few are labelled
   const cols = { gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))` };
+  if (!days.length) return <div className="dsh-chart-empty"><Empty>No workload yet.</Empty></div>;
   return (
-    <div className={`dsh-chart${dense ? ' dense' : ''}`}>
+    <div className={`dsh-chart${dense ? ' dense' : ''}${byDays ? '' : ' buckets'}`}>
       <div className="dsh-plotwrap">
         <div className="dsh-y">{ticks.map((t) => <span key={t}>{t}</span>)}</div>
         <div className="dsh-plot">
@@ -127,12 +147,12 @@ function DayChart({ info, todayIso }) {
             {days.map((x) => {
               const p = dayParts(x.iso);
               const h = x.n ? Math.max((x.n / niceMax) * 100, 3) : 0;
-              const kind = x.iso === todayIso ? 'today' : x.iso < todayIso ? 'past' : 'next';
+              const kind = x.last < todayIso ? 'past' : x.iso <= todayIso ? 'today' : 'next';   // a bar that contains today is "today"
               return (
-                <div key={x.iso} className={`dsh-col ${kind}${p.weekend ? ' weekend' : ''}`}>
+                <div key={x.iso} className={`dsh-col ${kind}${byDays && p.weekend ? ' weekend' : ''}`}>
                   {x.n ? <span className="dsh-val" style={{ bottom: `calc(${h}% + 4px)` }}>{x.n}</span> : <span className="dsh-zero" />}
                   <div className="dsh-bar" style={{ height: `${h}%` }} />
-                  <span className="dsh-tip" style={{ bottom: `calc(${h}% + 26px)` }}>{dayLabel(x.iso)}<b>{x.n} item{x.n === 1 ? '' : 's'}</b></span>
+                  <span className="dsh-tip" style={{ bottom: h > 62 ? `calc(${h}% - 58px)` : `calc(${h}% + 26px)` }}>{barLabel(x, bucket)}<b>{x.n} item{x.n === 1 ? '' : 's'}</b></span>
                 </div>
               );
             })}
@@ -142,12 +162,16 @@ function DayChart({ info, todayIso }) {
       <div className="dsh-xaxis" style={cols}>
         {days.map((x, i) => {
           const p = dayParts(x.iso);
-          const isToday = x.iso === todayIso;
+          const isToday = x.last >= todayIso && x.iso <= todayIso;
           const showMonth = i === 0 || p.num === 1;
+          const label = byDays
+            ? (dense ? (showMonth ? `${monthOf(x.iso)} ${p.num}` : p.num) : `${monthOf(x.iso)} ${p.num}`)
+            : axisLabel(x, i, days, bucket);
+          const skipped = !byDays && !isToday && i % step !== 0 && !(bucket === 'month' && partsOf(x.iso).m === 'Jan');   // the start of a year is always labelled
           return (
-            <div key={x.iso} className={`dsh-xl${isToday ? ' today' : ''}${p.weekend ? ' weekend' : ''}`}>
+            <div key={x.iso} className={`dsh-xl${isToday ? ' today' : ''}${byDays && p.weekend ? ' weekend' : ''}`}>
               {dense ? null : <span className="dsh-xl-dow">{p.dow}</span>}
-              {isToday ? <span className="dsh-xl-pill">{p.num}</span> : <span className="dsh-xl-date">{dense ? (showMonth ? `${monthOf(x.iso)} ${p.num}` : p.num) : `${monthOf(x.iso)} ${p.num}`}</span>}
+              {isToday && byDays ? <span className="dsh-xl-pill">{p.num}</span> : <span className={`dsh-xl-date${skipped ? ' skip' : ''}${isToday ? ' now' : ''}`}>{label}</span>}
             </div>
           );
         })}
@@ -187,7 +211,7 @@ export default function Dashboard() {
   const changeRange = (key) => {
     setRangeState(key);
     try { localStorage.setItem(RANGE_KEY, key); } catch (e) { /* storage unavailable */ }
-    get(`/api/dashboard/days?range=${key}`).then((r) => setD((cur) => (cur && cur.workload ? { ...cur, workload: { ...cur.workload, byDay: r.days, range: r.range, rangeLabel: r.label, rangeSub: r.sub } } : cur))).catch(() => { /* keep the old chart */ });
+    get(`/api/dashboard/days?range=${key}`).then((r) => setD((cur) => (cur && cur.workload ? { ...cur, workload: { ...cur.workload, byDay: r.days, bucket: r.bucket, range: r.range, rangeLabel: r.label, rangeSub: r.sub } } : cur))).catch(() => { /* keep the old chart */ });
   };
 
   if (!d) return <main className="container wide dsh"><Empty>Loading…</Empty></main>;
@@ -209,7 +233,7 @@ export default function Dashboard() {
     d.canOpen.reports && { to: '/reports', label: 'Reports', icon: BarChartIcon, hue: 'indigo' },
   ].filter(Boolean);
   const nothing = !w && !us && !d.kpis && !links.length;
-  const info = w ? dayInfo(w.byDay) : null;
+  const info = w ? dayInfo(w.byDay, w.bucket) : null;
 
   return (
     <main className="container wide dsh">
@@ -278,12 +302,12 @@ export default function Dashboard() {
       {w ? (
         <div className="dsh-row3">
           <section className="dsh-card dsh-chart-card">
-            <CardHead icon={UsersIcon} hue="blue" title="Workload by day" sub={w.rangeSub}
+            <CardHead icon={UsersIcon} hue="blue" title={`Workload by ${info.bucket}`} sub={w.rangeSub}
               right={(
                 <div className="dsh-cstats">
                   <span>In view <b>{info.total}</b></span>
-                  <span>Daily average <b>{info.avg.toFixed(1)}</b></span>
-                  <span>Busiest day <b>{info.busiest ? `${dayLabel(info.busiest.iso)} · ${info.busiest.n}` : '—'}</b></span>
+                  <span>{{ day: 'Daily', week: 'Weekly', month: 'Monthly', year: 'Yearly' }[info.bucket]} average <b>{info.avg.toFixed(1)}</b></span>
+                  <span>Busiest {info.bucket} <b>{info.busiest ? `${barLabel(info.busiest, info.bucket)} · ${info.busiest.n}` : '—'}</b></span>
                   <span className="dsh-legend"><i className="past" />Past<i className="next" />Upcoming<i className="today" />Today</span>
                 </div>
               )} />
