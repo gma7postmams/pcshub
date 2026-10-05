@@ -166,7 +166,6 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
         {period === 'day' || period === 'week' || period === 'month' ? (
           <div className="plug-date">
             <button type="button" className="btn sm" disabled={!canPrev} onClick={() => go(-1)} title={`Previous ${period === 'day' ? 'day with a list' : period}`}>‹</button>
-            <input type="date" className="plug-anchor" value={anchor} onChange={(e) => e.target.value && setAnchor(e.target.value)} aria-label="Go to date" />
             <button type="button" className="btn sm" disabled={!canNext} onClick={() => go(1)} title={`Next ${period === 'day' ? 'day with a list' : period}`}>›</button>
             <span className="plug-range">{rangeLabel(period, range, anchor)}</span>
           </div>
@@ -212,15 +211,15 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
                 <thead>
                   <tr>
                     {canWrite ? <th className="chk"><input type="checkbox" checked={allOn} disabled={!todo.length} onChange={() => setPicked(allOn ? new Set() : new Set(todo.map((r) => r.id)))} title="Select every plug on this page that is not yet in the Workload Tracker" /></th> : null}
-                    <th>DATE</th><th>NO</th><th>PLUG ID</th><th>PROG. NAME / PROJ. TITLE</th><th>PSD</th><th>ACCOUNT BY</th><th>IN WORKLOAD</th>{canWrite ? <th /> : null}
+                    <th>NO</th><th>DATE</th><th>PLUG ID</th><th>PROG. NAME / PROJ. TITLE</th><th>PSD</th><th>ACCOUNT BY</th><th>IN WORKLOAD</th>{canWrite ? <th /> : null}
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length ? rows.map((r, i) => (
                     <tr key={r.id} className={r.in_workload ? 'done' : ''}>
                       {canWrite ? <td className="chk"><input type="checkbox" checked={picked.has(r.id)} disabled={r.in_workload} onChange={() => toggle(r.id)} /></td> : null}
-                      <td className="nowrap">{dateLabel(r.plug_date)}</td>
                       <td>{r.list_no || offset + i + 1}</td>
+                      <td className="nowrap">{dateLabel(r.plug_date)}</td>
                       <td className="mono">{r.plug_id}{r.is_additional ? <span className="chip c-orange plug-add" title="Listed under “Additional for …”">Added</span> : null}</td>
                       <td>{r.prog_name}</td>
                       <td>{r.psd}</td>
