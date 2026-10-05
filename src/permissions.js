@@ -19,7 +19,7 @@ const CATALOG = [
     key: 'dashboard', label: 'Dashboard', path: '/dashboard',
     sections: [
       { key: 'dashboard.kpis', label: 'Ingest KPIs' },
-      { key: 'dashboard.recent', label: 'Recent ingest activity' },
+      { key: 'dashboard.users', label: 'Active users' },
     ],
   },
   { key: 'ingest', label: 'Ingest Tracker', path: '/ingest', sections: [] },

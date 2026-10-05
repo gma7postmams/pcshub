@@ -1,9 +1,10 @@
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { BrandingProvider, SessionProvider, useBranding, useSession } from './context.jsx';
 import TopNav from './components/TopNav.jsx';
 import { ConfirmProvider, ToastProvider } from './components/ui.jsx';
 import Login from './pages/Login.jsx';
+import { post } from './lib/api.js';
 
 const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
 const Ingest = lazy(() => import('./pages/Ingest.jsx'));
@@ -64,10 +65,36 @@ function Guarded({ path }) {
   return <Page key={path + (path === '/admin' ? '' : search)} />;
 }
 
+/** Tells the server this person is working (about once a minute, and when they change page) so the Dashboard can show who is active.
+    Only counts real use — mouse, keys, touch or scroll in the last two minutes, with the tab visible — so an idle open tab is not "active". */
+function Presence() {
+  const { pathname } = useLocation();
+  const lastInput = useRef(Date.now());
+  const path = useRef(pathname);
+  const beat = useRef(null);
+  path.current = pathname;
+  beat.current = () => {
+    if (document.visibilityState !== 'visible' || Date.now() - lastInput.current > 120000) return;
+    post('/api/presence', { path: path.current }).catch(() => { /* presence is best-effort */ });
+  };
+  useEffect(() => {
+    const mark = () => { lastInput.current = Date.now(); };
+    const events = ['mousemove', 'mousedown', 'keydown', 'scroll', 'wheel', 'touchstart'];
+    events.forEach((e) => window.addEventListener(e, mark, { passive: true }));
+    const onVisible = () => { if (document.visibilityState === 'visible') { mark(); beat.current(); } };
+    document.addEventListener('visibilitychange', onVisible);
+    const timer = setInterval(() => beat.current(), 60000);
+    return () => { events.forEach((e) => window.removeEventListener(e, mark)); document.removeEventListener('visibilitychange', onVisible); clearInterval(timer); };
+  }, []);
+  useEffect(() => { lastInput.current = Date.now(); beat.current(); }, [pathname]);   // opening a page counts as using the app
+  return null;
+}
+
 function AppShell() {
   return (
     <SessionProvider fallback={<Loading />}>
       <TopNav />
+      <Presence />
       <Suspense fallback={<Loading />}>
         <Routes>
           <Route path="/" element={<Landing />} />

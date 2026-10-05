@@ -749,9 +749,6 @@ table.t.wl tbody tr.picked td { box-shadow: inset 0 1px 0 color-mix(in srgb, var
 .dash-sec-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .dash-sec-head h2 { margin: 0; font-size: 18px; }
 .dash-sec-head .grow { flex: 1; }
-.dash-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-@media (max-width: 1200px) { .dash-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 700px) { .dash-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .dash-grid { display: grid; gap: 14px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .dash-grid .span-2 { grid-column: span 2; }
 @media (max-width: 1000px) { .dash-grid { grid-template-columns: 1fr; } .dash-grid .span-2 { grid-column: auto; } }
@@ -781,8 +778,6 @@ table.t.wl tbody tr.picked td { box-shadow: inset 0 1px 0 color-mix(in srgb, var
 .dash-teams .dt-top b { font-variant-numeric: tabular-nums; }
 .dash-teams .dt-track { height: 9px; border-radius: 999px; background: color-mix(in srgb, var(--text) 8%, transparent); overflow: hidden; }
 .dash-teams .dt-track div { height: 100%; border-radius: 999px; min-width: 3px; }
-.dash-teams .dt.unset .dt-track div { background: var(--amber); }
-.dash-teams .dt.unset .dt-name i { background: var(--amber); }
 .dash-teams .dt-note { font-size: 12px; }
 
 /* lists */
@@ -799,23 +794,20 @@ table.t.wl tbody tr.picked td { box-shadow: inset 0 1px 0 color-mix(in srgb, var
 @media (max-width: 700px) { .dash-list .dl-when { min-width: 0; } .dash-list li { flex-wrap: wrap; } }
 .dash-t td, .dash-t th { padding-top: 9px; padding-bottom: 9px; }
 
-/* plug list coverage */
-.dash-cover { display: grid; gap: 12px; }
-.dash-cover .dc-nums { display: flex; gap: 32px; flex-wrap: wrap; }
-.dash-cover .dc-nums div { display: flex; flex-direction: column; }
-.dash-cover .dc-nums b { font-size: 28px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
-.dash-cover .dc-nums span { font-size: 12.5px; color: var(--text-2); }
-.dash-cover .dc-track { height: 12px; border-radius: 999px; background: color-mix(in srgb, var(--text) 8%, transparent); overflow: hidden; }
-.dash-cover .dc-track div { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--green), color-mix(in srgb, var(--green) 70%, var(--accent))); min-width: 3px; }
-.dash-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; }
-.dash-facts div { display: flex; flex-direction: column; }
-.dash-facts span { font-size: 12px; color: var(--text-2); }
-.dash-facts b { font-size: 15px; font-variant-numeric: tabular-nums; }
-
-/* ingest status mix */
-.dash-status { padding: 16px 18px; }
-.dash-status .ds-bar { display: flex; height: 14px; border-radius: 999px; overflow: hidden; background: color-mix(in srgb, var(--text) 8%, transparent); gap: 2px; }
-.dash-status .ds-bar div { min-width: 4px; }
-.dash-status .ds-legend { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 12px; font-size: 13px; color: var(--text-2); }
-.dash-status .ds-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 7px; }
-.dash-status .ds-legend b { color: var(--text); margin-left: 4px; font-variant-numeric: tabular-nums; }
+/* Active users */
+.dash-users { padding: 16px 18px; }
+.dash-users .du-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.dash-users .du { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.dash-users .du-avatar { position: relative; flex: none; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 15px; letter-spacing: .02em; }
+.dash-users .du-dot { position: absolute; right: -1px; bottom: -1px; width: 12px; height: 12px; border-radius: 50%; background: var(--green); border: 2px solid var(--surface-2); box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 55%, transparent); animation: du-pulse 2s infinite; }
+@keyframes du-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 50%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .dash-users .du-dot { animation: none; } }
+.dash-users .du-info { min-width: 0; flex: 1; }
+.dash-users .du-name { font-weight: 650; font-size: 14px; display: flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-users .du-you { font-size: 10.5px; padding: 1px 7px; background: var(--accent-soft); color: var(--accent); }
+.dash-users .du-meta { display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 12.5px; flex-wrap: wrap; }
+.dash-users .du-ago { font-size: 12px; white-space: nowrap; align-self: flex-start; }
+.dash-users .du-earlier { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 12.5px; }
+.dash-users .du-chip { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); }
+.dash-users .du-chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dash-users .du-chip em { font-style: normal; color: var(--text-3); font-size: 11.5px; }

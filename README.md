@@ -249,10 +249,10 @@ The **Artwork / STB** field takes either a **date** (a date picker) or **text** 
 
 ### Dashboard
 
-The Dashboard is one screen for everything in flight, refreshed every minute. Each block shows only if the signed-in user may see it:
+The Dashboard is one screen for what is in flight, refreshed every minute. Each block shows only if the signed-in user may see it:
 
-- **Workload Tracker** (needs the Workload page) — KPI cards for *Today*, *This week* (Monday–Sunday), *Breakdates in the next 7 days*, *Priority* and *Needs units* (items copied from the plug list that have no team yet); **Workload by day** (a column chart of the past week and the week ahead, today highlighted, weekends hatched); **By team** (items per VGFX / VEDIT / Audio — a VGFX/VEDIT item counts for both — plus the ones with no team); **Upcoming breakdates** (the next eight VGFX / VEDIT times with plug, program, PSD and a Priority tag); **Priority items**; **Platforms** (most used); and **Recently updated** (latest changes and who made them).
-- **PSD Daily Plug List** (needs the plug list page) — **coverage** for the current list day (today's, else the latest before today): how many of its plugs are already in the Workload Tracker, how many are still to copy, and a progress bar; plus the days and plugs on file.
-- **Ingest & Approval** (the Dashboard sections *Ingest KPIs* and *Recent ingest activity*, as before) — the four status cards, a **Status mix** bar and the recent ingest table.
+- **Active users** (the Dashboard section *Active users*, granted per group under Admin → Groups) — who is working in the app right now: a card per person with their role, the page they are on and when they were last active, then a compact *Earlier today* line for anyone active in the last 24 hours. “Active” means they used the app within the last 5 minutes. The app sends a small heartbeat (`POST /api/presence`, about once a minute and when changing page) **only while the person is actually using it** — mouse, keys, touch or scroll in the last two minutes, tab visible — so an idle open tab doesn't count; it is stored one row per user in `user_presence`. Disabled accounts are left out.
+- **Workload Tracker** (needs the Workload page) — KPI cards for *Today*, *This week* (Monday–Sunday), *Breakdates in the next 7 days* and *Priority*; **Workload by day** (a column chart of the past week and the week ahead, today highlighted, weekends hatched); **By team** (items per VGFX / VEDIT / Audio — a VGFX/VEDIT item counts for both); **Upcoming breakdates** (the next eight VGFX / VEDIT times with plug, program, PSD and a Priority tag) and **Priority items**.
+- **Ingest & Approval** (the Dashboard section *Ingest KPIs*) — the four status cards.
 
-Cards and rows are clickable and open the relevant page. A user whose group has none of these sees a message instead.
+Cards and rows are clickable and open the relevant page. A user whose group has none of these sees a message instead. The first start of this version gives *Active users* to every group that can open the Dashboard (untick it per group afterwards; it isn't re-added) and retires the old *Recent ingest activity* section.

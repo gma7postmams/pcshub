@@ -363,3 +363,21 @@ DO $$ BEGIN
     ALTER TABLE workload_items ALTER COLUMN art_stb TYPE TEXT USING to_char(art_stb, 'YYYY-MM-DD');
   END IF;
 END $$;
+
+-- Who is working in the app right now: the signed-in app sends a small heartbeat (about once a minute, only while the person is actually
+-- using the page) and the Dashboard's "Active users" block reads it. One row per user.
+CREATE TABLE IF NOT EXISTS user_presence (
+  user_id         INT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  last_active_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  page            TEXT
+);
+CREATE INDEX IF NOT EXISTS user_presence_active_idx ON user_presence (last_active_at DESC);
+
+-- Dashboard sections: "Active users" is new and "Recent ingest activity" is gone. Once (flag in app_settings) every group that can open
+-- the Dashboard gets Active users — an Admin can untick it per group afterwards without it coming back — and the retired key is removed.
+INSERT INTO group_permissions (group_id, perm_key)
+SELECT group_id, 'dashboard.users' FROM group_permissions
+ WHERE perm_key = 'dashboard' AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'dashboard_users_granted')
+ON CONFLICT DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('dashboard_users_granted', '1') ON CONFLICT (key) DO NOTHING;
+DELETE FROM group_permissions WHERE perm_key = 'dashboard.recent';

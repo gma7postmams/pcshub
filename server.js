@@ -129,6 +129,7 @@ app.use('/api', (req, res, next) => {
 
 app.use('/api/profile',       requirePageAccess('/profile'),   require('./src/routes/profile'));
 app.use('/api/notifications', require('./src/routes/notifications'));
+app.use('/api/presence',      require('./src/routes/presence'));   // who is working right now (feeds the Dashboard's Active users)
 app.use('/api',               require('./src/routes/lookups'));
 app.use('/api/dashboard',     requirePageAccess('/dashboard'), require('./src/routes/dashboard'));
 app.use('/api/ingest',        requirePageAccess('/ingest'),    require('./src/routes/ingest'));
