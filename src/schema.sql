@@ -1,4 +1,30 @@
--- Promotional Content Hub schema (idempotent)
+-- Promotional Content Hub (PCS Hub)
+--
+-- Core Modules
+--   • Ingest Management
+--   • Approval Workflow
+--   • Workload Tracker
+--   • PSD Daily Plug List
+--   • Knowledge Base
+--   • Dashboard & User Presence
+--   • Audit Logging
+--   • Backup and Restore Center
+--
+-- Backup and Restore Center
+--   • Backup Creation
+--   • Backup Verification
+--   • Secure Download
+--   • Backup Analysis
+--   • Structure Verification
+--   • Risk Assessment
+--   • Restore Readiness Validation
+--   • Restore Execution
+--   • Rollback Support
+--   • Unified Backup and Restore History
+--
+-- The schema is idempotent and safe to execute repeatedly.
+-- ALTER statements are used extensively to support upgrades from
+-- previous releases without requiring manual migrations.
 
 -- ROLES: what a user can DO (actions). Fixed set.
 CREATE TABLE IF NOT EXISTS roles (
@@ -8,10 +34,21 @@ CREATE TABLE IF NOT EXISTS roles (
 );
 
 INSERT INTO roles (name, description, rank) VALUES
-  ('Admin',   'Full access to every page; manages users, groups, dropdowns, branding, audit', 4),
-  ('Manager', 'Create/edit/send ingest, approve/reject, edit workload (on pages their group can open)', 3),
-  ('Editor',  'Create/edit/send ingest (on pages their group can open)', 2),
-  ('Viewer',  'Read-only on pages their group can open', 1)
+  ('Admin',
+   'Full access to all modules including users, groups, permissions, branding, audit, backup and restore administration',
+   4),
+
+  ('Manager',
+   'Manage ingest, approvals, workload, knowledge and operational functions on pages granted by group permissions',
+   3),
+
+  ('Editor',
+   'Create and update content on pages granted by group permissions',
+   2),
+
+  ('Viewer',
+   'Read-only access to pages granted by group permissions',
+   1)
 ON CONFLICT (name) DO NOTHING;
 
 -- GROUPS: where a user is enrolled. Admin-defined. Decide which pages/sections members can open.
@@ -179,16 +216,11 @@ BEGIN
               AND table_name = 'workload_items' AND column_name = 'breakdate_time') THEN
     ALTER TABLE workload_items RENAME COLUMN breakdate TO breakdate_time;
   END IF;
-  -- Script and Artwork/STB become real dates (only values that are already ISO dates are kept)
+  -- Script becomes a real date (only values that are already ISO dates are kept; Artwork / STB is not converted: it holds a date OR free text, see the end of this file)
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
               AND table_name = 'workload_items' AND column_name = 'script' AND data_type = 'text') THEN
     ALTER TABLE workload_items ALTER COLUMN script TYPE DATE
       USING (CASE WHEN script ~ '^\d{4}-\d{2}-\d{2}$' THEN script::date END);
-  END IF;
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
-              AND table_name = 'workload_items' AND column_name = 'art_stb' AND data_type = 'text') THEN
-    ALTER TABLE workload_items ALTER COLUMN art_stb TYPE DATE
-      USING (CASE WHEN art_stb ~ '^\d{4}-\d{2}-\d{2}$' THEN art_stb::date END);
   END IF;
 END $$;
 
@@ -201,7 +233,7 @@ ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS psd             TEXT;   -- c
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate       TIMESTAMP;   -- Breakdate/Time: date and time picked together (wall-clock, no time zone)
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS vo              TEXT;   -- open
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS script          DATE;   -- date
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS art_stb         DATE;   -- date
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS art_stb         TEXT;   -- a date (YYYY-MM-DD) OR free text
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS audio_guide     TEXT;   -- dropdown: 'N/A' or a date (YYYY-MM-DD)
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS remarks         TEXT;   -- open
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS total_mats      TEXT;   -- open
@@ -273,7 +305,9 @@ CREATE TABLE IF NOT EXISTS app_settings (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Knowledge Base: PDF reference documents (files live on disk under uploads/knowledge/)
+-- Knowledge Base.
+-- Reference documents stored on disk under uploads/knowledge/.
+-- Metadata and integrity information are stored in the database.
 CREATE TABLE IF NOT EXISTS knowledge_docs (
   id            SERIAL PRIMARY KEY,
   title         TEXT NOT NULL,
@@ -290,7 +324,7 @@ CREATE INDEX IF NOT EXISTS knowledge_docs_created_idx ON knowledge_docs (created
 
 INSERT INTO app_settings (key, value) VALUES
   ('app_name', 'Promotional Content Hub'),
-  ('tagline',  'Ingest · Approval · Workload'),
+  ('tagline', 'Ingest · Approval · Workload · Backup and Restore'),
   ('theme', 'midnight'),
   ('accent_color', ''),
   ('logo_path', '')
@@ -365,7 +399,11 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
   applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Backup & Recovery job history. Rows are never hard-deleted: deleting a backup removes the file and sets deleted_at.
+-- Backup and Restore job history.
+-- Stores backup creation, backup analysis, restore execution,
+-- rollback activity, verification reports and operational history.
+-- Backup files are soft-deleted by removing the file and setting deleted_at.
+
 CREATE TABLE IF NOT EXISTS backup_jobs (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   kind             TEXT NOT NULL DEFAULT 'create' CHECK (kind IN ('create','analyze','restore')),
@@ -397,7 +435,14 @@ CREATE TABLE IF NOT EXISTS backup_jobs (
 CREATE INDEX IF NOT EXISTS backup_jobs_created_idx ON backup_jobs (created_at DESC);
 CREATE INDEX IF NOT EXISTS backup_jobs_status_idx ON backup_jobs (kind, status);
 
--- Phase 3 groundwork: restore/analyze rows reuse this table. Upgrade paths for tables created by the first release.
+-- Restore execution support.
+-- Restore operations reuse the backup_jobs table and track:
+--   • Risk Level
+--   • Duration
+--   • Source Backup
+--   • Status History
+--   • Rollback Relationships
+
 ALTER TABLE backup_jobs DROP CONSTRAINT IF EXISTS backup_jobs_kind_check;
 ALTER TABLE backup_jobs ADD CONSTRAINT backup_jobs_kind_check CHECK (kind IN ('create','analyze','restore'));
 ALTER TABLE backup_jobs DROP CONSTRAINT IF EXISTS backup_jobs_status_check;
@@ -408,3 +453,61 @@ ALTER TABLE backup_jobs ADD COLUMN IF NOT EXISTS duration_ms INT;
 ALTER TABLE backup_jobs ADD COLUMN IF NOT EXISTS source_backup_id UUID;   -- the backup a restore/analysis used, when it is a stored one
 ALTER TABLE backup_jobs DROP CONSTRAINT IF EXISTS backup_jobs_risk_level_check;
 ALTER TABLE backup_jobs ADD CONSTRAINT backup_jobs_risk_level_check CHECK (risk_level IN ('LOW','MEDIUM','HIGH'));
+-- PSD Daily Plug List: one row per plug per day, imported from the PSD's daily plug list workbook (one sheet per day:
+-- NO / PLUG ID / PROG NAME/PROJ TITLE / PSD / Account By). The Workload Tracker copies Plug ID, PSD and Prog. Name from here.
+CREATE TABLE IF NOT EXISTS workload_plugs (
+  id             BIGSERIAL PRIMARY KEY,
+  plug_date      DATE NOT NULL,
+  seq            INT NOT NULL DEFAULT 0,
+  list_no        INT,
+  plug_id        TEXT NOT NULL,
+  prog_name      TEXT NOT NULL DEFAULT '',
+  psd            TEXT NOT NULL DEFAULT '',
+  account_by     TEXT NOT NULL DEFAULT '',
+  is_additional  BOOLEAN NOT NULL DEFAULT false,
+  source_file    TEXT,
+  created_by     INT REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS workload_plugs_uniq ON workload_plugs (plug_date, plug_id, prog_name, psd);
+CREATE INDEX IF NOT EXISTS workload_plugs_date_idx ON workload_plugs (plug_date, seq);
+CREATE INDEX IF NOT EXISTS workload_plugs_lookup_idx ON workload_plugs (plug_date, upper(plug_id));
+
+-- The PSD Daily Plug List is now its own page ('plugs'). Once (flag in app_settings), every group that can open the Workload Tracker
+-- also gets it, so nobody who used the old tab loses access; an Admin can untick it per group afterwards without it coming back.
+INSERT INTO group_permissions (group_id, perm_key)
+SELECT group_id, 'plugs' FROM group_permissions
+ WHERE perm_key = 'workload' AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'plugs_page_granted')
+ON CONFLICT DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('plugs_page_granted', '1') ON CONFLICT (key) DO NOTHING;
+
+-- Artwork / STB takes either a date (picked) or plain text (typed). It used to be a DATE column: convert it in place, keeping every date
+-- as 'YYYY-MM-DD'. (Runs only while the column is still a DATE, so free text entered afterwards is never touched.)
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+              AND table_name = 'workload_items' AND column_name = 'art_stb' AND data_type = 'date') THEN
+    ALTER TABLE workload_items ALTER COLUMN art_stb TYPE TEXT USING to_char(art_stb, 'YYYY-MM-DD');
+  END IF;
+END $$;
+
+-- User Presence Tracking.
+-- Active sessions periodically send heartbeats while using the system.
+-- Used by Dashboard Active Users and collaboration awareness features.
+-- using the page) and the Dashboard's "Active users" block reads it. One row per user.
+
+CREATE TABLE IF NOT EXISTS user_presence (
+  user_id         INT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  last_active_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  page            TEXT
+);
+CREATE INDEX IF NOT EXISTS user_presence_active_idx ON user_presence (last_active_at DESC);
+
+-- Dashboard sections: "Active users" is new and "Recent ingest activity" is gone. Once (flag in app_settings) every group that can open
+-- the Dashboard gets Active users — an Admin can untick it per group afterwards without it coming back — and the retired key is removed.
+INSERT INTO group_permissions (group_id, perm_key)
+SELECT group_id, 'dashboard.users' FROM group_permissions
+ WHERE perm_key = 'dashboard' AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'dashboard_users_granted')
+ON CONFLICT DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('dashboard_users_granted', '1') ON CONFLICT (key) DO NOTHING;
+DELETE FROM group_permissions WHERE perm_key = 'dashboard.recent';

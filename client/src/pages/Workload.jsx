@@ -6,6 +6,7 @@ import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, LockIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
 import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
+import PresenceAvatars from '../components/PresenceAvatars.jsx';
 
 // Workload Tracker — ONE table. "Units Concerned" says which team(s) a plug is for; the tabs
 // (All / VGFX / VEDIT / Audio) are filters over it. Fields, per-tab columns and the Platform rules come
@@ -118,6 +119,19 @@ async function writeClipboard(text) {
 const newKey = () => `n${Math.random().toString(36).slice(2)}`;
 
 /** Platform suggested by the Plug ID prefix (same rules as the template's Platform formula). null = none. */
+// PSD and PROG. NAME / PROJ. TITLE come from the PSD Daily Plug List: when the Plug ID matches a plug on that Work Date's list, fill them in
+// if they are blank, or still hold what the previous Plug ID's entry had put there (so changing the Plug ID updates them, typed values stay).
+function fillFromPlug(row, prevRow, find) {
+  const plug = find(row.work_date, row.plug_id);
+  if (!plug) return row;
+  const old = prevRow ? find(prevRow.work_date, prevRow.plug_id) : null;
+  // _autoPsd / _autoProg remember what was filled in, so it can be replaced when the Plug ID changes while anything typed by hand is kept
+  const replaceable = (cur, auto, oldVal) => !cur || cur === auto || (!!old && cur === oldVal);
+  const next = { ...row };
+  if (replaceable(row.psd, row._autoPsd, old && old.psd)) { next.psd = plug.psd; next._autoPsd = plug.psd; }
+  if (replaceable(row.prog_name, row._autoProg, old && old.prog_name)) { next.prog_name = plug.prog_name; next._autoProg = plug.prog_name; }
+  return next;
+}
 function derivePlatform(rules, plug) {
   const text = String(plug || '');
   for (const r of rules) if (new RegExp(r.pattern, 'i').test(text)) return r.platform;
@@ -152,6 +166,26 @@ function AudioGuideInput({ value, onChange, disabled }) {
   );
 }
 
+// Artwork / STB: either a DATE (date picker) or plain TEXT (open text box) — pick which with the little dropdown. Stored as one value:
+// 'YYYY-MM-DD' for a date, anything else for text. Switching the kind clears the box, since the two don't convert into each other.
+function DateOrTextInput({ value, onChange, disabled, max }) {
+  const v = value || '';
+  const [mode, setMode] = useState(!v || ISO.test(v) ? 'date' : 'text');   // an empty one starts as a date, like the column always did
+  useEffect(() => { if (v) setMode(ISO.test(v) ? 'date' : 'text'); }, [v]);   // follows the value (e.g. a full date typed as text becomes a date)
+  const emit = (x) => onChange({ target: { value: x } });
+  return (
+    <div className="ag">
+      <select value={mode} disabled={disabled} aria-label="Artwork / STB: date or text" onChange={(e) => { setMode(e.target.value); emit(''); }}>
+        <option value="date">Date</option>
+        <option value="text">Text</option>
+      </select>
+      {mode === 'date'
+        ? <input type="date" value={ISO.test(v) ? v : ''} disabled={disabled} onChange={(e) => emit(e.target.value)} />
+        : <input type="text" maxLength={max || 200} value={v} disabled={disabled} onChange={(e) => emit(e.target.value)} />}
+    </div>
+  );
+}
+
 // Textarea that grows to fit its content (used in the Excel grid so pasted text is never cut off)
 function AutoTextarea({ value, ...props }) {
   const ref = useRef(null);
@@ -171,6 +205,7 @@ function FieldInput({ def, value, onChange, disabled, lookups, auto }) {
   // date and time picked together (the browser's own calendar + time picker); 15-minute steps
   if (def.kind === 'datetime') return <input type="datetime-local" step={900} value={v} disabled={disabled} onChange={onChange} />;
   if (def.kind === 'audio_guide') return <AudioGuideInput value={v} onChange={onChange} disabled={disabled} />;
+  if (def.kind === 'date_or_text') return <DateOrTextInput value={v} onChange={onChange} disabled={disabled} max={def.max} />;
   if (def.kind === 'date') return <input type="date" value={v} disabled={disabled} onChange={onChange} />;
   if (def.kind === 'select') {
     const list = def.lookup ? withCurrent(lookups[def.lookup] || [], v) : def.options;
@@ -189,10 +224,11 @@ function GridCellInput({ def, value, onChange, disabled, ...rest }) {
   const v = value ?? '';
   // The wrapper's hidden ::after copies the text (data-value) so the cell is exactly as wide (and, for multi-line
   // fields, as tall) as its content — nothing is cropped — while the real input/textarea fills that same box.
+  // (no placeholder text: an empty cell stays empty like a spreadsheet's, and a hint such as "Filled from the PSD Daily Plug List" would be cut off in a narrow column)
   const Field = def.multiline ? 'textarea' : 'input';
   return (
     <div className={`xl-cell${def.multiline ? ' multi' : ''}`} data-value={`${v}\u200b`}>
-      <Field maxLength={def.max} placeholder={def.hint} value={v} disabled={disabled} onChange={onChange} rows={def.multiline ? 1 : undefined} {...rest} />
+      <Field maxLength={def.max} value={v} disabled={disabled} onChange={onChange} rows={def.multiline ? 1 : undefined} {...rest} />
     </div>
   );
 }
@@ -206,7 +242,7 @@ function CellEditor({ def, initial, lookups, onSave, onCancel }) {
   const finished = useRef(false);
   const field = () => box.current && box.current.querySelector('input, select, textarea');
   useEffect(() => {
-    const el = field();
+    const el = def.kind === 'date_or_text' && box.current ? box.current.querySelector('input') : field();   // Artwork / STB: the date / text box, not its format dropdown
     if (!el) return;
     el.focus();
     if (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type === 'text')) el.setSelectionRange(el.value.length, el.value.length);
@@ -263,6 +299,18 @@ export default function Workload() {
   const [addingColumn, setAddingColumn] = useState(false);
   const [managingLocks, setManagingLocks] = useState(false);
   const [importing, setImporting] = useState(false);
+  // Table mode: selected rows (ids), "every row matching the filters" (Admin), and the delete-all dialog
+  const [picked, setPicked] = useState(() => new Set());
+  const [allMatching, setAllMatching] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
+  const lastPick = useRef(null);
+  const keysRef = useRef(null);
+  const pasteRef = useRef(null);
+  const tblMouse = useRef({});         // latest mouse handlers for dragging across rows (assigned every render)
+  const tblDrag = useRef(null);        // { idx, x, y, moved } while the mouse is down on a row
+  const tblSuppress = useRef(false);   // swallow the click that ends a drag / Shift / Ctrl+click, so it doesn't open a cell editor
+  const [tctx, setTctx] = useState(null);   // Table mode: right-click menu position { x, y } | null
+  const tblHist = useRef({ past: [], future: [] });   // Table-mode undo / redo (delete, cut, paste, cell edit)
   const fileRef = useRef(null);
   const boxRef = useRef(null);    // Excel mode: the focusable wrapper that receives copy / cut / paste / Delete for a range or whole rows
   const drag = useRef(null);      // Excel mode: 'cell' | 'row' | 'col' while the mouse is held down selecting
@@ -272,6 +320,17 @@ export default function Workload() {
   const [epoch, setEpoch] = useState(0);   // bumped whenever the grid is changed from outside a cell's own typing (paste, undo, clear …)
   const [ctx, setCtx] = useState(null);   // Excel mode: right-click menu position { x, y } | null
   useEffect(() => { setEditing(null); setGridSel(null); }, [tab, mode, offset]);
+  useEffect(() => {
+    if (!tctx) return undefined;
+    const close = () => setTctx(null);
+    const down = (e) => { if (!(e.target.closest && e.target.closest('.xl-menu'))) close(); };
+    const key = (e) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('mousedown', down);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    window.addEventListener('keydown', key);
+    return () => { window.removeEventListener('mousedown', down); window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close); window.removeEventListener('keydown', key); };
+  }, [tctx]);
   useEffect(() => {
     if (!ctx) return undefined;
     const close = () => setCtx(null);
@@ -315,6 +374,25 @@ export default function Workload() {
     return () => { window.removeEventListener('mouseup', up); window.removeEventListener('mousemove', move); };
   }, []);
   const q = useDebounced(filt.q, 300);
+  // a different tab / filter / search is a different set of rows: drop the selection
+  useEffect(() => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; }, [tab, mode, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q]);
+  // Table-mode keyboard + mouse (one set of window listeners that always call the latest handlers, assigned further down every render)
+  useEffect(() => {
+    const key = (e) => { if (keysRef.current) keysRef.current(e); };
+    const paste = (e) => { if (pasteRef.current) pasteRef.current(e); };
+    const move = (e) => { if (tblMouse.current.move) tblMouse.current.move(e); };
+    const up = (e) => { if (tblMouse.current.up) tblMouse.current.up(e); };
+    const down = (e) => { if (tblMouse.current.down) tblMouse.current.down(e); };
+    window.addEventListener('keydown', key);
+    window.addEventListener('paste', paste);
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    window.addEventListener('mousedown', down);
+    return () => {
+      window.removeEventListener('keydown', key); window.removeEventListener('paste', paste);
+      window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); window.removeEventListener('mousedown', down);
+    };
+  }, []);
   const isGrid = mode === 'excel' && tab !== 'ALL';
 
   // Rows are one line each (Remarks wraps), so a wide table scrolls sideways inside the card, like Excel.
@@ -400,6 +478,8 @@ export default function Workload() {
     if (String(value ?? '') === String(r[k] ?? '')) { setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur)); return; }
     try {
       const out = await patch(`/api/workload/${r.id}`, { field: k, value });
+      const before = r[k] ?? '';
+      pushTbl({ label: 'cell edit', undo: () => patch(`/api/workload/${r.id}`, { field: k, value: before }), redo: () => patch(`/api/workload/${r.id}`, { field: k, value }) });
       setData((d) => (d && d.rows ? { ...d, rows: d.rows.map((x) => (x.id === r.id ? { ...x, ...out.values } : x)) } : d));
       // close only THIS cell's editor: the person may already have opened another cell while this one was saving
       setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur));
@@ -463,10 +543,28 @@ export default function Workload() {
   };
   const undo = () => { const h = hist.current; if (!h.past.length) return; h.future.push(grid.rows); restoreRows(h.past.pop()); };
   const redo = () => { const h = hist.current; if (!h.future.length) return; h.past.push(grid.rows); restoreRows(h.future.pop()); };
+  // ---- PSD Daily Plug List lookups for the grid (plugs of the dates on screen, fetched once per date) ----
+  const plugCache = useRef(new Map());   // 'YYYY-MM-DD' -> plugs of that day
+  const ensurePlugDates = useCallback(async (dates) => {
+    const need = [...new Set(dates.filter((d) => d && ISO.test(d) && !plugCache.current.has(d)))].sort();
+    if (!need.length) return;
+    need.forEach((d) => plugCache.current.set(d, []));   // mark as asked, so a re-render doesn't ask again
+    try {
+      const { rows } = await get(`/api/plugs?from=${need[0]}&to=${need[need.length - 1]}&limit=5000`);
+      rows.forEach((r) => { const list = plugCache.current.get(r.plug_date); if (list) list.push(r); });
+    } catch (e) { need.forEach((d) => plugCache.current.delete(d)); }
+  }, []);
+  useEffect(() => { if (grid && grid.rows) ensurePlugDates(grid.rows.map((r) => r.work_date)); }, [grid, ensurePlugDates]);
+  const findPlug = (date, plugId) => {
+    const id = firstLine(plugId).trim().toUpperCase();
+    return id ? (plugCache.current.get(date) || []).find((p) => p.plug_id.toUpperCase() === id) || null : null;
+  };
   // one place that knows how to put a value into a grid cell (the merged Breakdate / Time cell is text for both teams' times)
-  const setCellValue = (row, k, val, replace) => (k === 'breakdate_vgfx'
-    ? { ...row, ...bdApply(row, val, meta.unitTeams, replace) }
-    : withAutoPlatform(meta.platformRules, row, k, val));
+  const setCellValue = (row, k, val, replace) => {
+    if (k === 'breakdate_vgfx') return { ...row, ...bdApply(row, val, meta.unitTeams, replace) };
+    const next = withAutoPlatform(meta.platformRules, row, k, val);
+    return k === 'plug_id' || k === 'work_date' ? fillFromPlug(next, row, findPlug) : next;
+  };
   const setCell = (key, k, val) => {
     if (!canWrite) return;
     pushHistory(`${key}:${k}`);
@@ -749,6 +847,12 @@ export default function Workload() {
       if (e.key.toLowerCase() === 'y' || e.shiftKey) redo(); else undo();
       return;
     }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a') {
+      // Ctrl/Cmd+A selects every cell of the grid — also while a cell has the cursor (the only way to select all)
+      e.preventDefault();
+      if (grid && grid.rows.length) { setGridSel({ r0: 0, c0: 0, r1: grid.rows.length - 1, c1: xlKeys().length - 1 }); focusBox(); }
+      return;
+    }
     if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
       // like a spreadsheet: Enter moves to the cell below (Shift+Enter: above); Tab / Shift+Tab move sideways natively
       const td = e.target.closest('td[data-r]');
@@ -795,12 +899,174 @@ export default function Workload() {
       else load();
     } catch (e) { toast(e.message, 'err'); }
   };
+  // ---- Table mode: select rows by dragging across them (or Shift / Ctrl+click), with the same shortcuts as Excel mode ----
+  const total = data && data.total ? data.total : 0;
+  const isAdminUser = !!(s.user && s.user.role === 'Admin');
+  const pageRows = data && data.rows ? data.rows : [];
+  const pickable = pageRows.filter((r) => !isLocked(r.work_date, meta.locks));   // a row in a locked period can't be deleted, so it can't be selected
+  const pickedCount = allMatching ? total : picked.size;
+  const pageAllPicked = !!pickable.length && pickable.every((r) => allMatching || picked.has(r.id));
+  const clearPicks = () => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; };
+  const rangeIds = (a, b) => pageRows.slice(Math.min(a, b), Math.max(a, b) + 1).filter((r) => !isLocked(r.work_date, meta.locks)).map((r) => r.id);
+  const selectPage = () => { setAllMatching(false); setPicked(new Set(pickable.map((r) => r.id))); };
+  const selectAllMatching = () => { setPicked(new Set(pickable.map((r) => r.id))); setAllMatching(true); };
+  const toPayload = (r) => [...Object.keys(meta.fields), 'is_priority'].reduce((o, k) => ({ ...o, [k]: r[k] }), {});   // a row as the batch endpoint takes it (no id)
+
+  // undo / redo of what Table mode does straight on the server: delete / cut, paste and single-cell edits
+  const pushTbl = (entry) => { const h = tblHist.current; h.past.push(entry); if (h.past.length > 50) h.past.shift(); h.future = []; };
+  const stepTbl = async (from, to, verb) => {
+    const e = tblHist.current[from].pop();
+    if (!e) { toast(`Nothing to ${verb}`); return; }
+    try { await e[verb](); tblHist.current[to].push(e); toast(`${verb === 'undo' ? 'Undone' : 'Redone'}: ${e.label}`); } catch (err) { tblHist.current[from].push(e); toast(err.message, 'err'); }
+    clearPicks();
+    load();
+    loadStats();
+  };
+  const undoTbl = () => stepTbl('past', 'future', 'undo');
+  const redoTbl = () => stepTbl('future', 'past', 'redo');
+
+  const afterBulk = (out) => {
+    const bits = [`${out.deleted} row${out.deleted === 1 ? '' : 's'} deleted`];
+    if (out.skipped) bits.push(`${out.skipped} skipped — in a locked period`);
+    toast(bits.join(' — '), out.skipped ? 'err' : undefined);
+    clearPicks();
+    if (offset > 0 && out.deleted >= pageRows.length) setOffset(Math.max(0, offset - PAGE)); else load();
+    loadStats();
+  };
+  const deleteSelected = async (verb = 'Delete') => {
+    if (allMatching) { setDeletingAll(true); return; }
+    const ids = [...picked];
+    if (!ids.length) return;
+    const n = ids.length;
+    const what = `${n} row${n === 1 ? '' : 's'}`;
+    if (!(await confirm(`${verb} ${what}`, verb === 'Cut'
+      ? `Cut the ${what} you selected? They leave the tracker; Ctrl+V puts them back, or Ctrl+Z undoes it.`
+      : `Permanently delete the ${what} you selected? Ctrl+Z can undo it.`, { okText: verb, danger: true }))) return;
+    const snapshot = pageRows.filter((r) => picked.has(r.id)).map(toPayload);
+    try {
+      const out = await post('/api/workload/bulk-delete', { ids });
+      if (out.deleted && !out.skipped) {
+        let current = ids;
+        pushTbl({
+          label: `${verb.toLowerCase()} ${what}`,
+          undo: async () => { current = (await post('/api/workload/batch', { rows: snapshot })).createdIds || []; },
+          redo: async () => { await post('/api/workload/bulk-delete', { ids: current }); },
+        });
+      }
+      afterBulk(out);
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  // Copy the selected rows as tab-separated text — the same layout Excel mode copies and pastes
+  const copyPicked = async () => {
+    const rows = pageRows.filter((r) => picked.has(r.id));
+    if (!rows.length) return false;
+    const text = rows.map((r) => tableCols.map((k) => tsvCell(k === 'breakdate_vgfx' ? bdText(r, meta.unitTeams) : r[k])).join('\t')).join('\n');
+    internalClip.current = text;
+    const ok = await writeClipboard(text);
+    const elsewhere = picked.size - rows.length;
+    toast(ok ? `Copied ${rows.length} row${rows.length === 1 ? '' : 's'}${elsewhere > 0 ? ` (${elsewhere} selected on other pages not included)` : ''}` : 'Could not reach the clipboard', ok ? undefined : 'err');
+    return ok;
+  };
+  const cutPicked = async () => { if (await copyPicked()) await deleteSelected('Cut'); };
+  // Paste rows (copied from here, Excel mode or a spreadsheet) as NEW Workload rows
+  const pasteRows = async (text) => {
+    if (!canWrite) return;
+    const block = parseTsvBlock(text).filter((cells) => cells.some((c) => String(c).trim() !== ''));
+    if (!block.length) return;
+    if (block.length > 200) toast('Only the first 200 rows are pasted at a time', 'err');
+    const rows = block.slice(0, 200).map((cells) => {
+      let row = {};
+      cells.forEach((raw, ci) => { if (tableCols[ci]) row = setCellValue(row, tableCols[ci], raw, true); });
+      if (!row.work_date) row.work_date = filt.from || isoDate();
+      if (!row.units_concerned && tab !== 'ALL') row.units_concerned = meta.tabDefaultUnits[tab];
+      return row;
+    });
+    const what = `${rows.length} row${rows.length === 1 ? '' : 's'}`;
+    if (!(await confirm(`Paste ${what}`, `Add ${what} from the clipboard to the Workload Tracker as new items?`, { okText: 'Paste' }))) return;
+    try {
+      let ids = (await post('/api/workload/batch', { rows })).createdIds || [];
+      pushTbl({
+        label: `paste ${what}`,
+        undo: async () => { await post('/api/workload/bulk-delete', { ids }); },
+        redo: async () => { ids = (await post('/api/workload/batch', { rows })).createdIds || []; },
+      });
+      toast(`${what} pasted`);
+      load();
+      loadStats();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+
+  // right-click a row: select it (unless it is already part of the selection) and open the same menu Excel mode has
+  const rowMenu = (e, r) => {
+    const t = e.target;
+    if (t.closest && t.closest('.editing, .cell-editor-inline, input, select, textarea')) return;   // inside an open editor keep the browser's own menu
+    e.preventDefault();
+    if (!rowLocked(r) && !(allMatching || picked.has(r.id))) { setAllMatching(false); setPicked(new Set([r.id])); lastPick.current = r.id; }
+    setTctx({ x: Math.min(e.clientX, window.innerWidth - 210), y: Math.min(e.clientY, window.innerHeight - 190) });
+  };
+  const menuPasteRows = async () => {
+    setTctx(null);
+    let text = null;
+    try { if (navigator.clipboard && navigator.clipboard.readText && window.isSecureContext) text = await navigator.clipboard.readText(); } catch (err) { text = null; }
+    if (text == null || text === '') text = internalClip.current;   // plain-http addresses can't read the clipboard: use what was last copied here
+    if (text == null || text === '') { toast('Nothing to paste yet — copy some rows first, or press Ctrl+V', 'err'); return; }
+    pasteRows(text);
+  };
+
+  // mouse: press on a row and drag over others to select them; Shift+click extends, Ctrl/Cmd+click adds or removes one row
+  const rowDown = (e, r, idx) => {
+    if (e.button !== 0) return;
+    const t = e.target;
+    if (t.closest && t.closest('.actions-cell, .editing, .cell-editor-inline, input, select, textarea, button, a')) return;
+    const holdClick = () => { tblSuppress.current = true; setTimeout(() => { tblSuppress.current = false; }, 150); };
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      holdClick();
+      if (!rowLocked(r)) {
+        setAllMatching(false);
+        setPicked((cur) => { const n = new Set(cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; });
+        lastPick.current = r.id;
+      }
+      return;
+    }
+    if (e.shiftKey && lastPick.current != null) {
+      const from = pageRows.findIndex((x) => x.id === lastPick.current);
+      if (from >= 0) { e.preventDefault(); holdClick(); setAllMatching(false); setPicked(new Set(rangeIds(from, idx))); return; }
+    }
+    tblDrag.current = { idx, x: e.clientX, y: e.clientY, moved: false, last: idx, id: r.id };
+  };
+  tblMouse.current.move = (e) => {
+    const d = tblDrag.current;
+    if (!d) return;
+    if (!(e.buttons & 1)) { tblDrag.current = null; return; }
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const tr = el && el.closest ? el.closest('#tbl tr[data-id]') : null;
+    const now = tr ? pageRows.findIndex((r) => String(r.id) === tr.dataset.id) : d.last;
+    if (!d.moved && now === d.idx && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 6) return;   // still a click
+    if (!d.moved) { d.moved = true; tblSuppress.current = true; lastPick.current = d.id; const box = document.getElementById('tbl'); if (box) box.classList.add('selecting'); }
+    d.last = now;
+    if (window.getSelection) window.getSelection().removeAllRanges();
+    setAllMatching(false);
+    setPicked(new Set(rangeIds(d.idx, now)));
+  };
+  tblMouse.current.up = () => {
+    const d = tblDrag.current;
+    tblDrag.current = null;
+    const box = document.getElementById('tbl');
+    if (box) box.classList.remove('selecting');
+    if (d && d.moved) setTimeout(() => { tblSuppress.current = false; }, 150);
+  };
+  tblMouse.current.down = (e) => {   // a click anywhere outside the table (and its bar / dialogs) drops the selection
+    if (!(picked.size || allMatching)) return;
+    const t = e.target;
+    if (t && t.closest && !t.closest('#tbl, .sel-bar, .modal-backdrop, .xl-menu')) clearPicks();
+  };
   const saveGrid = async () => {
     const idx = [];
     const rows = [];
     grid.rows.forEach((r, i) => {
       if (!r._dirty || (r._new && isEmptyRow(r))) return;
-      const { _key, _dirty, _new, ...rest } = r; // eslint-disable-line no-unused-vars
+      const { _key, _dirty, _new, _autoPsd, _autoProg, ...rest } = r; // eslint-disable-line no-unused-vars
       idx.push(i);
       rows.push(rest);
     });
@@ -818,12 +1084,45 @@ export default function Workload() {
 
   if (!meta) return <main className="container wide"><Empty>Loading…</Empty></main>;
 
+  // Table-mode shortcuts — the same ones Excel mode has: Ctrl/Cmd+A select all, +C copy, +X cut, +V paste, +Z undo, +Y redo, Delete, Esc
+  // (ignored while typing in a field, with a cell editor or dialog open, and in Excel mode / the plug list, which have their own)
+  const tableKeysOk = (e) => {
+    if (isGrid || !canWrite) return false;
+    const el = e.target;
+    if (el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return false;
+    return !(document.querySelector('.modal-backdrop') || form || addingColumn || managingLocks || deletingAll || editing);
+  };
+  keysRef.current = (e) => {
+    if (e.defaultPrevented || e.altKey || !tableKeysOk(e)) return;
+    const key = e.key.toLowerCase();
+    if (e.ctrlKey || e.metaKey) {
+      if (key === 'a') {
+        e.preventDefault();
+        if (pageAllPicked && !allMatching && isAdminUser && total > pageRows.length) selectAllMatching(); else selectPage();   // pressed again: every matching row (Admin)
+      } else if (key === 'c') {
+        if (picked.size && !(window.getSelection && String(window.getSelection()))) { e.preventDefault(); copyPicked(); }
+      } else if (key === 'x') {
+        if (picked.size) { e.preventDefault(); cutPicked(); }
+      } else if (key === 'z') { e.preventDefault(); if (e.shiftKey) redoTbl(); else undoTbl(); }
+      else if (key === 'y') { e.preventDefault(); redoTbl(); }
+      return;   // Ctrl+V arrives as a paste event (below)
+    }
+    if (key === 'escape') clearPicks();
+    else if ((key === 'delete' || key === 'backspace') && pickedCount) { e.preventDefault(); deleteSelected(); }
+  };
+  pasteRef.current = (e) => {
+    if (!tableKeysOk(e)) return;
+    const text = e.clipboardData && e.clipboardData.getData('text/plain');
+    if (!text || !text.trim()) return;
+    e.preventDefault();
+    pasteRows(text);
+  };
+
   const isAll = tab === 'ALL';
   const cols = meta.views[tab];   // raw column list (Table mode's tableCols below merges the two Breakdate / Time columns; Excel mode does the same)
   // Table mode only: Breakdate/Time (VGFX) and (VEDIT) merge into ONE column/cell, holding one or two pills —
   // 'breakdate_vgfx' is kept as that column's position; breakdateCell() below decides what actually shows in it.
   const tableCols = cols.filter((k) => k !== 'breakdate_vedit');
-  const total = data && data.total ? data.total : 0;
   const head = (k) => (k === 'breakdate_vgfx' ? 'Breakdate / Time' : meta.fields[k].label);   // table header only; Excel mode reads meta.fields directly and keeps the (VGFX)/(VEDIT) labels
   const firstLineOf = (t) => String(t || '').split('\n');
   // every cell except Remarks stays on one line: line breaks in pasted text are shown as " · "
@@ -836,7 +1135,7 @@ export default function Workload() {
     switch (k) {
       case 'work_date': return <td {...common}><WorkDate value={val} />{isLocked(val, meta.locks) ? <span className="row-lock" title={`Locked: ${lockNote(val, meta.locks)}`}><LockIcon /></span> : null}</td>;
       case 'platform': return <td {...common}><PlatformCell value={val} /></td>;
-      case 'units_concerned': return <td {...common}><UnitsPills value={val} unitTeams={meta.unitTeams} /></td>;
+      case 'units_concerned': return <td {...common}>{val ? <UnitsPills value={val} unitTeams={meta.unitTeams} /> : <span className="chip c-gray unset" title="Copied from the PSD Daily Plug List — click to choose the team(s). It shows under All until then.">Set units</span>}</td>;
       case 'plug_type': return <td {...common}><TypePill value={val} /></td>;
       case 'plug_id': {
         const [first, ...rest] = firstLineOf(val);
@@ -853,6 +1152,7 @@ export default function Workload() {
             {val ? <span className="strong">{oneLine(val)}</span> : null}
           </td>
         );
+      case 'art_stb': return <td {...common}>{val ? (ISO.test(val) ? <DateChip>{fmtDate(val)}</DateChip> : oneLine(val)) : null}</td>;   // a date shows as a chip, text as text
       case 'audio_guide': return <td {...common}><DateChip hue="fuchsia">{val ? (ISO.test(val) ? fmtDate(val) : oneLine(val)) : null}</DateChip></td>;
       case 'breakdate_vgfx': return <td {...common}><DateChip hue="purple">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VGFX in Units Concerned
       case 'breakdate_vedit': return <td {...common}><DateChip hue="orange">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VEDIT in Units Concerned
@@ -874,6 +1174,14 @@ export default function Workload() {
           <CellEditor def={meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value) => saveCell(r, k, value)} onCancel={() => setEditing(null)} />
         </td>
       );
+    }
+    if (k === 'plug_id') {   // no free-text Plug ID: choose it from the PSD Daily Plug List in the edit form
+      const openForm = () => setForm({ rec: r });
+      return cloneElement(td, {
+        className: 'editable', title: 'Click to choose the plug from the PSD Daily Plug List', tabIndex: 0,
+        onClick: (e) => { e.stopPropagation(); openForm(); },
+        onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); openForm(); } },
+      });
     }
     const open = () => setEditing({ id: r.id, k });
     return cloneElement(td, {
@@ -925,6 +1233,7 @@ export default function Workload() {
     <main className="container wide wl-page">
       <div className="page-head">
         <div><h1>Workload Tracker</h1><div className="sub">Track and monitor promotional plug workloads across VGFX, VEDIT and Audio.</div></div>
+        <div className="actions"><PresenceAvatars path="/workload" /></div>
       </div>
 
       {!lookups.workload_platform.length || !lookups.plug_type.length ? (
@@ -985,7 +1294,7 @@ export default function Workload() {
               <input type="search" placeholder="Search plug ID, PSD, program, billable party, remarks…" value={filt.q} onChange={setF('q')} />
             </label>
           ) : null}
-          <FilterSelect label="Units" value={filt.units} onChange={setF('units')}><Options list={meta.units} blank="All" /></FilterSelect>
+          <FilterSelect label="Units" value={filt.units} onChange={setF('units')}><Options list={[...meta.units, meta.notSet]} blank="All" /></FilterSelect>
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
           <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
           <DateRange from={filt.from} to={filt.to} onChange={setRange} />
@@ -1055,16 +1364,30 @@ export default function Workload() {
                 </div>
               );
             })() : null}
-            {canWrite && grid && !grid.error ? (
-              <div className="xl-hint dim">Click a cell to edit it · drag across cells or Shift+click to select just those cells · click a row number for the whole row · right-click for Undo / Redo / Cut / Copy / Paste / Delete · Ctrl+Z / Ctrl+Y / Ctrl+X / Ctrl+C / Ctrl+V · paste below the last row adds rows · Delete clears</div>
-            ) : null}
             {grid && grid.total > GRID_LIMIT ? (
               <div className="pager"><span>Showing the first {GRID_LIMIT} of {grid.total} rows — narrow the date range to edit the rest.</span></div>
             ) : null}
           </>
         ) : (
           <>
-            <div className="table-wrap" id="tbl">
+            {canWrite && data && data.rows && data.rows.length ? (
+              <div className="sel-bar">
+                {pickedCount ? (
+                  <span className="sel-count">
+                    {allMatching ? <>All <strong>{total}</strong> matching rows selected</> : <><strong>{pickedCount}</strong> selected</>}
+                    {!allMatching && pageAllPicked && isAdminUser && total > pageRows.length ? <span className="dim">Press Ctrl+A again to select all {total} matching rows</span> : null}
+                    <button type="button" className="linkbtn" onClick={clearPicks}>Clear</button>
+                  </span>
+                ) : <span className="dim sel-count">Drag across rows to select them (Shift / Ctrl+click to extend) · Ctrl+A selects all</span>}
+                <span className="grow" />
+                <button type="button" className="btn danger sm" disabled={!pickedCount} onClick={() => deleteSelected()}>Delete selected{pickedCount ? ` (${pickedCount})` : ''}</button>
+                {isAdminUser ? <button type="button" className="btn danger sm" onClick={() => setDeletingAll(true)} title="Delete every row that matches the current tab and filters">Delete all…</button> : null}
+              </div>
+            ) : null}
+            <div className="table-wrap" id="tbl" onClickCapture={(e) => {
+              if (tblSuppress.current) { tblSuppress.current = false; e.stopPropagation(); e.preventDefault(); return; }   // the click that ended a drag / Shift / Ctrl+click
+              if (canWrite && (picked.size || allMatching) && !(e.target.closest && e.target.closest('.actions-cell'))) clearPicks();
+            }}>
               {!data ? <Empty>Loading…</Empty>
                 : data.error ? <Empty>{data.error}</Empty>
                   : !data.rows.length ? <Empty>No workload items match these filters.</Empty>
@@ -1072,8 +1395,12 @@ export default function Workload() {
                       <table className={`t wl${cards ? ' cards' : ''}`}>
                         <thead><tr>{tableCols.map((k) => <th key={k}>{head(k)}</th>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
-                          {data.rows.map((r) => (
-                            <tr key={r.id} className={canWrite ? '' : 'clickable'} onClick={canWrite ? undefined : () => setForm({ rec: r })}>
+                          {data.rows.map((r, idx) => (
+                            <tr key={r.id} data-id={r.id}
+                              className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}`.trim()}
+                              onMouseDown={canWrite ? (e) => rowDown(e, r, idx) : undefined}
+                              onContextMenu={canWrite ? (e) => rowMenu(e, r) : undefined}
+                              onClick={canWrite ? undefined : () => setForm({ rec: r })}>
                               {tableCols.map((k) => (k === 'breakdate_vgfx' ? breakdateCell(r) : cell(r, k)))}
                               {canWrite ? (
                                 <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
@@ -1091,10 +1418,32 @@ export default function Workload() {
                     )}
             </div>
             <Pager total={total} offset={offset} size={PAGE} onOffset={setOffset} />
+            {tctx ? (
+              <div className="xl-menu" style={{ left: tctx.x, top: tctx.y }} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
+                <button type="button" disabled={!tblHist.current.past.length} onClick={() => { setTctx(null); undoTbl(); }}>Undo<span>Ctrl+Z</span></button>
+                <button type="button" disabled={!tblHist.current.future.length} onClick={() => { setTctx(null); redoTbl(); }}>Redo<span>Ctrl+Y</span></button>
+                <hr />
+                <button type="button" disabled={!picked.size || allMatching} onClick={() => { setTctx(null); cutPicked(); }}>Cut<span>Ctrl+X</span></button>
+                <button type="button" disabled={!picked.size} onClick={() => { setTctx(null); copyPicked(); }}>Copy<span>Ctrl+C</span></button>
+                <button type="button" onClick={menuPasteRows}>Paste<span>Ctrl+V</span></button>
+                <hr />
+                <button type="button" disabled={!pickedCount} onClick={() => { setTctx(null); deleteSelected(); }}>Delete {pickedCount > 1 ? `${pickedCount} rows` : 'row'}<span>Del</span></button>
+              </div>
+            ) : null}
           </>
         )}
       </div>
 
+      {deletingAll ? (
+        <DeleteAllModal
+          total={total}
+          scope={[tab === 'ALL' ? 'All tab' : `${meta.tabs.find((t) => t.key === tab).label} tab`, filt.units && `Units: ${filt.units}`, filt.platform && `Platform: ${filt.platform}`, filt.plug_type && `Plug Type: ${filt.plug_type}`,
+            (filt.from || filt.to) && `Dates: ${filt.from || '…'} → ${filt.to || '…'}`, q && `Search: “${q}”`].filter(Boolean)}
+          filters={{ team: tab === 'ALL' ? undefined : tab, units: filt.units || undefined, platform: filt.platform || undefined, plug_type: filt.plug_type || undefined, from: filt.from || undefined, to: filt.to || undefined, q: q || undefined }}
+          onClose={() => setDeletingAll(false)}
+          onDone={(out) => { setDeletingAll(false); afterBulk(out); }}
+        />
+      ) : null}
       {form ? (
         <WorkloadForm
           rec={form.rec}
@@ -1128,6 +1477,27 @@ export default function Workload() {
 
 // Admin-only: name a new column. It shows up everywhere (Table, Excel grid, the add/edit form, Excel export)
 // as a plain open-text field, appended after the template's own columns.
+function DeleteAllModal({ total, scope, filters, onClose, onDone }) {
+  const toast = useToast();
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
+    try { onDone(await post('/api/workload/bulk-delete', { all: true, filters })); } catch (e) { toast(e.message, 'err'); setBusy(false); }
+  };
+  return (
+    <Modal title="Delete all rows" onClose={onClose}
+      footer={(<><span className="grow" /><button type="button" className="btn" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn danger" disabled={busy || typed.trim() !== 'DELETE' || !total} onClick={go}>Delete {total} row{total === 1 ? '' : 's'}</button></>)}>
+      <p>This permanently deletes <strong>{total}</strong> Workload row{total === 1 ? '' : 's'} — every row that matches what you are looking at now:</p>
+      <ul className="plug-warn" style={{ color: 'inherit' }}>{scope.map((x) => <li key={x}>{x}</li>)}</ul>
+      <p>Rows in a locked period are skipped. It cannot be undone — consider an Export first.</p>
+      <label className="f"><span>Type <strong>DELETE</strong> to confirm</span>
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" onKeyDown={(e) => { if (e.key === 'Enter' && typed.trim() === 'DELETE' && !busy) go(); }} /></label>
+    </Modal>
+  );
+}
+
 function AddColumnModal({ columns, onClose, onAdded, onChanged }) {
   const toast = useToast();
   const [label, setLabel] = useState('');
@@ -1237,10 +1607,41 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
   if (!rec && !duplicateFrom) { initial.work_date = isoDate(); initial.units_concerned = defaultUnits; }
   initial.is_priority = !!(rec && rec.is_priority);   // a duplicate is a new item, so it starts un-prioritised
   const [f, , setAll] = useForm(initial);
+  // Plug ID is not typed: it is picked from the PSD Daily Plug List of the chosen Work Date, which fills PSD and PROG. NAME / PROJ. TITLE too
+  const session = useSession();
+  const [plugs, setPlugs] = useState(null);   // null = loading
+  useEffect(() => {
+    if (!ISO.test(f.work_date || '')) { setPlugs([]); return undefined; }
+    let live = true;
+    setPlugs(null);
+    get(`/api/plugs?date=${f.work_date}&used=1`).then((d) => { if (live) setPlugs(d.rows); }).catch(() => { if (live) setPlugs([]); });
+    return () => { live = false; };
+  }, [f.work_date]);
+  const findPlugIn = (date, plugId) => {
+    const id = firstLine(plugId).trim().toUpperCase();
+    return id && plugs ? plugs.find((p) => p.plug_date === date && p.plug_id.toUpperCase() === id) || null : null;
+  };
   const set = (k) => (e) => {
     const val = e && e.target ? e.target.value : e;
-    setAll((prev) => withAutoPlatform(meta.platformRules, prev, k, val));
+    setAll((prev) => {
+      if (k === 'work_date') {
+        // another day has another list: the plug chosen for the old day (and what it filled in) is cleared
+        if (val === prev.work_date) return prev;
+        const old = findPlugIn(prev.work_date, prev.plug_id);
+        const next = withAutoPlatform(meta.platformRules, { ...prev, work_date: val }, 'plug_id', '');
+        if (old && next.psd === old.psd) next.psd = '';
+        if (old && next.prog_name === old.prog_name) next.prog_name = '';
+        return next;
+      }
+      return withAutoPlatform(meta.platformRules, prev, k, val);
+    });
   };
+  const pickPlug = (e) => {
+    const p = (plugs || []).find((x) => String(x.id) === e.target.value);
+    if (p) setAll((prev) => ({ ...withAutoPlatform(meta.platformRules, prev, 'plug_id', p.plug_id), psd: p.psd, prog_name: p.prog_name }));
+    else if (e.target.value === '') setAll((prev) => withAutoPlatform(meta.platformRules, prev, 'plug_id', ''));   // "Choose…" again: no plug
+  };
+  const chosenPlug = findPlugIn(f.work_date, f.plug_id);
 
   // Audio-only units use the template's Audio sheet columns; everything else uses the main sheet columns
   const teams = meta.unitTeams[f.units_concerned] || [];
@@ -1261,7 +1662,7 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
   const submit = async () => {
     if (!f.work_date) { toast('Work Date is required', 'err'); return; }
     if (!f.units_concerned) { toast('Units Concerned is required', 'err'); return; }
-    if (!plugText) { toast('Plug ID is required', 'err'); return; }
+    if (!plugText) { toast('Choose a Plug ID from the PSD Daily Plug List', 'err'); return; }
     setBusy(true);
     try {
       if (rec) await put(`/api/workload/${rec.id}`, f);
@@ -1302,13 +1703,32 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
         </label>
         {!f.units_concerned ? <div className="full dim">Choose Units Concerned to see the fields.</div> : shown.map((k) => {
           const def = meta.fields[k];
+          if (k === 'plug_id') {
+            // no free-text box: the Plug ID is chosen from the PSD Daily Plug List of the Work Date
+            const blocked = !f.work_date ? 'Choose the Work Date first' : plugs === null ? 'Loading the plug list…' : !plugs.length ? 'No PSD Daily Plug List for this date yet' : null;
+            const legacy = !!plugText && !!plugs && !chosenPlug;   // saved earlier with a Plug ID that isn't on this day's list: keep it until another is chosen
+            return (
+              <label key={k} className="f full">
+                <span>{fieldLabel(k, def)}<span className="req"> *</span></span>
+                <select value={blocked ? '' : chosenPlug ? String(chosenPlug.id) : legacy ? '__current' : ''} onChange={pickPlug} disabled={!canWrite || !!blocked} aria-label="Plug ID — pick from the PSD Daily Plug List">
+                  {blocked ? <option value="">{blocked}</option> : (
+                    <>
+                      <option value="">Pick from the PSD Daily Plug List ({plugs.length})…</option>
+                      {legacy ? <option value="__current">{firstLine(f.plug_id)} (not on this day’s list)</option> : null}
+                      {plugs.map((p) => <option key={p.id} value={p.id}>{p.plug_id} — {p.prog_name || '(no title)'} · {p.psd || '(no PSD)'}</option>)}
+                    </>
+                  )}
+                </select>
+                {plugs && !plugs.length && f.work_date
+                  ? <small className="dim">{session.canPage('/plug-list') ? <>Import it, or add the plug, on the <Link to="/plug-list">PSD Daily Plug List</Link> page.</> : 'Ask someone who manages the PSD Daily Plug List to import it.'}</small> : null}
+                {plugText && !f.platform ? <small className="dim">{/PD_/i.test(plugText) ? 'PD_ plugs are digital — choose DIGITAL or INTL DIGITAL.' : 'Could not tell the platform from the Plug ID — choose one.'}</small> : null}
+              </label>
+            );
+          }
           return (
             <label key={k} className={`f${def.multiline ? ' full' : ''}`}>
               <span>{fieldLabel(k, def)}{def.required ? <span className="req"> *</span> : null}</span>
               <FieldInput def={def} value={f[k]} onChange={set(k)} disabled={!canWrite} lookups={lookups} />
-              {k === 'platform' && plugText && !f.platform ? (
-                <small className="dim">{/PD_/i.test(plugText) ? 'PD_ plugs are digital — choose DIGITAL or INTL DIGITAL.' : 'Could not tell the platform from the Plug ID — choose one.'}</small>
-              ) : null}
             </label>
           );
         })}

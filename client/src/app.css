@@ -362,10 +362,10 @@ table.xl .x-btn:hover { color: var(--red); }
 .auth-wrap { min-height: 100vh; display: grid; place-items: center; padding: 20px;
   background: radial-gradient(900px 500px at 15% -10%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 60%),
               radial-gradient(700px 400px at 110% 110%, color-mix(in srgb, var(--accent-2) 14%, transparent), transparent 60%), var(--bg); }
-.auth-card { width: 100%; max-width: 400px; padding: 30px 28px; }
+.auth-card { width: 100%; max-width: 420px; padding: 34px 30px; }
 .auth-card .brand { margin: 0 0 22px; justify-content: center; flex-direction: column; gap: 12px; text-align: center; }
-.auth-card .brand img { height: 56px; max-width: 200px; }
-.auth-card .brand .mark { width: 52px; height: 52px; font-size: 22px; border-radius: 14px; }
+.auth-card .brand img { height: 112px; max-width: 320px; }
+.auth-card .brand .mark { width: 84px; height: 84px; font-size: 34px; border-radius: 22px; }
 .auth-card .brand .name { display: block; font-size: 19px; }
 .auth-card .tagline { color: var(--text-2); font-size: 13px; font-weight: 400; }
 .auth-card .btn { width: 100%; height: 40px; }
@@ -441,7 +441,7 @@ table.t.xl tr.dirty td, table.t.xl tr.dirty:hover td { background: color-mix(in 
 /* Audio Guide control: N/A | Date (+ date picker) */
 .ag { display: flex; gap: 6px; align-items: center; }
 .ag select { flex: 0 0 auto; width: auto; min-width: 84px; }
-.ag input[type="date"] { flex: 1 1 auto; min-width: 130px; }
+.ag input[type="date"], .ag input[type="text"] { flex: 1 1 auto; min-width: 130px; }
 label.f > small { display: block; margin-top: 4px; font-size: 12px; }
 table.t.xl .ag select { width: 84px; min-width: 84px; flex: none; }
 table.t.xl .ag input[type="date"] { width: auto; min-width: 140px; flex: 1 1 auto; }
@@ -514,11 +514,11 @@ html[data-mode="light"] .c-fuchsia { --c: #a21caf; }
 .wl-search input { flex: 1; min-width: 0; height: auto; padding: 0; border: 0; background: transparent; box-shadow: none; color: var(--text); }
 .wl-search:focus-within, .fsel:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .fsel { position: relative; display: block; min-width: 150px; height: 38px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); }
+.fsel-btn { display: block; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; border-radius: inherit; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.fsel-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .fsel-row { display: flex; align-items: center; gap: 14px; height: 100%; padding: 0 28px 0 12px; pointer-events: none; }
 .fsel-label { flex: none; font-size: 12px; line-height: 1; color: var(--text-2); font-weight: 550; white-space: nowrap; }
 .fsel-value { flex: 1; min-width: 0; text-align: right; font-weight: 600; font-size: 13.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fsel select { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; border-radius: inherit; background: transparent; box-shadow: none; color: transparent; -webkit-appearance: none; -moz-appearance: none; appearance: none; cursor: pointer; }
-.fsel select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }   /* the select is invisible, but keep a real focus indicator for keyboard use */
 .fsel svg { position: absolute; right: 10px; top: 50%; width: 13px; height: 13px; transform: translateY(-50%); pointer-events: none; color: var(--text-2); z-index: 1; }
 .daterange { position: relative; display: flex; }
 .daterange-btn { display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; height: 38px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); color: var(--text); font: 600 13px var(--font); cursor: pointer; white-space: nowrap; }
@@ -607,7 +607,7 @@ table.t.wl td.editing { padding: 4px; white-space: normal; }   /* the cell itsel
 .cell-editor input[type="datetime-local"] { min-width: 215px; }
 .cell-editor .ag { flex-wrap: wrap; max-width: 230px; }   /* wrap instead of overflowing into the next column if the cell is narrow */
 .cell-editor .ag select { min-width: 84px; }   /* the generic ".cell-editor select" rule above (150px) was overriding this back up, which is what pushed the date input into the Remarks column */
-.cell-editor .ag input[type="date"] { min-width: 130px; }
+.cell-editor .ag input[type="date"], .cell-editor .ag input[type="text"] { min-width: 130px; }
 table.t.xl input[type="datetime-local"] { min-width: 215px; }
 table.t.wl.cards td.editing { padding: 0; }
 
@@ -772,3 +772,190 @@ table.t.xl td[data-k="breakdate_vgfx"] .xl-cell { min-width: 250px; }
 @media (max-width: 800px) { .diff-grid { grid-template-columns: 1fr; } }
 .sub-tabs { margin-bottom: 14px; }
 .restore-overlay { z-index: 1000; }
+/* PSD Daily Plug List tab */
+.plug-list { padding: 12px 16px 16px; }
+.plug-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.plug-bar .grow { flex: 1; }
+.plug-date { display: inline-flex; gap: 4px; align-items: center; }
+.plug-date select { min-width: 250px; }
+.plug-t td, .plug-t th { vertical-align: middle; }
+.plug-t th.chk, .plug-t td.chk { width: 34px; text-align: center; }
+.plug-t tr.done td { opacity: .6; }
+.plug-add { margin-left: 8px; font-size: 10.5px; }
+.plug-sum { max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; margin-top: 10px; font-size: 13px; }
+.plug-sum > div { display: flex; justify-content: space-between; gap: 16px; padding: 3px 0; }
+.plug-warn { color: var(--danger, #c0392b); font-size: 13px; margin: 8px 0 0 18px; }
+select.plug-pick { margin-top: 6px; font-size: 12.5px; }
+
+.chip.unset { cursor: pointer; opacity: .85; }
+
+/* The Units / Platform / Plug Type dropdowns: the real <select> is invisible (color: transparent) and the label above it is drawn by hand,
+   so its option list inherited "transparent" text on the system's white popup. Give the options their own readable colours. */
+
+/* Table mode: row ticks, selection bar, highlighted row */
+table.t.wl tbody tr.picked td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+table.t.wl.cards tr.picked { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.sel-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.sel-bar .grow { flex: 1; }
+.sel-count { display: inline-flex; align-items: center; gap: 10px; }
+.linkbtn { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; }
+.xl-selall { padding: 8px 4px 0; }
+
+/* dragging across rows: don't select the text underneath */
+#tbl.selecting, #tbl.selecting * { user-select: none; -webkit-user-select: none; cursor: default; }
+table.t.wl tbody tr.picked td { box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 40%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--accent) 40%, transparent); }
+
+/* Filter dropdown list (drawn by the app, so the values get proper padding and follow the theme) */
+.fsel.open { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.fsel-list { position: absolute; z-index: 60; top: calc(100% + 4px); left: 0; min-width: 100%; max-width: 360px; max-height: 300px; overflow-y: auto; margin: 0; padding: 6px; list-style: none; background: var(--surface); border: 1px solid var(--border-2); border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.22); }
+.fsel-list li { padding: 9px 14px; border-radius: 6px; font-size: 13.5px; line-height: 1.25; color: var(--text); white-space: nowrap; cursor: pointer; }
+.fsel-list li.hi { background: var(--accent-soft); }
+.fsel-list li.sel { font-weight: 700; color: var(--accent); }
+
+.radio-row { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; }
+.radio-row input { width: auto; margin: 0; }
+
+/* PSD Daily Plug List: period / paging controls */
+.plug-range { font-weight: 600; font-size: 13.5px; margin-left: 6px; white-space: nowrap; }
+.plug-from { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.plug-from input { height: 36px; }
+.plug-foot { display: flex; align-items: center; gap: 14px; margin-top: 10px; }
+.plug-foot .grow { flex: 1; }
+.plug-foot .fsel { min-width: 130px; }
+.plug-t td.nowrap { white-space: nowrap; }
+.plug-bar .wl-search { flex: 1 1 180px; min-width: 180px; }
+.plug-bar { row-gap: 8px; }
+
+/* ---------------- Dashboard ---------------- */
+.dash { padding-bottom: 40px; }
+.dash-hero { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; padding: 22px 24px; border-radius: 14px; border: 1px solid var(--border);
+  background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 16%, var(--surface)) 0%, var(--surface) 60%); }
+.dash-hero h1 { margin: 0; }
+.dash-hero .sub { color: var(--text-2); margin-top: 4px; }
+.dash-hero .actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.dash-section { margin-top: 26px; }
+.dash-sec-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.dash-sec-head h2 { margin: 0; font-size: 18px; }
+.dash-sec-head .grow { flex: 1; }
+.dash-grid { display: grid; gap: 14px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.dash-grid .span-2 { grid-column: span 2; }
+@media (max-width: 1000px) { .dash-grid { grid-template-columns: 1fr; } .dash-grid .span-2 { grid-column: auto; } }
+.dash-panel { padding: 16px 18px; }
+.dash-panel-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.dash-panel-head h3 { margin: 0; font-size: 14.5px; }
+.dash-panel-head .dim { font-size: 12.5px; }
+
+/* workload by day */
+.wbd { display: grid; gap: 14px; }
+.wbd-stats { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 34px; }
+.wbd-stats > div:not(.wbd-legend) { display: flex; flex-direction: column; gap: 1px; }
+.wbd-stats span { font-size: 11.5px; color: var(--text-2); letter-spacing: .02em; }
+.wbd-stats b { font-size: 17px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.wbd-legend { margin-left: auto; display: flex; gap: 14px; align-items: center; }
+.wbd-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.wbd-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.wbd-legend i.past { background: color-mix(in srgb, var(--accent) 34%, var(--surface)); }
+.wbd-legend i.next { background: color-mix(in srgb, var(--accent) 78%, var(--surface)); }
+.wbd-legend i.today { background: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
+.wbd-chart { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 8px; padding-top: 18px; }   /* room for the top bar's value label */
+.wbd-y { height: 180px; display: flex; flex-direction: column; justify-content: space-between; text-align: right; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; line-height: 1; margin: -5px 0 -5px; }
+.wbd-plot { position: relative; height: 180px; }
+.wbd-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed color-mix(in srgb, var(--text) 13%, transparent); }
+.wbd-line.base { top: auto; bottom: 0; border-top: 1px solid color-mix(in srgb, var(--text) 24%, transparent); }
+.wbd-cols { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); }
+.wbd-col { position: relative; height: 100%; display: flex; justify-content: center; }
+.wbd-col.weekend { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.wbd-col.today { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.wbd-col:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.wbd-bar { position: absolute; bottom: 0; width: 58%; max-width: 40px; border-radius: 7px 7px 2px 2px; transition: filter .15s, height .3s; }
+.wbd-col.past .wbd-bar { background: color-mix(in srgb, var(--accent) 34%, var(--surface)); }
+.wbd-col.next .wbd-bar { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, #fff) 0%, color-mix(in srgb, var(--accent) 70%, var(--surface)) 100%); }
+.wbd-col.today .wbd-bar { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 92%, #fff) 0%, var(--accent) 100%); box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 38%, transparent); }
+.wbd-col:hover .wbd-bar { filter: brightness(1.08); }
+.wbd-zero { position: absolute; bottom: 0; width: 34%; max-width: 22px; height: 3px; border-radius: 3px; background: color-mix(in srgb, var(--text) 16%, transparent); }
+.wbd-val { position: absolute; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text); }
+.wbd-col.past .wbd-val { color: var(--text-2); }
+.wbd-tip { position: absolute; z-index: 5; display: none; flex-direction: column; align-items: center; padding: 6px 10px; border-radius: 8px; background: var(--text); color: var(--bg); font-size: 11.5px; white-space: nowrap; box-shadow: 0 6px 18px rgba(0,0,0,.25); pointer-events: none; }
+.wbd-tip b { font-size: 12.5px; }
+.wbd-col:hover .wbd-tip { display: flex; }
+.wbd-x { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); margin-left: 38px; }
+.wbd-xl { display: flex; flex-direction: column; align-items: center; padding-top: 6px; min-width: 0; line-height: 1.25; }
+.wbd-xl .wbd-mon { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); min-height: 12px; }
+.wbd-xl .wbd-dow { font-size: 11px; color: var(--text-2); }
+.wbd-xl .wbd-num { font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 1px; }
+.wbd-xl.weekend .wbd-dow, .wbd-xl.weekend .wbd-num { color: var(--text-3); }
+.wbd-xl.today .wbd-num { background: var(--accent); color: var(--accent-contrast, #fff); border-radius: 999px; padding: 0 8px; }
+.wbd-xl.today .wbd-dow { color: var(--accent); font-weight: 700; }
+@media (max-width: 700px) { .wbd-legend { margin-left: 0; } .wbd-xl .wbd-dow { display: none; } .wbd-x { margin-left: 38px; } }
+
+/* by team */
+.dash-teams { display: grid; gap: 14px; }
+.dash-teams .dt-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; font-size: 13.5px; }
+.dash-teams .dt-name { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.dash-teams .dt-name i { width: 10px; height: 10px; border-radius: 3px; background: var(--gray); display: inline-block; }
+.dash-teams .dt-top b { font-variant-numeric: tabular-nums; }
+.dash-teams .dt-track { height: 9px; border-radius: 999px; background: color-mix(in srgb, var(--text) 8%, transparent); overflow: hidden; }
+.dash-teams .dt-track div { height: 100%; border-radius: 999px; min-width: 3px; }
+.dash-teams .dt-note { font-size: 12px; }
+
+/* Active users */
+.dash-users { padding: 16px 18px; }
+.dash-users .du-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.dash-users .du { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.dash-users .du-avatar { position: relative; flex: none; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 15px; letter-spacing: .02em; }
+.dash-users .du-dot { position: absolute; right: -1px; bottom: -1px; width: 12px; height: 12px; border-radius: 50%; background: var(--green); border: 2px solid var(--surface-2); box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 55%, transparent); animation: du-pulse 2s infinite; }
+@keyframes du-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 50%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .dash-users .du-dot { animation: none; } }
+.dash-users .du-info { min-width: 0; flex: 1; }
+.dash-users .du-name { font-weight: 650; font-size: 14px; display: flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-users .du-you { font-size: 10.5px; padding: 1px 7px; background: var(--accent-soft); color: var(--accent); }
+.dash-users .du-meta { display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 12.5px; flex-wrap: wrap; }
+.dash-users .du-ago { font-size: 12px; white-space: nowrap; align-self: flex-start; }
+.dash-users .du-earlier { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 12.5px; }
+.dash-users .du-chip { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); }
+.dash-users .du-chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dash-users .du-chip em { font-style: normal; color: var(--text-3); font-size: 11.5px; }
+
+/* Workload by day — a smaller version of the same chart (short plot, summary in the panel header, month folded into the date label) */
+.dash { padding-bottom: 24px; }
+.dash-panel-head { flex-wrap: wrap; row-gap: 6px; }
+.dash-panel-head .grow { flex: 1; }
+.dash-panel-head .wbd-stats { gap: 6px 22px; align-items: center; }
+.dash-panel-head .wbd-stats span { font-size: 11px; }
+.dash-panel-head .wbd-stats b { font-size: 14px; }
+.dash-panel-head .wbd-stats > div:not(.wbd-legend) { flex-direction: row; align-items: baseline; gap: 6px; }
+.dash-panel-head .wbd-legend { margin-left: 0; gap: 10px; }
+.wbd { gap: 0; }
+.wbd-chart { padding-top: 14px; }
+.wbd-y { height: 96px; }
+.wbd-plot { height: 96px; }
+.wbd-val { font-size: 11.5px; }
+.wbd-bar { max-width: 34px; }
+.wbd-x .wbd-xl { padding-top: 4px; }
+.wbd-xl .wbd-num small { display: block; font-size: 9px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); line-height: 1; margin-top: 1px; }
+.wbd-xl.today .wbd-num small { color: var(--accent); }
+@media (max-width: 700px) { .dash-panel-head .wbd-stats > div:not(.wbd-legend) { flex-direction: column; gap: 0; } }
+
+/* Use the spare height: on a tall window the dashboard fills the screen below the nav bar — the Workload by day chart and By team panel
+   grow into whatever room is left (they never shrink below their compact size, so a short window still scrolls as before). */
+.container.dash { min-height: calc(100vh - var(--nav-h)); min-height: calc(100dvh - var(--nav-h)); box-sizing: border-box; display: flex; flex-direction: column; }
+.dash-section.grow { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.dash-section.grow > .dash-grid { flex: 1; }
+.dash-grid > .dash-panel { display: flex; flex-direction: column; min-height: 0; }
+.dash-grid > .dash-panel > .wbd { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.wbd-chart { height: auto; flex: 1; min-height: 110px; }
+.wbd-y { height: auto; min-height: 96px; }
+.wbd-plot { height: auto; min-height: 96px; }
+.dash-grid > .dash-panel > .dash-teams { flex: 1; align-content: space-evenly; }
+.container.dash > .dash-hero { margin-bottom: 0; }   /* in the column layout margins don't collapse: the sections' own top margin is the gap */
+
+/* People on this page (Workload Tracker header) */
+.presence { display: flex; align-items: center; padding-left: 5px; }
+.pa { position: relative; flex: none; width: 34px; height: 34px; margin-left: -5px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 12px; font-weight: 700;
+  letter-spacing: .02em; border: 2px solid var(--surface); box-shadow: 0 1px 4px rgba(0, 0, 0, .22); cursor: default; user-select: none; transition: transform .12s; }
+.pa:hover { transform: translateY(-2px); z-index: 5; }
+.pa.you { box-shadow: 0 0 0 2px var(--accent), 0 1px 4px rgba(0, 0, 0, .22); }
+.pa.more { background: var(--surface-3); color: var(--text-2); font-size: 11.5px; }
+.pa::after { content: attr(data-tip); position: absolute; top: calc(100% + 8px); right: -4px; padding: 4px 10px; border-radius: 7px; background: var(--text); color: var(--bg);
+  font-size: 12px; font-weight: 600; letter-spacing: 0; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 30; box-shadow: 0 6px 18px rgba(0, 0, 0, .25); }
+.pa:hover::after { opacity: 1; }

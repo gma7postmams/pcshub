@@ -134,11 +134,13 @@ app.use('/api', (req, res, next) => {
 
 app.use('/api/profile',       requirePageAccess('/profile'),   require('./src/routes/profile'));
 app.use('/api/notifications', require('./src/routes/notifications'));
+app.use('/api/presence',      require('./src/routes/presence'));   // who is working right now (feeds the Dashboard's Active users)
 app.use('/api',               require('./src/routes/lookups'));
 app.use('/api/dashboard',     requirePageAccess('/dashboard'), require('./src/routes/dashboard'));
 app.use('/api/ingest',        requirePageAccess('/ingest'),    require('./src/routes/ingest'));
 app.use('/api/approvals',     requirePageAccess('/approval'),  require('./src/routes/approvals'));
 app.use('/api/workload',      requirePageAccess('/workload'),  require('./src/routes/workload'));
+app.use('/api/plugs',         require('./src/routes/plugs')(require('./src/routes/workload').helpers));   // PSD Daily Plug List (page + API of its own)
 app.use('/api/reports',       requirePageAccess('/reports'),   require('./src/routes/reports'));
 app.use('/api/knowledge',     requirePageAccess('/knowledge'), require('./src/routes/knowledge'));
 app.use('/api/admin/backups', requirePageAccess('/admin'),     require('./src/routes/backups'));
@@ -181,14 +183,34 @@ app.use(errorHandler);
 // ---------- Boot ----------
 // MIGRATE_ON_START=false: run `npm run migrate` with an owner DB login instead, and give the app a DML-only login
 // (see db/app-role.sql).
-const boot = process.env.MIGRATE_ON_START === 'false' ? db.query('SELECT 1 FROM users LIMIT 1') : migrate(db);
+const boot = process.env.MIGRATE_ON_START === 'false'
+  ? db.query('SELECT 1 FROM users LIMIT 1')
+  : migrate(db);
+
 boot
   .then(() => require('./src/backup/service').recoverStale())
   .then(() => require('./src/backup/analysis').startupCleanup())
-  .then(() => {
+  .then(async () => {
+    // Workload rows that have a Plug ID but no PSD / PROG. NAME yet are filled from the PSD Daily Plug List
+    try {
+      const n = await require('./src/routes/plugs').backfillWorkload(db);
+      if (n) {
+        console.log(
+          `[workload] filled PSD / PROG. NAME on ${n} existing row(s) from the PSD Daily Plug List`
+        );
+      }
+    } catch (e) {
+      console.error('[workload] plug list fill skipped:', e.message);
+    }
+
     // Production default: localhost only — users reach the app through the HTTPS reverse proxy.
     const HOST = process.env.HOST || (PROD ? '127.0.0.1' : '0.0.0.0');
-    app.listen(PORT, HOST, () => console.log(`Promotional Content Hub listening on ${HOST}:${PORT} (${PROD ? 'production' : 'development'})`));
+
+    app.listen(PORT, HOST, () =>
+      console.log(
+        `Promotional Content Hub listening on ${HOST}:${PORT} (${PROD ? 'production' : 'development'})`
+      )
+    );
   })
   .catch((e) => {
     console.error('Startup failed:', e);

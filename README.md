@@ -189,3 +189,79 @@ client/                   React 18 + Vite front end
   public/                 theme-boot.js, sw.js, manifest, icons, offline page
   dist/                   build output served by Express (index.html only after the access check)
 ```
+
+### Import / export audit hook (for whoever owns the audit log)
+
+The Import and Export buttons — **Workload Import**, **Workload Export** and the PSD Daily Plug List **Import plug list** — do **not** write to the audit log themselves; that part belongs to someone else. Instead, each run (and each failure) is announced through one small module, `src/transfer-hook.js`, and the audit owner subscribes once:
+
+```js
+const { onTransfer } = require('./src/transfer-hook');
+onTransfer((e) => audit(e.req, e.action, e.entity, e.entityId, e.details));   // e.g. in server.js, once the audit module is loaded
+```
+
+Nothing is wired up yet, so until that line is added these actions simply don't appear in the audit log. (One line per event is also written to the server log — `journalctl -u pcshub -f` — whether or not anything is subscribed.)
+
+**Events** (`e.action`): `workload.export`, `workload.export_failed`, `workload.import`, `workload.import_failed`, `workload.plugs_import`, `workload.plugs_import_failed` — the list is exported as `TRANSFER_ACTIONS`.
+
+**The event** `e`: `action` · `entity` (`'workload_transfer'`, a suggested value for `audit()`'s entity argument) · `entityId` (`null`) · `user` (`{ id, username, role }` or `null`) · `ip` · `at` (ISO time) · `req` (the Express request, so `audit(req, …)` works exactly as elsewhere in the app) · `details`:
+
+| action | `details` |
+|---|---|
+| `workload.export` | `format`, `team`, `filters`, `matched`, `truncated` (hit the 20,000-row cap), `sheets` (rows per sheet), `file`, `bytes`, `ms` |
+| `workload.import` | `file`, `bytes`, `sheets` (`[{ name, rows }]`), `rowsRead`, `uniqueRows`, `created`, `skipped`, `errors` (first 20 skip reasons), `newColumns`, `ms` |
+| `workload.plugs_import` | `target`, `file`, `bytes`, `year`, `days`, `from`, `to`, `plugs`, `added`, `skipped`, `workloadRowsFilled`, `warnings`, `ms` |
+| `*_failed` | what was known at the time (`file`, `bytes`, `team` / `filters` …) plus `error` and `ms` |
+
+Row contents are never included. Listeners may be async; one that throws or rejects is logged and ignored, so it can never break an import or export. `onTransfer` returns a function that unsubscribes.
+
+Separately, the other actions added to Workload and the plug list — bulk delete / **Delete all…**, **Copy to Workload**, **Fill blank rows** — are ordinary action logs written through the existing `audit()` helper (`workload.bulk_delete`, `workload.plugs_copy`, `workload.plugs_fill`, `workload.plugs_delete_all`), like the app's other create / edit / delete entries; each imported Workload row still gets its own `workload.create` entry, flagged `imported`.
+
+### PSD Daily Plug List (its own page, next to the Workload Tracker)
+
+The **PSD Daily Plug List** page (top navigation, right after the Workload Tracker; `/plug-list`) holds the PSD's daily plug list. The table has a **NO** column first, then a **DATE** column of its own (then PLUG ID / PROG. NAME / PROJ. TITLE / PSD / Account By), and two dropdowns control what you see: **View** — *All*, *Daily*, *Weekly* (Monday–Sunday), *Monthly* or *Custom range* (with ‹ › to step to the previous / next day that has a list, week or month) — and **Rows**, how many rows are visible per page (25 / 50 / 100 / 250 / 500 / All, up to 5,000 at once; the choices are remembered). *All* lists the newest day first. Search works within the current view. The Workload Tracker copies **Plug ID, PSD and PROG. NAME / PROJ. TITLE** from it.
+
+- **Import plug list** reads the PSD's workbook (one sheet per day; each sheet's date comes from its "DATE:" line, else the sheet name). The year isn't in the sheet, so it is taken from the file name (`September_2026_…`) or asked for. Re-importing an updated file only adds what is new; late additions under “Additional for …” are marked *Added*; exact duplicate lines are dropped. The import is announced on the import / export hook (`workload.plugs_import`, see above).
+- **Existing rows get filled too**: a Workload row that already has a Plug ID but a blank PSD or PROG. NAME / PROJ. TITLE is filled in from that day's list — automatically after a plug list is imported or a plug is added / edited, once at every server start, and on demand with **Fill blank rows** (on the plug list page; `workload.plugs_fill` in the audit log). Only blanks are filled (nothing typed is overwritten), the Plug ID matches in any letter case (for a multi-line Plug ID cell, the first line), and rows in a locked date range are left alone.
+- **New / Edit Workload has no free-text Plug ID**: the field is a dropdown of the plugs on the PSD Daily Plug List for the chosen Work Date (“PLUG_ID — program · PSD”). Choosing one fills PSD, PROG. NAME / PROJ. TITLE and the platform; changing the Work Date clears the choice, since another day has another list; a day with no list yet says so (with a link to the plug list page) and can't be saved. A row saved earlier with a Plug ID that isn't on the list shows it as “(not on this day's list)” and can still be saved unchanged. In Table mode, clicking a Plug ID cell opens the edit form for the same reason. Excel mode, Import and the Table-mode paste still take a typed / pasted Plug ID (they fill PSD / PROG. NAME when it matches the list).
+- **Autofill**: in Excel mode when you type or paste a Plug ID, and on the server whenever a row is saved with those two left blank (forms, Excel grid, Workload import). Values you type yourself are kept; ones that were filled in are replaced if you change the Plug ID.
+- **Copy to Workload** makes a Workload row for each selected plug — from any days — or, with nothing selected, for every plug in the current view (up to 5,000) that isn't in the tracker yet with Plug ID, PSD and PROG. NAME / PROJ. TITLE filled in. **Units Concerned is left blank** (the plug list doesn't say which team a plug is for): those rows show only under the **All** tab, marked “Set units”, until someone chooses the team(s) — click the Units cell or edit the row — and then they appear under the matching VGFX / VEDIT / Audio tabs. The Units filter's “(Not set)” finds the ones still waiting, and an export puts them on an `UNASSIGNED` sheet (which Import reads back). A row that has units can't be blanked, and a row you add by hand still needs them. Copy skips plugs that already have a row for that day, respects locked dates, and is logged (`workload.plugs_copy`).
+- **Add plug**, **Edit** and **Delete** (on every row) change a day's list by hand. Editing can fix any field, including the Plug ID or the day (the list follows the plug to its new day); Workload rows already filled from the old values keep what they have, and any Workload row with a blank PSD / PROG. NAME that now matches gets filled in. Edits are logged (`workload.plug_edit`). **Delete all…** (Admin only) clears everything in the current view (e.g. one week) or every day's plugs, after typing `DELETE`; Workload rows already made from the list are not touched. It is logged (`workload.plugs_delete_all`).
+
+**Access.** The page is granted to a *group* like any other (Admin → Groups → Pages → “PSD Daily Plug List”); the first time this version starts, every group that can open the Workload Tracker is given it too, so nobody loses access (untick it per group afterwards — it isn't re-added). Anyone who can open either the plug list page or the Workload Tracker can *read* the list (the tracker uses it to fill PSD / PROG. NAME). Changing it — import, add, edit, delete, delete all — needs the new `plugs.write` action (Manager or Admin **and** the plug list page; delete all is Admin only). **Copy to Workload** and **Fill blank rows** also need `workload.write`, because they create / change Workload rows. The API moved from `/api/workload/plugs` to `/api/plugs`.
+- The Workload column formerly named “Prog. Name / Project Title” is now **PROG. NAME / PROJ. TITLE** (Import still understands files exported under the old name).
+
+### Table mode: selecting, deleting and keyboard shortcuts
+
+Table mode selects rows the way Excel mode selects cells — no tick boxes and no Select all button.
+
+- **Select rows**: press on a row and **drag** across the rows you want; **Shift+click** extends a range; **Ctrl/Cmd+click** adds or removes one row. A plain click on a cell still opens that cell for editing, and clicking outside the table (or pressing **Esc**) drops the selection. Rows in a locked period can't be selected.
+- **Select all is Ctrl/Cmd+A only**: in Table mode it selects every row on the page (press again for every matching row — Admin); in Excel mode it selects every cell of the grid, even with the cursor inside a cell.
+- **Right-click a row** (Table mode) for the same menu as Excel mode: Undo, Redo, Cut, Copy, Paste, Delete. (On a plain-http address the browser won't let the menu read the system clipboard, so its Paste uses the rows last copied in the app; Ctrl+V works for anything copied elsewhere.)
+- **Shortcuts** (the same as Excel mode; not while typing in a field or a cell editor): **Ctrl+C** copy the selected rows as tab-separated text (pastes into Excel mode or a spreadsheet) · **Ctrl+X** cut (copy, then delete after a confirmation) · **Ctrl+V** paste rows from the clipboard as new Workload rows (after a confirmation) · **Ctrl+Z / Ctrl+Y** undo / redo a delete, cut, paste or single-cell edit · **Delete** delete the selected rows (after a confirmation) · **Esc** clear.
+- Table mode saves straight to the server, so undo works by doing the opposite on the server: undoing a delete re-creates the rows as new rows (new IDs), undoing a paste deletes what it added. Undo history is kept until the page is reloaded; deleting everything with **Delete all…** can't be undone.
+- **Delete selected** and **Delete all…** (Admin only; type `DELETE` to confirm) skip rows in a locked period and say how many, and are logged (`workload.bulk_delete`).
+- The Units / Platform / Plug Type filters are the app's own dropdowns (keyboard: arrows, Enter, Esc, type a letter to jump), so the values are padded and themed instead of using the browser's plain popup.
+
+### Logo: login page and browser tab
+
+- The logo on the sign-in page is twice its old size (112 px tall, up to 320 px wide); the initials mark used when there is no logo grew to match.
+- The **browser-tab icon** is the logo uploaded on **Admin → Branding**, with a transparent background. It is made in the browser from that logo: a plain solid backdrop (a white or coloured box around the artwork) is removed from the edges inwards — white *inside* the artwork is kept — the empty margin is trimmed, and the result is centred on a 64×64 PNG. A logo that is already transparent is only trimmed and squared. It is cached per logo, so a newly uploaded logo gets a fresh icon; with no logo the built-in icon is used. (A logo whose corners are not one plain colour, such as a photo, is used as it is.) The installed-app / home-screen icons (`manifest.webmanifest`) are not changed.
+
+### Artwork / STB: a date or plain text
+
+The **Artwork / STB** field takes either a **date** (a date picker) or **text** (an open text box): a small **Date / Text** dropdown sits beside the box, in the New / Edit form and when you click the cell in Table mode (an empty one starts as a Date, as the column always did; switching clears the box, since the two don't convert into each other). It is stored as one value — `YYYY-MM-DD` for a date, anything else for text (up to 200 characters, one line; a date-shaped value must be a real date). In Table mode a date shows as a date chip and text as plain text; in Excel mode the cell is just a text cell (type `2026-10-09` or any text); the Export writes a date as a real Excel date and text as text, and Import reads either back. The database column changed from `DATE` to `TEXT`; the first start of this version converts it in place and keeps every existing date as `YYYY-MM-DD`.
+
+### Dashboard
+
+The Dashboard is one screen for what is in flight, refreshed every minute. Each block shows only if the signed-in user may see it:
+
+- **Active users** (the Dashboard section *Active users*, granted per group under Admin → Groups) — who is working in the app right now: a card per person with their role, the page they are on and when they were last active, then a compact *Earlier today* line for anyone active in the last 24 hours. “Active” means they used the app within the last 5 minutes. The app sends a small heartbeat (`POST /api/presence`, about once a minute and when changing page) **only while the person is actually using it** — mouse, keys, touch or scroll in the last two minutes, tab visible — so an idle open tab doesn't count; it is stored one row per user in `user_presence`. Disabled accounts are left out. The block refreshes itself every 10 seconds (`GET /api/dashboard/users`, a light request; the rest of the dashboard every minute), the Dashboard records that you are on it *before* it loads its numbers, and your own card always says you are on the Dashboard — so locations stay current.
+- **Workload Tracker** (needs the Workload page) — KPI cards for *Today*, *This week* (Monday–Sunday), *Breakdates in the next 7 days* and *Priority*; **Workload by day** (a column chart of the past week and the week ahead with a y axis and gridlines — past days muted, upcoming days in the accent colour, today picked out, weekends lightly shaded — kept compact — a short plot, with the total in view, daily average and busiest day beside the title — and a tooltip on hover) and **By team** (items per VGFX / VEDIT / Audio — a VGFX/VEDIT item counts for both).
+- **Ingest & Approval** (the Dashboard section *Ingest KPIs*) — the four status cards.
+
+Cards and rows are clickable and open the relevant page. A user whose group has none of these sees a message instead. The first start of this version gives *Active users* to every group that can open the Dashboard (untick it per group afterwards; it isn't re-added) and retires the old *Recent ingest activity* section.
+On a tall window the dashboard fills the screen below the nav bar: the *Workload by day* chart and *By team* panel grow into whatever height is left (they never shrink below their compact size, so a short window simply scrolls).
+
+### Who is on the Workload Tracker
+
+The top right of the **Workload Tracker** page shows a row of round avatars — like the collaborators at the top of a Google Sheet — for everyone who is on that page right now (you included, with an accent ring). Hover an avatar to see the name; more than six collapse into a “+N” bubble whose tooltip lists the rest. There are no profile pictures in the app, so each avatar is the person's initials on a colour of their own. It uses the same presence signal as the Dashboard's *Active users* (`user_presence`, “active” = used the app in the last 5 minutes) and refreshes every 30 seconds; `GET /api/presence?path=/workload` answers it for anyone who can open that page, and only lists people currently on that same page. Nothing is shown when you are the only one. Disabled accounts are left out.

@@ -21,12 +21,13 @@ const CATALOG = [
     path: '/dashboard',
     sections: [
       { key: 'dashboard.kpis', label: 'Ingest KPIs' },
-      { key: 'dashboard.recent', label: 'Recent ingest activity' },
+      { key: 'dashboard.users', label: 'Active users' },
     ],
   },
 
   { key: 'ingest', label: 'Ingest Tracker', path: '/ingest', sections: [] },
   { key: 'workload', label: 'Workload Tracker', path: '/workload', sections: [] },
+  { key: 'plugs', label: 'PSD Daily Plug List', path: '/plug-list', sections: [] },
   { key: 'approval', label: 'Approval', path: '/approval', sections: [] },
 
   {
@@ -59,8 +60,25 @@ const SECTION_PAGE = Object.fromEntries(CATALOG.flatMap((p) => p.sections.map((s
 
 // Role -> actions
 const ROLE_ACTIONS = {
-  Admin:   ['ingest.write', 'ingest.delete', 'approval.decide', 'ingest.cm_complete', 'workload.write', 'knowledge.write', 'admin'],
-  Manager: ['ingest.write', 'approval.decide', 'ingest.cm_complete', 'workload.write', 'knowledge.write'],
+  Admin: [
+    'ingest.write',
+    'ingest.delete',
+    'approval.decide',
+    'ingest.cm_complete',
+    'workload.write',
+    'knowledge.write',
+    'plugs.write',
+    'admin'
+  ],
+
+  Manager: [
+    'ingest.write',
+    'approval.decide',
+    'ingest.cm_complete',
+    'workload.write',
+    'knowledge.write',
+    'plugs.write'
+  ],
   Editor:  ['ingest.write'],
   Viewer:  [],
 };
@@ -72,6 +90,7 @@ const ACTION_PAGE = {
   'approval.decide': 'approval',
   'workload.write': 'workload',
   'knowledge.write': 'knowledge',
+  'plugs.write': 'plugs',
   'admin': null,
 };
 
