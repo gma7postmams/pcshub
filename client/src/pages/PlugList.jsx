@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { del, get, post } from '../lib/api.js';
+import { del, get, post, put } from '../lib/api.js';
 import { fmtDate, isoDate } from '../lib/util.js';
 import { PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
 import { Empty, Modal, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
@@ -28,6 +28,7 @@ export default function PlugList({ canWrite, isAdmin, onCopied }) {
   const [year, setYear] = useState(new Date().getFullYear());
   const [summary, setSummary] = useState(null);    // result of the last import
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(null);   // the plug being edited
   const [copying, setCopying] = useState(false);
   const [filling, setFilling] = useState(false);
 
@@ -152,7 +153,12 @@ export default function PlugList({ canWrite, isAdmin, onCopied }) {
                     <td>{r.psd}</td>
                     <td>{r.account_by}</td>
                     <td>{r.in_workload ? <span className="chip c-green">In workload</span> : <span className="dim">—</span>}</td>
-                    {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removePlug(r)}>Delete</button></td> : null}
+                    {canWrite ? (
+                      <td className="right nowrap">
+                        <button type="button" className="btn sm ghost" onClick={() => setEditing(r)}>Edit</button>
+                        <button type="button" className="btn sm ghost" onClick={() => removePlug(r)}>Delete</button>
+                      </td>
+                    ) : null}
                   </tr>
                 )) : <tr><td colSpan={canWrite ? 8 : 6} className="empty">{query ? 'No plugs match that search.' : 'This day has no plugs.'}</td></tr>}
               </tbody>
@@ -189,7 +195,17 @@ export default function PlugList({ canWrite, isAdmin, onCopied }) {
           onDone={async (out) => { setDeleting(false); setPicked(new Set()); toast(`${out.deleted} plug${out.deleted === 1 ? '' : 's'} deleted`); await loadDates(true); loadRows(); }} />
       ) : null}
 
-      {adding ? <AddPlugModal date={date} onClose={() => setAdding(false)} onSaved={async (d) => { setAdding(false); await loadDates(true); if (d) setDate(d); loadRows(); }} /> : null}
+      {adding || editing ? (
+        <PlugModal date={date} plug={editing} onClose={() => { setAdding(false); setEditing(null); }}
+          onSaved={async (d, out) => {
+            const wasEdit = !!editing;
+            setAdding(false); setEditing(null);
+            if (out && out.workloadRowsFilled) toast(`${out.workloadRowsFilled} Workload row${out.workloadRowsFilled === 1 ? '' : 's'} filled in from this plug`);
+            await loadDates(true);
+            if (d && (!wasEdit || d !== date)) setDate(d);   // an edit that moves the plug to another day follows it there
+            loadRows();
+          }} />
+      ) : null}
 
       {copying ? (
         <CopyModal date={date} plugs={chosen.length ? chosen : todo} onClose={() => setCopying(false)}
@@ -224,25 +240,32 @@ function DeleteAllPlugsModal({ date, dayCount, totals, onClose, onDone }) {
   );
 }
 
-function AddPlugModal({ date, onClose, onSaved }) {
+function PlugModal({ date, plug, onClose, onSaved }) {
   const toast = useToast();
-  const [f, setF] = useState({ plug_date: date || isoDate(), plug_id: '', prog_name: '', psd: '', account_by: '' });
+  const [f, setF] = useState(plug
+    ? { plug_date: plug.plug_date, plug_id: plug.plug_id, prog_name: plug.prog_name || '', psd: plug.psd || '', account_by: plug.account_by || '' }
+    : { plug_date: date || isoDate(), plug_id: '', prog_name: '', psd: '', account_by: '' });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const save = async () => {
     if (!f.plug_id.trim()) { toast('Plug ID is required', 'err'); return; }
     setBusy(true);
-    try { await post('/api/workload/plugs', f); toast('Plug added'); onSaved(f.plug_date); } catch (e) { toast(e.message, 'err'); setBusy(false); }
+    try {
+      const out = plug ? await put(`/api/workload/plugs/${plug.id}`, f) : await post('/api/workload/plugs', f);
+      toast(plug ? 'Plug updated' : 'Plug added');
+      onSaved(f.plug_date, out);
+    } catch (e) { toast(e.message, 'err'); setBusy(false); }
   };
   return (
-    <Modal title="Add plug" onClose={onClose} footer={(<><span className="grow" /><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className="btn primary" disabled={busy} onClick={save}>Add</button></>)}>
+    <Modal title={plug ? 'Edit plug' : 'Add plug'} onClose={onClose} footer={(<><span className="grow" /><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className="btn primary" disabled={busy} onClick={save}>{plug ? 'Save' : 'Add'}</button></>)}>
       <form className="form-grid" noValidate onSubmit={(e) => { e.preventDefault(); save(); }}>
         <label className="f"><span>Date <span className="req">*</span></span><input type="date" value={f.plug_date} onChange={set('plug_date')} /></label>
-        <label className="f"><span>Plug ID <span className="req">*</span></span><input value={f.plug_id} onChange={set('plug_id')} maxLength={200} /></label>
+        <label className="f"><span>Plug ID <span className="req">*</span></span><input value={f.plug_id} onChange={set('plug_id')} maxLength={200} autoFocus /></label>
         <label className="f full"><span>PROG. NAME / PROJ. TITLE</span><input value={f.prog_name} onChange={set('prog_name')} maxLength={300} /></label>
         <label className="f"><span>PSD</span><input value={f.psd} onChange={set('psd')} maxLength={200} /></label>
         <label className="f"><span>Account By</span><input value={f.account_by} onChange={set('account_by')} maxLength={100} /></label>
       </form>
+      {plug ? <p className="dim m-0 mt-12">Workload rows already filled from this plug keep what they have; only blank PSD / PROG. NAME fields get filled.</p> : null}
     </Modal>
   );
 }
