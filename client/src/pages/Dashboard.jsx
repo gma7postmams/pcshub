@@ -34,6 +34,64 @@ function Section({ title, hint, children }) {
   );
 }
 
+/** Workload by day: a column chart with a y axis and gridlines, past days muted, upcoming days in the accent colour, today picked out. */
+function DayChart({ byDay, todayIso }) {
+  const days = byDay.map((x) => ({ iso: String(x.day).slice(0, 10), n: x.n }));
+  const total = days.reduce((a, x) => a + x.n, 0);
+  const top = Math.max(...days.map((x) => x.n), 0);
+  const busiest = days.find((x) => x.n === top && top > 0);
+  const niceMax = Math.max(4, Math.ceil(top / 4) * 4);   // axis tops out on a multiple of 4 so the four gridlines are whole numbers
+  const ticks = [1, 0.75, 0.5, 0.25, 0].map((f) => Math.round(niceMax * f));
+  const label = (iso) => {
+    const p = dayParts(iso);
+    return `${p.dow}, ${new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', timeZone: 'UTC' })} ${p.num}`;
+  };
+  return (
+    <div className="wbd">
+      <div className="wbd-stats">
+        <div><span>In view</span><b>{total}</b></div>
+        <div><span>Daily average</span><b>{(total / (days.length || 1)).toFixed(1)}</b></div>
+        <div><span>Busiest day</span><b>{busiest ? `${label(busiest.iso)} · ${busiest.n}` : '—'}</b></div>
+        <div className="wbd-legend"><span><i className="past" />Past</span><span><i className="next" />Upcoming</span><span><i className="today" />Today</span></div>
+      </div>
+      <div className="wbd-chart">
+        <div className="wbd-y">{ticks.map((t) => <span key={t}>{t}</span>)}</div>
+        <div className="wbd-plot">
+          {[0, 25, 50, 75].map((pct0) => <div key={pct0} className="wbd-line" style={{ top: `${pct0}%` }} />)}
+          <div className="wbd-line base" />
+          <div className="wbd-cols">
+            {days.map((x) => {
+              const p = dayParts(x.iso);
+              const h = x.n ? Math.max((x.n / niceMax) * 100, 3) : 0;
+              const kind = x.iso === todayIso ? 'today' : x.iso < todayIso ? 'past' : 'next';
+              return (
+                <div key={x.iso} className={`wbd-col ${kind}${p.weekend ? ' weekend' : ''}`}>
+                  {x.n ? <span className="wbd-val" style={{ bottom: `calc(${h}% + 5px)` }}>{x.n}</span> : <span className="wbd-zero" />}
+                  <div className="wbd-bar" style={{ height: `${h}%` }} />
+                  <span className="wbd-tip" style={{ bottom: `calc(${h}% + 28px)` }}>{label(x.iso)}<b>{x.n} item{x.n === 1 ? '' : 's'}</b></span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+      <div className="wbd-x">
+        {days.map((x, i) => {
+          const p = dayParts(x.iso);
+          const month = new Date(`${x.iso}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', timeZone: 'UTC' });
+          return (
+            <div key={x.iso} className={`wbd-xl${x.iso === todayIso ? ' today' : ''}${p.weekend ? ' weekend' : ''}`}>
+              <span className="wbd-mon">{i === 0 || p.num === 1 ? month : ''}</span>
+              <span className="wbd-dow">{p.dow}</span>
+              <span className="wbd-num">{p.num}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Panel({ title, sub, children, className }) {
   return (
     <div className={`card dash-panel ${className || ''}`}>
@@ -112,23 +170,7 @@ export default function Dashboard() {
 
           <div className="dash-grid mt-16">
             <Panel title="Workload by day" sub="past week and the week ahead" className="span-2">
-              <div className="dash-days">
-                {(() => {
-                  const max = Math.max(...w.byDay.map((x) => x.n), 1);
-                  return w.byDay.map((x) => {
-                    const iso = String(x.day).slice(0, 10);
-                    const p = dayParts(iso);
-                    return (
-                      <div key={iso} className={`dd${iso === todayIso ? ' today' : ''}${p.weekend ? ' weekend' : ''}${iso < todayIso ? ' past' : ''}`} title={`${fmtDate(iso)} — ${x.n} item${x.n === 1 ? '' : 's'}`}>
-                        <span className="dd-val">{x.n || ''}</span>
-                        <div className="dd-bar"><i style={{ height: `${x.n ? Math.max((x.n / max) * 100, 6) : 0}%` }} /></div>
-                        <span className="dd-dow">{iso === todayIso ? 'Today' : p.dow}</span>
-                        <span className="dd-num">{p.num}</span>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
+              <DayChart byDay={w.byDay} todayIso={todayIso} />
             </Panel>
 
             <Panel title="By team" sub="items each team is on">
