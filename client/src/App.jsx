@@ -88,8 +88,15 @@ function Presence() {
     events.forEach((e) => window.addEventListener(e, mark, { passive: true }));
     const onVisible = () => { if (document.visibilityState === 'visible') { mark(); beat.current(); } };
     document.addEventListener('visibilitychange', onVisible);
+    // The tab or browser is closing: say so, so this person leaves the Active users list at once. `keepalive` lets the request finish while
+    // the page unloads (and, unlike sendBeacon, can carry the CSRF header). Best-effort: a crash or power cut falls back to the heartbeat window.
+    const onLeave = () => {
+      if (gatedRef.current) return;
+      try { fetch('/api/presence/leave', { method: 'POST', keepalive: true, credentials: 'same-origin', headers: { 'X-Requested-With': 'PromoHub', 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {}); } catch (e) { /* closing anyway */ }
+    };
+    window.addEventListener('pagehide', onLeave);
     const timer = setInterval(() => beat.current(), 60000);
-    return () => { events.forEach((e) => window.removeEventListener(e, mark)); document.removeEventListener('visibilitychange', onVisible); clearInterval(timer); };
+    return () => { events.forEach((e) => window.removeEventListener(e, mark)); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('pagehide', onLeave); clearInterval(timer); };
   }, []);
   useEffect(() => { lastInput.current = Date.now(); beat.current(); }, [pathname]);   // opening a page counts as using the app
   return null;

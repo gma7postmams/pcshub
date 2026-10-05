@@ -3,7 +3,7 @@ const db = require('../db');
 const { asyncH } = require('../middleware');
 const { PAGE_BY_PATH, canPage } = require('../permissions');
 
-const ACTIVE_MINUTES = 5;   // "active" = used the app within this many minutes (shared with the Dashboard's Active users)
+const ACTIVE_MINUTES = 3;   // "active" = sent a heartbeat within this many minutes (they come about once a minute while someone is using the app). Shared with the Dashboard's Active users
 
 // Presence heartbeat. The signed-in app posts { path } about once a minute, but only while the person is really using it (mouse, keys,
 // touch or scroll in the last two minutes, tab visible) — so an idle open tab does NOT count as "active". The Dashboard's Active users block
@@ -20,6 +20,13 @@ router.post('/', asyncH(async (req, res) => {
       WHERE user_presence.last_active_at < now() - interval '15 seconds' OR user_presence.page IS DISTINCT FROM EXCLUDED.page`,
     [req.user.id, page]
   );
+  res.json({ ok: true });
+}));
+
+// "I'm leaving": sent as the tab / browser closes (and by logout on the server), so the person drops off the list at once instead of
+// lingering until the heartbeat window runs out. If they have another tab open it simply reappears on that tab's next heartbeat.
+router.post('/leave', asyncH(async (req, res) => {
+  await db.query('DELETE FROM user_presence WHERE user_id = $1', [req.user.id]);
   res.json({ ok: true });
 }));
 

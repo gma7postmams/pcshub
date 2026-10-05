@@ -119,6 +119,7 @@ router.post('/2fa', loginLimiter, asyncH(async (req, res) => {
 
 router.post('/logout', asyncH(async (req, res) => {
   if (req.user) await audit(req, 'auth.logout', 'user', req.user.id);
+  if (req.user) await db.query('DELETE FROM user_presence WHERE user_id = $1', [req.user.id]).catch(() => { /* presence is best-effort */ });   // signed out = no longer "active"
   req.session.destroy(() => {
     res.clearCookie(COOKIE_NAME, { path: '/' });
     res.json({ ok: true });
