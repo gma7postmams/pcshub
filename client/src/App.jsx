@@ -69,13 +69,18 @@ function Guarded({ path }) {
     Only counts real use — mouse, keys, touch or scroll in the last two minutes, with the tab visible — so an idle open tab is not "active". */
 function Presence() {
   const { pathname } = useLocation();
+  const sess = useSession();
+  // someone who still has to change their password or set up 2FA isn't "using the app" yet — and the server only lets them reach Profile
+  const gated = !!(sess.user.must_change_password || (sess.user.totp_required && !sess.user.totp_enabled));
+  const gatedRef = useRef(gated);
+  gatedRef.current = gated;
   const lastInput = useRef(Date.now());
   const path = useRef(pathname);
   const beat = useRef(null);
   path.current = pathname;
   beat.current = () => {
-    if (document.visibilityState !== 'visible' || Date.now() - lastInput.current > 120000) return;
-    post('/api/presence', { path: path.current }).catch(() => { /* presence is best-effort */ });
+    if (gatedRef.current || document.visibilityState !== 'visible' || Date.now() - lastInput.current > 120000) return;
+    post('/api/presence', { path: path.current }, { quiet: true }).catch(() => { /* presence is best-effort */ });
   };
   useEffect(() => {
     const mark = () => { lastInput.current = Date.now(); };

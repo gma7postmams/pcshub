@@ -167,7 +167,7 @@ export default function Dashboard() {
   const load = useCallback(() => get(`/api/dashboard?range=${rangeRef.current}`).then(setD).catch(() => setD((cur) => cur || { error: true })), []);
   useEffect(() => {
     // Say "I'm on the Dashboard" BEFORE asking for the numbers, so Active users never shows where you were a moment ago
-    post('/api/presence', { path: '/dashboard' }).catch(() => { /* best effort */ }).then(load);
+    post('/api/presence', { path: '/dashboard' }, { quiet: true }).catch(() => { /* best effort */ }).then(load);
     const t = setInterval(load, 60000);   // the whole dashboard refreshes every minute
     return () => clearInterval(t);
   }, [load]);
@@ -177,7 +177,7 @@ export default function Dashboard() {
     if (!showUsers) return undefined;
     const refresh = () => {
       if (document.visibilityState !== 'visible') return;
-      get('/api/dashboard/users').then((r) => setD((cur) => (cur ? { ...cur, users: r.users } : cur))).catch(() => { /* next time */ });
+      get('/api/dashboard/users', { quiet: true }).then((r) => setD((cur) => (cur ? { ...cur, users: r.users } : cur))).catch(() => { /* next time */ });
     };
     const t = setInterval(refresh, 10000);
     document.addEventListener('visibilitychange', refresh);

@@ -258,6 +258,8 @@ The Dashboard follows a design mockup: a greeting banner (sun, name, date, a cla
 
 The first start of this version gives *Active users* to every group that can open the Dashboard (untick it per group afterwards; it isn't re-added) and retires the old *Recent ingest activity* section. “Today” and “This week” follow the server's clock.
 
+**Note on gated accounts.** An account that must change its password (or set up required 2FA) is only allowed to call the Profile and Notifications APIs. The presence heartbeat is therefore **not sent** for those accounts, and background calls (`post` / `get` with `{ quiet: true }`) never redirect the browser; before this, the heartbeat sent from the Profile page was refused with “password change required”, which redirected to Profile, which sent it again — a reload loop that stopped the forced password-change page from loading.
+
 ### Who is on the Workload Tracker
 
 The top right of the **Workload Tracker** page shows a row of round avatars — like the collaborators at the top of a Google Sheet — for everyone who is on that page right now (you included, with an accent ring). Hover an avatar to see the name; more than six collapse into a “+N” bubble whose tooltip lists the rest. There are no profile pictures in the app, so each avatar is the person's initials on a colour of their own. It uses the same presence signal as the Dashboard's *Active users* (`user_presence`, “active” = used the app in the last 5 minutes) and refreshes every 30 seconds; `GET /api/presence?path=/workload` answers it for anyone who can open that page, and only lists people currently on that same page. Nothing is shown when you are the only one. Disabled accounts are left out.

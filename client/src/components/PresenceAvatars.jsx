@@ -12,7 +12,7 @@ export default function PresenceAvatars({ path }) {
   const [users, setUsers] = useState([]);
   useEffect(() => {
     let live = true;
-    const load = () => get(`/api/presence?path=${encodeURIComponent(path)}`).then((d) => { if (live) setUsers(d.users || []); }).catch(() => { /* best effort */ });
+    const load = () => get(`/api/presence?path=${encodeURIComponent(path)}`, { quiet: true }).then((d) => { if (live) setUsers(d.users || []); }).catch(() => { /* best effort */ });
     const first = setTimeout(load, 1500);   // let this page's own "I'm here" signal reach the server first
     const timer = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 30000);
     const onVisible = () => { if (document.visibilityState === 'visible') load(); };
