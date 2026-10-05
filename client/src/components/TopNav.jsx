@@ -5,6 +5,9 @@ import { ago, initials, safeLocalLink } from '../lib/util.js';
 import { useBranding, useSession } from '../context.jsx';
 import { BellIcon, MenuIcon } from './Icons.jsx';
 import { RoleBadge, useToast } from './ui.jsx';
+import { BarChartIcon, BookIcon, CheckCircleIcon, ChevronDownSmall, CloudIcon, DocIcon, GearIcon, HomeIcon, ListIcon } from './DashIcons.jsx';
+
+const NAV_ICON = { '/dashboard': HomeIcon, '/ingest': CloudIcon, '/workload': ListIcon, '/plug-list': DocIcon, '/approval': CheckCircleIcon, '/reports': BarChartIcon, '/knowledge': BookIcon, '/admin': GearIcon };
 
 export function BrandMark({ branding }) {
   return (
@@ -88,7 +91,10 @@ export default function TopNav() {
       <a className="brand" href="/"><BrandMark branding={branding} /></a>
       <nav className={`navlinks ${open === 'nav' ? 'open' : ''}`} id="navlinks" onClick={() => setOpen(null)}>
         {s.pages.filter((p) => p.inNav !== false).map((p) => (
-          <NavLink key={p.path} to={p.path} className={({ isActive }) => (isActive ? 'active' : '')}>{p.label}</NavLink>
+          <NavLink key={p.path} to={p.path} className={({ isActive }) => (isActive ? 'active' : '')}>
+            {NAV_ICON[p.path] ? <span className="nav-ico">{(() => { const Icon = NAV_ICON[p.path]; return <Icon />; })()}</span> : null}
+            <span>{p.label}</span>
+          </NavLink>
         ))}
       </nav>
       <div className="nav-right">
@@ -98,8 +104,8 @@ export default function TopNav() {
         </button>
         <button type="button" className="usermenu-btn" id="user-btn" onClick={toggle('user')}>
           <span className="avatar">{initials(u.full_name)}</span>
-          <span className="uname">{u.full_name}</span>
-          <RoleBadge role={u.role} />
+          <span className="uinfo"><span className="uname">{u.full_name}</span><RoleBadge role={u.role} /></span>
+          <span className="uchev"><ChevronDownSmall /></span>
         </button>
       </div>
 

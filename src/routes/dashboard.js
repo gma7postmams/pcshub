@@ -11,6 +11,26 @@ const router = express.Router();
 //   users              -> the Dashboard section "Active users" granted to their group
 //   workload           -> they can open the Workload Tracker
 const { ACTIVE_MINUTES } = require('./presence');   // "active now" = used the app within this many minutes
+// The window the "Workload by day" chart covers (the dropdown at the top right of the Workload Tracker block).
+const RANGES = {
+  week: { label: 'This week', sub: 'past week and the week ahead' },
+  month: { label: 'This month', sub: 'the whole month' },
+  last30: { label: 'Last 30 days', sub: 'the last 30 days' },
+  next30: { label: 'Next 30 days', sub: 'the next 30 days' },
+};
+const rangeKey = (q) => (RANGES[q] ? q : 'week');
+async function workloadDays(range) {
+  const start = { week: 'CURRENT_DATE - 6', month: `date_trunc('month', CURRENT_DATE)::date`, last30: 'CURRENT_DATE - 29', next30: 'CURRENT_DATE' }[range];
+  const end = { week: 'CURRENT_DATE + 7', month: `(date_trunc('month', CURRENT_DATE) + interval '1 month - 1 day')::date`, last30: 'CURRENT_DATE', next30: 'CURRENT_DATE + 29' }[range];
+  const { rows } = await db.query(
+    `SELECT d::date AS day, count(w.id)::int AS n
+       FROM generate_series(${start}, ${end}, interval '1 day') d
+       LEFT JOIN workload_items w ON w.work_date = d::date
+      GROUP BY d ORDER BY d`
+  );
+  return rows;
+}
+
 const unitsFor = (team) => Object.entries(UNIT_TEAMS).filter(([, teams]) => teams.includes(team)).map(([u]) => u);
 
 // Who is working in the app right now, and who was earlier in the last 24 hours. Used by the full dashboard and, on its own, by the
@@ -23,9 +43,17 @@ async function activeUsers(u) {
       WHERE u.is_active AND p.last_active_at >= now() - interval '24 hours'
       ORDER BY p.last_active_at DESC LIMIT 60`, [String(ACTIVE_MINUTES)]
   );
-  const row = (r) => ({ id: r.id, name: r.name, role: r.role, page: r.page && PAGE_BY_PATH[r.page] ? PAGE_BY_PATH[r.page].label : null, lastActiveAt: r.last_active_at, you: r.id === u.id });
+  const row = (r) => ({ id: r.id, name: r.name, role: r.role, page: r.page && PAGE_BY_PATH[r.page] ? PAGE_BY_PATH[r.page].label : null, path: r.page && PAGE_BY_PATH[r.page] ? r.page : null, lastActiveAt: r.last_active_at, you: r.id === u.id });
   return { windowMinutes: ACTIVE_MINUTES, active: rows.filter((r) => r.active).map(row), earlier: rows.filter((r) => !r.active).slice(0, 12).map(row) };
 }
+
+// Just the chart's days for another range (the dropdown), without recomputing the whole dashboard.
+router.get('/days', asyncH(async (req, res) => {
+  if (!canPage(req.user, '/workload')) return res.status(403).json({ error: 'No access to the Workload Tracker' });
+  const range = rangeKey(req.query.range);
+  res.set('Cache-Control', 'no-store');
+  res.json({ range, label: RANGES[range].label, sub: RANGES[range].sub, days: await workloadDays(range) });
+}));
 
 router.get('/users', asyncH(async (req, res) => {
   if (!canSection(req.user, 'dashboard.users')) return res.status(403).json({ error: 'Active users is not enabled for your group' });
@@ -42,6 +70,7 @@ router.get('/', asyncH(async (req, res) => {
       approval: canPage(u, '/approval'),
       reports: canPage(u, '/reports'),
       workload: canPage(u, '/workload'),
+      plugs: canPage(u, '/plug-list'),
     },
     kpis: null,
     users: null,
@@ -67,6 +96,7 @@ router.get('/', asyncH(async (req, res) => {
 
   // ---- Workload Tracker ----
   if (out.canOpen.workload) {
+    const range = rangeKey(req.query.range);
     const [totals, units, byDay] = await Promise.all([
       db.query(`SELECT count(*)::int AS total,
                        count(*) FILTER (WHERE work_date = CURRENT_DATE)::int AS today,
@@ -75,11 +105,7 @@ router.get('/', asyncH(async (req, res) => {
                        count(*) FILTER (WHERE is_priority)::int AS priority
                   FROM workload_items`),
       db.query(`SELECT units_concerned AS u, count(*)::int AS n FROM workload_items WHERE units_concerned IS NOT NULL GROUP BY 1`),
-      // the week behind and the week ahead, so a quiet or busy stretch is visible at a glance
-      db.query(`SELECT d::date AS day, count(w.id)::int AS n
-                  FROM generate_series(CURRENT_DATE - 6, CURRENT_DATE + 7, interval '1 day') d
-                  LEFT JOIN workload_items w ON w.work_date = d::date
-                 GROUP BY d ORDER BY d`),
+      workloadDays(range),
     ]);
     // rows per team (a VGFX/VEDIT row counts for both teams)
     const byTeam = { VGFX: 0, VEDIT: 0, AUDIO: 0 };
@@ -93,7 +119,7 @@ router.get('/', asyncH(async (req, res) => {
     const t = totals.rows[0];
     out.workload = {
       total: t.total, today: t.today, thisWeek: t.this_week, priority: t.priority, breakdatesNext7Days: nextWeek,
-      byTeam, byDay: byDay.rows,
+      byTeam, byDay, range, rangeLabel: RANGES[range].label, rangeSub: RANGES[range].sub, ranges: Object.entries(RANGES).map(([k, v]) => ({ key: k, label: v.label })),
     };
   }
 
