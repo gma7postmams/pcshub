@@ -358,3 +358,41 @@ CREATE TABLE IF NOT EXISTS workload_locks (
 
 -- Workload priority flag: a prioritised row gets its Breakdate/Time cell highlighted in the UI.
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS is_priority BOOLEAN NOT NULL DEFAULT false;
+
+-- Schema version history: backups record the highest version so a restore can check compatibility.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version     INT PRIMARY KEY,
+  applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Backup & Recovery job history. Rows are never hard-deleted: deleting a backup removes the file and sets deleted_at.
+CREATE TABLE IF NOT EXISTS backup_jobs (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind             TEXT NOT NULL DEFAULT 'create' CHECK (kind IN ('create','restore')),
+  status           TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','succeeded','failed','cancelled')),
+  progress         TEXT,
+  filename         TEXT,
+  rel_path         TEXT,
+  size_bytes       BIGINT,
+  sha256           TEXT,
+  schema_version   INT,
+  app_version      TEXT,
+  pg_version       TEXT,
+  signed           BOOLEAN NOT NULL DEFAULT FALSE,
+  note             TEXT,
+  summary          JSONB,
+  error            TEXT,
+  verify_status    TEXT CHECK (verify_status IN ('ok','failed')),
+  verify_report    JSONB,
+  verified_at      TIMESTAMPTZ,
+  verified_by      INT REFERENCES users(id) ON DELETE SET NULL,
+  created_by       INT REFERENCES users(id) ON DELETE SET NULL,
+  created_by_name  TEXT,
+  started_at       TIMESTAMPTZ,
+  finished_at      TIMESTAMPTZ,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at       TIMESTAMPTZ,
+  deleted_by       INT REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS backup_jobs_created_idx ON backup_jobs (created_at DESC);
+CREATE INDEX IF NOT EXISTS backup_jobs_status_idx ON backup_jobs (kind, status);

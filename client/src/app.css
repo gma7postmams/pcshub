@@ -736,3 +736,18 @@ table.t.xl td.xl-sel.xl-single::after { border-width: 2px; }
 
 .xl-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 2px; }
 table.t.xl td[data-k="breakdate_vgfx"] .xl-cell { min-width: 250px; }
+
+/* Backup & Recovery */
+.stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.stat { display: flex; flex-direction: column; gap: 6px; padding: 14px 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); min-width: 0; }
+.stat-label { color: var(--text-2); font-size: 12.5px; font-weight: 500; }
+.stat-value { font-size: 24px; font-weight: 700; line-height: 1.1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.kv-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 2px; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+.kv-row:last-of-type { border-bottom: 0; }
+.kv-label { color: var(--text-2); }
+.kv-value { display: inline-flex; align-items: baseline; gap: 12px; font-variant-numeric: tabular-nums; }
+.hist-stats { display: flex; flex-wrap: wrap; gap: 8px 28px; margin-left: 16px; flex: 1; }
+.hist-stats > div { display: flex; flex-direction: column; line-height: 1.25; }
+.hist-stats span { color: var(--text-3); font-size: 11.5px; font-weight: 500; text-transform: uppercase; letter-spacing: .03em; }
+.hist-stats strong { font-size: 15px; font-variant-numeric: tabular-nums; }
+@media (max-width: 800px) { .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } }

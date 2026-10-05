@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { get } from '../../lib/api.js';
-import { fmtDateTime } from '../../lib/util.js';
+import { fmtBytes, fmtDateTime } from '../../lib/util.js';
 import { Empty, useDebounced } from '../../components/ui.jsx';
 
 const PAGE = 50;
@@ -60,6 +60,12 @@ const ACTION_LABELS = {
   'admin.workload_lock_add': 'Added Workload Lock',
   'admin.workload_lock_delete': 'Deleted Workload Lock',
 
+  'admin.backup_create': 'Created Backup',
+  'admin.backup_download': 'Downloaded Backup',
+  'admin.backup_delete': 'Deleted Backup',
+  'admin.backup_verify': 'Verified Backup',
+  'admin.backup_analyze': 'Verified Backup',
+  'admin.backup_restore': 'Restored Backup',
 };
 
 function formatAction(action) {
@@ -89,6 +95,8 @@ function formatEntity(row) {
       return 'Knowledge Document';
     case 'workload_lock':
       return 'Workload Lock';      
+    case 'backup':
+      return 'Backup';
      
     default:
       return row.entity || '';
@@ -147,6 +155,22 @@ function describeBrandingUpdate(d) {
     .filter((k) => k in d.to && (from[k] ?? '') !== (d.to[k] ?? ''))
     .map((k) => `${labels[k]} changed from ${q(from[k])} to ${q(d.to[k])}`);
   return changes.length ? changes.join(' | ') : 'Updated branding settings (no changes)';
+}
+
+function describeBackup(action, d) {
+  const verb = { 'admin.backup_create': 'create', 'admin.backup_download': 'download', 'admin.backup_delete': 'delete', 'admin.backup_verify': 'verify', 'admin.backup_analyze': 'verify', 'admin.backup_restore': 'restore' }[action];
+  const file = d.filename ? ` ${d.filename}` : '';
+  if (d.outcome === 'denied') return `Backup ${verb} denied${d.reason ? ` (${d.reason.replace(/_/g, ' ')})` : ''}${file ? ` -${file}` : ''}`;
+  if (d.outcome === 'failed') return `Backup ${verb} failed${d.error ? `: ${d.error}` : ''}`;
+  const size = d.sizeBytes != null ? ` (${fmtBytes(d.sizeBytes)})` : '';
+  switch (action) {
+    case 'admin.backup_create': return `Created backup${file}${size}`;
+    case 'admin.backup_download': return `Downloaded backup${file}${size}`;
+    case 'admin.backup_delete': return `Deleted backup${file}${size}`;
+    case 'admin.backup_verify':
+    case 'admin.backup_analyze': return `Verified backup${file} - signature: ${d.signature || 'n/a'}, checksums ${d.checksumsValid ? 'valid' : 'invalid'}`;
+    default: return `Restored backup${file}`;
+  }
 }
 
 function formatDetails(row) {
@@ -317,6 +341,14 @@ function formatDetails(row) {
     case 'admin.workload_lock_delete':
       return `Removed workload date lock from ${d.from_date} to ${d.to_date}`;  
       
+    case 'admin.backup_create':
+    case 'admin.backup_download':
+    case 'admin.backup_delete':
+    case 'admin.backup_verify':
+    case 'admin.backup_analyze':
+    case 'admin.backup_restore':
+      return describeBackup(row.action, d);
+
     case 'auth.locked':
       return 'Account locked due to multiple failed login attempts';
 

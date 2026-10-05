@@ -7,6 +7,7 @@ async function migrate(db) {
   await upgradeV1(db);
   const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   await db.query(sql);
+  await db.query('INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING', [require('./version').SCHEMA_VERSION]);
   await upgradeIngestRecords(db);
   await require('./totp').migrateSecrets(db);
   await seedAdmin(db);

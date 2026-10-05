@@ -30,3 +30,6 @@ client/dist/
 
 # Uploads
 uploads/
+
+# Backups
+backups/

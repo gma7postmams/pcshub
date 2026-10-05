@@ -136,6 +136,7 @@ app.use('/api/approvals',     requirePageAccess('/approval'),  require('./src/ro
 app.use('/api/workload',      requirePageAccess('/workload'),  require('./src/routes/workload'));
 app.use('/api/reports',       requirePageAccess('/reports'),   require('./src/routes/reports'));
 app.use('/api/knowledge',     requirePageAccess('/knowledge'), require('./src/routes/knowledge'));
+app.use('/api/admin/backups', requirePageAccess('/admin'),     require('./src/routes/backups'));
 app.use('/api/admin',         requirePageAccess('/admin'),     require('./src/routes/admin'));
 
 
@@ -177,6 +178,7 @@ app.use(errorHandler);
 // (see db/app-role.sql).
 const boot = process.env.MIGRATE_ON_START === 'false' ? db.query('SELECT 1 FROM users LIMIT 1') : migrate(db);
 boot
+  .then(() => require('./src/backup/service').recoverStale())
   .then(() => {
     // Production default: localhost only — users reach the app through the HTTPS reverse proxy.
     const HOST = process.env.HOST || (PROD ? '127.0.0.1' : '0.0.0.0');

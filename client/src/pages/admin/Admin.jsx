@@ -7,10 +7,11 @@ import Roles from './Roles.jsx';
 import Dropdowns from './Dropdowns.jsx';
 import Branding from './Branding.jsx';
 import Audit from './Audit.jsx';
+import Backup from './Backup.jsx';
 
 const TABS = [
   ['users', 'Users', Users], ['groups', 'Groups', Groups], ['roles', 'Roles', Roles],
-  ['dropdowns', 'Dropdowns', Dropdowns], ['branding', 'Branding', Branding], ['audit', 'Audit Log', Audit],
+  ['dropdowns', 'Dropdowns', Dropdowns], ['branding', 'Branding', Branding], ['backup', 'Backup & Recovery', Backup], ['audit', 'Audit Log', Audit],
 ];
 const fromHash = () => {
   const h = window.location.hash.slice(1);
@@ -32,7 +33,7 @@ export default function Admin() {
   const Tab = (TABS.find(([k]) => k === tab) || TABS[0])[2];
   return (
     <main className="container">
-      <div className="page-head"><div><h1>Admin</h1><div className="sub">Users, roles, groups, dropdowns, branding and audit.</div></div></div>
+      <div className="page-head"><div><h1>Admin</h1><div className="sub">Users, roles, groups, dropdowns, branding, backup & recovery, and audit.</div></div></div>
       <div className="tabs" id="tabs">
         {TABS.map(([k, l]) => <button key={k} type="button" data-t={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
       </div>
