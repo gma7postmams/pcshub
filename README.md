@@ -256,3 +256,4 @@ The Dashboard is one screen for what is in flight, refreshed every minute. Each 
 - **Ingest & Approval** (the Dashboard section *Ingest KPIs*) — the four status cards.
 
 Cards and rows are clickable and open the relevant page. A user whose group has none of these sees a message instead. The first start of this version gives *Active users* to every group that can open the Dashboard (untick it per group afterwards; it isn't re-added) and retires the old *Recent ingest activity* section.
+On a tall window the dashboard fills the screen below the nav bar: the *Workload by day* chart and *By team* panel grow into whatever height is left (they never shrink below their compact size, so a short window simply scrolls).

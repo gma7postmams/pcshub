@@ -847,3 +847,16 @@ table.t.wl tbody tr.picked td { box-shadow: inset 0 1px 0 color-mix(in srgb, var
 .wbd-xl .wbd-num small { display: block; font-size: 9px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); line-height: 1; margin-top: 1px; }
 .wbd-xl.today .wbd-num small { color: var(--accent); }
 @media (max-width: 700px) { .dash-panel-head .wbd-stats > div:not(.wbd-legend) { flex-direction: column; gap: 0; } }
+
+/* Use the spare height: on a tall window the dashboard fills the screen below the nav bar — the Workload by day chart and By team panel
+   grow into whatever room is left (they never shrink below their compact size, so a short window still scrolls as before). */
+.container.dash { min-height: calc(100vh - var(--nav-h)); min-height: calc(100dvh - var(--nav-h)); box-sizing: border-box; display: flex; flex-direction: column; }
+.dash-section.grow { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.dash-section.grow > .dash-grid { flex: 1; }
+.dash-grid > .dash-panel { display: flex; flex-direction: column; min-height: 0; }
+.dash-grid > .dash-panel > .wbd { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.wbd-chart { height: auto; flex: 1; min-height: 110px; }
+.wbd-y { height: auto; min-height: 96px; }
+.wbd-plot { height: auto; min-height: 96px; }
+.dash-grid > .dash-panel > .dash-teams { flex: 1; align-content: space-evenly; }
+.container.dash > .dash-hero { margin-bottom: 0; }   /* in the column layout margins don't collapse: the sections' own top margin is the gap */

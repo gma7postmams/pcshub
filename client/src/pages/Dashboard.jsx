@@ -22,9 +22,9 @@ const pct = (n, of) => (of ? Math.round((n / of) * 100) : 0);
 const HUES = ['#4f8cff', '#a78bfa', '#34c38f', '#f0883e', '#e5568f', '#26b5ad', '#f1b44c'];
 const hueFor = (name) => HUES[[...String(name)].reduce((a, c) => a + c.charCodeAt(0), 0) % HUES.length];
 
-function Section({ title, hint, children }) {
+function Section({ title, hint, grow, children }) {
   return (
-    <section className="dash-section">
+    <section className={`dash-section${grow ? ' grow' : ''}`}>
       <div className="dash-sec-head">
         <h2>{title}</h2>
         {hint ? <span className="dim">{hint}</span> : null}
@@ -164,7 +164,7 @@ export default function Dashboard() {
 
       {/* ---------------- Workload Tracker ---------------- */}
       {w ? (
-        <Section title="Workload Tracker" hint={`${w.total} item${w.total === 1 ? '' : 's'} in total`}>
+        <Section title="Workload Tracker" hint={`${w.total} item${w.total === 1 ? '' : 's'} in total`} grow>
           <div className="grid grid-4">
             <Kpi label="Today" value={w.today} foot={w.today === 1 ? 'item to work on' : 'items to work on'} color="c-blue" onClick={go('/workload')} />
             <Kpi label="This week" value={w.thisWeek} foot="Monday to Sunday" color="c-purple" onClick={go('/workload')} />
