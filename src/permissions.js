@@ -24,6 +24,7 @@ const CATALOG = [
   },
   { key: 'ingest', label: 'Ingest Tracker', path: '/ingest', sections: [] },
   { key: 'workload', label: 'Workload Tracker', path: '/workload', sections: [] },
+  { key: 'plugs', label: 'PSD Daily Plug List', path: '/plug-list', sections: [] },
   { key: 'approval', label: 'Approval', path: '/approval', sections: [] },
   {
     key: 'reports', label: 'Reports', path: '/reports',
@@ -46,8 +47,8 @@ const SECTION_PAGE = Object.fromEntries(CATALOG.flatMap((p) => p.sections.map((s
 
 // Role -> actions
 const ROLE_ACTIONS = {
-  Admin:   ['ingest.write', 'ingest.delete', 'approval.decide', 'workload.write', 'admin'],
-  Manager: ['ingest.write', 'approval.decide', 'workload.write'],
+  Admin:   ['ingest.write', 'ingest.delete', 'approval.decide', 'workload.write', 'plugs.write', 'admin'],
+  Manager: ['ingest.write', 'approval.decide', 'workload.write', 'plugs.write'],
   Editor:  ['ingest.write'],
   Viewer:  [],
 };
@@ -57,6 +58,7 @@ const ACTION_PAGE = {
   'ingest.delete': 'ingest',
   'approval.decide': 'approval',
   'workload.write': 'workload',
+  'plugs.write': 'plugs',
   'admin': null,
 };
 

@@ -63,6 +63,15 @@ function requirePageAccess(pagePath) {
   };
 }
 
+/** Allows a user who can open ANY of the pages (e.g. the plug list is read by both the PSD Daily Plug List page and the Workload Tracker). */
+function requireAnyPage(paths) {
+  return (req, res, next) => {
+    if (!req.user) return requireAuth(req, res, next);
+    if (paths.some((p) => canPage(req.user, p))) return next();
+    return res.status(403).json({ error: `${who(req.user)} cannot access ${paths[0]}` });
+  };
+}
+
 function requireAction(action) {
   return (req, res, next) => {
     if (!req.user) return requireAuth(req, res, next);
@@ -99,4 +108,4 @@ function errorHandler(err, req, res, _next) {
   res.status(status).send(message);
 }
 
-module.exports = { asyncH, HttpError, loadUser, requireAuth, requirePageAccess, requireAction, requireSection, csrfGuard, errorHandler, CLIENT_DIST, INDEX_HTML };
+module.exports = { asyncH, HttpError, loadUser, requireAuth, requirePageAccess, requireAnyPage, requireAction, requireSection, csrfGuard, errorHandler, CLIENT_DIST, INDEX_HTML };

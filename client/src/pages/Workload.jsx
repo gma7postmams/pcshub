@@ -6,7 +6,6 @@ import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, LockIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
 import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
-import PlugList from './PlugList.jsx';
 
 // Workload Tracker — ONE table. "Units Concerned" says which team(s) a plug is for; the tabs
 // (All / VGFX / VEDIT / Audio) are filters over it. Fields, per-tab columns and the Platform rules come
@@ -371,8 +370,7 @@ export default function Workload() {
       window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); window.removeEventListener('mousedown', down);
     };
   }, []);
-  const isPlugs = tab === 'PLUGS';   // the PSD Daily Plug List tab (its own screen, not a view of the workload table)
-  const isGrid = mode === 'excel' && tab !== 'ALL' && !isPlugs;
+  const isGrid = mode === 'excel' && tab !== 'ALL';
 
   // Rows are one line each (Remarks wraps), so a wide table scrolls sideways inside the card, like Excel.
   // Phones and small tablets show each row as a card instead.
@@ -411,7 +409,6 @@ export default function Workload() {
   const load = useCallback(async () => {
     if (!meta) return;
     loadStats();
-    if (isPlugs) return;
     try {
       if (isGrid) {
         const d = await get(`/api/workload?${query({ limit: GRID_LIMIT })}`);
@@ -423,7 +420,7 @@ export default function Workload() {
     } catch (e) {
       (isGrid ? setGrid : setData)({ error: e.message, rows: [], total: 0 });
     }
-  }, [meta, isGrid, isPlugs, query, offset, loadStats]);
+  }, [meta, isGrid, query, offset, loadStats]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -530,7 +527,7 @@ export default function Workload() {
     if (!need.length) return;
     need.forEach((d) => plugCache.current.set(d, []));   // mark as asked, so a re-render doesn't ask again
     try {
-      const { rows } = await get(`/api/workload/plugs?from=${need[0]}&to=${need[need.length - 1]}&limit=5000`);
+      const { rows } = await get(`/api/plugs?from=${need[0]}&to=${need[need.length - 1]}&limit=5000`);
       rows.forEach((r) => { const list = plugCache.current.get(r.plug_date); if (list) list.push(r); });
     } catch (e) { need.forEach((d) => plugCache.current.delete(d)); }
   }, []);
@@ -1067,7 +1064,7 @@ export default function Workload() {
   // Table-mode shortcuts — the same ones Excel mode has: Ctrl/Cmd+A select all, +C copy, +X cut, +V paste, +Z undo, +Y redo, Delete, Esc
   // (ignored while typing in a field, with a cell editor or dialog open, and in Excel mode / the plug list, which have their own)
   const tableKeysOk = (e) => {
-    if (isGrid || isPlugs || !canWrite) return false;
+    if (isGrid || !canWrite) return false;
     const el = e.target;
     if (el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return false;
     return !(document.querySelector('.modal-backdrop') || form || addingColumn || managingLocks || deletingAll || editing);
@@ -1099,7 +1096,7 @@ export default function Workload() {
   };
 
   const isAll = tab === 'ALL';
-  const cols = isPlugs ? [] : meta.views[tab];   // raw column list (Table mode's tableCols below merges the two Breakdate / Time columns; Excel mode does the same)
+  const cols = meta.views[tab];   // raw column list (Table mode's tableCols below merges the two Breakdate / Time columns; Excel mode does the same)
   // Table mode only: Breakdate/Time (VGFX) and (VEDIT) merge into ONE column/cell, holding one or two pills —
   // 'breakdate_vgfx' is kept as that column's position; breakdateCell() below decides what actually shows in it.
   const tableCols = cols.filter((k) => k !== 'breakdate_vedit');
@@ -1198,7 +1195,6 @@ export default function Workload() {
     );
   };
 
-  const allTabs = [...meta.tabs, { key: 'PLUGS', label: 'PSD Daily Plug List' }];
   const tabCount = { ALL: stats && stats.total, VGFX: stats && stats.vgfx, VEDIT: stats && stats.vedit, AUDIO: stats && stats.audio };
 
   return (
@@ -1218,13 +1214,13 @@ export default function Workload() {
       <div className="card wl-card">
         <div className="wl-tabbar">
           <div className="tabs" id="section-tabs">
-            {allTabs.map((t) => (
+            {meta.tabs.map((t) => (
               <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => changeTab(t.key)}>
-                {t.label}{t.key === 'PLUGS' ? null : <span className="count">{tabCount[t.key] ?? '–'}</span>}
+                {t.label}<span className="count">{tabCount[t.key] ?? '–'}</span>
               </button>
             ))}
           </div>
-          {isPlugs ? null : <div className="wl-tabactions">
+          <div className="wl-tabactions">
             <div className="segmented" id="mode-seg">
               <button type="button" className={mode === 'table' ? 'on' : ''} onClick={() => changeMode('table')}>Table</button>
               <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
@@ -1255,10 +1251,10 @@ export default function Workload() {
                 </button>
               </>
             ) : null}
-          </div>}
+          </div>
         </div>
 
-        {isPlugs ? null : <div className="wl-filters">
+        <div className="wl-filters">
           {!isGrid ? (
             <label className="wl-search">
               <SearchIcon />
@@ -1269,11 +1265,9 @@ export default function Workload() {
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
           <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
           <DateRange from={filt.from} to={filt.to} onChange={setRange} />
-        </div>}
+        </div>
 
-        {isPlugs ? (
-          <PlugList canWrite={canWrite} isAdmin={isAdminUser} onCopied={() => { loadStats(); }} />
-        ) : mode === 'excel' && tab === 'ALL' ? (
+        {mode === 'excel' && tab === 'ALL' ? (
           <Empty>Pick VGFX, VEDIT or Audio above to edit in the Excel grid — each shows its own columns.</Empty>
         ) : isGrid ? (
           <>
@@ -1589,7 +1583,7 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
   useEffect(() => {
     if (!ISO.test(f.work_date || '')) { setPlugs([]); return undefined; }
     let live = true;
-    get(`/api/workload/plugs?date=${f.work_date}`).then((d) => { if (live) setPlugs(d.rows); }).catch(() => { if (live) setPlugs([]); });
+    get(`/api/plugs?date=${f.work_date}`).then((d) => { if (live) setPlugs(d.rows); }).catch(() => { if (live) setPlugs([]); });
     return () => { live = false; };
   }, [f.work_date]);
   const findPlugIn = (date, plugId) => {

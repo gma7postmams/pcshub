@@ -1,5 +1,4 @@
-// PSD Daily Plug List — mounted by workload.js under /api/workload/plugs (so it sits behind requirePageAccess('/workload');
-// writes need requireAction('workload.write')).
+// PSD Daily Plug List — its own page (/plug-list) and API (/api/plugs). See the access note in build() below.
 //
 // The PSD's daily plug list workbook has one sheet per day. Each sheet: a "DATE:" line near the top ("September 28,Monday Plug list"),
 // then a table with NO / PLUG ID / PROG NAME/PROJ TITLE / PSD / Account By:. Late additions sit under an "Additional for …" line.
@@ -8,7 +7,8 @@
 const multer = require('multer');
 const db = require('../db');
 const v = require('../validate');
-const { asyncH, HttpError, requireAction } = require('../middleware');
+const express = require('express');
+const { asyncH, HttpError, requireAction, requireAnyPage } = require('../middleware');
 const { audit } = require('../audit');
 const { logRun } = require('../transferlog');
 
@@ -139,16 +139,21 @@ async function backfillWorkload(runner, { from = null, to = null, userId = null 
   return rowCount;
 }
 
-module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked }) {
+module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked }) {
+  const router = express.Router();
+  // Mounted at /api/plugs. Anyone who can open the PSD Daily Plug List page OR the Workload Tracker may read the list (the tracker
+  // uses it to fill PSD / PROG. NAME); changing it needs the plugs.write action (Manager / Admin + the Plug List page), and the two
+  // operations that create or change Workload rows (copy, fill) also need workload.write.
+  router.use(requireAnyPage(['/plug-list', '/workload']));
   // ---- which days have a list ----
-  router.get('/plugs/dates', asyncH(async (req, res) => {
+  router.get('/dates', asyncH(async (req, res) => {
     const { rows } = await db.query('SELECT plug_date AS date, count(*)::int AS n FROM workload_plugs GROUP BY plug_date ORDER BY plug_date DESC LIMIT 366');
     const all = (await db.query('SELECT count(*)::int AS plugs, count(DISTINCT plug_date)::int AS days FROM workload_plugs')).rows[0];
     res.json({ dates: rows, total: all.plugs, days: all.days });
   }));
 
   // ---- list: ?date=YYYY-MM-DD, or ?from=&to=, optional ?q= and ?used=1 (adds in_workload: is it already in the Workload Tracker) ----
-  router.get('/plugs', asyncH(async (req, res) => {
+  router.get('/', asyncH(async (req, res) => {
     const params = [];
     const where = [];
     const add = (sql, val) => { params.push(val); where.push(sql.replace('?', `$${params.length}`)); };
@@ -174,7 +179,7 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
   }));
 
   // ---- import the PSD's daily plug list workbook ----
-  router.post('/plugs/import', requireAction('workload.write'), upload.single('file'), asyncH(async (req, res) => {
+  router.post('/import', requireAction('plugs.write'), upload.single('file'), asyncH(async (req, res) => {
     const t0 = Date.now();
     const info = { target: 'plug list', file: req.file ? req.file.originalname : null, bytes: req.file ? req.file.size : 0 };
     try {
@@ -236,7 +241,7 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
   });
   const dupe = (e) => { if (e && e.code === '23505') throw new HttpError(409, 'That plug (same Plug ID, program and PSD) is already on this day\'s list'); throw e; };
 
-  router.post('/plugs', requireAction('workload.write'), asyncH(async (req, res) => {
+  router.post('/', requireAction('plugs.write'), asyncH(async (req, res) => {
     const b = plugBody(req.body || {});
     let row;
     try {
@@ -251,7 +256,7 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
     res.status(201).json({ id: row.id, workloadRowsFilled: filled });
   }));
 
-  router.put('/plugs/:id(\\d+)', requireAction('workload.write'), asyncH(async (req, res) => {
+  router.put('/:id(\\d+)', requireAction('plugs.write'), asyncH(async (req, res) => {
     const b = plugBody(req.body || {});
     try {
       const r = await db.query(
@@ -265,7 +270,7 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
     res.json({ ok: true, workloadRowsFilled: filled });
   }));
 
-  router.delete('/plugs/:id(\\d+)', requireAction('workload.write'), asyncH(async (req, res) => {
+  router.delete('/:id(\\d+)', requireAction('plugs.write'), asyncH(async (req, res) => {
     const { rows } = await db.query('DELETE FROM workload_plugs WHERE id=$1 RETURNING plug_date, plug_id', [req.params.id]);
     if (!rows.length) throw new HttpError(404, 'Plug not found');
     await audit(req, 'workload.plug_delete', 'workload_plug', req.params.id, rows[0]);
@@ -273,7 +278,7 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
   }));
 
   // ---- fill blank PSD / PROG. NAME / PROJ. TITLE on rows already in the Workload Tracker (optional { from, to }) ----
-  router.post('/plugs/fill', requireAction('workload.write'), asyncH(async (req, res) => {
+  router.post('/fill', requireAction('workload.write'), asyncH(async (req, res) => {
     const body = req.body || {};
     const from = body.from ? v.date(body.from, { field: 'From' }) : null;
     const to = body.to ? v.date(body.to, { field: 'To' }) : null;
@@ -283,7 +288,7 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
   }));
 
   // ---- delete all: the selected day's list, or every day's (Admin only). Workload rows already made from plugs are not touched. ----
-  router.post('/plugs/delete-all', requireAction('workload.write'), asyncH(async (req, res) => {
+  router.post('/delete-all', requireAction('plugs.write'), asyncH(async (req, res) => {
     if (!req.user || req.user.role !== 'Admin') throw new HttpError(403, 'Only an Admin can delete the whole plug list');
     const body = req.body || {};
     const scope = body.scope === 'all' ? 'all' : 'day';
@@ -296,7 +301,7 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
   }));
 
   // ---- copy a day's plugs (or the chosen ones) into the Workload Tracker: one new row per plug not already there ----
-  router.post('/plugs/copy', requireAction('workload.write'), asyncH(async (req, res) => {
+  router.post('/copy', requireAction('workload.write'), asyncH(async (req, res) => {
     const t0 = Date.now();
     const body = req.body || {};
     const date = v.date(body.date, { field: 'Date', required: true });
@@ -335,6 +340,8 @@ module.exports = function mount(router, { UNITS, parseRow, insertRow, loadCustom
     await logRun(req, 'workload.plugs_copy', { date, units: units || '(blank)', requested: plugs.length, created, alreadyInWorkload: already, errors: errors.slice(0, 20), ms: Date.now() - t0 });
     res.json({ ok: true, created, already, errors: errors.slice(0, 20) });
   }));
+
+  return router;
 };
 
 module.exports.parsePlugWorkbook = parsePlugWorkbook;

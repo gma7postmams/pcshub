@@ -134,6 +134,7 @@ app.use('/api/dashboard',     requirePageAccess('/dashboard'), require('./src/ro
 app.use('/api/ingest',        requirePageAccess('/ingest'),    require('./src/routes/ingest'));
 app.use('/api/approvals',     requirePageAccess('/approval'),  require('./src/routes/approvals'));
 app.use('/api/workload',      requirePageAccess('/workload'),  require('./src/routes/workload'));
+app.use('/api/plugs',         require('./src/routes/plugs')(require('./src/routes/workload').helpers));   // PSD Daily Plug List (page + API of its own)
 app.use('/api/reports',       requirePageAccess('/reports'),   require('./src/routes/reports'));
 app.use('/api/knowledge',     requirePageAccess('/knowledge'), require('./src/routes/knowledge'));
 app.use('/api/admin',         requirePageAccess('/admin'),     require('./src/routes/admin'));

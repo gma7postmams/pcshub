@@ -860,7 +860,6 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
   }
 }));
 
-// ---------- PSD Daily Plug List (tab in the Workload Tracker): /api/workload/plugs/* ----------
-require('./plugs')(router, { UNITS, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked });
-
 module.exports = router;
+// shared with the PSD Daily Plug List routes (src/routes/plugs.js), which make Workload rows from plugs
+module.exports.helpers = { UNITS, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked };

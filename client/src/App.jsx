@@ -8,6 +8,7 @@ import Login from './pages/Login.jsx';
 const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
 const Ingest = lazy(() => import('./pages/Ingest.jsx'));
 const Workload = lazy(() => import('./pages/Workload.jsx'));
+const PlugListPage = lazy(() => import('./pages/PlugListPage.jsx'));
 const Approval = lazy(() => import('./pages/Approval.jsx'));
 const Reports = lazy(() => import('./pages/Reports.jsx'));
 const Knowledge = lazy(() => import('./pages/Knowledge.jsx'));
@@ -18,6 +19,7 @@ const PAGES = {
   '/dashboard': Dashboard,
   '/ingest': Ingest,
   '/workload': Workload,
+  '/plug-list': PlugListPage,
   '/approval': Approval,
   '/reports': Reports,
   '/knowledge': Knowledge,

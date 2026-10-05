@@ -351,3 +351,11 @@ CREATE TABLE IF NOT EXISTS workload_plugs (
 CREATE UNIQUE INDEX IF NOT EXISTS workload_plugs_uniq ON workload_plugs (plug_date, plug_id, prog_name, psd);
 CREATE INDEX IF NOT EXISTS workload_plugs_date_idx ON workload_plugs (plug_date, seq);
 CREATE INDEX IF NOT EXISTS workload_plugs_lookup_idx ON workload_plugs (plug_date, upper(plug_id));
+
+-- The PSD Daily Plug List is now its own page ('plugs'). Once (flag in app_settings), every group that can open the Workload Tracker
+-- also gets it, so nobody who used the old tab loses access; an Admin can untick it per group afterwards without it coming back.
+INSERT INTO group_permissions (group_id, perm_key)
+SELECT group_id, 'plugs' FROM group_permissions
+ WHERE perm_key = 'workload' AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'plugs_page_granted')
+ON CONFLICT DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('plugs_page_granted', '1') ON CONFLICT (key) DO NOTHING;

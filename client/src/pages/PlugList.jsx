@@ -11,7 +11,7 @@ import { Empty, Modal, useConfirm, useDebounced, useToast } from '../components/
 const weekday = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' });
 const dateLabel = (iso) => `${weekday(iso)}, ${fmtDate(iso)}`;
 
-export default function PlugList({ canWrite, isAdmin, onCopied }) {
+export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
   const toast = useToast();
   const confirm = useConfirm();
   const fileRef = useRef(null);
@@ -34,7 +34,7 @@ export default function PlugList({ canWrite, isAdmin, onCopied }) {
 
   const loadDates = useCallback(async (keep) => {
     try {
-      const out = await get('/api/workload/plugs/dates');
+      const out = await get('/api/plugs/dates');
       const d = out.dates;
       setDates(d);
       setTotals({ plugs: out.total ?? d.reduce((n, x) => n + x.n, 0), days: out.days ?? d.length });
@@ -52,7 +52,7 @@ export default function PlugList({ canWrite, isAdmin, onCopied }) {
     try {
       const p = new URLSearchParams({ date, used: '1' });
       if (query) p.set('q', query);
-      setRows((await get(`/api/workload/plugs?${p}`)).rows);
+      setRows((await get(`/api/plugs?${p}`)).rows);
     } catch (e) { setRows([]); toast(e.message, 'err'); }
   }, [date, query]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setRows(null); setPicked(new Set()); loadRows(); }, [loadRows]);
@@ -66,7 +66,7 @@ export default function PlugList({ canWrite, isAdmin, onCopied }) {
     if (yr) form.append('year', String(yr));
     setImporting(true);
     try {
-      const out = await post('/api/workload/plugs/import', form);
+      const out = await post('/api/plugs/import', form);
       setSummary(out);
       toast(`${out.added} plug${out.added === 1 ? '' : 's'} added${out.existing ? `, ${out.existing} already there` : ''}${out.workloadRowsFilled ? ` — ${out.workloadRowsFilled} existing Workload row${out.workloadRowsFilled === 1 ? '' : 's'} filled in` : ''}`);
       await loadDates(true);
@@ -84,14 +84,14 @@ export default function PlugList({ canWrite, isAdmin, onCopied }) {
   const fillExisting = async () => {
     setFilling(true);
     try {
-      const out = await post('/api/workload/plugs/fill', {});
+      const out = await post('/api/plugs/fill', {});
       toast(out.filled ? `${out.filled} Workload row${out.filled === 1 ? '' : 's'} filled in from the plug list` : 'Nothing to fill — every Workload row with a matching Plug ID already has its PSD and PROG. NAME / PROJ. TITLE');
       if (out.filled && onCopied) onCopied(out);
     } catch (e) { toast(e.message, 'err'); } finally { setFilling(false); }
   };
   const removePlug = async (r) => {
     if (!(await confirm('Delete plug', `Remove "${r.plug_id}" from the ${fmtDate(r.plug_date)} list? Workload rows already made from it are not touched.`, { okText: 'Delete', danger: true }))) return;
-    try { await del(`/api/workload/plugs/${r.id}`); toast('Deleted'); await loadDates(true); loadRows(); } catch (e) { toast(e.message, 'err'); }
+    try { await del(`/api/plugs/${r.id}`); toast('Deleted'); await loadDates(true); loadRows(); } catch (e) { toast(e.message, 'err'); }
   };
 
   const todo = rows ? rows.filter((r) => !r.in_workload) : [];
@@ -119,12 +119,14 @@ export default function PlugList({ canWrite, isAdmin, onCopied }) {
             <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files[0])} />
             <button type="button" className="btn" disabled={importing} onClick={() => fileRef.current.click()}><UploadIcon /> {importing ? 'Importing…' : 'Import plug list'}</button>
             <button type="button" className="btn" onClick={() => setAdding(true)}><PlusIcon /> Add plug</button>
-            <button type="button" className="btn" disabled={filling} onClick={fillExisting}
-              title="Rows already in the Workload Tracker that have a Plug ID but a blank PSD or PROG. NAME / PROJ. TITLE get them from this list (anything typed is kept)">{filling ? 'Filling…' : 'Fill blank rows'}</button>
+            {canWorkload ? <button type="button" className="btn" disabled={filling} onClick={fillExisting}
+              title="Rows already in the Workload Tracker that have a Plug ID but a blank PSD or PROG. NAME / PROJ. TITLE get them from this list (anything typed is kept)">{filling ? 'Filling…' : 'Fill blank rows'}</button> : null}
             {isAdmin ? <button type="button" className="btn danger" disabled={!totals.plugs} onClick={() => setDeleting(true)} title="Delete this day's plug list, or every day's">Delete all…</button> : null}
-            <button type="button" className="btn primary" disabled={!date || !todo.length} onClick={() => setCopying(true)}>
-              {chosen.length ? `Copy ${chosen.length} to Workload` : `Copy ${todo.length || ''} to Workload`.replace('  ', ' ')}
-            </button>
+            {canWorkload ? (
+              <button type="button" className="btn primary" disabled={!date || !todo.length} onClick={() => setCopying(true)}>
+                {chosen.length ? `Copy ${chosen.length} to Workload` : `Copy ${todo.length || ''} to Workload`.replace('  ', ' ')}
+              </button>
+            ) : null}
           </>
         ) : null}
       </div>
@@ -223,7 +225,7 @@ function DeleteAllPlugsModal({ date, dayCount, totals, onClose, onDone }) {
   const count = scope === 'day' ? dayCount : totals.plugs;
   const go = async () => {
     setBusy(true);
-    try { onDone(await post('/api/workload/plugs/delete-all', { scope, date })); } catch (e) { toast(e.message, 'err'); setBusy(false); }
+    try { onDone(await post('/api/plugs/delete-all', { scope, date })); } catch (e) { toast(e.message, 'err'); setBusy(false); }
   };
   return (
     <Modal title="Delete plug list" onClose={onClose}
@@ -251,7 +253,7 @@ function PlugModal({ date, plug, onClose, onSaved }) {
     if (!f.plug_id.trim()) { toast('Plug ID is required', 'err'); return; }
     setBusy(true);
     try {
-      const out = plug ? await put(`/api/workload/plugs/${plug.id}`, f) : await post('/api/workload/plugs', f);
+      const out = plug ? await put(`/api/plugs/${plug.id}`, f) : await post('/api/plugs', f);
       toast(plug ? 'Plug updated' : 'Plug added');
       onSaved(f.plug_date, out);
     } catch (e) { toast(e.message, 'err'); setBusy(false); }
@@ -276,7 +278,7 @@ function CopyModal({ date, plugs, onClose, onDone }) {
   const go = async () => {
     setBusy(true);
     try {
-      const out = await post('/api/workload/plugs/copy', { date, ids: plugs.map((p) => p.id) });
+      const out = await post('/api/plugs/copy', { date, ids: plugs.map((p) => p.id) });
       const bits = [`${out.created} row${out.created === 1 ? '' : 's'} added to the Workload Tracker`];
       if (out.already) bits.push(`${out.already} already there`);
       if (out.errors && out.errors.length) bits.push(`${out.errors.length} failed`);
