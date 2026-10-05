@@ -202,10 +202,11 @@ function GridCellInput({ def, value, onChange, disabled, ...rest }) {
   const v = value ?? '';
   // The wrapper's hidden ::after copies the text (data-value) so the cell is exactly as wide (and, for multi-line
   // fields, as tall) as its content — nothing is cropped — while the real input/textarea fills that same box.
+  // (no placeholder text: an empty cell stays empty like a spreadsheet's, and a hint such as "Filled from the PSD Daily Plug List" would be cut off in a narrow column)
   const Field = def.multiline ? 'textarea' : 'input';
   return (
     <div className={`xl-cell${def.multiline ? ' multi' : ''}`} data-value={`${v}\u200b`}>
-      <Field maxLength={def.max} placeholder={def.hint} value={v} disabled={disabled} onChange={onChange} rows={def.multiline ? 1 : undefined} {...rest} />
+      <Field maxLength={def.max} value={v} disabled={disabled} onChange={onChange} rows={def.multiline ? 1 : undefined} {...rest} />
     </div>
   );
 }
