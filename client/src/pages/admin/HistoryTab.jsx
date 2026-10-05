@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, get, post } from '../../lib/api.js';
-import { useSession } from '../../context.jsx';
+import ReauthDialog from './ReauthDialog.jsx';
 import { fmtBytes, fmtDateTime } from '../../lib/util.js';
 import { Empty, Modal, useToast } from '../../components/ui.jsx';
 
@@ -15,36 +15,6 @@ function fmtDuration(ms) {
   if (ms == null) return '—';
   const s = Math.round(ms / 1000);
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-}
-
-/** Asks for the password (and 2FA code when enabled); resolves through onSubmit({ password, code }). */
-function ReauthDialog({ title, intro, okText, danger, typed, onClose, onSubmit }) {
-  const { user } = useSession();
-  const [password, setPassword] = useState('');
-  const [code, setCode] = useState('');
-  const [confirm, setConfirm] = useState('');
-  const [busy, setBusy] = useState(false);
-  const toast = useToast();
-  const ready = password && (!user.totp_enabled || code) && (!typed || confirm === typed);
-  const submit = async () => {
-    setBusy(true);
-    try { await onSubmit({ password, code, confirm }); } catch (e) { toast(e.message, 'err'); setBusy(false); }
-  };
-  return (
-    <Modal
-      title={title}
-      size="sm"
-      onClose={onClose}
-      footer={<><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className={`btn ${danger ? 'danger' : 'primary'}`} disabled={!ready || busy} onClick={submit}>{okText}</button></>}
-    >
-      <form className="stack" noValidate onSubmit={(e) => { e.preventDefault(); if (ready && !busy) submit(); }}>
-        <p className="muted m-0">{intro}</p>
-        {typed ? <label className="f"><span>Type <strong>{typed}</strong> to confirm</span><input autoComplete="off" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></label> : null}
-        <label className="f"><span>Your password</span><input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
-        {user.totp_enabled ? <label className="f"><span>Authentication code</span><input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value)} /></label> : null}
-      </form>
-    </Modal>
-  );
 }
 
 const CHECK_PILL = { pass: 's-done', warn: 's-pending', fail: 's-rejected' };
@@ -104,7 +74,7 @@ function ResultCell({ j }) {
   );
 }
 
-export default function HistoryTab({ active, refreshKey, onRunning, onChanged }) {
+export default function HistoryTab({ active, refreshKey, onRunning, onChanged, onRollback }) {
   const toast = useToast();
   const [hist, setHist] = useState(null);
   const [type, setType] = useState('all');
@@ -198,6 +168,7 @@ export default function HistoryTab({ active, refreshKey, onRunning, onChanged })
                         ) : null}
                         {backup && !j.deleted_at && !isRunning(j) ? <button type="button" className="btn sm ghost" onClick={() => setDialog({ type: 'delete', job: j })}>Delete</button> : null}
                         {ok && j.verify_report ? <>{' '}<button type="button" className="btn sm ghost" onClick={() => setDialog({ type: 'verify', job: j })}>Report</button></> : null}
+                        {!backup && j.status === 'failed' && j.summary && j.summary.preRestoreBackupId ? <button type="button" className="btn sm danger" onClick={() => onRollback(j)}>Roll back</button> : null}
                       </td>
                     </tr>
                   );

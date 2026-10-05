@@ -1,0 +1,6 @@
+body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #0f1419; color: #e6e9ee; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.box { max-width: 460px; padding: 32px; text-align: center; border: 1px solid #2a323d; border-radius: 12px; background: #161c24; }
+h1 { margin: 0 0 12px; font-size: 22px; }
+p { margin: 8px 0; color: #aab2bf; }
+.stage { color: #e6e9ee; font-weight: 600; }
+.hint { font-size: 13px; }

@@ -13,6 +13,7 @@ const { asyncH, HttpError } = require('../middleware');
 const { audit } = require('../audit');
 const svc = require('../backup/service');
 const analysis = require('../backup/analysis');
+const restore = require('../backup/restore');
 const cfg = require('../backup/config');
 
 // Mounted behind requirePageAccess('/admin'); the role is re-checked here as defence in depth.
@@ -64,8 +65,36 @@ router.post('/', createLimiter, asyncH(async (req, res) => {
 
 router.get('/jobs/:id', asyncH(async (req, res) => res.json({ job: await svc.getJob(req.params.id) })));
 
-// ---------- Restore (placeholder: execution arrives in a later phase; restore rows appear in GET / history) ----------
-router.post('/restore', (req, res) => res.status(501).json({ error: 'Restore is not available in this release.' }));
+// ---------- Restore execution (only from a completed analysis; rollback only from a failed restore) ----------
+const restoreLimiter = limiter(5);
+
+router.post('/restore', restoreLimiter, asyncH(async (req, res) => {
+  const aid = typeof req.body.analysisId === 'string' ? req.body.analysisId : '';
+  if (!/^[0-9a-f]{24}$/.test(aid)) throw new HttpError(400, 'Analyze a backup before restoring it');
+  const a = analysis.get(aid, req.user.id);
+  const risk = a.report && a.report.risk.level;
+  if (req.body.confirm !== 'RESTORE') throw new HttpError(400, 'Type RESTORE to confirm');
+  if (risk === 'HIGH' && req.body.acknowledgeRisk !== true) throw new HttpError(400, 'Acknowledge the HIGH risk level to continue');
+  await reauth(req, 'admin.backup_restore', aid);
+  try {
+    res.status(202).json({ job: await restore.start(req, aid) });
+  } catch (e) {
+    await audit(req, 'admin.backup_restore', 'backup', aid, { outcome: 'failed', riskLevel: risk, error: String(e.message).slice(0, 300), dbModified: false });
+    throw e;
+  }
+}));
+
+router.post('/:id/rollback', restoreLimiter, asyncH(async (req, res) => {
+  const id = req.params.id;
+  if (req.body.confirm !== 'ROLLBACK') throw new HttpError(400, 'Type ROLLBACK to confirm');
+  await reauth(req, 'admin.backup_restore', id);
+  try {
+    res.status(202).json({ job: await restore.startRollback(req, id) });
+  } catch (e) {
+    await audit(req, 'admin.backup_restore', 'backup', id, { outcome: 'failed', rollbackOf: id, error: String(e.message).slice(0, 300), dbModified: false });
+    throw e;
+  }
+}));
 
 // ---------- Restore analysis (read-only: nothing is restored) ----------
 router.param('aid', (req, res, next, aid) => (/^[0-9a-f]{24}$/.test(aid) ? next() : res.status(404).json({ error: 'Analysis not found or expired' })));

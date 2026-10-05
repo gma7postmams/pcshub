@@ -53,6 +53,11 @@ app.use((req, res, next) => {
   next();
 });
 
+// During a restore everything except the status endpoint answers 503. Registered before sessions: it must not touch the database.
+const maintenance = require('./src/backup/maintenance');
+app.use(maintenance.middleware);
+app.get('/api/maintenance/status', maintenance.status);
+
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false, limit: '100kb' }));
 

@@ -771,3 +771,4 @@ table.t.xl td[data-k="breakdate_vgfx"] .xl-cell { min-width: 250px; }
 .diff-title { font-weight: 600; font-size: 13px; }
 @media (max-width: 800px) { .diff-grid { grid-template-columns: 1fr; } }
 .sub-tabs { margin-bottom: 14px; }
+.restore-overlay { z-index: 1000; }

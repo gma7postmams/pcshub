@@ -3,14 +3,14 @@ const path = require('path');
 const bcrypt = require('bcrypt');
 const validator = require('validator');
 
-async function migrate(db) {
+async function migrate(db, { seed = true } = {}) {
   await upgradeV1(db);
   const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   await db.query(sql);
   await db.query('INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING', [require('./version').SCHEMA_VERSION]);
   await upgradeIngestRecords(db);
   await require('./totp').migrateSecrets(db);
-  await seedAdmin(db);
+  if (seed) await seedAdmin(db);
 }
 
 async function upgradeIngestRecords(db) {

@@ -404,7 +404,7 @@ async function list({ limit, offset, type = 'all', deleted = false }) {
 }
 
 async function getJob(id) {
-  const { rows } = await db.query(`SELECT ${COLS} FROM backup_jobs WHERE id=$1`, [id]);
+  const { rows } = await db.query(`SELECT ${COLS}, risk_level, duration_ms FROM backup_jobs WHERE id=$1`, [id]);
   if (!rows[0]) throw new HttpError(404, 'Backup not found');
   return rows[0];
 }
@@ -465,5 +465,5 @@ async function recoverStale() {
 
 module.exports = {
   preview, startCreate, list, getJob, verify, remove, prepareDownload, issueDownloadToken, consumeDownloadToken, recoverStale, environment,
-  acquire, verifyFile, collectCounts, isBusy: () => state.busy,
+  acquire, verifyFile, collectCounts, isBusy: () => state.busy, runCreate, resolvePath,
 };

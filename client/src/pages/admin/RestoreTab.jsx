@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
-import { api, get } from '../../lib/api.js';
+import { api, get, post } from '../../lib/api.js';
 import { fmtBytes, fmtDateTime } from '../../lib/util.js';
 import { useToast } from '../../components/ui.jsx';
+import ReauthDialog from './ReauthDialog.jsx';
 
 const RISK_PILL = { LOW: 's-done', MEDIUM: 's-pending', HIGH: 's-rejected' };
 const CHECK_PILL = { pass: 's-done', warn: 's-pending', fail: 's-rejected' };
@@ -151,7 +152,7 @@ function ImpactTable({ rows }) {
   );
 }
 
-function Report({ a, onDiscard }) {
+function Report({ a, onDiscard, onRestore }) {
   const r = a.report;
   const [cls, readyLabel, readyText] = READY[r.readiness.state];
   const b = r.backup;
@@ -161,13 +162,13 @@ function Report({ a, onDiscard }) {
         <div className="card-head">
           <h2>Restore readiness report</h2>
           <button type="button" className="btn sm" onClick={onDiscard}>Discard analysis</button>
-          <button type="button" className="btn primary sm" disabled title="Restore execution is not available in this release">Restore</button>
+          <button type="button" className="btn danger sm" disabled={r.readiness.state === 'blocked'} title={r.readiness.state === 'blocked' ? 'Resolve the failed checks first' : undefined} onClick={onRestore}>Restore</button>
         </div>
         <div className="card-pad">
           <div className="readiness">
             <div><span className="stat-label">Risk level</span><div><span className={`pill risk ${RISK_PILL[r.risk.level]}`}>{r.risk.level}</span></div></div>
             <div><span className="stat-label">Readiness</span><div><span className={`pill ${cls}`}>{readyLabel}</span></div></div>
-            <div className="grow dim">{readyText} Restore execution is not available in this release; this report is for review only.</div>
+            <div className="grow dim">{readyText}</div>
           </div>
           {r.risk.blockers.length ? <div className="alert err mt-12">{r.risk.blockers.map((x) => <div key={x}>{x}</div>)}</div> : null}
           <div className="grid grid-3 mt-12">
@@ -230,11 +231,42 @@ function Report({ a, onDiscard }) {
   );
 }
 
-export default function RestoreTab() {
+function RestoreDialog({ a, onClose, onStarted }) {
+  const r = a.report;
+  const [ack, setAck] = useState(false);
+  const submit = async ({ password, code, confirm }) => {
+    const { job } = await post('/api/admin/backups/restore', { analysisId: a.id, confirm, acknowledgeRisk: ack, password, code });
+    onStarted(job.id);
+  };
+  return (
+    <ReauthDialog
+      title="Restore backup" okText="Restore now" danger typed="RESTORE" onClose={onClose} onSubmit={submit}
+      extraReady={r.risk.level !== 'HIGH' || ack}
+      intro={`This replaces the live system with ${r.source.filename}.`}
+    >
+      <div className="readiness">
+        <div><span className="stat-label">Risk level</span><div><span className={`pill risk ${RISK_PILL[r.risk.level]}`}>{r.risk.level}</span></div></div>
+        <div><span className="stat-label">Added</span><div><strong className="c-add">{r.totals.added}</strong></div></div>
+        <div><span className="stat-label">Removed</span><div><strong className="c-rem">{r.totals.removed}</strong></div></div>
+        <div><span className="stat-label">Modified</span><div><strong className="c-mod">{r.totals.modified}</strong></div></div>
+      </div>
+      {r.risk.reasons.length ? <ul className="reasons">{r.risk.reasons.slice(0, 5).map((x) => <li key={x.message}>{x.message}</li>)}</ul> : null}
+      <ul className="reasons">
+        <li>A pre-restore backup is created and verified first. If it fails, nothing is changed.</li>
+        <li>The system goes into maintenance mode and is unavailable to everyone until the restore ends.</li>
+        <li>Users created after this backup are lost, and other users are signed out. The audit log is kept.</li>
+      </ul>
+      {r.risk.level === 'HIGH' ? <label className="check"><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} /> I understand the risk and want to continue</label> : null}
+    </ReauthDialog>
+  );
+}
+
+export default function RestoreTab({ onRestoreStarted }) {
   const toast = useToast();
   const [analysis, setAnalysis] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [pct, setPct] = useState(null);
+  const [confirming, setConfirming] = useState(false);
   const id = analysis && analysis.id;
   const running = analysis && analysis.status === 'running';
 
@@ -261,7 +293,8 @@ export default function RestoreTab() {
       <UploadCard busy={uploading || Boolean(running)} uploadPct={pct} onAnalyze={analyze} />
       {running ? <div className="card mb-12"><div className="card-pad"><strong>Analyzing…</strong> <span className="dim">{analysis.stage}</span></div></div> : null}
       {analysis && analysis.status === 'failed' ? <div className="alert err mb-12">Analysis failed: {analysis.error}</div> : null}
-      {analysis && analysis.status === 'done' ? <Report a={analysis} onDiscard={discard} /> : null}
+      {analysis && analysis.status === 'done' ? <Report a={analysis} onDiscard={discard} onRestore={() => setConfirming(true)} /> : null}
+      {confirming && analysis ? <RestoreDialog a={analysis} onClose={() => setConfirming(false)} onStarted={(jobId) => { setConfirming(false); setAnalysis(null); onRestoreStarted(jobId); }} /> : null}
     </>
   );
 }

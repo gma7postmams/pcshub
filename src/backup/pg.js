@@ -90,4 +90,18 @@ async function restoreInto(dumpFile, dbName) {
   ], { env: connEnv(), timeoutMs: cfg.TIMEOUT_MS });
 }
 
-module.exports = { run, toolVersion, dump, listDump, inspectToc, restoreInto, databaseName };
+/** Restores over the live database in one transaction; any error rolls everything back. */
+async function restoreLive(dumpFile) {
+  const env = { ...connEnv(), PGOPTIONS: '-c lock_timeout=60000' };
+  await run(cfg.PG_RESTORE_BIN, [
+    '--clean', '--if-exists', '--no-owner', '--no-privileges', '--single-transaction', '--exit-on-error',
+    `--dbname=${env.PGDATABASE}`, dumpFile,
+  ], { env, timeoutMs: cfg.TIMEOUT_MS });
+}
+
+async function tocTables(file) {
+  const { stdout } = await run(cfg.PG_RESTORE_BIN, ['--list', file], { timeoutMs: 120000 });
+  return new Set(stdout.split('\n').map((l) => /^\d+; \d+ \d+ TABLE public (\S+)/.exec(l)).filter(Boolean).map((m) => m[1]));
+}
+
+module.exports = { run, toolVersion, dump, listDump, inspectToc, restoreInto, restoreLive, tocTables, databaseName };
