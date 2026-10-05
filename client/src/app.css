@@ -726,3 +726,15 @@ table.t.wl tbody tr.picked td { box-shadow: inset 0 1px 0 color-mix(in srgb, var
 
 .radio-row { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; }
 .radio-row input { width: auto; margin: 0; }
+
+/* PSD Daily Plug List: period / paging controls */
+.plug-anchor { height: 36px; }
+.plug-range { font-weight: 600; font-size: 13.5px; margin-left: 6px; white-space: nowrap; }
+.plug-from { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.plug-from input { height: 36px; }
+.plug-foot { display: flex; align-items: center; gap: 14px; margin-top: 10px; }
+.plug-foot .grow { flex: 1; }
+.plug-foot .fsel { min-width: 130px; }
+.plug-t td.nowrap { white-space: nowrap; }
+.plug-bar .wl-search { flex: 1 1 180px; min-width: 180px; }
+.plug-bar { row-gap: 8px; }

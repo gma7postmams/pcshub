@@ -139,6 +139,23 @@ async function backfillWorkload(runner, { from = null, to = null, userId = null 
   return rowCount;
 }
 
+/** WHERE for the plug list: ?date= (one day), ?from= / ?to= (a period), ?q= (plug ID / program / PSD contains). Returns { where, params }. */
+function plugFilter(query) {
+  const params = [];
+  const where = [];
+  const add = (sql, val) => { params.push(val); where.push(sql.replace('?', `$${params.length}`)); };
+  if (query.date) add('p.plug_date = ?', v.date(query.date, { field: 'Date' }));
+  if (query.from) add('p.plug_date >= ?', v.date(query.from, { field: 'From' }));
+  if (query.to) add('p.plug_date <= ?', v.date(query.to, { field: 'To' }));
+  if (query.q) {
+    const like = `%${String(query.q).slice(0, 80).replace(/[%_\\]/g, '\\$&')}%`;
+    params.push(like);
+    where.push(`(p.plug_id ILIKE $${params.length} OR p.prog_name ILIKE $${params.length} OR p.psd ILIKE $${params.length})`);
+  }
+  return { where, params };
+}
+const whereSql = (where) => (where.length ? `WHERE ${where.join(' AND ')}` : '');
+
 module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked }) {
   const router = express.Router();
   // Mounted at /api/plugs. Anyone who can open the PSD Daily Plug List page OR the Workload Tracker may read the list (the tracker
@@ -148,34 +165,26 @@ module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, lo
   // ---- which days have a list ----
   router.get('/dates', asyncH(async (req, res) => {
     const { rows } = await db.query('SELECT plug_date AS date, count(*)::int AS n FROM workload_plugs GROUP BY plug_date ORDER BY plug_date DESC LIMIT 366');
-    const all = (await db.query('SELECT count(*)::int AS plugs, count(DISTINCT plug_date)::int AS days FROM workload_plugs')).rows[0];
-    res.json({ dates: rows, total: all.plugs, days: all.days });
+    const all = (await db.query('SELECT count(*)::int AS plugs, count(DISTINCT plug_date)::int AS days, min(plug_date) AS first, max(plug_date) AS last FROM workload_plugs')).rows[0];
+    res.json({ dates: rows, total: all.plugs, days: all.days, first: all.first, last: all.last });
   }));
 
   // ---- list: ?date=YYYY-MM-DD, or ?from=&to=, optional ?q= and ?used=1 (adds in_workload: is it already in the Workload Tracker) ----
   router.get('/', asyncH(async (req, res) => {
-    const params = [];
-    const where = [];
-    const add = (sql, val) => { params.push(val); where.push(sql.replace('?', `$${params.length}`)); };
-    if (req.query.date) add('p.plug_date = ?', v.date(req.query.date, { field: 'Date' }));
-    if (req.query.from) add('p.plug_date >= ?', v.date(req.query.from, { field: 'From' }));
-    if (req.query.to) add('p.plug_date <= ?', v.date(req.query.to, { field: 'To' }));
-    if (req.query.q) {
-      const like = `%${String(req.query.q).slice(0, 80).replace(/[%_\\]/g, '\\$&')}%`;
-      params.push(like);
-      where.push(`(p.plug_id ILIKE $${params.length} OR p.prog_name ILIKE $${params.length} OR p.psd ILIKE $${params.length})`);
-    }
+    const { where, params } = plugFilter(req.query);
     const used = req.query.used === '1'
       ? `, EXISTS (SELECT 1 FROM workload_items w WHERE w.work_date = p.plug_date
            AND upper(p.plug_id) IN (SELECT upper(btrim(x)) FROM unnest(string_to_array(w.plug_id, E'\\n')) AS x)) AS in_workload`
       : '';
-    const limit = Math.min(parseInt(req.query.limit, 10) || 3000, 5000);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 3000, 1), 5000);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const order = req.query.order === 'desc' ? 'p.plug_date DESC, p.seq, p.id' : 'p.plug_date, p.seq, p.id';   // newest day first, or oldest first; list order within a day
+    const total = (await db.query(`SELECT count(*)::int AS n FROM workload_plugs p ${whereSql(where)}`, params)).rows[0].n;
     const { rows } = await db.query(
       `SELECT p.id, p.plug_date, p.seq, p.list_no, p.plug_id, p.prog_name, p.psd, p.account_by, p.is_additional${used}
-         FROM workload_plugs p ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-        ORDER BY p.plug_date, p.seq, p.id LIMIT ${limit}`, params
+         FROM workload_plugs p ${whereSql(where)} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params
     );
-    res.json({ rows });
+    res.json({ rows, total });
   }));
 
   // ---- import the PSD's daily plug list workbook ----
@@ -291,54 +300,72 @@ module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, lo
   router.post('/delete-all', requireAction('plugs.write'), asyncH(async (req, res) => {
     if (!req.user || req.user.role !== 'Admin') throw new HttpError(403, 'Only an Admin can delete the whole plug list');
     const body = req.body || {};
-    const scope = body.scope === 'all' ? 'all' : 'day';
-    const date = scope === 'day' ? v.date(body.date, { field: 'Date', required: true }) : null;
-    const { rowCount } = scope === 'day'
-      ? await db.query('DELETE FROM workload_plugs WHERE plug_date = $1', [date])
-      : await db.query('DELETE FROM workload_plugs');
-    await logRun(req, 'workload.plugs_delete_all', { scope, date, deleted: rowCount });
-    res.json({ ok: true, deleted: rowCount });
+    const scope = body.scope === 'all' ? 'all' : 'range';   // 'range' = what a view shows: ?from / ?to / ?q (a single day is from = to)
+    let filters = null;
+    let result;
+    if (scope === 'all') result = await db.query('DELETE FROM workload_plugs');
+    else {
+      filters = { from: body.from || body.date || undefined, to: body.to || body.date || undefined, q: body.q || undefined };
+      if (!filters.from && !filters.to && !filters.q) throw new HttpError(400, 'Choose a period or search to delete, or delete everything');
+      const { where, params } = plugFilter(filters);
+      result = await db.query(`DELETE FROM workload_plugs p ${whereSql(where)}`, params);
+    }
+    await logRun(req, 'workload.plugs_delete_all', { scope, filters, deleted: result.rowCount });
+    res.json({ ok: true, deleted: result.rowCount });
   }));
 
   // ---- copy a day's plugs (or the chosen ones) into the Workload Tracker: one new row per plug not already there ----
   router.post('/copy', requireAction('workload.write'), asyncH(async (req, res) => {
     const t0 = Date.now();
     const body = req.body || {};
-    const date = v.date(body.date, { field: 'Date', required: true });
     // Units Concerned is NOT known from the plug list: rows are made with it blank (they show under All until someone sets it).
     // A value may still be passed in (optional).
     const units = body.units_concerned ? v.oneOf(body.units_concerned, UNITS, { field: 'Units Concerned' }) : null;
-    const ids = Array.isArray(body.ids) ? body.ids.map((n) => parseInt(n, 10)).filter(Number.isInteger).slice(0, 500) : null;
-    assertNotLocked(await loadLocks(db), date);
-    const { rows: plugs } = await db.query(
-      `SELECT p.id, p.plug_id, p.prog_name, p.psd FROM workload_plugs p
-        WHERE p.plug_date = $1 ${ids ? 'AND p.id = ANY($2::bigint[])' : ''} ORDER BY p.seq, p.id LIMIT 500`, ids ? [date, ids] : [date]
-    );
+    // which plugs: the chosen ones ({ ids }, from any days), or everything in a view ({ from, to, q } — or one { date })
+    const ids = Array.isArray(body.ids) ? body.ids.map((n) => parseInt(n, 10)).filter(Number.isInteger).slice(0, 5000) : null;
+    const LIMIT = 5000;
+    let found;
+    if (ids) {
+      found = await db.query('SELECT p.id, p.plug_date, p.plug_id, p.prog_name, p.psd FROM workload_plugs p WHERE p.id = ANY($1::bigint[]) ORDER BY p.plug_date, p.seq, p.id', [ids]);
+    } else {
+      const { where, params } = plugFilter({ from: body.from || body.date || undefined, to: body.to || body.date || undefined, q: body.q || undefined });
+      found = await db.query(`SELECT p.id, p.plug_date, p.plug_id, p.prog_name, p.psd FROM workload_plugs p ${whereSql(where)} ORDER BY p.plug_date, p.seq, p.id LIMIT ${LIMIT + 1}`, params);
+    }
+    const truncated = found.rows.length > LIMIT;
+    const plugs = found.rows.slice(0, LIMIT);
+    if (!plugs.length) return res.json({ ok: true, created: 0, already: 0, locked: 0, errors: [], truncated: false });
+    const locks = await loadLocks(db);
+    const dates = [...new Set(plugs.map((p) => p.plug_date))];
     const { rows: have } = await db.query(
-      `SELECT DISTINCT upper(btrim(x)) AS id FROM workload_items w, unnest(string_to_array(w.plug_id, E'\\n')) AS x WHERE w.work_date = $1`, [date]
+      `SELECT DISTINCT w.work_date AS d, upper(btrim(x)) AS id FROM workload_items w, unnest(string_to_array(w.plug_id, E'\\n')) AS x WHERE w.work_date = ANY($1::date[])`, [dates]
     );
-    const taken = new Set(have.map((r) => r.id));
+    const taken = new Set(have.map((r) => `${r.d}|${r.id}`));
     const customCols = await loadCustomCols(db);
     let created = 0;
     let already = 0;
+    let locked = 0;
     const errors = [];
     await db.tx(async (c) => {
       for (const p of plugs) {
-        const key = p.plug_id.toUpperCase();
+        const key = `${p.plug_date}|${p.plug_id.toUpperCase()}`;
         if (taken.has(key)) { already++; continue; }
+        try { assertNotLocked(locks, p.plug_date); } catch (e) { locked++; continue; }   // a day inside a locked period is skipped
         try {
-          const rec = await parseRow(c, { work_date: date, units_concerned: units, plug_id: p.plug_id, psd: p.psd, prog_name: p.prog_name }, null, customCols, { allowBlankUnits: true });
+          const rec = await parseRow(c, { work_date: p.plug_date, units_concerned: units, plug_id: p.plug_id, psd: p.psd, prog_name: p.prog_name }, null, customCols, { allowBlankUnits: true });
           const id = await insertRow(c, rec, req.user.id);
           await audit(req, 'workload.create', 'workload_item', id, { from_plug_list: true, plug_id: p.plug_id }, c);
           taken.add(key);
           created++;
         } catch (e) {
-          errors.push(`${p.plug_id}: ${e instanceof HttpError ? e.message : 'unexpected error'}`);
+          errors.push(`${p.plug_date} ${p.plug_id}: ${e instanceof HttpError ? e.message : 'unexpected error'}`);
         }
       }
     });
-    await logRun(req, 'workload.plugs_copy', { date, units: units || '(blank)', requested: plugs.length, created, alreadyInWorkload: already, errors: errors.slice(0, 20), ms: Date.now() - t0 });
-    res.json({ ok: true, created, already, errors: errors.slice(0, 20) });
+    await logRun(req, 'workload.plugs_copy', {
+      mode: ids ? 'selected' : 'view', days: dates.length, from: dates[0], to: dates[dates.length - 1], units: units || '(blank)', requested: plugs.length,
+      created, alreadyInWorkload: already, skippedLocked: locked, truncated, errors: errors.slice(0, 20), ms: Date.now() - t0,
+    });
+    res.json({ ok: true, created, already, locked, errors: errors.slice(0, 20), truncated });
   }));
 
   return router;
