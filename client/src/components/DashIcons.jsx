@@ -41,7 +41,7 @@ export const HeroArt = () => (
     </defs>
     <path d="M0 150C40 90 80 70 130 92s90 30 130-20 70-40 100-20v98z" fill="url(#dshWave)" />
     <path d="M60 150C110 112 160 110 210 126s90 8 150-34v58z" fill="#fff" opacity=".28" />
-    <g transform="translate(-56 -44) scale(1.25)">
+    <g transform="translate(-26 -14) scale(1.15)">
       <g transform="rotate(-9 255 82)">
         <rect x="205" y="64" width="104" height="70" rx="11" fill="url(#dshBoard)" />
         <path d="m238 82 28 17-28 17z" fill="#fff" />
