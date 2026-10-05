@@ -6,7 +6,6 @@ import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, LockIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
 import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
-import PlugPicker from '../components/PlugPicker.jsx';
 
 // Workload Tracker — ONE table. "Units Concerned" says which team(s) a plug is for; the tabs
 // (All / VGFX / VEDIT / Audio) are filters over it. Fields, per-tab columns and the Platform rules come
@@ -1616,7 +1615,12 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
       return withAutoPlatform(meta.platformRules, prev, k, val);
     });
   };
-  const pickPlug = (p) => setAll((prev) => ({ ...withAutoPlatform(meta.platformRules, prev, 'plug_id', p.plug_id), psd: p.psd, prog_name: p.prog_name }));
+  const pickPlug = (e) => {
+    const p = (plugs || []).find((x) => String(x.id) === e.target.value);
+    if (p) setAll((prev) => ({ ...withAutoPlatform(meta.platformRules, prev, 'plug_id', p.plug_id), psd: p.psd, prog_name: p.prog_name }));
+    else if (e.target.value === '') setAll((prev) => withAutoPlatform(meta.platformRules, prev, 'plug_id', ''));   // "Choose…" again: no plug
+  };
+  const chosenPlug = findPlugIn(f.work_date, f.plug_id);
 
   // Audio-only units use the template's Audio sheet columns; everything else uses the main sheet columns
   const teams = meta.unitTeams[f.units_concerned] || [];
@@ -1679,13 +1683,25 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
         {!f.units_concerned ? <div className="full dim">Choose Units Concerned to see the fields.</div> : shown.map((k) => {
           const def = meta.fields[k];
           if (k === 'plug_id') {
+            // no free-text box: the Plug ID is chosen from the PSD Daily Plug List of the Work Date
+            const blocked = !f.work_date ? 'Choose the Work Date first' : plugs === null ? 'Loading the plug list…' : !plugs.length ? 'No PSD Daily Plug List for this date yet' : null;
+            const legacy = !!plugText && !!plugs && !chosenPlug;   // saved earlier with a Plug ID that isn't on this day's list: keep it until another is chosen
             return (
-              <div key={k} className="f full">
+              <label key={k} className="f full">
                 <span>{fieldLabel(k, def)}<span className="req"> *</span></span>
-                <PlugPicker date={f.work_date} value={f.plug_id} plugs={plugs} disabled={!canWrite} onPick={pickPlug}
-                  manageLink={session.canPage('/plug-list') ? <>Import it, or add the plug, on the <Link to="/plug-list">PSD Daily Plug List</Link> page.</> : 'Ask someone who manages the PSD Daily Plug List to import it.'} />
+                <select value={blocked ? '' : chosenPlug ? String(chosenPlug.id) : legacy ? '__current' : ''} onChange={pickPlug} disabled={!canWrite || !!blocked} aria-label="Plug ID — pick from the PSD Daily Plug List">
+                  {blocked ? <option value="">{blocked}</option> : (
+                    <>
+                      <option value="">Pick from the PSD Daily Plug List ({plugs.length})…</option>
+                      {legacy ? <option value="__current">{firstLine(f.plug_id)} (not on this day’s list)</option> : null}
+                      {plugs.map((p) => <option key={p.id} value={p.id}>{p.plug_id} — {p.prog_name || '(no title)'} · {p.psd || '(no PSD)'}</option>)}
+                    </>
+                  )}
+                </select>
+                {plugs && !plugs.length && f.work_date
+                  ? <small className="dim">{session.canPage('/plug-list') ? <>Import it, or add the plug, on the <Link to="/plug-list">PSD Daily Plug List</Link> page.</> : 'Ask someone who manages the PSD Daily Plug List to import it.'}</small> : null}
                 {plugText && !f.platform ? <small className="dim">{/PD_/i.test(plugText) ? 'PD_ plugs are digital — choose DIGITAL or INTL DIGITAL.' : 'Could not tell the platform from the Plug ID — choose one.'}</small> : null}
-              </div>
+              </label>
             );
           }
           return (
