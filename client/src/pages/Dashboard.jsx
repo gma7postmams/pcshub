@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { get } from '../lib/api.js';
+import { get, post } from '../lib/api.js';
 import { ago, fmtDate, initials } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { Empty, Kpi, RoleBadge } from '../components/ui.jsx';
@@ -111,7 +111,24 @@ export default function Dashboard() {
   const [d, setD] = useState(null);
 
   const load = useCallback(() => get('/api/dashboard').then(setD).catch(() => setD((cur) => cur || { error: true })), []);
-  useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t); }, [load]);   // refreshes itself every minute
+  useEffect(() => {
+    // Say "I'm on the Dashboard" BEFORE asking for the numbers, so the Active users block never shows where you were a moment ago
+    post('/api/presence', { path: '/dashboard' }).catch(() => { /* best effort */ }).then(load);
+    const t = setInterval(load, 60000);   // the whole dashboard refreshes every minute
+    return () => clearInterval(t);
+  }, [load]);
+  // Active users alone refreshes every 10 seconds (a light request), so people's locations and who is online stay current
+  const showUsers = !!(d && d.users);
+  useEffect(() => {
+    if (!showUsers) return undefined;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      get('/api/dashboard/users').then((r) => setD((cur) => (cur ? { ...cur, users: r.users } : cur))).catch(() => { /* next time */ });
+    };
+    const t = setInterval(refresh, 10000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', refresh); };
+  }, [showUsers]);
   if (!d) return <main className="container wide"><Empty>Loading…</Empty></main>;
   if (d.error) return <main className="container wide"><Empty>Could not load the dashboard.</Empty></main>;
 
@@ -145,7 +162,7 @@ export default function Dashboard() {
                     <span className="du-avatar" style={{ background: hueFor(p.name) }}>{initials(p.name).slice(0, 2)}<i className="du-dot" title="Active now" /></span>
                     <div className="du-info">
                       <div className="du-name">{p.name}{p.you ? <span className="chip du-you">You</span> : null}</div>
-                      <div className="du-meta"><RoleBadge role={p.role} />{p.page ? <span className="dim">on {p.page}</span> : null}</div>
+                      <div className="du-meta"><RoleBadge role={p.role} />{p.page || p.you ? <span className="dim">on {p.you ? 'Dashboard' : p.page}</span> : null}</div>
                     </div>
                     <span className="du-ago dim">{ago(p.lastActiveAt)}</span>
                   </div>

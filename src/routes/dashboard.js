@@ -13,6 +13,26 @@ const router = express.Router();
 const { ACTIVE_MINUTES } = require('./presence');   // "active now" = used the app within this many minutes
 const unitsFor = (team) => Object.entries(UNIT_TEAMS).filter(([, teams]) => teams.includes(team)).map(([u]) => u);
 
+// Who is working in the app right now, and who was earlier in the last 24 hours. Used by the full dashboard and, on its own, by the
+// light GET /api/dashboard/users the page polls every few seconds so people's locations stay current.
+async function activeUsers(u) {
+  const { rows } = await db.query(
+    `SELECT p.user_id AS id, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name, u.role, p.page, p.last_active_at,
+            (p.last_active_at >= now() - ($1 || ' minutes')::interval) AS active
+       FROM user_presence p JOIN users u ON u.id = p.user_id
+      WHERE u.is_active AND p.last_active_at >= now() - interval '24 hours'
+      ORDER BY p.last_active_at DESC LIMIT 60`, [String(ACTIVE_MINUTES)]
+  );
+  const row = (r) => ({ id: r.id, name: r.name, role: r.role, page: r.page && PAGE_BY_PATH[r.page] ? PAGE_BY_PATH[r.page].label : null, lastActiveAt: r.last_active_at, you: r.id === u.id });
+  return { windowMinutes: ACTIVE_MINUTES, active: rows.filter((r) => r.active).map(row), earlier: rows.filter((r) => !r.active).slice(0, 12).map(row) };
+}
+
+router.get('/users', asyncH(async (req, res) => {
+  if (!canSection(req.user, 'dashboard.users')) return res.status(403).json({ error: 'Active users is not enabled for your group' });
+  res.set('Cache-Control', 'no-store');
+  res.json({ users: await activeUsers(req.user) });
+}));
+
 router.get('/', asyncH(async (req, res) => {
   const u = req.user;
   const out = {
@@ -42,18 +62,8 @@ router.get('/', asyncH(async (req, res) => {
       thisMonth: month.rows[0],
     };
   }
-  // ---- Active users: who is working in the app right now, and who was earlier in the last 24 hours ----
-  if (out.sections.users) {
-    const { rows } = await db.query(
-      `SELECT p.user_id AS id, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name, u.role, p.page, p.last_active_at,
-              (p.last_active_at >= now() - ($1 || ' minutes')::interval) AS active
-         FROM user_presence p JOIN users u ON u.id = p.user_id
-        WHERE u.is_active AND p.last_active_at >= now() - interval '24 hours'
-        ORDER BY p.last_active_at DESC LIMIT 60`, [String(ACTIVE_MINUTES)]
-    );
-    const row = (r) => ({ id: r.id, name: r.name, role: r.role, page: r.page && PAGE_BY_PATH[r.page] ? PAGE_BY_PATH[r.page].label : null, lastActiveAt: r.last_active_at, you: r.id === u.id });
-    out.users = { windowMinutes: ACTIVE_MINUTES, active: rows.filter((r) => r.active).map(row), earlier: rows.filter((r) => !r.active).slice(0, 12).map(row) };
-  }
+  // ---- Active users ----
+  if (out.sections.users) out.users = await activeUsers(u);
 
   // ---- Workload Tracker ----
   if (out.canOpen.workload) {
