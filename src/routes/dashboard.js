@@ -10,7 +10,7 @@ const router = express.Router();
 //   kpis               -> the Dashboard section "Ingest KPIs" granted to their group
 //   users              -> the Dashboard section "Active users" granted to their group
 //   workload           -> they can open the Workload Tracker
-const ACTIVE_MINUTES = 5;   // "active now" = used the app within this many minutes (see src/routes/presence.js)
+const { ACTIVE_MINUTES } = require('./presence');   // "active now" = used the app within this many minutes
 const unitsFor = (team) => Object.entries(UNIT_TEAMS).filter(([, teams]) => teams.includes(team)).map(([u]) => u);
 
 router.get('/', asyncH(async (req, res) => {

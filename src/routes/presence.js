@@ -1,7 +1,9 @@
 const express = require('express');
 const db = require('../db');
 const { asyncH } = require('../middleware');
-const { PAGE_BY_PATH } = require('../permissions');
+const { PAGE_BY_PATH, canPage } = require('../permissions');
+
+const ACTIVE_MINUTES = 5;   // "active" = used the app within this many minutes (shared with the Dashboard's Active users)
 
 // Presence heartbeat. The signed-in app posts { path } about once a minute, but only while the person is really using it (mouse, keys,
 // touch or scroll in the last two minutes, tab visible) — so an idle open tab does NOT count as "active". The Dashboard's Active users block
@@ -21,4 +23,21 @@ router.post('/', asyncH(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// Who is on a page right now (the avatars at the top of the Workload Tracker): GET /api/presence?path=/workload
+// Anyone who can open that page may ask; the answer is only people who are currently on that same page.
+router.get('/', asyncH(async (req, res) => {
+  const path = String(req.query.path || '');
+  if (!PAGE_BY_PATH[path]) return res.status(400).json({ error: 'Unknown page' });
+  if (!canPage(req.user, path)) return res.status(403).json({ error: 'No access to that page' });
+  const { rows } = await db.query(
+    `SELECT p.user_id AS id, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name, u.role, p.last_active_at
+       FROM user_presence p JOIN users u ON u.id = p.user_id
+      WHERE u.is_active AND p.page = $1 AND p.last_active_at >= now() - ($2 || ' minutes')::interval
+      ORDER BY (p.user_id = $3) DESC, p.last_active_at DESC LIMIT 30`,
+    [path, String(ACTIVE_MINUTES), req.user.id]
+  );
+  res.json({ users: rows.map((r) => ({ id: r.id, name: r.name, role: r.role, lastActiveAt: r.last_active_at, you: r.id === req.user.id })) });
+}));
+
 module.exports = router;
+module.exports.ACTIVE_MINUTES = ACTIVE_MINUTES;

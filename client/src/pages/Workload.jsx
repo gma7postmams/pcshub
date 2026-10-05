@@ -6,6 +6,7 @@ import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, LockIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
 import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
+import PresenceAvatars from '../components/PresenceAvatars.jsx';
 
 // Workload Tracker — ONE table. "Units Concerned" says which team(s) a plug is for; the tabs
 // (All / VGFX / VEDIT / Audio) are filters over it. Fields, per-tab columns and the Platform rules come
@@ -1232,6 +1233,7 @@ export default function Workload() {
     <main className="container wide wl-page">
       <div className="page-head">
         <div><h1>Workload Tracker</h1><div className="sub">Track and monitor promotional plug workloads across VGFX, VEDIT and Audio.</div></div>
+        <div className="actions"><PresenceAvatars path="/workload" /></div>
       </div>
 
       {!lookups.workload_platform.length || !lookups.plug_type.length ? (
