@@ -31,6 +31,22 @@ export const SunArt = () => (
   </svg>
 );
 
+/** The moon beside the greeting in the evening and at night (the sun replaces it from 5 am). */
+export const MoonArt = () => (
+  <svg viewBox="0 0 64 64" aria-hidden="true" focusable="false" className="dsh-sun dsh-moon">
+    <defs>
+      <radialGradient id="dshMoonCore" cx="35%" cy="32%" r="75%"><stop offset="0" stopColor="#fff3b8" /><stop offset="1" stopColor="#ffc94d" /></radialGradient>
+      <mask id="dshMoonCut"><rect width="64" height="64" fill="#fff" /><circle cx="43" cy="25" r="19" fill="#000" /></mask>
+    </defs>
+    <circle cx="29" cy="34" r="22" fill="url(#dshMoonCore)" mask="url(#dshMoonCut)" />
+    <g fill="#ffe27a">
+      <path d="M50 9l1.6 4.4L56 15l-4.4 1.6L50 21l-1.6-4.4L44 15l4.4-1.6z" />
+      <path d="M57 32l1 2.8 2.8 1-2.8 1-1 2.8-1-2.8-2.8-1 2.8-1z" />
+      <circle cx="40" cy="8" r="1.6" /><circle cx="58" cy="50" r="1.4" /><circle cx="8" cy="12" r="1.5" />
+    </g>
+  </svg>
+);
+
 /** The clapperboard illustration on the right of the greeting banner (decorative). */
 export const HeroArt = () => (
   <svg viewBox="0 0 360 150" aria-hidden="true" focusable="false" className="dsh-heroart" preserveAspectRatio="xMaxYMid meet">

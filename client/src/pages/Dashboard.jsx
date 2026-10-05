@@ -6,7 +6,7 @@ import { useSession } from '../context.jsx';
 import { Empty, RoleBadge } from '../components/ui.jsx';
 import {
   BarChartIcon, CalendarCheckIcon, CalendarGridIcon, CheckCircleIcon, ChevronDownSmall, ChevronRightIcon, ClockIcon, CloudIcon, DocIcon, FlagIcon,
-  HeroArt, HourglassIcon, ListIcon, PulseIcon, SunArt, UsersIcon, XCircleIcon,
+  HeroArt, HourglassIcon, ListIcon, MoonArt, PulseIcon, SunArt, UsersIcon, XCircleIcon,
 } from '../components/DashIcons.jsx';
 import '../dashboard.css';
 
@@ -226,6 +226,7 @@ export default function Dashboard() {
   const now = new Date();
   const hour = now.getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const night = hour >= 18 || hour < 5;   // the moon from 6 pm until 5 am, the sun in between (the wording of the greeting is separate)
   const go = (href) => (href ? () => navigate(href) : null);
   const w = d.workload;
   const us = d.users;
@@ -244,7 +245,7 @@ export default function Dashboard() {
   return (
     <main className="container wide dsh">
       <section className="dsh-hero">
-        <SunArt />
+        {night ? <MoonArt /> : <SunArt />}
         <div className="dsh-hero-text">
           <h1>{greet}, {s.user.full_name.split(' ')[0]}!</h1>
           <div className="dsh-date">{now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>

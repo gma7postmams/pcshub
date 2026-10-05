@@ -14,6 +14,7 @@
   border: 1px solid color-mix(in srgb, #6aa7ff 28%, var(--border));
   background: linear-gradient(100deg, color-mix(in srgb, #4d86ff 22%, var(--surface)) 0%, color-mix(in srgb, #8b7bff 15%, var(--surface)) 48%, color-mix(in srgb, #ff6b9d 18%, var(--surface)) 100%); }
 .dsh-sun { width: clamp(44px, 4vw, 58px); height: auto; flex: none; filter: drop-shadow(0 4px 8px rgba(255, 150, 30, .3)); }
+.dsh-moon { filter: drop-shadow(0 4px 12px rgba(120, 130, 255, .35)); }
 .dsh-hero-text { min-width: 0; position: relative; z-index: 1; }
 .dsh-hero h1 { margin: 0; font-size: clamp(24px, 2.3vw, 36px); font-weight: 800; letter-spacing: -.02em; line-height: 1.15; }
 .dsh-date { margin-top: 4px; color: var(--text-2); font-size: clamp(13px, 1vw, 15.5px); }
