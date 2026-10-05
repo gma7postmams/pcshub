@@ -1,21 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { get } from '../lib/api.js';
-import { ago, fmtBreakdate, fmtDate, initials } from '../lib/util.js';
+import { ago, fmtDate, initials } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { Empty, Kpi, RoleBadge } from '../components/ui.jsx';
 
 // Dashboard — one screen for everything in flight. Blocks appear only if the signed-in user may see them:
 //   Active users      (the Dashboard section "Active users")  — who is working in the app right now
-//   Workload Tracker  (needs the Workload page)               — totals, the next two weeks, teams, upcoming breakdates, priority items
+//   Workload Tracker  (needs the Workload page)               — totals, the next two weeks, teams
 //   Ingest & Approval (the Dashboard section "Ingest KPIs")   — status counts
 const TEAMS = [
   { key: 'VGFX', label: 'VGFX', color: 'var(--purple)' },
   { key: 'VEDIT', label: 'VEDIT', color: '#f0883e' },
   { key: 'AUDIO', label: 'Audio', color: '#26b5ad' },
 ];
-const TEAM_COLOR = { VGFX: 'c-purple', VEDIT: 'c-orange', AUDIO: 'c-teal' };
-const firstLine = (s) => String(s || '').split('\n')[0];
 const dayParts = (iso) => {
   const d = new Date(`${String(iso).slice(0, 10)}T00:00:00Z`);
   return { dow: d.toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' }), num: d.getUTCDate(), weekend: [0, 6].includes(d.getUTCDay()) };
@@ -73,11 +71,6 @@ export default function Dashboard() {
         <div>
           <h1>{greet}, {s.user.full_name.split(' ')[0]}</h1>
           <div className="sub">{now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} · here’s where everything stands.</div>
-        </div>
-        <div className="actions">
-          {d.canOpen.workload ? <Link className="btn primary" to="/workload">Workload Tracker</Link> : null}
-          {s.can('ingest.write') ? <Link className="btn" to="/ingest?new=1">+ New Ingest</Link> : null}
-          {d.canOpen.reports ? <Link className="btn" to="/reports">Reports</Link> : null}
         </div>
       </div>
 
@@ -150,41 +143,6 @@ export default function Dashboard() {
                 ))}
                 <div className="dim dt-note">A VGFX/VEDIT item counts for both teams.</div>
               </div>
-            </Panel>
-          </div>
-
-          <div className="dash-grid mt-16">
-            <Panel title="Upcoming breakdates" sub="next VGFX / VEDIT times" className="span-2">
-              {w.upcoming.length ? (
-                <ul className="dash-list">
-                  {w.upcoming.map((e, i) => (
-                    <li key={`${e.id}-${e.team}-${i}`} className="clickable" onClick={() => navigate('/workload')}>
-                      <span className={`chip ${TEAM_COLOR[e.team]}`}>{e.team}</span>
-                      <span className="dl-when">{fmtBreakdate(e.at)}</span>
-                      <span className="dl-main">
-                        <b className="mono">{firstLine(e.plug_id)}</b>
-                        <span className="dim">{[e.prog_name, e.psd].filter(Boolean).join(' · ')}</span>
-                      </span>
-                      {e.is_priority ? <span className="chip c-red">Priority</span> : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : <Empty>No breakdates coming up.</Empty>}
-            </Panel>
-
-            <Panel title="Priority items" sub="flagged, last week onwards">
-              {w.priorityItems.length ? (
-                <ul className="dash-list tight">
-                  {w.priorityItems.map((r) => (
-                    <li key={r.id} className="clickable" onClick={() => navigate('/workload')}>
-                      <span className="dl-main">
-                        <b className="mono">{firstLine(r.plug_id)}</b>
-                        <span className="dim">{[r.prog_name, fmtDate(r.work_date)].filter(Boolean).join(' · ')}</span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : <Empty>Nothing is flagged priority.</Empty>}
             </Panel>
           </div>
         </Section>

@@ -57,7 +57,7 @@ router.get('/', asyncH(async (req, res) => {
 
   // ---- Workload Tracker ----
   if (out.canOpen.workload) {
-    const [totals, units, byDay, upcoming, priority] = await Promise.all([
+    const [totals, units, byDay] = await Promise.all([
       db.query(`SELECT count(*)::int AS total,
                        count(*) FILTER (WHERE work_date = CURRENT_DATE)::int AS today,
                        count(*) FILTER (WHERE work_date >= date_trunc('week', CURRENT_DATE)::date
@@ -70,16 +70,6 @@ router.get('/', asyncH(async (req, res) => {
                   FROM generate_series(CURRENT_DATE - 6, CURRENT_DATE + 7, interval '1 day') d
                   LEFT JOIN workload_items w ON w.work_date = d::date
                  GROUP BY d ORDER BY d`),
-      db.query(`SELECT * FROM (
-                  SELECT 'VGFX' AS team, w.breakdate_vgfx AS at, w.id, w.plug_id, w.prog_name, w.psd, w.is_priority
-                    FROM workload_items w WHERE w.breakdate_vgfx >= LOCALTIMESTAMP AND w.units_concerned = ANY($1)
-                  UNION ALL
-                  SELECT 'VEDIT', w.breakdate_vedit, w.id, w.plug_id, w.prog_name, w.psd, w.is_priority
-                    FROM workload_items w WHERE w.breakdate_vedit >= LOCALTIMESTAMP AND w.units_concerned = ANY($2)
-                ) e ORDER BY at, team LIMIT 8`, [unitsFor('VGFX'), unitsFor('VEDIT')]),
-      db.query(`SELECT id, work_date, plug_id, prog_name, psd, units_concerned
-                  FROM workload_items WHERE is_priority AND work_date >= CURRENT_DATE - 7
-                 ORDER BY work_date, id LIMIT 6`),
     ]);
     // rows per team (a VGFX/VEDIT row counts for both teams)
     const byTeam = { VGFX: 0, VEDIT: 0, AUDIO: 0 };
@@ -93,7 +83,7 @@ router.get('/', asyncH(async (req, res) => {
     const t = totals.rows[0];
     out.workload = {
       total: t.total, today: t.today, thisWeek: t.this_week, priority: t.priority, breakdatesNext7Days: nextWeek,
-      byTeam, byDay: byDay.rows, upcoming: upcoming.rows, priorityItems: priority.rows,
+      byTeam, byDay: byDay.rows,
     };
   }
 
