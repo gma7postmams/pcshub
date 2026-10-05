@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { get } from '../lib/api.js';
 import { ago, fmtDate, initials } from '../lib/util.js';
 import { useSession } from '../context.jsx';
@@ -22,14 +22,12 @@ const pct = (n, of) => (of ? Math.round((n / of) * 100) : 0);
 const HUES = ['#4f8cff', '#a78bfa', '#34c38f', '#f0883e', '#e5568f', '#26b5ad', '#f1b44c'];
 const hueFor = (name) => HUES[[...String(name)].reduce((a, c) => a + c.charCodeAt(0), 0) % HUES.length];
 
-function Section({ title, hint, to, toLabel, children }) {
+function Section({ title, hint, children }) {
   return (
     <section className="dash-section">
       <div className="dash-sec-head">
         <h2>{title}</h2>
         {hint ? <span className="dim">{hint}</span> : null}
-        <span className="grow" />
-        {to ? <Link className="btn sm" to={to}>{toLabel || 'Open'}</Link> : null}
       </div>
       {children}
     </section>
@@ -104,7 +102,7 @@ export default function Dashboard() {
 
       {/* ---------------- Workload Tracker ---------------- */}
       {w ? (
-        <Section title="Workload Tracker" hint={`${w.total} item${w.total === 1 ? '' : 's'} in total`} to="/workload">
+        <Section title="Workload Tracker" hint={`${w.total} item${w.total === 1 ? '' : 's'} in total`}>
           <div className="grid grid-4">
             <Kpi label="Today" value={w.today} foot={w.today === 1 ? 'item to work on' : 'items to work on'} color="c-blue" onClick={go('/workload')} />
             <Kpi label="This week" value={w.thisWeek} foot="Monday to Sunday" color="c-purple" onClick={go('/workload')} />
@@ -150,7 +148,7 @@ export default function Dashboard() {
 
       {/* ---------------- Ingest & Approval ---------------- */}
       {d.kpis ? (
-        <Section title="Ingest & Approval" hint={`${d.kpis.total} record${d.kpis.total === 1 ? '' : 's'}`} to={d.canOpen.ingest ? '/ingest' : null} toLabel="Open tracker">
+        <Section title="Ingest & Approval" hint={`${d.kpis.total} record${d.kpis.total === 1 ? '' : 's'}`}>
           <div className="grid grid-4">
             <Kpi label="Total Ingest Records" value={d.kpis.total} foot={`${d.kpis.thisMonth.created} created this month`} color="c-blue" onClick={go(d.canOpen.ingest ? '/ingest' : null)} />
             <Kpi label="Pending Approval" value={st['Pending Approval'] || 0} foot="Awaiting a decision" color="c-amber" onClick={go(d.canOpen.approval ? '/approval?status=Pending' : null)} />
