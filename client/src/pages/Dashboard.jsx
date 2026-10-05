@@ -146,7 +146,7 @@ export default function Dashboard() {
     <main className="container wide dash">
       <div className="dash-hero">
         <div>
-          <h1>{greet}, {s.user.full_name.split(' ')[0]}</h1>
+          <h1>{greet}, {s.user.full_name.split(' ')[0]}!</h1>
           <div className="sub">{now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>
         </div>
       </div>
