@@ -127,7 +127,7 @@ export default function Ingest() {
   const canDelete = s.can('ingest.delete');
 
   const [lookups, setLookups] = useState(null);
-  const [filt, setFilt] = useState({ q: '', status: /^pending$/i.test(params.get('status') || '') ? 'PENDING' : (params.get('status') || ''), program: '', platform: '', from: '', to: '' });
+  const [filt, setFilt] = useState({ q: '', status: /^pending$/i.test(params.get('status') || '') ? 'PENDING' : (params.get('status') || ''), program: '', platform: '', from: '', to: '', approval: /^pending$/i.test(params.get('approval') || '') ? 'pending' : '' });
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);     // null | {} (new) | record (edit)
@@ -144,7 +144,7 @@ export default function Ingest() {
     const p = new URLSearchParams({ limit: PAGE, offset });
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
     try { setData(await get(`/api/ingest?${p}`)); } catch (e) { setData({ error: e.message, rows: [], total: 0 }); }
-  }, [filt.status, filt.program, filt.platform, filt.from, filt.to, q, offset]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, [load]);
 
@@ -244,6 +244,9 @@ export default function Ingest() {
             <input type="text" placeholder="Program / Project (exact match)" value={filt.program} onChange={setF('program')} style={{ textOverflow: 'ellipsis' }} />
           </label>
           <DateRange title="Episode / Break date range" from={filt.from} to={filt.to} onChange={({ from, to }) => { setFilt((f) => ({ ...f, from, to })); setOffset(0); }} />
+          {filt.approval ? (   // opened from the Dashboard's Pending Approval card: only requests nobody has approved yet; the chip clears it
+            <button type="button" className="btn sm" title="Show every request again" onClick={() => { setFilt((f) => ({ ...f, approval: '' })); setOffset(0); }}>Awaiting approval ✕</button>
+          ) : null}
         </div>
         <div className="table-wrap" id="tbl">
           {!data ? <Empty>Loading…</Empty>

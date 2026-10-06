@@ -80,6 +80,9 @@ router.get('/', asyncH(async (req, res) => {
   const add = (sql, val) => { params.push(val); where.push(sql.replace('?', `$${params.length}`)); };
   if (req.query.status && CM_STATUSES.includes(req.query.status)) add('i.cm_status = ?', req.query.status);
   else if (/^pending$/i.test(String(req.query.status || ''))) where.push('i.cm_status IS NULL');
+  // approval=pending: nobody has approved it yet; approval=approved: it has an approver (the same test the approve route uses)
+  if (/^pending$/i.test(String(req.query.approval || ''))) where.push(`(i.approved_at IS NULL AND COALESCE(btrim(i.approved_by), '') = '')`);
+  else if (/^approved$/i.test(String(req.query.approval || ''))) where.push(`(i.approved_at IS NOT NULL OR COALESCE(btrim(i.approved_by), '') <> '')`);
   if (req.query.program) add('i.program = ?', String(req.query.program));
   if (req.query.platform) add('i.platform = ?', String(req.query.platform));
   if (req.query.from) add('i.episode_date >= ?', v.date(req.query.from, { field: 'from' }));

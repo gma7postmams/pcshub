@@ -412,8 +412,9 @@ export default function Dashboard() {
       {d.kpis ? (
         <section className="dsh-card">
           <CardHead icon={DocIcon} hue="blue" plain title="Ingest Tracker" hint={`${d.kpis.total} record${d.kpis.total === 1 ? '' : 's'}`} />
-          <div className="dsh-stats compact">
+          <div className="dsh-stats compact five">
             <StatCard icon={CalendarCheckIcon} hue="blue" soft label="Total Ingest Records" value={d.kpis.total} foot={`${d.kpis.thisMonth.created} created this month`} onClick={go(d.canOpen.ingest ? '/ingest' : null)} />
+            <StatCard icon={ClockIcon} hue="purple" soft label="Pending Approval" value={d.kpis.pendingApproval ?? 0} foot="Waiting for an approver" onClick={go(d.canOpen.ingest ? '/ingest?approval=pending' : null)} />
             <StatCard icon={HourglassIcon} hue="amber" soft label="Pending (CM)" value={st.Pending || 0} foot="Awaiting a CM decision" onClick={go(d.canOpen.ingest ? '/ingest?status=Pending' : null)} />
             <StatCard icon={CheckCircleIcon} hue="green" label="Done" value={st.DONE || 0} foot={`${d.kpis.thisMonth.done} this month`} onClick={go(d.canOpen.ingest ? '/ingest?status=DONE' : null)} />
             <StatCard icon={XCircleIcon} hue="red" label="Non-compliant" value={st['NON-COMPLIANT'] || 0} foot="Needs rework" onClick={go(d.canOpen.ingest ? '/ingest?status=NON-COMPLIANT' : null)} />

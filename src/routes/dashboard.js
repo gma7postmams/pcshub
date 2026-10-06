@@ -202,15 +202,18 @@ router.get('/', asyncH(async (req, res) => {
 
   // ---- Ingest Tracker ----
   if (out.sections.kpis) {
-    const [counts, month] = await Promise.all([
+    const [counts, month, unapproved] = await Promise.all([
       db.query(`SELECT COALESCE(cm_status, 'Pending') AS status, count(*)::int AS n FROM ingest_records GROUP BY 1`),
       db.query(`SELECT count(*)::int AS created, count(*) FILTER (WHERE cm_status='DONE')::int AS done
                   FROM ingest_records WHERE created_at >= date_trunc('month', now())`),
+      // waiting for an approver: nobody has approved it yet (the same test the approve route uses)
+      db.query(`SELECT count(*)::int AS n FROM ingest_records WHERE approved_at IS NULL AND COALESCE(btrim(approved_by), '') = ''`),
     ]);
     out.kpis = {
       total: counts.rows.reduce((a, r) => a + r.n, 0),
       byStatus: Object.fromEntries(counts.rows.map((r) => [r.status, r.n])),
       thisMonth: month.rows[0],
+      pendingApproval: unapproved.rows[0].n,
     };
   }
   // ---- Active users ----

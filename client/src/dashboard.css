@@ -273,3 +273,9 @@ button.dsh-stat:hover { transform: translateY(-2px); box-shadow: 0 10px 22px col
 .dsh-chart.buckets .dsh-xl-date { font-size: 11px; }
 .dsh-chart.buckets .dsh-xl-date.now { color: var(--accent); font-weight: 800; }
 .dsh-chart-empty { flex: 1; display: grid; place-items: center; min-height: 120px; }
+
+/* the Ingest Tracker block has five cards: one row on a wide screen, then 3 + 2, 2 + 2 + 1, one per row */
+.dsh-stats.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1179px) { .dsh-stats.five { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .dsh-stats.five { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .dsh-stats.five { grid-template-columns: minmax(0, 1fr); } }
