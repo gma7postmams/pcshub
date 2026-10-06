@@ -97,6 +97,8 @@ A section only takes effect if its page is also checked.
 
 **Ingest NO. column.** The number is the record's place in the whole list, in the order the table shows it (newest first): the newest record is 1 and the numbers count **up** down the table (1, 2, 3 …). It is worked out when the list is loaded (`no` in `GET /api/ingest`), so it renumbers by itself when a record is deleted, leaves no gaps, and does not change with filters, search or paging. It is not the database id: dialogs show the same number, and the notification texts no longer quote an id (their title already names the program); links such as `/ingest?id=12` still use the database id.
 
+**Ingest — Materials column.** The heading is the single word *Materials* on one line (hover it for “No. of Materials”), so the column is only as wide as its numbers; editing a number in it keeps the same width.
+
 **Dashboard — Ingest Tracker cards.** *Total Ingest Records*, **Pending Approval** (requests nobody has approved yet — no approver recorded; opens the Ingest Tracker with `?approval=pending`, shown as an “Awaiting approval ✕” chip you can click to clear), *Pending (CM)* (no CM decision yet — includes requests not yet approved), *Done* and *Non-compliant*. One row on a wide screen (down to about 1180 px), then 3 + 2, 2 + 2 + 1 and one per row. `GET /api/ingest` accepts `approval=pending|approved`.
 
 Adding a new page or section: add it to `CATALOG`, then guard its route with `requirePageAccess(path)` or `requireSection(key)`. It then shows up as a checkbox in Admin → Groups automatically.
