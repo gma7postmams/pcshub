@@ -93,6 +93,8 @@ A section only takes effect if its page is also checked.
 | Edit Workload | Workload | ✓ | ✓ | — | — |
 | Users, groups, dropdowns, branding, audit | Admin | ✓ | — | — | — |
 
+**Ingest approvals and deletes.** The table has no Approve button: click a row (or its *Approved By* cell) to open the details dialog, where people who can approve press **Approve** (disabled, with the reason, until the Destination Folder is filled in) and later **Undo approval**; the table only shows who approved and when, and *Awaiting approval* on unapproved rows to people who can approve. A request that has a CM decision is kept as a historical record and can't be deleted — except that an **Admin can delete a request that is DONE in CM** (the dialog warns first, and the delete is written to the audit log with its CM status). NON-COMPLIANT requests stay for everyone.
+
 Adding a new page or section: add it to `CATALOG`, then guard its route with `requirePageAccess(path)` or `requireSection(key)`. It then shows up as a checkbox in Admin → Groups automatically.
 
 **Upgrading from the first version**: on startup the old `users.group_name` (which held Admin/Manager/Editor/Viewer) is migrated to `users.role`, and `groups` is recreated as enrolment groups. Existing non-Admin users start **Not enrolled** (Profile only) until you assign them a group.

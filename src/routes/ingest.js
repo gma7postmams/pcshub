@@ -296,7 +296,11 @@ router.delete('/:id', requireAction('ingest.delete'), asyncH(async (req, res) =>
   await db.tx(async (c) => {
     const cur = await c.query('SELECT program, cm_status FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
     if (!cur.rows.length) throw new HttpError(404, 'Ingest record not found');
-    if (cur.rows[0].cm_status) throw new HttpError(409, 'CM-completed requests are preserved as historical records');
+    // A request with a CM decision is kept as a historical record — except that an Admin may delete one that is DONE (NON-COMPLIANT ones stay).
+    const cm = cur.rows[0].cm_status;
+    if (cm && !(cm === 'DONE' && req.user && req.user.role === 'Admin')) {
+      throw new HttpError(409, cm === 'DONE' ? 'Only an Admin can delete a request that is DONE in CM' : 'CM-completed requests are preserved as historical records');
+    }
     await c.query('DELETE FROM ingest_records WHERE id=$1', [id]);
     await audit(req, 'ingest.delete', 'ingest_record', id, cur.rows[0], c);
   });

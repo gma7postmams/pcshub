@@ -26,8 +26,9 @@ const CmStatus = ({ r, inline }) => (r.cm_status
     </div>
   )
   : <CmChip s="PENDING" />);
-// Approved By: the approver's name with the time under it (like Status (CM)); PCS / OCS see an Approve button until it is approved, and an approval can be undone from the details popup.
-const ApprovedBy = ({ r, canApprove, onApprove }) => {
+// Approved By: the approver's name with the time under it (like Status (CM)). Approving itself happens in the details dialog: click the row (or this cell) and press Approve there.
+// Until a request is approved, people who can approve see a quiet "Awaiting approval" so they can spot what needs them.
+const ApprovedBy = ({ r, canApprove }) => {
   if (r.approved_by) {
     return (
       <div className="stack">
@@ -36,12 +37,7 @@ const ApprovedBy = ({ r, canApprove, onApprove }) => {
       </div>
     );
   }
-  if (!canApprove) return null;
-  const ready = !!(r.destination_folder && String(r.destination_folder).trim());
-  return (
-    <button type="button" className="btn sm primary" disabled={!ready} title={ready ? 'Approve this ingest — you will be recorded as the approver' : 'Fill in the Destination Folder first'}
-      onClick={(e) => { e.stopPropagation(); onApprove(r); }}>Approve</button>
-  );
+  return canApprove ? <span className="dim">Awaiting approval</span> : null;
 };
 const dayText = (x) => (isoDate(x) ? fmtDate(isoDate(x)) : (x || ''));   // a real date reads like the Workload Tracker's; old free text is shown as written
 
@@ -170,8 +166,7 @@ export default function Ingest() {
     const fresh = await get(`/api/ingest/${r.id}`);
     setData((d) => (d && d.rows ? { ...d, rows: d.rows.map((x) => (x.id === r.id ? { ...x, ...fresh } : x)) } : d));
   };
-  const approve = async (r) => {
-    if (!(await confirm(`Approve ingest #${r.id}?`, 'You will be recorded as the approver. You can undo it later if it was a mistake.', { okText: 'Approve' }))) return;
+  const approve = async (r) => {   // called from the details dialog; you are recorded as the approver, and "Undo approval" is there if it was a mistake
     try {
       await post(`/api/ingest/${r.id}/approve`, {});
       const fresh = await get(`/api/ingest/${r.id}`);
@@ -272,7 +267,7 @@ export default function Ingest() {
                           {cell(r, 'materials_count', r.materials_count != null ? r.materials_count : '', { className: 'num' })}
                           <td title="Filled in automatically from the person who created the request">{r.requested_by_psd || r.requested_by_name || ''}</td>
                           {cell(r, 'destination_folder', r.destination_folder, { className: 'cell-clip mono', title: r.destination_folder || '' })}
-                          <td><ApprovedBy r={r} canApprove={canApprove} onApprove={approve} /></td>
+                          <td><ApprovedBy r={r} canApprove={canApprove} /></td>
                           {cell(r, 'cm_status', <CmStatus r={r} />)}
                           <td className="dim nowrap">{ago(r.updated_at)}</td>
                         </tr>
@@ -297,15 +292,17 @@ export default function Ingest() {
         <IngestDetail
           r={detail}
           canWrite={canWrite && (!detail.cm_status || s.can('ingest.cm_complete'))}
-          canDelete={canDelete && !detail.cm_status}
-          canApprove={canApprove && !detail.approved_by && !!(detail.destination_folder && String(detail.destination_folder).trim())}
+          canDelete={canDelete && (!detail.cm_status || (detail.cm_status === 'DONE' && s.user.role === 'Admin'))}   // a CM-decided request is kept as history, except that an Admin can delete one that is DONE
+          canApprove={canApprove && !detail.approved_by}
+          approveReady={!!(detail.destination_folder && String(detail.destination_folder).trim())}
           canUnapprove={canApprove && !!detail.approved_by}
           onApprove={() => approve(detail)}
           onUnapprove={() => unapprove(detail)}
           onClose={() => setDetail(null)}
           onEdit={() => { setForm(detail); setDetail(null); }}
           onDelete={async () => {
-            if (!(await confirm('Delete ingest record', `Permanently delete ingest #${detail.id}?`, { okText: 'Delete', danger: true }))) return;
+            const done = detail.cm_status === 'DONE';
+            if (!(await confirm('Delete ingest record', done ? `Ingest #${detail.id} is already DONE in CM. Deleting it permanently removes this historical record.` : `Permanently delete ingest #${detail.id}?`, { okText: 'Delete', danger: true }))) return;
             try { await del(`/api/ingest/${detail.id}`); toast('Deleted'); setDetail(null); load(); } catch (e) { toast(e.message, 'err'); }
           }}
         />
@@ -412,7 +409,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
 
 const KV = ({ k, children }) => <><dt>{k}</dt><dd>{children || <span className="dim">—</span>}</dd></>;
 
-function IngestDetail({ r, canWrite, canDelete, canApprove, canUnapprove, onClose, onEdit, onDelete, onApprove, onUnapprove }) {
+function IngestDetail({ r, canWrite, canDelete, canApprove, approveReady, canUnapprove, onClose, onEdit, onDelete, onApprove, onUnapprove }) {
   return (
     <Modal
       title={`Ingest #${r.id}`}
@@ -423,7 +420,10 @@ function IngestDetail({ r, canWrite, canDelete, canApprove, canUnapprove, onClos
           <span className="grow" />
           <button type="button" className="btn" onClick={onClose}>Close</button>
           {canUnapprove ? <button type="button" className="btn" id="unapprove" onClick={onUnapprove}>Undo approval</button> : null}
-          {canApprove ? <button type="button" className="btn primary" id="approve" onClick={onApprove}>Approve</button> : null}
+          {canApprove ? (
+            <button type="button" className="btn primary" id="approve" disabled={!approveReady} onClick={onApprove}
+              title={approveReady ? 'Approve this ingest — you will be recorded as the approver' : 'Fill in the Destination Folder first'}>Approve</button>
+          ) : null}
           {canWrite ? <button type="button" className="btn primary" id="edit" onClick={onEdit}>Edit</button> : null}
         </>
       )}
@@ -438,7 +438,7 @@ function IngestDetail({ r, canWrite, canDelete, canApprove, canUnapprove, onClos
         <KV k="Number of Materials">{r.materials_count != null ? String(r.materials_count) : null}</KV>
         <KV k="Requested By">{r.requested_by_psd || r.requested_by_name}</KV>
         <KV k="Destination Folder">{r.destination_folder ? <span className="mono">{r.destination_folder}</span> : null}</KV>
-        <KV k="Approved By">{r.approved_by ? `${r.approved_by}${r.approved_at ? ` · ${fmtDateTime(r.approved_at)}` : ''}` : null}</KV>
+        <KV k="Approved By">{r.approved_by ? `${r.approved_by}${r.approved_at ? ` · ${fmtDateTime(r.approved_at)}` : ''}` : (canApprove && !approveReady ? <span className="dim">Fill in the Destination Folder before approving.</span> : null)}</KV>
         <KV k="Status (CM)">{r.cm_status || 'PENDING'}</KV>
         {r.cm_status ? <>
           {r.cm_non_compliant_reason ? <KV k="Non-compliant reason">{r.cm_non_compliant_reason}</KV> : null}
