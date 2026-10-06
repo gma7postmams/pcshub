@@ -35,8 +35,9 @@ const CELLS = {
   materials_count: { kind: 'number' },
   destination_folder: { kind: 'area', max: 1000, approve: true },
   approved_by: { kind: 'text', max: 200, approve: true },
+  cm_status: { kind: 'select', cm: true },   // Status (CM): a dropdown for CM users; NON-COMPLIANT then asks for its reason
 };
-const cellInitial = (r, k) => (k === 'episode_break_date_text' ? (isoDate(r.episode_break_date_text) || isoDate(r.episode_date))
+const cellInitial = (r, k) => (k === 'cm_status' ? (r.cm_status || '') : k === 'episode_break_date_text' ? (isoDate(r.episode_break_date_text) || isoDate(r.episode_date))
   : r[k] == null ? '' : String(r[k]));
 
 // One table cell turned into its own editor. Dropdowns save as soon as you pick; a failed save keeps the editor open with the message shown.
@@ -79,6 +80,28 @@ function InlineCell({ def, initial, options, onSave, onCancel }) {
   return <div className={`cell-editor${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key}>{input}</div>;
 }
 
+// NON-COMPLIANT needs a reason: asked here right after it is picked in the Status (CM) cell.
+function ReasonModal({ r, onClose, onSave }) {
+  const [reason, setReason] = useState(r.cm_non_compliant_reason || '');
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  const save = async () => {
+    if (!reason.trim()) { toast('Enter the reason it is NON-COMPLIANT', 'err'); return; }
+    setBusy(true);
+    try { await onSave(reason); } catch (e) { toast(e.message, 'err'); setBusy(false); }
+  };
+  return (
+    <Modal title={`Ingest #${r.id}: NON-COMPLIANT`} onClose={() => { if (!busy) onClose(); }}
+      footer={(<>
+        <button type="button" className="btn" disabled={busy} onClick={onClose}>Cancel</button>
+        <button type="button" className="btn primary" disabled={busy} onClick={save}>Save</button>
+      </>)}>
+      <label className="f full"><span>Reason <span className="req">*</span></span>
+        <textarea maxLength={2000} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+    </Modal>
+  );
+}
+
 export default function Ingest() {
   const s = useSession();
   const toast = useToast();
@@ -93,6 +116,7 @@ export default function Ingest() {
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);     // null | {} (new) | record (edit)
   const [detail, setDetail] = useState(null);
+  const [reasonFor, setReasonFor] = useState(null);   // the record whose NON-COMPLIANT reason is being asked for
   const [editing, setEditing] = useState(null);   // { id, k }: the one cell being edited in the table
   const q = useDebounced(filt.q, 300);
 
@@ -121,8 +145,19 @@ export default function Ingest() {
   const canCm = s.can('ingest.cm_complete');
   const closeCell = (r, k) => setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur));
   // Save ONE cell (PATCH writes only that column, so other people's edits to the row are kept)
+  const decide = async (r, decision, reason) => {
+    await post(`/api/ingest/${r.id}/cm-decision`, { decision, reason: decision === 'NON-COMPLIANT' ? reason : '' });
+    const fresh = await get(`/api/ingest/${r.id}`);
+    setData((d) => (d && d.rows ? { ...d, rows: d.rows.map((x) => (x.id === r.id ? { ...x, ...fresh } : x)) } : d));
+  };
   const saveCell = async (r, k, value, initial) => {
     if (String(value ?? '') === String(initial ?? '')) { closeCell(r, k); return; }
+    if (k === 'cm_status') {
+      if (!value) { closeCell(r, k); return; }
+      if (value === 'NON-COMPLIANT') { closeCell(r, k); setReasonFor(r); return; }
+      try { await decide(r, value, ''); closeCell(r, k); toast('Saved'); } catch (e) { toast(e.message, 'err'); throw e; }
+      return;
+    }
     try {
       const out = await patch(`/api/ingest/${r.id}`, { field: k, value: k === 'materials_count' ? (value === '' ? null : Number(value)) : value });
       setData((d) => (d && d.rows ? { ...d, rows: d.rows.map((x) => (x.id === r.id ? { ...x, ...out.row } : x)) } : d));
@@ -132,13 +167,13 @@ export default function Ingest() {
   // A cell in the table: editable in place when you may change it, otherwise plain (clicking it opens the details as before).
   const cell = (r, k, children, props = {}) => {
     const def = CELLS[k];
-    const may = canWrite && (!r.cm_status || canCm) && (!def || !def.approve || canApprove);
+    const may = def && def.cm ? canCm : canWrite && (!r.cm_status || canCm) && (!def || !def.approve || canApprove);
     if (!def || !may) return <td {...props}>{children}</td>;
     if (editing && editing.id === r.id && editing.k === k) {
       const initial = cellInitial(r, k);
       return (
         <td className="editing" onClick={(e) => e.stopPropagation()}>
-          <InlineCell def={def} initial={initial} options={withCurrent(lookups ? lookups.platform : [], r.platform)}
+          <InlineCell def={def} initial={initial} options={k === 'cm_status' ? CM_OPTIONS : withCurrent(lookups ? lookups.platform : [], r.platform)}
             onSave={(value) => saveCell(r, k, value, initial)} onCancel={() => setEditing(null)} />
         </td>
       );
@@ -195,7 +230,7 @@ export default function Ingest() {
                           <td title="Filled in automatically from the person who created the request">{r.requested_by_psd || r.requested_by_name || ''}</td>
                           {cell(r, 'destination_folder', r.destination_folder, { className: 'cell-clip mono', title: r.destination_folder || '' })}
                           {cell(r, 'approved_by', r.approved_by)}
-                          <td><CmStatus r={r} /></td>
+                          {cell(r, 'cm_status', <CmStatus r={r} />)}
                           <td className="dim nowrap">{ago(r.updated_at)}</td>
                         </tr>
                       ))}
@@ -213,6 +248,11 @@ export default function Ingest() {
 
       {form && lookups ? (
         <IngestForm rec={form.id ? form : null} lookups={lookups} onClose={() => setForm(null)} onSaved={() => { setForm(null); load(); }} />
+      ) : null}
+
+      {reasonFor ? (
+        <ReasonModal r={reasonFor} onClose={() => setReasonFor(null)}
+          onSave={async (reason) => { await decide(reasonFor, 'NON-COMPLIANT', reason); setReasonFor(null); toast('Saved'); }} />
       ) : null}
 
       {detail ? (
