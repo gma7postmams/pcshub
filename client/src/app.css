@@ -572,7 +572,9 @@ table.t.wl .stack .sub { margin: 0; }
 .pager .pg.on { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
 .pg-gap { padding: 0 4px; color: var(--text-3); }
 table.t.wl td[data-k="work_date"] strong { white-space: nowrap; }
-.chips { flex-wrap: nowrap; }
+/* Units Concerned etc. stay on ONE row in the Workload table. Scoped to the table (not a bare .chips) so the Admin → Groups page, which reuses the
+   class name for its permission chips and defines it later in this file, can no longer override it and make three-team pills wrap. */
+table.t.wl .chips { flex-wrap: nowrap; max-width: none; }
 table.t.wl.cards .chips { flex-wrap: wrap; }
 table.t.wl .stack { gap: 3px; }
 table.t.wl .stack > strong { line-height: 1.3; }
