@@ -845,9 +845,12 @@ table.t.wl tbody tr.picked td { box-shadow: inset 0 1px 0 color-mix(in srgb, var
 .pa:hover::after { opacity: 1; }
 
 /* A column that holds a short value (Ingest: No. of Materials) is kept as narrow as its one-line heading allows. */
-table.t.wl th.narrow { white-space: nowrap; width: 1%; letter-spacing: .03em; }   /* "No. of Materials" stays on ONE line; tighter letter-spacing and padding keep the column as narrow as that allows */
+table.t.wl th.narrow { white-space: nowrap; width: 1%; min-width: 160px; letter-spacing: .03em; }   /* No. of Materials: a fixed, comfortable 160 px — it is not stretched on a wide screen */   /* "No. of Materials" stays on ONE line; tighter letter-spacing and padding keep the column as narrow as that allows */
 /* editing a number in a narrow column (No. of Materials): the box stays as narrow as the column instead of widening it to 170px */
 .cell-editor.num { min-width: 0; }
 .cell-editor.num input { min-width: 0; width: 100%; max-width: 90px; text-align: center; padding-left: 4px; padding-right: 4px; }
 /* a heading that is longer than its content (Ingest: Episode / Breakdate) gets slightly tighter spacing so the column is a little narrower */
-table.t.wl th.tight { letter-spacing: .02em; padding-left: 6px; padding-right: 6px; }
+table.t.wl th.tight { letter-spacing: .02em; padding-left: 6px; padding-right: 6px; width: 1%; }   /* Episode / Breakdate: only as wide as its one-line heading — on a wide screen the spare room goes to the other columns instead */
+/* editing a date in the narrow Episode / Breakdate column: the date box fits the column (no 170 px jump) */
+.cell-editor.date { min-width: 0; }
+.cell-editor.date input { min-width: 0; width: 100%; max-width: 140px; padding: 4px 3px 4px 6px; font-size: 12.5px; }

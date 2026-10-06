@@ -93,7 +93,7 @@ function InlineCell({ def, initial, options, onSave, onCancel }) {
   else if (def.kind === 'number') input = <input type="number" min="0" step="1" value={val} disabled={busy} onChange={change} />;
   else if (def.kind === 'area') input = <textarea className="mono" maxLength={def.max} value={val} disabled={busy} onChange={change} />;
   else input = <input maxLength={def.max} value={val} disabled={busy} onChange={change} />;
-  return <div className={`cell-editor${def.kind === 'number' ? ' num' : ''}${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key}>{input}</div>;
+  return <div className={`cell-editor${def.kind === 'number' ? ' num' : def.kind === 'date' ? ' date' : ''}${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key}>{input}</div>;
 }
 
 // NON-COMPLIANT needs a reason: asked here right after it is picked in the Status (CM) cell.
