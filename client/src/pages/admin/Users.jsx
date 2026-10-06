@@ -5,12 +5,12 @@ import { useSession } from '../../context.jsx';
 import { PlusIcon } from '../../components/Icons.jsx';
 import { Empty, Modal, Options, RoleBadge, useConfirm, useForm, useToast } from '../../components/ui.jsx';
 import { keyLabels } from './labels.js';
-import { useStepUp } from './ReauthDialog.jsx';
 
 export default function Users({ model }) {
   const [list, setList] = useState(null);
   const [groups, setGroups] = useState([]);
   const [editing, setEditing] = useState(null); // null | {} new | user
+  const [q, setQ] = useState('');
 
   const load = useCallback(async () => {
     const [u, g] = await Promise.all([get('/api/admin/users'), get('/api/admin/groups')]);
@@ -19,19 +19,27 @@ export default function Users({ model }) {
   useEffect(() => { load(); }, [load]);
 
   if (!list) return <Empty>Loading…</Empty>;
+  const term = q.trim().toLowerCase();
+  const shown = term
+    ? list.filter((u) => [u.full_name, u.username, u.email, u.role, u.group_name].some((x) => (x || '').toLowerCase().includes(term)))
+    : list;
   const locked = (u) => u.locked_until && new Date(u.locked_until) > new Date();
 
   return (
     <div className="card">
       <div className="card-head">
-        <h2>Users <span className="dim">{list.length}</span></h2>
+        <h2>Users <span className="dim">{term ? `${shown.length} of ${list.length}` : list.length}</span></h2>
         <button type="button" className="btn primary sm" id="add" onClick={() => setEditing({})}><PlusIcon /> Add user</button>
+      </div>
+      <div className="filters">
+        <input type="search" placeholder="Search name, username, email, role or group…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search users" />
       </div>
       <div className="table-wrap">
         <table className="t wl">
           <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Group</th><th>Status</th><th>2FA</th><th>Last login</th><th /></tr></thead>
           <tbody>
-            {list.map((u) => (
+            {!shown.length ? <tr><td colSpan={8} className="empty">No users match your search.</td></tr> : null}
+            {shown.map((u) => (
               <tr key={u.id}>
                 <td><strong>{u.full_name}</strong>{u.email ? <div className="dim">{u.email}</div> : null}</td>
                 <td className="mono">{u.username}</td>
@@ -75,26 +83,20 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
     : g ? `Opens: ${g.perms.filter((k) => !k.includes('.')).map((k) => LABEL[k] || k).join(', ') || 'no pages'} + Profile`
       : 'Not enrolled: user can only open Profile until assigned to a group.';
 
-  // Granting Admin, resetting a password and removing 2FA ask the signed-in Admin to confirm their own password first
-  const [stepUp, stepUpDialog] = useStepUp();
-  const fail = (e) => { if (!(e.data && e.data.cancelled)) toast(e.message, 'err'); };
   const save = async () => {
     const body = { ...f, is_active: self ? true : f.is_active };
     try {
-      await stepUp(
-        (reauth) => (u ? put(`/api/admin/users/${u.id}`, { ...body, reauth }) : post('/api/admin/users', { ...body, reauth })),
-        { intro: `Giving ${f.full_name || 'this user'} the Admin role needs your password.` }
-      );
+      await (u ? put(`/api/admin/users/${u.id}`, body) : post('/api/admin/users', body));
       toast('User saved'); onSaved();
-    } catch (e) { fail(e); }
+    } catch (e) { toast(e.message, 'err'); }
   };
-  const action = async (path, msg, confirmArgs, intro, extra = {}) => {
+  const action = async (path, msg, confirmArgs, extra = {}) => {
     if (confirmArgs && !(await confirm(...confirmArgs))) return null;
     try {
-      const r = await stepUp((reauth) => post(`/api/admin/users/${u.id}/${path}`, { ...extra, reauth }), { intro });
+      const r = await post(`/api/admin/users/${u.id}/${path}`, extra);
       if (msg) { toast(msg); onSaved(); }
       return r;
-    } catch (e) { fail(e); return null; }
+    } catch (e) { toast(e.message, 'err'); return null; }
   };
 
   return (
@@ -127,26 +129,23 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
             <h3 className="mt-16 mb-12">Security</h3>
             <div className="row">
               <button type="button" className="btn sm" id="rpw" onClick={async () => {
-                const r = await action('reset-password', null, ['Reset password', `Generate a temporary password for ${u.full_name}? Their sessions will be signed out.`, { okText: 'Reset' }],
-                  `Resetting the password for ${u.full_name} needs your own password.`);
+                const r = await action('reset-password', null, ['Reset password', `Generate a temporary password for ${u.full_name}? Their sessions will be signed out.`, { okText: 'Reset' }]);
                 if (r) setTemp(r.temporary_password);
               }}>Reset password</button>
               {u.twofa_required
                 ? <button type="button" className="btn sm" id="tfa-off"
                   onClick={() => action('2fa', '2FA disabled', ['Disable 2FA', `Turn 2FA off for ${u.full_name}? Their authenticator is removed.`, { okText: 'Disable 2FA', danger: true }],
-                    `Disabling 2FA for ${u.full_name} needs your own password.`, { enabled: false })}>Disable 2FA</button>
+                    { enabled: false })}>Disable 2FA</button>
                 : <button type="button" className="btn sm" id="tfa-on"
                   onClick={() => action('2fa', '2FA enabled', ['Enable 2FA', `Turn 2FA on for ${u.full_name}? They must set up an authenticator at their next use.`, { okText: 'Enable 2FA' }],
-                    null, { enabled: true })}>Enable 2FA</button>}
+                    { enabled: true })}>Enable 2FA</button>}
               <button type="button" className="btn sm" id="r2fa" disabled={!u.totp_enabled}
-                onClick={() => action('reset-2fa', '2FA reset', ['Reset 2FA', `Remove 2FA from ${u.full_name}? They can set it up again from Profile.`, { okText: 'Reset 2FA', danger: true }],
-                  `Removing 2FA from ${u.full_name} needs your own password.`)}>Reset 2FA</button>
+                onClick={() => action('reset-2fa', '2FA reset', ['Reset 2FA', `Remove 2FA from ${u.full_name}? They can set it up again from Profile.`, { okText: 'Reset 2FA', danger: true }])}>Reset 2FA</button>
               <button type="button" className="btn sm" id="unlock" onClick={() => action('unlock', 'Account unlocked')}>Unlock</button>
             </div>
           </>
         ) : null}
       </Modal>
-      {stepUpDialog}
       {temp ? (
         <Modal title="Temporary password" size="sm" onClose={() => setTemp(null)} footer={<button type="button" className="btn primary" onClick={() => setTemp(null)}>Done</button>}>
           <p className="muted m-0">Share this securely. It is shown once.</p>

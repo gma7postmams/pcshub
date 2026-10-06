@@ -37,6 +37,8 @@ const ACTION_LABELS = {
   'admin.dropdown_create': 'Created Dropdown',
   'admin.dropdown_update': 'Updated Dropdown',
   'admin.dropdown_delete': 'Deleted Dropdown',
+  'admin.dropdown_export': 'Exported Dropdowns',
+  'admin.dropdown_import': 'Imported Dropdowns',
 
   'admin.branding_update': 'Updated Branding',
   'admin.branding_logo': 'Uploaded Logo',
@@ -238,6 +240,12 @@ function formatDetails(row) {
 
     case 'admin.dropdown_delete':
       return `Deleted ${d.category}: ${d.value}`;
+
+    case 'admin.dropdown_export':
+      return `Exported ${d.options} dropdown option(s) to JSON`;
+
+    case 'admin.dropdown_import':
+      return `Imported dropdowns from JSON: ${d.added} added, ${d.updated} updated, ${d.unchanged} unchanged`;
 
     case 'admin.branding_update':
       return describeBrandingUpdate(d);
