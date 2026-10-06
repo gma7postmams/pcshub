@@ -1,5 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const db = require('../db');
 const { asyncH, HttpError, requireAuth, clearSessionCookie } = require('../middleware');
@@ -122,6 +123,7 @@ router.post('/2fa', loginLimiter, asyncH(async (req, res) => {
 
 router.post('/logout', asyncH(async (req, res) => {
   if (req.user) await audit(req, 'auth.logout', 'user', req.user.id);
+  if (req.user) await db.query('DELETE FROM user_presence WHERE user_id = $1', [req.user.id]).catch(() => { /* presence is best-effort */ });   // signed out = no longer "active"
   req.session.destroy(() => {
     clearSessionCookie(res);
     res.json({ ok: true });
@@ -141,6 +143,9 @@ router.get('/me', requireAuth, (req, res) => {
     sections: allowedSections(u),
     actions: allowedActions(u),
     landing: landingPath(u),
+    // A fingerprint of THIS sign-in (a one-way hash of the session id — the id itself is never sent to the page). It changes every time someone
+    // signs in, so the page can keep a per-sign-in preference (the Dashboard's period menu) and forget it at sign-out.
+    session_key: crypto.createHash('sha256').update(String(req.sessionID || '')).digest('hex').slice(0, 20),
   });
 });
 
