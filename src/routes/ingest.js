@@ -225,12 +225,40 @@ router.post('/:id/approve', requireAction('ingest.approve'), asyncH(async (req, 
   res.json({ ok: true });
 }));
 
-// Status (CM): DONE or NON-COMPLIANT (with a reason). Every change is audit-logged with who and when.
+// Undo an approval (a mistaken click): the record goes back to not approved and can be approved again. Audit-logged.
+router.post('/:id/unapprove', requireAction('ingest.approve'), asyncH(async (req, res) => {
+  const id = v.id(req.params.id);
+  await db.tx(async (c) => {
+    const cur = await c.query('SELECT approved_by, approved_at FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
+    const r = cur.rows[0];
+    if (!r) throw new HttpError(404, 'Ingest record not found');
+    if (!r.approved_at && !(r.approved_by && String(r.approved_by).trim())) return;   // nothing to undo
+    await c.query('UPDATE ingest_records SET approved_by=NULL, approved_by_user_id=NULL, approved_at=NULL, updated_by=$2, updated_at=now() WHERE id=$1', [id, req.user.id]);
+    await audit(req, 'ingest.unapprove', 'ingest_record', id, { previous: r.approved_by }, c);
+  });
+  res.json({ ok: true });
+}));
+
+// Status (CM): DONE or NON-COMPLIANT (with a reason), changeable later, or back to Pending after a mistaken click. Every change is audit-logged with who and when.
 router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
-  const decision = v.oneOf(req.body.decision, CM_STATUSES, { field: 'CM decision' });
+  const decision = v.oneOf(req.body.decision, [...CM_STATUSES, 'Pending'], { field: 'CM decision' });
   const reason = v.str(req.body.reason, { field: 'Non-compliant reason', max: 2000 });
   if (decision === 'NON-COMPLIANT' && !reason) throw new HttpError(400, 'A reason is required for NON-COMPLIANT');
+
+  if (decision === 'Pending') {   // clear the decision: back to Pending, with no decider, time or reason
+    await db.tx(async (c) => {
+      const cur = await c.query('SELECT cm_status FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
+      if (!cur.rows.length) throw new HttpError(404, 'Ingest record not found');
+      if (!cur.rows[0].cm_status) return;
+      await c.query(
+        `UPDATE ingest_records SET cm_status=NULL, cm_decided_by=NULL, cm_decided_at=NULL, cm_non_compliant_reason=NULL,
+                updated_by=$2, updated_at=now() WHERE id=$1`, [id, req.user.id]
+      );
+      await audit(req, 'ingest.cm_reset', 'ingest_record', id, { previous: cur.rows[0].cm_status }, c);
+    });
+    return res.json({ ok: true, status: 'Pending' });
+  }
 
   await db.tx(async (c) => {
     const cur = await c.query(

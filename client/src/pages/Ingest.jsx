@@ -26,13 +26,14 @@ const CmStatus = ({ r, inline }) => (r.cm_status
     </div>
   )
   : <CmChip s="Pending" />);
-// Approved By: the approver's name with the time under it (like Status (CM)); PCS / OCS see an Approve button until it is approved. Final once approved.
-const ApprovedBy = ({ r, canApprove, onApprove }) => {
+// Approved By: the approver's name with the time under it (like Status (CM)); PCS / OCS see an Approve button until it is approved, and an Undo once it is.
+const ApprovedBy = ({ r, canApprove, onApprove, onUnapprove }) => {
   if (r.approved_by) {
     return (
       <div className="stack">
         <span>{r.approved_by}</span>
         {r.approved_at ? <span className="sub nowrap">{fmtDateTime(r.approved_at)}</span> : null}
+        {canApprove ? <button type="button" className="btn sm" title="Remove this approval (e.g. a mistaken click)" onClick={(e) => { e.stopPropagation(); onUnapprove(r); }}>Undo</button> : null}
       </div>
     );
   }
@@ -55,7 +56,7 @@ const CELLS = {
   source: { kind: 'text', max: 500 },
   materials_count: { kind: 'number' },
   destination_folder: { kind: 'area', max: 1000, approve: true },
-  cm_status: { kind: 'select', cm: true },   // Status (CM): a dropdown for CM users; NON-COMPLIANT then asks for its reason
+  cm_status: { kind: 'select', cm: true, blank: 'Pending' },   // Status (CM): a dropdown for CM users; NON-COMPLIANT then asks for its reason
 };
 const cellInitial = (r, k) => (k === 'cm_status' ? (r.cm_status || '') : k === 'episode_break_date_text' ? (isoDate(r.episode_break_date_text) || isoDate(r.episode_date))
   : r[k] == null ? '' : String(r[k]));
@@ -92,7 +93,7 @@ function InlineCell({ def, initial, options, onSave, onCancel }) {
     if (e.key === 'Enter' && tag !== 'SELECT' && (tag !== 'TEXTAREA' || e.ctrlKey || e.metaKey)) { e.preventDefault(); save(val); }
   };
   let input;
-  if (def.kind === 'select') input = <select value={val} disabled={busy} onChange={change}><Options list={options} blank="Select…" /></select>;
+  if (def.kind === 'select') input = <select value={val} disabled={busy} onChange={change}><Options list={options} blank={def.blank || 'Select…'} /></select>;
   else if (def.kind === 'date') input = <input type="date" value={val} disabled={busy} onChange={change} />;
   else if (def.kind === 'number') input = <input type="number" min="0" step="1" value={val} disabled={busy} onChange={change} />;
   else if (def.kind === 'area') input = <textarea className="mono" maxLength={def.max} value={val} disabled={busy} onChange={change} />;
@@ -171,7 +172,7 @@ export default function Ingest() {
     setData((d) => (d && d.rows ? { ...d, rows: d.rows.map((x) => (x.id === r.id ? { ...x, ...fresh } : x)) } : d));
   };
   const approve = async (r) => {
-    if (!(await confirm(`Approve ingest #${r.id}?`, 'You will be recorded as the approver. An approval cannot be undone.', { okText: 'Approve' }))) return;
+    if (!(await confirm(`Approve ingest #${r.id}?`, 'You will be recorded as the approver. You can undo it later if it was a mistake.', { okText: 'Approve' }))) return;
     try {
       await post(`/api/ingest/${r.id}/approve`, {});
       const fresh = await get(`/api/ingest/${r.id}`);
@@ -180,10 +181,19 @@ export default function Ingest() {
       toast('Approved');
     } catch (e) { toast(e.message, 'err'); }
   };
+  const unapprove = async (r) => {
+    try {
+      await post(`/api/ingest/${r.id}/unapprove`, {});
+      const fresh = await get(`/api/ingest/${r.id}`);
+      setData((d) => (d && d.rows ? { ...d, rows: d.rows.map((x) => (x.id === r.id ? { ...x, ...fresh } : x)) } : d));
+      setDetail((cur) => (cur && cur.id === r.id ? fresh : cur));
+      toast('Approval removed');
+    } catch (e) { toast(e.message, 'err'); }
+  };
   const saveCell = async (r, k, value, initial) => {
     if (String(value ?? '') === String(initial ?? '')) { closeCell(r, k); return; }
     if (k === 'cm_status') {
-      if (!value) { closeCell(r, k); return; }
+      if (!value) { try { await decide(r, 'Pending', ''); closeCell(r, k); toast('Saved'); } catch (e) { toast(e.message, 'err'); throw e; } return; }   // back to Pending
       if (value === 'NON-COMPLIANT') { closeCell(r, k); setReasonFor(r); return; }
       try { await decide(r, value, ''); closeCell(r, k); toast('Saved'); } catch (e) { toast(e.message, 'err'); throw e; }
       return;
@@ -263,7 +273,7 @@ export default function Ingest() {
                           {cell(r, 'materials_count', r.materials_count != null ? r.materials_count : '', { className: 'num' })}
                           <td title="Filled in automatically from the person who created the request">{r.requested_by_psd || r.requested_by_name || ''}</td>
                           {cell(r, 'destination_folder', r.destination_folder, { className: 'cell-clip mono', title: r.destination_folder || '' })}
-                          <td><ApprovedBy r={r} canApprove={canApprove} onApprove={approve} /></td>
+                          <td><ApprovedBy r={r} canApprove={canApprove} onApprove={approve} onUnapprove={unapprove} /></td>
                           {cell(r, 'cm_status', <CmStatus r={r} />)}
                           <td className="dim nowrap">{ago(r.updated_at)}</td>
                         </tr>
@@ -290,7 +300,9 @@ export default function Ingest() {
           canWrite={canWrite && (!detail.cm_status || s.can('ingest.cm_complete'))}
           canDelete={canDelete && !detail.cm_status}
           canApprove={canApprove && !detail.approved_by && !!(detail.destination_folder && String(detail.destination_folder).trim())}
+          canUnapprove={canApprove && !!detail.approved_by}
           onApprove={() => approve(detail)}
+          onUnapprove={() => unapprove(detail)}
           onClose={() => setDetail(null)}
           onEdit={() => { setForm(detail); setDetail(null); }}
           onDelete={async () => {
@@ -344,7 +356,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
       toast('Number of Materials must be a nonnegative integer', 'err');
       return;
     }
-    const cmChanged = canCm && f.cm_status && (f.cm_status !== initialForm.cm_status || (f.cm_status === 'NON-COMPLIANT' && f.cm_reason !== initialForm.cm_reason));
+    const cmChanged = canCm && (f.cm_status !== initialForm.cm_status || (f.cm_status === 'NON-COMPLIANT' && f.cm_reason !== initialForm.cm_reason));
     if (cmChanged && f.cm_status === 'NON-COMPLIANT' && !f.cm_reason.trim()) { toast('Enter the reason it is NON-COMPLIANT', 'err'); return; }
     const { cm_status: _s, cm_reason: _r, ...rest } = f;
     const payload = { ...rest, materials_count: materialsCount };
@@ -355,7 +367,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
       let id = rec && rec.id;
       if (rec) await put(`/api/ingest/${rec.id}`, payload);
       else id = (await post('/api/ingest', payload)).id;
-      if (cmChanged) await post(`/api/ingest/${id}/cm-decision`, { decision: f.cm_status, reason: f.cm_status === 'NON-COMPLIANT' ? f.cm_reason : '' });
+      if (cmChanged) await post(`/api/ingest/${id}/cm-decision`, { decision: f.cm_status || 'Pending', reason: f.cm_status === 'NON-COMPLIANT' ? f.cm_reason : '' });
       toast('Saved');
       onSaved();
     } catch (e) { toast(e.message, 'err'); setBusy(false); }
@@ -401,7 +413,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
 
 const KV = ({ k, children }) => <><dt>{k}</dt><dd>{children || <span className="dim">—</span>}</dd></>;
 
-function IngestDetail({ r, canWrite, canDelete, canApprove, onClose, onEdit, onDelete, onApprove }) {
+function IngestDetail({ r, canWrite, canDelete, canApprove, canUnapprove, onClose, onEdit, onDelete, onApprove, onUnapprove }) {
   return (
     <Modal
       title={`Ingest #${r.id}`}
@@ -411,6 +423,7 @@ function IngestDetail({ r, canWrite, canDelete, canApprove, onClose, onEdit, onD
           {canDelete ? <button type="button" className="btn danger" id="del" onClick={onDelete}>Delete</button> : null}
           <span className="grow" />
           <button type="button" className="btn" onClick={onClose}>Close</button>
+          {canUnapprove ? <button type="button" className="btn" id="unapprove" onClick={onUnapprove}>Undo approval</button> : null}
           {canApprove ? <button type="button" className="btn primary" id="approve" onClick={onApprove}>Approve</button> : null}
           {canWrite ? <button type="button" className="btn primary" id="edit" onClick={onEdit}>Edit</button> : null}
         </>

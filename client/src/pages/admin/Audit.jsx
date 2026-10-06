@@ -15,6 +15,8 @@ const ACTION_LABELS = {
   'ingest.create': 'Created Ingest Record',
   'ingest.send_for_approval': 'Submitted For Approval',
   'ingest.approve': 'Approved Ingest Record',
+  'ingest.unapprove': 'Removed Ingest Approval',
+  'ingest.cm_reset': 'CM Status Set To Pending',
   'ingest.cm_done': 'CM Completed',
   'ingest.cm_non_compliant': 'CM Marked Non-Compliant',
 
@@ -359,6 +361,12 @@ function formatDetails(row) {
 
     case 'ingest.approve':
       return 'Approved ingest request';
+
+    case 'ingest.unapprove':
+      return 'Removed the approval on an ingest request';
+
+    case 'ingest.cm_reset':
+      return 'Set ingest request status back to Pending';
 
     case 'ingest.cm_done':
       return 'CM completed ingest request';

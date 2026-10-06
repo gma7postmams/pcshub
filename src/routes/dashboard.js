@@ -83,6 +83,8 @@ const ACTIVITY = Object.assign(Object.create(null), {
   'ingest.create':            { page: '/ingest',   hue: 'blue',   verb: 'added a new ingest record', kind: 'ingest' },
   'ingest.update':            { page: '/ingest',   hue: 'blue',   verb: 'updated ingest record', kind: 'ingest' },
   'ingest.approve':           { page: '/ingest',   hue: 'blue',   verb: 'approved ingest record', kind: 'ingest' },
+  'ingest.unapprove':         { page: '/ingest',   hue: 'blue',   verb: 'removed the approval on ingest record', kind: 'ingest' },
+  'ingest.cm_reset':          { page: '/ingest',   hue: 'blue',   verb: 'set ingest status back to pending', kind: 'ingest' },
   'ingest.cm_done':           { page: '/ingest',   hue: 'blue',   verb: 'marked compliant', kind: 'ingest' },
   'ingest.cm_non_compliant':  { page: '/ingest',   hue: 'blue',   verb: 'marked non-compliant', kind: 'ingest' },
   'ingest.delete':            { page: '/ingest',   hue: 'blue',   verb: 'deleted ingest record', kind: 'ingest' },
