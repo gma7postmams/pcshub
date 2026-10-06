@@ -26,14 +26,13 @@ const CmStatus = ({ r, inline }) => (r.cm_status
     </div>
   )
   : <CmChip s="PENDING" />);
-// Approved By: the approver's name with the time under it (like Status (CM)); PCS / OCS see an Approve button until it is approved, and an Undo once it is.
-const ApprovedBy = ({ r, canApprove, onApprove, onUnapprove }) => {
+// Approved By: the approver's name with the time under it (like Status (CM)); PCS / OCS see an Approve button until it is approved, and an approval can be undone from the details popup.
+const ApprovedBy = ({ r, canApprove, onApprove }) => {
   if (r.approved_by) {
     return (
       <div className="stack">
         <span>{r.approved_by}</span>
         {r.approved_at ? <span className="sub nowrap">{fmtDateTime(r.approved_at)}</span> : null}
-        {canApprove ? <button type="button" className="btn sm" title="Remove this approval (e.g. a mistaken click)" onClick={(e) => { e.stopPropagation(); onUnapprove(r); }}>Undo</button> : null}
       </div>
     );
   }
@@ -273,7 +272,7 @@ export default function Ingest() {
                           {cell(r, 'materials_count', r.materials_count != null ? r.materials_count : '', { className: 'num' })}
                           <td title="Filled in automatically from the person who created the request">{r.requested_by_psd || r.requested_by_name || ''}</td>
                           {cell(r, 'destination_folder', r.destination_folder, { className: 'cell-clip mono', title: r.destination_folder || '' })}
-                          <td><ApprovedBy r={r} canApprove={canApprove} onApprove={approve} onUnapprove={unapprove} /></td>
+                          <td><ApprovedBy r={r} canApprove={canApprove} onApprove={approve} /></td>
                           {cell(r, 'cm_status', <CmStatus r={r} />)}
                           <td className="dim nowrap">{ago(r.updated_at)}</td>
                         </tr>
