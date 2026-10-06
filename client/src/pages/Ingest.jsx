@@ -14,9 +14,9 @@ const withCurrent = (list, v) => (v && !list.includes(v) ? [...list, v] : list);
 const isoDate = (x) => (/^\d{4}-\d{2}-\d{2}/.test(x || '') ? String(x).slice(0, 10) : '');
 
 // Status (CM) cell: the decision plus its audit-trail timestamp
-const CmStatus = ({ r }) => (r.cm_status
+const CmStatus = ({ r, inline }) => (r.cm_status
   ? (
-    <div className="stack">
+    <div className={`stack${inline ? ' inline' : ''}`}>
       <Pill s={r.cm_status} />
       <span className="sub nowrap">{fmtDateTime(r.cm_decided_at)}{r.cm_decided_by_name ? ` · ${r.cm_decided_by_name}` : ''}</span>
       {r.cm_status === 'NON-COMPLIANT' && r.cm_non_compliant_reason ? <span className="sub" title={r.cm_non_compliant_reason}>{r.cm_non_compliant_reason}</span> : null}
@@ -89,7 +89,7 @@ export default function Ingest() {
                 : (
                   <table className="t wl">
                     <thead><tr>
-                      <th>#</th><th>Program / Project</th><th>Platform</th><th>Billable Party</th><th>Episode / Break Date</th><th>Source</th>
+                      <th>NO</th><th>Program / Project</th><th>Platform</th><th>Billable Party</th><th>Episode / Break Date</th><th>Source</th>
                       <th>No. of Materials</th><th>Requested By</th><th>Destination Folder</th><th>Approved By</th><th>Status (CM)</th><th>Updated</th>
                     </tr></thead>
                     <tbody>
@@ -257,7 +257,7 @@ function IngestDetail({ r, canWrite, canDelete, onClose, onEdit, onDelete }) {
         </>
       )}
     >
-      <div className="row mb-12"><CmStatus r={r} /><span className="dim">Created {fmtDateTime(r.created_at)} by {r.created_by_name || '—'}</span></div>
+      <div className="row mb-12"><CmStatus r={r} inline /><span className="dim">Created {fmtDateTime(r.created_at)} by {r.created_by_name || '—'}</span></div>
       <dl className="kv">
         <KV k="Program / Project">{r.program}</KV>
         <KV k="Platform">{r.platform}</KV>
@@ -270,8 +270,6 @@ function IngestDetail({ r, canWrite, canDelete, onClose, onEdit, onDelete }) {
         <KV k="Approved By">{r.approved_by}</KV>
         <KV k="Status (CM)">{r.cm_status || 'Pending'}</KV>
         {r.cm_status ? <>
-          <KV k="Decided by">{r.cm_decided_by_name || '—'}</KV>
-          <KV k="Decided at">{fmtDateTime(r.cm_decided_at)}</KV>
           {r.cm_non_compliant_reason ? <KV k="Non-compliant reason">{r.cm_non_compliant_reason}</KV> : null}
         </> : null}
         <KV k="Remarks">{r.remarks}</KV>

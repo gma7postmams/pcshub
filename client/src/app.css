@@ -208,6 +208,8 @@ h3 { font-size: 15px; }
 @media (max-width: 1000px) { .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .grid-3 { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 680px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } .container { padding: 16px 12px 50px; } }
 .stack > * + * { margin-top: 14px; }
+.stack.inline { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }   /* status pill + its date on one line, with room between them */
+.stack.inline > * + * { margin-top: 0; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* ---------- KPI tiles ---------- */
