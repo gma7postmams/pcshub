@@ -7,7 +7,7 @@
 //  - Admin role: every page and section, plus the Admin page. Group is ignored.
 //  - Everyone else: only the pages/sections checked on their group. No group => Profile only.
 //  - An action needs BOTH the role AND access to the page it happens on
-//    (e.g. approving requires Manager role + a group with the Approval page).
+//    (e.g. filling Destination Folder / Approved by requires Manager role + a group with the Ingest Tracker page).
 //  - Profile is always available. Admin page is Admin-role only (not group-assignable).
 
 const ROLES = ['Admin', 'Manager', 'Editor', 'Viewer'];
@@ -28,7 +28,6 @@ const CATALOG = [
   { key: 'ingest', label: 'Ingest Tracker', path: '/ingest', sections: [] },
   { key: 'workload', label: 'Workload Tracker', path: '/workload', sections: [] },
   { key: 'plugs', label: 'PSD Daily Plug List', path: '/plug-list', sections: [] },
-  { key: 'approval', label: 'Approval', path: '/approval', sections: [] },
 
   {
     key: 'knowledge',
@@ -56,7 +55,7 @@ const ROLE_ACTIONS = Object.assign(Object.create(null), {
   Admin: [
     'ingest.write',
     'ingest.delete',
-    'approval.decide',
+    'ingest.approve',
     'ingest.cm_complete',
     'workload.write',
     'knowledge.write',
@@ -66,7 +65,7 @@ const ROLE_ACTIONS = Object.assign(Object.create(null), {
 
   Manager: [
     'ingest.write',
-    'approval.decide',
+    'ingest.approve',
     'ingest.cm_complete',
     'workload.write',
     'knowledge.write',
@@ -80,7 +79,7 @@ const ACTION_PAGE = Object.assign(Object.create(null), {
   'ingest.write': 'ingest',
   'ingest.delete': 'ingest',
   'ingest.cm_complete': 'ingest',
-  'approval.decide': 'approval',
+  'ingest.approve': 'ingest',
   'workload.write': 'workload',
   'knowledge.write': 'knowledge',
   'plugs.write': 'plugs',

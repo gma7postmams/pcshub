@@ -82,12 +82,9 @@ async function activeUsers(u) {
 const ACTIVITY = Object.assign(Object.create(null), {
   'ingest.create':            { page: '/ingest',   hue: 'blue',   verb: 'added a new ingest record', kind: 'ingest' },
   'ingest.update':            { page: '/ingest',   hue: 'blue',   verb: 'updated ingest record', kind: 'ingest' },
-  'ingest.send_for_approval': { page: '/ingest',   hue: 'blue',   verb: 'submitted for approval', kind: 'ingest' },
   'ingest.cm_done':           { page: '/ingest',   hue: 'blue',   verb: 'marked compliant', kind: 'ingest' },
   'ingest.cm_non_compliant':  { page: '/ingest',   hue: 'blue',   verb: 'marked non-compliant', kind: 'ingest' },
   'ingest.delete':            { page: '/ingest',   hue: 'blue',   verb: 'deleted ingest record', kind: 'ingest' },
-  'approval.approved':        { page: '/approval', hue: 'green',  verb: 'approved', kind: 'ingest' },
-  'approval.rejected':        { page: '/approval', hue: 'red',    verb: 'rejected', kind: 'ingest' },
   'workload.create':          { page: '/workload', hue: 'purple', verb: 'added workload item', kind: 'workload' },
   'workload.update':          { page: '/workload', hue: 'purple', verb: 'updated workload item', kind: 'workload' },
   'workload.delete':          { page: '/workload', hue: 'purple', verb: 'deleted workload item', kind: 'workload' },
@@ -151,7 +148,6 @@ router.get('/', asyncH(async (req, res) => {
     sections: { kpis: canSection(u, 'dashboard.kpis'), users: canSection(u, 'dashboard.users') },
     canOpen: {
       ingest: canPage(u, '/ingest'),
-      approval: canPage(u, '/approval'),
       workload: canPage(u, '/workload'),
       plugs: canPage(u, '/plug-list'),
     },
@@ -162,11 +158,11 @@ router.get('/', asyncH(async (req, res) => {
     today: (await db.query('SELECT CURRENT_DATE AS d')).rows[0].d,
   };
 
-  // ---- Ingest & Approval ----
+  // ---- Ingest Tracker ----
   if (out.sections.kpis) {
     const [counts, month] = await Promise.all([
-      db.query(`SELECT status, count(*)::int AS n FROM ingest_records GROUP BY status`),
-      db.query(`SELECT count(*)::int AS created, count(*) FILTER (WHERE status='Approved')::int AS approved
+      db.query(`SELECT COALESCE(cm_status, 'Pending') AS status, count(*)::int AS n FROM ingest_records GROUP BY 1`),
+      db.query(`SELECT count(*)::int AS created, count(*) FILTER (WHERE cm_status='DONE')::int AS done
                   FROM ingest_records WHERE created_at >= date_trunc('month', now())`),
     ]);
     out.kpis = {

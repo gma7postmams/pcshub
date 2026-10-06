@@ -18,6 +18,7 @@ async function upgradeIngestRecords(db) {
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS billable_party TEXT`);
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS episode_break_date_text TEXT`);
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS materials_count INTEGER`);
+    await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS approved_by TEXT`);
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS cm_status TEXT`);
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS cm_decided_by INT`);
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS cm_decided_at TIMESTAMPTZ`);
@@ -30,11 +31,20 @@ async function upgradeIngestRecords(db) {
       ALTER TABLE ingest_records DROP CONSTRAINT IF EXISTS ingest_cm_decision_consistent;
       ALTER TABLE ingest_records ADD CONSTRAINT ingest_cm_decision_consistent CHECK (
         (cm_status IS NULL AND cm_decided_by IS NULL AND cm_decided_at IS NULL AND cm_non_compliant_reason IS NULL)
-        OR (cm_status = 'DONE' AND status = 'Approved' AND cm_decided_at IS NOT NULL AND cm_non_compliant_reason IS NULL)
-        OR (cm_status = 'NON-COMPLIANT' AND status = 'Approved' AND cm_decided_at IS NOT NULL
+        OR (cm_status = 'DONE' AND cm_decided_at IS NOT NULL AND cm_non_compliant_reason IS NULL)
+        OR (cm_status = 'NON-COMPLIANT' AND cm_decided_at IS NOT NULL
             AND cm_non_compliant_reason IS NOT NULL AND length(btrim(cm_non_compliant_reason)) > 0)
       );
     END $$`);
+    // The Approval page was merged into the Ingest Tracker: carry the approver's name onto the record, and drop the old page grant.
+    await client.query(
+      `UPDATE ingest_records i SET approved_by = u.full_name
+         FROM (SELECT DISTINCT ON (ingest_record_id) ingest_record_id, decided_by FROM approval_requests
+                WHERE status = 'Approved' ORDER BY ingest_record_id, decided_at DESC NULLS LAST, id DESC) ar
+         JOIN users u ON u.id = ar.decided_by
+        WHERE ar.ingest_record_id = i.id AND i.approved_by IS NULL`
+    );
+    await client.query(`DELETE FROM group_permissions WHERE perm_key = 'approval'`);
     // Preserve episode_date for existing consumers while backfilling its text form once.
     await client.query(
       `UPDATE ingest_records

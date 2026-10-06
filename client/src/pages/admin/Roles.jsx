@@ -1,9 +1,10 @@
 import { keyLabels } from './labels.js';
 
 const ACT = {
-  'ingest.write': 'Create / edit / send ingest',
+  'ingest.write': 'Create / edit ingest',
   'ingest.delete': 'Delete ingest records',
-  'approval.decide': 'Approve / reject',
+  'ingest.approve': 'Ingest: Destination Folder / Approved by',
+  'ingest.cm_complete': 'Ingest: set Status (CM)',
   'workload.write': 'Edit Workload',
   'knowledge.write': 'Upload / rename / delete Knowledge Base PDFs',
   'admin': 'Users, groups, dropdowns, branding, audit',
@@ -16,7 +17,7 @@ export default function Roles({ model }) {
     <>
       <div className="alert info mb-12">
         Roles decide what a user can <strong>do</strong>. An action also needs the user&apos;s group to open the page it happens on
-        (e.g. approving needs Manager role <em>and</em> a group with the Approval page). Roles are fixed in <span className="mono">src/permissions.js</span>.
+        (e.g. filling Destination Folder / Approved by needs Manager role <em>and</em> a group with the Ingest Tracker page). Roles are fixed in <span className="mono">src/permissions.js</span>.
       </div>
       <div className="card">
         <div className="table-wrap">

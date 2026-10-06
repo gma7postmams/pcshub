@@ -148,7 +148,6 @@ app.use('/api/presence',      require('./src/routes/presence'));   // who is wor
 app.use('/api',               require('./src/routes/lookups'));
 app.use('/api/dashboard',     requirePageAccess('/dashboard'), require('./src/routes/dashboard'));
 app.use('/api/ingest',        requirePageAccess('/ingest'),    require('./src/routes/ingest'));
-app.use('/api/approvals',     requirePageAccess('/approval'),  require('./src/routes/approvals'));
 app.use('/api/workload',      requirePageAccess('/workload'),  require('./src/routes/workload'));
 app.use('/api/plugs',         require('./src/routes/plugs')(require('./src/routes/workload').helpers));   // PSD Daily Plug List (page + API of its own)
 app.use('/api/knowledge',     requirePageAccess('/knowledge'), require('./src/routes/knowledge'));
@@ -169,6 +168,9 @@ app.get('/login', noStore, (req, res) => {
   sendApp(req, res);
 });
 app.get('/', (req, res) => res.redirect(req.user ? landingPath(req.user) : '/login'));
+
+// The Approval page is part of the Ingest Tracker now (old links and notifications still land somewhere useful)
+app.get('/approval', (req, res) => res.redirect('/ingest'));
 
 for (const page of Object.keys(PAGE_BY_PATH)) {
   app.get(page, noStore, requirePageAccess(page), (req, res) => {
