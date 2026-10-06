@@ -11,7 +11,7 @@ import {
 import '../dashboard.css';
 
 // Dashboard. Everything on it is shown only if the signed-in user may see it:
-//   greeting banner · Active users + Recent Activity · Workload Tracker (KPI cards) · Workload by day + By team · Ingest & Approval (KPI cards)
+//   greeting banner · Active users + Recent Activity · Workload Tracker (KPI cards) · Workload by day + By team · Ingest Tracker (KPI cards)
 // It lays itself out for the screen: two columns on a wide screen, stacked on a narrow one. The chart row keeps a fixed height on a big screen.
 const TEAMS = [
   { key: 'VGFX', label: 'VGFX', color: 'var(--purple)' },
@@ -353,12 +353,12 @@ export default function Dashboard() {
 
       {d.kpis ? (
         <section className="dsh-card">
-          <CardHead icon={DocIcon} hue="blue" plain title="Ingest & Approval" hint={`${d.kpis.total} record${d.kpis.total === 1 ? '' : 's'}`} />
+          <CardHead icon={DocIcon} hue="blue" plain title="Ingest Tracker" hint={`${d.kpis.total} record${d.kpis.total === 1 ? '' : 's'}`} />
           <div className="dsh-stats compact">
             <StatCard icon={CalendarCheckIcon} hue="blue" soft label="Total Ingest Records" value={d.kpis.total} foot={`${d.kpis.thisMonth.created} created this month`} onClick={go(d.canOpen.ingest ? '/ingest' : null)} />
-            <StatCard icon={HourglassIcon} hue="amber" soft label="Pending Approval" value={st['Pending Approval'] || 0} foot="Awaiting a decision" onClick={go(d.canOpen.approval ? '/approval?status=Pending' : null)} />
-            <StatCard icon={CheckCircleIcon} hue="green" label="Approved" value={st.Approved || 0} foot={`${d.kpis.thisMonth.approved} this month`} onClick={go(d.canOpen.ingest ? '/ingest?status=Approved' : null)} />
-            <StatCard icon={XCircleIcon} hue="red" label="Rejected" value={st.Rejected || 0} foot="Needs rework & resubmission" onClick={go(d.canOpen.ingest ? '/ingest?status=Rejected' : null)} />
+            <StatCard icon={HourglassIcon} hue="amber" soft label="Pending (CM)" value={st.Pending || 0} foot="Awaiting a CM decision" onClick={go(d.canOpen.ingest ? '/ingest?status=Pending' : null)} />
+            <StatCard icon={CheckCircleIcon} hue="green" label="Done" value={st.DONE || 0} foot={`${d.kpis.thisMonth.done} this month`} onClick={go(d.canOpen.ingest ? '/ingest?status=DONE' : null)} />
+            <StatCard icon={XCircleIcon} hue="red" label="Non-compliant" value={st['NON-COMPLIANT'] || 0} foot="Needs rework" onClick={go(d.canOpen.ingest ? '/ingest?status=NON-COMPLIANT' : null)} />
           </div>
         </section>
       ) : null}

@@ -150,6 +150,7 @@ CREATE TABLE IF NOT EXISTS ingest_records (
   materials_count       INTEGER,
   source                TEXT,
   destination_folder    TEXT,
+  approved_by           TEXT,
   requested_by_user_id  INT REFERENCES users(id) ON DELETE SET NULL,
   requested_by_psd      TEXT,
   remarks               TEXT,
@@ -165,8 +166,8 @@ CREATE TABLE IF NOT EXISTS ingest_records (
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT ingest_cm_decision_consistent CHECK (
     (cm_status IS NULL AND cm_decided_by IS NULL AND cm_decided_at IS NULL AND cm_non_compliant_reason IS NULL)
-    OR (cm_status = 'DONE' AND status = 'Approved' AND cm_decided_at IS NOT NULL AND cm_non_compliant_reason IS NULL)
-    OR (cm_status = 'NON-COMPLIANT' AND status = 'Approved' AND cm_decided_at IS NOT NULL
+    OR (cm_status = 'DONE' AND cm_decided_at IS NOT NULL AND cm_non_compliant_reason IS NULL)
+    OR (cm_status = 'NON-COMPLIANT' AND cm_decided_at IS NOT NULL
         AND cm_non_compliant_reason IS NOT NULL AND length(btrim(cm_non_compliant_reason)) > 0)
   )
 );

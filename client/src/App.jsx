@@ -10,7 +10,6 @@ const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
 const Ingest = lazy(() => import('./pages/Ingest.jsx'));
 const Workload = lazy(() => import('./pages/Workload.jsx'));
 const PlugListPage = lazy(() => import('./pages/PlugListPage.jsx'));
-const Approval = lazy(() => import('./pages/Approval.jsx'));
 const Knowledge = lazy(() => import('./pages/Knowledge.jsx'));
 const Admin = lazy(() => import('./pages/admin/Admin.jsx'));
 const Profile = lazy(() => import('./pages/Profile.jsx'));
@@ -22,7 +21,6 @@ const PAGES = {
   '/ingest': Ingest,
   '/workload': Workload,
   '/plug-list': PlugListPage,
-  '/approval': Approval,
   '/activity-history': ActivityHistory,
   '/knowledge': Knowledge,
   '/admin': Admin,
