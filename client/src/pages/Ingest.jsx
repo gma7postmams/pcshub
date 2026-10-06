@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { del, get, post, put } from '../lib/api.js';
-import { ago, fmtDate, fmtDateTime } from '../lib/util.js';
+import { ago, fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { PlusIcon } from '../components/Icons.jsx';
 import { Empty, Modal, Options, Pill, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
-const STATUSES = ['New', 'Pending Approval', 'Approved', 'Rejected'];
+const STATUSES = ['New', 'Pending Approval', 'Approved', 'Rejected', 'DONE', 'NON-COMPLIANT'];
 const EDITABLE = ['New', 'Rejected'];
 const PAGE = 50;
 const withCurrent = (list, v) => (v && !list.includes(v) ? [...list, v] : list);
@@ -18,6 +18,7 @@ export default function Ingest() {
   const [params] = useSearchParams();
   const canWrite = s.can('ingest.write');
   const canDelete = s.can('ingest.delete');
+  const canCmComplete = s.can('ingest.cm_complete');
 
   const [lookups, setLookups] = useState(null);
   const [filt, setFilt] = useState({ q: '', status: params.get('status') || '', program: '', platform: '', from: '', to: '' });
@@ -28,8 +29,7 @@ export default function Ingest() {
   const q = useDebounced(filt.q, 300);
 
   useEffect(() => {
-    Promise.all([get('/api/dropdowns?categories=program,platform'), get('/api/users/active')])
-      .then(([dd, users]) => setLookups({ ...dd, users }));
+    get('/api/dropdowns?categories=platform').then(setLookups);
   }, []);
 
   const load = useCallback(async () => {
@@ -53,7 +53,7 @@ export default function Ingest() {
   const total = data ? data.total : 0;
 
   return (
-    <main className="container">
+    <main className="container wide wl-page">
       <div className="page-head">
         <div><h1>Ingest Tracker</h1><div className="sub">Log ingest requests and send them for approval.</div></div>
         <div className="actions">
@@ -61,31 +61,24 @@ export default function Ingest() {
         </div>
       </div>
 
-      {lookups && !lookups.program.length ? (
-        <div className="alert warn mb-12">
-          No PROGRAM options exist yet.{' '}
-          {s.canPage('/admin') ? <>Add them in <Link to="/admin#dropdowns">Admin → Dropdowns</Link>.</> : 'Ask an Admin to add them.'}
-        </div>
-      ) : null}
-
       <div className="card">
         <div className="filters">
-          <input type="search" placeholder="Search program, source, folder, remarks…" value={filt.q} onChange={setF('q')} />
+          <input type="search" placeholder="Search program, billable party, episode / break date, source, folder, remarks…" value={filt.q} onChange={setF('q')} />
           <select value={filt.status} onChange={setF('status')}><Options list={STATUSES} blank="All statuses" /></select>
-          <select value={filt.program} onChange={setF('program')}><Options list={lookups ? lookups.program : []} blank="All programs" /></select>
+          <input type="text" placeholder="Program / Project (exact match)" value={filt.program} onChange={setF('program')} />
           <select value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All platforms" /></select>
-          <input type="date" title="Episode date from" value={filt.from} onChange={setF('from')} />
-          <input type="date" title="Episode date to" value={filt.to} onChange={setF('to')} />
+          <input type="date" title="Legacy episode date from (YYYY-MM-DD)" value={filt.from} onChange={setF('from')} />
+          <input type="date" title="Legacy episode date to (YYYY-MM-DD)" value={filt.to} onChange={setF('to')} />
         </div>
         <div className="table-wrap" id="tbl">
           {!data ? <Empty>Loading…</Empty>
             : data.error ? <Empty>{data.error}</Empty>
               : !data.rows.length ? <Empty>No ingest records match these filters.</Empty>
                 : (
-                  <table className="t">
+                  <table className="t wl">
                     <thead><tr>
-                      <th>#</th><th>Program</th><th>Platform</th><th>Episode Date</th><th>Source</th><th>Destination Folder</th>
-                      <th>Requested By</th><th>Requested By (PSD)</th><th>Status</th><th>Updated</th>
+                      <th>#</th><th>Program / Project</th><th>Platform</th><th>Episode / Break Date</th><th>Source</th><th>Destination Folder</th>
+                      <th>Requested By</th><th>Status</th><th>Updated</th>
                     </tr></thead>
                     <tbody>
                       {data.rows.map((r) => (
@@ -93,12 +86,11 @@ export default function Ingest() {
                           <td className="dim mono">{r.id}</td>
                           <td><strong>{r.program}</strong></td>
                           <td>{r.platform}</td>
-                          <td className="nowrap">{fmtDate(r.episode_date)}</td>
+                          <td className="nowrap">{r.episode_break_date_text || r.episode_date || ''}</td>
                           <td className="cell-clip" title={r.source || ''}>{r.source}</td>
                           <td className="cell-clip mono" title={r.destination_folder || ''}>{r.destination_folder}</td>
-                          <td className="nowrap">{r.requested_by_name || ''}</td>
                           <td>{r.requested_by_psd || ''}</td>
-                          <td><Pill s={r.status} /></td>
+                          <td><Pill s={r.cm_status || r.status} /></td>
                           <td className="dim nowrap">{ago(r.updated_at)}</td>
                         </tr>
                       ))}
@@ -115,7 +107,7 @@ export default function Ingest() {
       </div>
 
       {form && lookups ? (
-        <IngestForm rec={form.id ? form : null} lookups={lookups} me={s.user} onClose={() => setForm(null)} onSaved={() => { setForm(null); load(); }} />
+        <IngestForm rec={form.id ? form : null} lookups={lookups} onClose={() => setForm(null)} onSaved={() => { setForm(null); load(); }} />
       ) : null}
 
       {detail ? (
@@ -123,11 +115,35 @@ export default function Ingest() {
           r={detail}
           canWrite={canWrite}
           canDelete={canDelete}
+          canCmComplete={canCmComplete}
           onClose={() => setDetail(null)}
           onEdit={() => { setForm(detail); setDetail(null); }}
           onSend={async () => {
             if (!(await confirm('Send for approval', `Send ingest #${detail.id} (${detail.program}) to Managers for approval? It will be locked from editing while pending.`, { okText: 'Send' }))) return;
             try { await post(`/api/ingest/${detail.id}/send`); toast('Sent for approval'); setDetail(null); load(); } catch (e) { toast(e.message, 'err'); }
+          }}
+          onCmDecision={async (decision) => {
+            const result = await confirm(
+              decision === 'DONE' ? 'Mark ingest DONE' : 'Mark ingest NON-COMPLIANT',
+              decision === 'DONE'
+                ? `Mark ingest #${detail.id} (${detail.program}) DONE? This is a final decision.`
+                : `Mark ingest #${detail.id} (${detail.program}) NON-COMPLIANT? A reason is required.`,
+              {
+                okText: `Mark ${decision}`,
+                danger: decision === 'NON-COMPLIANT',
+                ...(decision === 'NON-COMPLIANT' ? { input: { label: 'Reason', required: true } } : {}),
+              }
+            );
+            if (result === null) return;
+            try {
+              await post(`/api/ingest/${detail.id}/cm-decision`, {
+                decision,
+                reason: decision === 'NON-COMPLIANT' ? result.value : '',
+              });
+              toast(`Ingest marked ${decision}`);
+              setDetail(null);
+              load();
+            } catch (e) { toast(e.message, 'err'); }
           }}
           onDelete={async () => {
             if (!(await confirm('Delete ingest record', `Permanently delete ingest #${detail.id} and its approval history?`, { okText: 'Delete', danger: true }))) return;
@@ -139,24 +155,57 @@ export default function Ingest() {
   );
 }
 
-function IngestForm({ rec, lookups, me, onClose, onSaved }) {
+function IngestForm({ rec, lookups, onClose, onSaved }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const r = rec || {};
-  const [f, set] = useForm({
-    program: r.program || '', platform: r.platform || '', episode_date: r.episode_date || '', source: r.source || '',
-    destination_folder: r.destination_folder || '', requested_by_user_id: r.requested_by_user_id || (rec ? '' : me.id),
-    requested_by_psd: r.requested_by_psd || '', remarks: r.remarks || '',
-  });
+  const isoDate = (x) => (/^\d{4}-\d{2}-\d{2}/.test(x || '') ? String(x).slice(0, 10) : '');
+  const initialEpisodeText = rec ? isoDate(r.episode_break_date_text) || isoDate(r.episode_date) : '';
+  const { user } = useSession();
+  const requester = rec ? (r.requested_by_psd || r.requested_by_name || '') : (user.full_name || user.username);
+  const initialForm = {
+    program: r.program || '', platform: r.platform || '', billable_party: r.billable_party || '',
+    episode_break_date_text: initialEpisodeText,
+    materials_count: r.materials_count == null ? '' : String(r.materials_count),
+    source: r.source || '',
+    remarks: r.remarks || '',
+  };
+  const [f, set] = useForm(initialForm);
   const [busy, setBusy] = useState(false);
-  const userOpts = lookups.users.map((u) => ({ value: u.id, label: u.full_name }));
+  const dirty = JSON.stringify(f) !== JSON.stringify(initialForm);
+
+  const requestClose = async () => {
+    if (busy) return;
+    if (!dirty) {
+      onClose();
+      return;
+    }
+    const ok = await confirm(
+      'Discard unsaved changes?',
+      'Your changes have not been saved. Discard them and close this form?',
+      { danger: true, okText: 'Discard' }
+    );
+    if (ok) onClose();
+  };
 
   const submit = async (send) => {
-    if (!f.program || !f.platform) { toast('PROGRAM and Platform are required', 'err'); return; }
+    if (!f.program || !f.platform) { toast('Program / Project and Platform are required', 'err'); return; }
+    const materialsCount = f.materials_count === '' ? null : Number(f.materials_count);
+    if (materialsCount !== null && (!Number.isInteger(materialsCount) || materialsCount < 0)) {
+      toast('Number of Materials must be a nonnegative integer', 'err');
+      return;
+    }
+    const payload = {
+      ...f,
+      materials_count: materialsCount,
+    };
+    // Omit an unchanged fallback value so older records keep their stored compatibility fields.
+    if (rec && f.episode_break_date_text === initialEpisodeText) delete payload.episode_break_date_text;
     setBusy(true);
     try {
       let id = rec && rec.id;
-      if (rec) await put(`/api/ingest/${rec.id}`, f);
-      else id = (await post('/api/ingest', f)).id;
+      if (rec) await put(`/api/ingest/${rec.id}`, payload);
+      else id = (await post('/api/ingest', payload)).id;
       if (send) await post(`/api/ingest/${id}/send`);
       toast(send ? 'Saved and sent for approval' : 'Saved');
       onSaved();
@@ -166,26 +215,25 @@ function IngestForm({ rec, lookups, me, onClose, onSaved }) {
   return (
     <Modal
       title={rec ? `Edit Ingest #${rec.id}` : 'New Ingest'}
-      onClose={onClose}
+      onClose={requestClose}
       footer={(
         <>
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn" onClick={requestClose}>Cancel</button>
           {!rec ? <button type="button" className="btn" id="save-send" disabled={busy} onClick={() => submit(true)}>Save &amp; Send for Approval</button> : null}
           <button type="button" className="btn primary" id="save" disabled={busy} onClick={() => submit(false)}>Save</button>
         </>
       )}
     >
       <form id="ing-form" className="form-grid" noValidate onSubmit={(e) => e.preventDefault()}>
-        <label className="f"><span>PROGRAM <span className="req">*</span></span>
-          <select name="program" value={f.program} onChange={set('program')}><Options list={withCurrent(lookups.program, r.program)} blank="Select program…" /></select></label>
+        <label className="f"><span>Program / Project <span className="req">*</span></span>
+          <input name="program" maxLength={200} value={f.program} onChange={set('program')} /></label>
         <label className="f"><span>Platform <span className="req">*</span></span>
           <select name="platform" value={f.platform} onChange={set('platform')}><Options list={withCurrent(lookups.platform, r.platform)} blank="Select platform…" /></select></label>
-        <label className="f"><span>Episode date</span><input type="date" name="episode_date" value={f.episode_date} onChange={set('episode_date')} /></label>
+        <label className="f"><span>Billable Party</span><input name="billable_party" maxLength={200} value={f.billable_party} onChange={set('billable_party')} /></label>
+        <label className="f"><span>Episode / Break Date</span><input type="date" name="episode_break_date_text" value={f.episode_break_date_text} onChange={set('episode_break_date_text')} /></label>
+        <label className="f"><span>Number of Materials</span><input type="number" name="materials_count" min="0" step="1" value={f.materials_count} onChange={set('materials_count')} /></label>
         <label className="f"><span>Source</span><input name="source" maxLength={500} value={f.source} onChange={set('source')} placeholder="e.g. Tape, drive, server path" /></label>
-        <label className="f full"><span>Destination Folder</span><input name="destination_folder" maxLength={1000} className="mono" value={f.destination_folder} onChange={set('destination_folder')} placeholder="\\server\share\promos\…" /></label>
-        <label className="f"><span>Requested by</span>
-          <select name="requested_by_user_id" value={f.requested_by_user_id} onChange={set('requested_by_user_id')}><Options list={userOpts} blank="—" /></select></label>
-        <label className="f"><span>Requested by (PSD)</span><input name="requested_by_psd" maxLength={200} value={f.requested_by_psd} onChange={set('requested_by_psd')} /></label>
+        <label className="f"><span>Requested By</span><input name="requested_by" value={requester} readOnly disabled /></label>
         <label className="f full"><span>Remarks</span><textarea name="remarks" maxLength={4000} value={f.remarks} onChange={set('remarks')} /></label>
         {!rec ? <div className="full dim">Status will be set to <strong>New</strong>. Send it for approval when ready.</div> : null}
       </form>
@@ -195,35 +243,48 @@ function IngestForm({ rec, lookups, me, onClose, onSaved }) {
 
 const KV = ({ k, children }) => <><dt>{k}</dt><dd>{children || <span className="dim">—</span>}</dd></>;
 
-function IngestDetail({ r, canWrite, canDelete, onClose, onEdit, onSend, onDelete }) {
+function IngestDetail({ r, canWrite, canDelete, canCmComplete, onClose, onEdit, onSend, onCmDecision, onDelete }) {
   const editable = canWrite && EDITABLE.includes(r.status);
+  const cmFinal = Boolean(r.cm_status);
   return (
     <Modal
       title={`Ingest #${r.id}`}
       onClose={onClose}
       footer={(
         <>
-          {canDelete ? <button type="button" className="btn danger" id="del" onClick={onDelete}>Delete</button> : null}
+          {canDelete && !cmFinal ? <button type="button" className="btn danger" id="del" onClick={onDelete}>Delete</button> : null}
           <span className="grow" />
           <button type="button" className="btn" onClick={onClose}>Close</button>
           {editable ? <button type="button" className="btn" id="edit" onClick={onEdit}>Edit</button> : null}
           {editable ? <button type="button" className="btn primary" id="send" onClick={onSend}>{r.status === 'Rejected' ? 'Resubmit for Approval' : 'Send for Approval'}</button> : null}
+          {canCmComplete && r.status === 'Approved' && !cmFinal ? <>
+            <button type="button" className="btn success" id="cm-done" onClick={() => onCmDecision('DONE')}>Mark DONE</button>
+            <button type="button" className="btn danger" id="cm-non-compliant" onClick={() => onCmDecision('NON-COMPLIANT')}>Mark NON-COMPLIANT</button>
+          </> : null}
         </>
       )}
     >
-      <div className="row mb-12"><Pill s={r.status} /><span className="dim">Created {fmtDateTime(r.created_at)} by {r.created_by_name || '—'}</span></div>
+      <div className="row mb-12"><Pill s={r.cm_status || r.status} /><span className="dim">Created {fmtDateTime(r.created_at)} by {r.created_by_name || '—'}</span></div>
       {r.status === 'Rejected' && r.last_approval && r.last_approval.decision_note
         ? <div className="alert err mb-12"><strong>Rejected:</strong> {r.last_approval.decision_note}</div> : null}
       <dl className="kv">
-        <KV k="PROGRAM">{r.program}</KV>
+        <KV k="Program / Project">{r.program}</KV>
         <KV k="Platform">{r.platform}</KV>
-        <KV k="Episode date">{fmtDate(r.episode_date)}</KV>
+        <KV k="Billable Party">{r.billable_party}</KV>
+        <KV k="Episode / Break Date">{r.episode_break_date_text || r.episode_date}</KV>
+        <KV k="Number of Materials">{r.materials_count != null ? String(r.materials_count) : null}</KV>
         <KV k="Source">{r.source}</KV>
         <KV k="Destination Folder">{r.destination_folder ? <span className="mono">{r.destination_folder}</span> : null}</KV>
-        <KV k="Requested by">{r.requested_by_name}</KV>
-        <KV k="Requested by (PSD)">{r.requested_by_psd}</KV>
+        <KV k="Requested By">{r.requested_by_psd}</KV>
+        {r.requested_by_name ? <KV k="Historical Requested By Account">{r.requested_by_name}</KV> : null}
         <KV k="Remarks">{r.remarks}</KV>
         <KV k="Last updated">{fmtDateTime(r.updated_at)}{r.updated_by_name ? ` by ${r.updated_by_name}` : ''}</KV>
+        {r.cm_status ? <>
+          <KV k="CM decision">{r.cm_status}</KV>
+          <KV k="CM decision by">{r.cm_decided_by_name || '—'}</KV>
+          <KV k="CM decision at">{fmtDateTime(r.cm_decided_at)}</KV>
+          {r.cm_non_compliant_reason ? <KV k="Non-compliant reason">{r.cm_non_compliant_reason}</KV> : null}
+        </> : null}
       </dl>
       {r.approvals.length ? (
         <>

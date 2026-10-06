@@ -1,4 +1,30 @@
--- Promotional Content Hub schema (idempotent)
+-- Promotional Content Hub (PCS Hub)
+--
+-- Core Modules
+--   • Ingest Management
+--   • Approval Workflow
+--   • Workload Tracker
+--   • PSD Daily Plug List
+--   • Knowledge Base
+--   • Dashboard & User Presence
+--   • Audit Logging
+--   • Backup and Restore Center
+--
+-- Backup and Restore Center
+--   • Backup Creation
+--   • Backup Verification
+--   • Secure Download
+--   • Backup Analysis
+--   • Structure Verification
+--   • Risk Assessment
+--   • Restore Readiness Validation
+--   • Restore Execution
+--   • Rollback Support
+--   • Unified Backup and Restore History
+--
+-- The schema is idempotent and safe to execute repeatedly.
+-- ALTER statements are used extensively to support upgrades from
+-- previous releases without requiring manual migrations.
 
 -- ROLES: what a user can DO (actions). Fixed set.
 CREATE TABLE IF NOT EXISTS roles (
@@ -8,10 +34,21 @@ CREATE TABLE IF NOT EXISTS roles (
 );
 
 INSERT INTO roles (name, description, rank) VALUES
-  ('Admin',   'Full access to every page; manages users, groups, dropdowns, branding, audit', 4),
-  ('Manager', 'Create/edit/send ingest, approve/reject, edit workload (on pages their group can open)', 3),
-  ('Editor',  'Create/edit/send ingest (on pages their group can open)', 2),
-  ('Viewer',  'Read-only on pages their group can open', 1)
+  ('Admin',
+   'Full access to all modules including users, groups, permissions, branding, audit, backup and restore administration',
+   4),
+
+  ('Manager',
+   'Manage ingest, approvals, workload, knowledge and operational functions on pages granted by group permissions',
+   3),
+
+  ('Editor',
+   'Create and update content on pages granted by group permissions',
+   2),
+
+  ('Viewer',
+   'Read-only access to pages granted by group permissions',
+   1)
 ON CONFLICT (name) DO NOTHING;
 
 -- GROUPS: where a user is enrolled. Admin-defined. Decide which pages/sections members can open.
@@ -51,6 +88,9 @@ CREATE TABLE IF NOT EXISTS users (
 );
 -- upgrade paths for older databases
 ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_step BIGINT;
+-- 2FA is off for everyone until an Admin turns it on for that user (the user then enrols from Profile)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS twofa_required BOOLEAN NOT NULL DEFAULT FALSE;
+UPDATE users SET twofa_required = TRUE WHERE totp_enabled AND NOT twofa_required;
 -- per-user appearance: system | dark | light
 ALTER TABLE users ADD COLUMN IF NOT EXISTS appearance TEXT NOT NULL DEFAULT 'system' CHECK (appearance IN ('system','dark','light'));  -- last TOTP time-step used (replay protection)
 ALTER TABLE users ADD COLUMN IF NOT EXISTS group_id INT REFERENCES groups(id) ON DELETE RESTRICT;
@@ -103,8 +143,11 @@ CREATE TABLE IF NOT EXISTS dropdown_options (
 CREATE TABLE IF NOT EXISTS ingest_records (
   id                    SERIAL PRIMARY KEY,
   program               TEXT NOT NULL,
+  billable_party        TEXT,
   platform              TEXT NOT NULL,
   episode_date          DATE,
+  episode_break_date_text TEXT,
+  materials_count       INTEGER,
   source                TEXT,
   destination_folder    TEXT,
   requested_by_user_id  INT REFERENCES users(id) ON DELETE SET NULL,
@@ -112,10 +155,20 @@ CREATE TABLE IF NOT EXISTS ingest_records (
   remarks               TEXT,
   status                TEXT NOT NULL DEFAULT 'New'
                         CHECK (status IN ('New','Pending Approval','Approved','Rejected')),
+  cm_status             TEXT CHECK (cm_status IN ('DONE','NON-COMPLIANT')),
+  cm_decided_by         INT REFERENCES users(id) ON DELETE SET NULL,
+  cm_decided_at         TIMESTAMPTZ,
+  cm_non_compliant_reason TEXT,
   created_by            INT REFERENCES users(id) ON DELETE SET NULL,
   updated_by            INT REFERENCES users(id) ON DELETE SET NULL,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT ingest_cm_decision_consistent CHECK (
+    (cm_status IS NULL AND cm_decided_by IS NULL AND cm_decided_at IS NULL AND cm_non_compliant_reason IS NULL)
+    OR (cm_status = 'DONE' AND status = 'Approved' AND cm_decided_at IS NOT NULL AND cm_non_compliant_reason IS NULL)
+    OR (cm_status = 'NON-COMPLIANT' AND status = 'Approved' AND cm_decided_at IS NOT NULL
+        AND cm_non_compliant_reason IS NOT NULL AND length(btrim(cm_non_compliant_reason)) > 0)
+  )
 );
 CREATE INDEX IF NOT EXISTS ingest_status_idx ON ingest_records (status);
 CREATE INDEX IF NOT EXISTS ingest_created_idx ON ingest_records (created_at DESC);
@@ -255,9 +308,26 @@ CREATE TABLE IF NOT EXISTS app_settings (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Knowledge Base.
+-- Reference documents stored on disk under uploads/knowledge/.
+-- Metadata and integrity information are stored in the database.
+CREATE TABLE IF NOT EXISTS knowledge_docs (
+  id            SERIAL PRIMARY KEY,
+  title         TEXT NOT NULL,
+  filename      TEXT NOT NULL,            -- original file name, used for downloads
+  stored_name   TEXT NOT NULL UNIQUE,     -- random name on disk
+  size_bytes    BIGINT NOT NULL,
+  sha256        TEXT NOT NULL,
+  uploaded_by   INT REFERENCES users(id) ON DELETE SET NULL,
+  uploaded_name TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS knowledge_docs_created_idx ON knowledge_docs (created_at DESC);
+
 INSERT INTO app_settings (key, value) VALUES
   ('app_name', 'Promotional Content Hub'),
-  ('tagline',  'Ingest · Approval · Workload'),
+  ('tagline', 'Ingest · Approval · Workload · Backup and Restore'),
   ('theme', 'midnight'),
   ('accent_color', ''),
   ('logo_path', '')
@@ -326,6 +396,66 @@ CREATE TABLE IF NOT EXISTS workload_locks (
 -- Workload priority flag: a prioritised row gets its Breakdate/Time cell highlighted in the UI.
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS is_priority BOOLEAN NOT NULL DEFAULT false;
 
+-- Schema version history: backups record the highest version so a restore can check compatibility.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version     INT PRIMARY KEY,
+  applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Backup and Restore job history.
+-- Stores backup creation, backup analysis, restore execution,
+-- rollback activity, verification reports and operational history.
+-- Backup files are soft-deleted by removing the file and setting deleted_at.
+
+CREATE TABLE IF NOT EXISTS backup_jobs (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind             TEXT NOT NULL DEFAULT 'create' CHECK (kind IN ('create','analyze','restore')),
+  status           TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','succeeded','failed','cancelled','rolled_back')),
+  progress         TEXT,
+  filename         TEXT,
+  rel_path         TEXT,
+  size_bytes       BIGINT,
+  sha256           TEXT,
+  schema_version   INT,
+  app_version      TEXT,
+  pg_version       TEXT,
+  signed           BOOLEAN NOT NULL DEFAULT FALSE,
+  note             TEXT,
+  summary          JSONB,
+  error            TEXT,
+  verify_status    TEXT CHECK (verify_status IN ('ok','failed')),
+  verify_report    JSONB,
+  verified_at      TIMESTAMPTZ,
+  verified_by      INT REFERENCES users(id) ON DELETE SET NULL,
+  created_by       INT REFERENCES users(id) ON DELETE SET NULL,
+  created_by_name  TEXT,
+  started_at       TIMESTAMPTZ,
+  finished_at      TIMESTAMPTZ,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at       TIMESTAMPTZ,
+  deleted_by       INT REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS backup_jobs_created_idx ON backup_jobs (created_at DESC);
+CREATE INDEX IF NOT EXISTS backup_jobs_status_idx ON backup_jobs (kind, status);
+
+-- Restore execution support.
+-- Restore operations reuse the backup_jobs table and track:
+--   • Risk Level
+--   • Duration
+--   • Source Backup
+--   • Status History
+--   • Rollback Relationships
+
+ALTER TABLE backup_jobs DROP CONSTRAINT IF EXISTS backup_jobs_kind_check;
+ALTER TABLE backup_jobs ADD CONSTRAINT backup_jobs_kind_check CHECK (kind IN ('create','analyze','restore'));
+ALTER TABLE backup_jobs DROP CONSTRAINT IF EXISTS backup_jobs_status_check;
+ALTER TABLE backup_jobs ADD CONSTRAINT backup_jobs_status_check
+  CHECK (status IN ('queued','running','succeeded','failed','cancelled','rolled_back'));
+ALTER TABLE backup_jobs ADD COLUMN IF NOT EXISTS risk_level TEXT;
+ALTER TABLE backup_jobs ADD COLUMN IF NOT EXISTS duration_ms INT;
+ALTER TABLE backup_jobs ADD COLUMN IF NOT EXISTS source_backup_id UUID;   -- the backup a restore/analysis used, when it is a stored one
+ALTER TABLE backup_jobs DROP CONSTRAINT IF EXISTS backup_jobs_risk_level_check;
+ALTER TABLE backup_jobs ADD CONSTRAINT backup_jobs_risk_level_check CHECK (risk_level IN ('LOW','MEDIUM','HIGH'));
 -- PSD Daily Plug List: one row per plug per day, imported from the PSD's daily plug list workbook (one sheet per day:
 -- NO / PLUG ID / PROG NAME/PROJ TITLE / PSD / Account By). The Workload Tracker copies Plug ID, PSD and Prog. Name from here.
 CREATE TABLE IF NOT EXISTS workload_plugs (
@@ -381,3 +511,6 @@ SELECT group_id, 'dashboard.users' FROM group_permissions
 ON CONFLICT DO NOTHING;
 INSERT INTO app_settings (key, value) VALUES ('dashboard_users_granted', '1') ON CONFLICT (key) DO NOTHING;
 DELETE FROM group_permissions WHERE perm_key = 'dashboard.recent';
+
+-- The Reports page (and its CSV export) was removed. Drop its retired permission keys from every group.
+DELETE FROM group_permissions WHERE perm_key IN ('reports', 'reports.ingest', 'reports.export');

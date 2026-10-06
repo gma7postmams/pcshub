@@ -12,13 +12,13 @@ const router = express.Router();
 //   workload           -> they can open the Workload Tracker
 const { ACTIVE_MINUTES } = require('./presence');   // "active now" = used the app within this many minutes
 // The window the "Workload by day" chart covers (the dropdown at the top right of the Workload Tracker block).
-const RANGES = {   // the order here is the order of the menu (All time first); the default is DEFAULT_RANGE below
+const RANGES = Object.assign(Object.create(null), {   // the order here is the order of the menu (All time first); the default is DEFAULT_RANGE below
   all: { label: 'All time', sub: 'all time' },
   week: { label: 'This week', sub: 'past week and the week ahead' },
   month: { label: 'This month', sub: 'the whole month' },
   last30: { label: 'Last 30 days', sub: 'the last 30 days' },
   next30: { label: 'Next 30 days', sub: 'the next 30 days' },
-};
+});
 const DEFAULT_RANGE = 'week';   // what people see until they choose something else
 const rangeKey = (q) => (RANGES[q] ? q : DEFAULT_RANGE);
 const BUCKET_NAME = { day: 'day', week: 'week', month: 'month', year: 'year' };
@@ -98,7 +98,6 @@ router.get('/', asyncH(async (req, res) => {
     canOpen: {
       ingest: canPage(u, '/ingest'),
       approval: canPage(u, '/approval'),
-      reports: canPage(u, '/reports'),
       workload: canPage(u, '/workload'),
       plugs: canPage(u, '/plug-list'),
     },

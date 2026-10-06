@@ -5,7 +5,7 @@ import { ago, fmtDate, initials } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { Empty, RoleBadge } from '../components/ui.jsx';
 import {
-  BarChartIcon, CalendarCheckIcon, CalendarGridIcon, CheckCircleIcon, ChevronDownSmall, ChevronRightIcon, ClockIcon, CloudIcon, DocIcon, FlagIcon,
+  CalendarCheckIcon, CalendarGridIcon, CheckCircleIcon, ChevronDownSmall, ChevronRightIcon, ClockIcon, CloudIcon, DocIcon, FlagIcon,
   HeroArt, HourglassIcon, ListIcon, MoonArt, PulseIcon, SunArt, UsersIcon, XCircleIcon,
 } from '../components/DashIcons.jsx';
 import '../dashboard.css';
@@ -237,7 +237,6 @@ export default function Dashboard() {
     d.canOpen.workload && { to: '/workload', label: 'Workload Tracker', icon: ListIcon, hue: 'purple' },
     d.canOpen.plugs && { to: '/plug-list', label: 'PSD Daily Plug List', icon: DocIcon, hue: 'green' },
     d.canOpen.approval && { to: '/approval', label: 'Approval', icon: CheckCircleIcon, hue: 'amber' },
-    d.canOpen.reports && { to: '/reports', label: 'Reports', icon: BarChartIcon, hue: 'indigo' },
   ].filter(Boolean);
   const nothing = !w && !us && !d.kpis && !links.length;
   const info = w ? dayInfo(w.byDay, w.bucket) : null;

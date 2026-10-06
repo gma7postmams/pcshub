@@ -11,10 +11,11 @@ const Ingest = lazy(() => import('./pages/Ingest.jsx'));
 const Workload = lazy(() => import('./pages/Workload.jsx'));
 const PlugListPage = lazy(() => import('./pages/PlugListPage.jsx'));
 const Approval = lazy(() => import('./pages/Approval.jsx'));
-const Reports = lazy(() => import('./pages/Reports.jsx'));
 const Knowledge = lazy(() => import('./pages/Knowledge.jsx'));
 const Admin = lazy(() => import('./pages/admin/Admin.jsx'));
 const Profile = lazy(() => import('./pages/Profile.jsx'));
+
+const ActivityHistory = lazy(() => import('./pages/ActivityHistory.jsx'));
 
 const PAGES = {
   '/dashboard': Dashboard,
@@ -22,11 +23,13 @@ const PAGES = {
   '/workload': Workload,
   '/plug-list': PlugListPage,
   '/approval': Approval,
-  '/reports': Reports,
+  '/activity-history': ActivityHistory,
   '/knowledge': Knowledge,
   '/admin': Admin,
   '/profile': Profile,
 };
+
+
 
 const Loading = () => <main className="container"><div className="empty">Loading…</div></main>;
 

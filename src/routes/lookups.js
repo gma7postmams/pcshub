@@ -5,11 +5,21 @@ const { canPage } = require('../permissions');
 
 const router = express.Router();
 
-// Active dropdown values for a category (any signed-in user)
+// Which page each dropdown category belongs to. A user only gets the values for pages their group can open.
+const CATEGORY_PAGE = Object.assign(Object.create(null), {
+  program: '/ingest',
+  platform: '/ingest',
+  workload_platform: '/workload',
+  plug_type: '/workload',
+});
+
+// Active dropdown values: GET /api/dropdowns?categories=platform,plug_type
 router.get('/dropdowns', asyncH(async (req, res) => {
-  const cats = String(req.query.categories || req.query.category || '')
-    .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 10);
+  const cats = [...new Set(String(req.query.categories || req.query.category || '')
+    .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 10))];
   if (!cats.length) throw new HttpError(400, 'category is required');
+  if (cats.some((c) => !CATEGORY_PAGE[c])) throw new HttpError(400, 'Unknown category');
+  if (cats.some((c) => !canPage(req.user, CATEGORY_PAGE[c]))) throw new HttpError(403, 'Not permitted');
   const { rows } = await db.query(
     `SELECT category, value FROM dropdown_options
       WHERE is_active AND category = ANY($1::text[]) ORDER BY category, sort_order, value`,
@@ -19,15 +29,6 @@ router.get('/dropdowns', asyncH(async (req, res) => {
   cats.forEach((c) => { out[c] = []; });
   rows.forEach((r) => out[r.category].push(r.value));
   res.json(out);
-}));
-
-// Active users (for "Requested by" / assignee pickers) — only for groups that edit such records
-router.get('/users/active', asyncH(async (req, res) => {
-  if (!canPage(req.user, '/ingest') && !canPage(req.user, '/workload')) throw new HttpError(403, 'Not permitted');
-  const { rows } = await db.query(
-    `SELECT id, full_name, username FROM users WHERE is_active ORDER BY full_name`
-  );
-  res.json(rows);
 }));
 
 module.exports = router;

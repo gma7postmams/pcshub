@@ -34,7 +34,10 @@ router.post('/leave', asyncH(async (req, res) => {
 // Anyone who can open that page may ask; the answer is only people who are currently on that same page.
 router.get('/', asyncH(async (req, res) => {
   const path = String(req.query.path || '');
-  if (!PAGE_BY_PATH[path]) return res.status(400).json({ error: 'Unknown page' });
+  const page = PAGE_BY_PATH[path];
+  // Only for pages a group has to be granted (or the Admin page): "who is on their Profile" is nobody else's business,
+  // and everyone can open Profile, so that would hand any signed-in user a list of names and roles.
+  if (!page || page.always) return res.status(400).json({ error: 'Unknown page' });
   if (!canPage(req.user, path)) return res.status(403).json({ error: 'No access to that page' });
   const { rows } = await db.query(
     `SELECT p.user_id AS id, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name, u.role, p.last_active_at

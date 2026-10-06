@@ -14,7 +14,7 @@ export const Chip = ({ hue, dot, small, children }) => (
 );
 
 const TYPE_HUE = { EPISODIC: 'blue', SEASONAL: 'pink', BUMPER: 'red', 'POP-UP/POP LOGO': 'blue', RADIO: 'green' };   // avoids purple/orange/teal (the team colours)
-export const TypePill = ({ value }) => (value ? <Chip hue={TYPE_HUE[value] || hueOf(value)}>{value}</Chip> : null);
+export const TypePill = ({ value }) => (value ? <Chip hue={Object.prototype.hasOwnProperty.call(TYPE_HUE, value) ? TYPE_HUE[value] : hueOf(value)}>{value}</Chip> : null);
 
 const TEAM_HUE = { VGFX: 'purple', VEDIT: 'orange', AUDIO: 'teal' };   // reserved: never appear in PALETTE above
 const TEAM_LABEL = { VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio' };

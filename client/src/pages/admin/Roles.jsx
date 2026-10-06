@@ -5,6 +5,7 @@ const ACT = {
   'ingest.delete': 'Delete ingest records',
   'approval.decide': 'Approve / reject',
   'workload.write': 'Edit Workload',
+  'knowledge.write': 'Upload / rename / delete Knowledge Base PDFs',
   'admin': 'Users, groups, dropdowns, branding, audit',
 };
 
@@ -19,7 +20,7 @@ export default function Roles({ model }) {
       </div>
       <div className="card">
         <div className="table-wrap">
-          <table className="t perm-matrix">
+          <table className="t wl perm-matrix">
             <thead><tr><th>Action</th><th>Needs page</th>{model.roles.map((r) => <th key={r}><span className={`role-badge r-${r}`}>{r}</span></th>)}</tr></thead>
             <tbody>
               {Object.keys(model.actionPage).map((a) => (

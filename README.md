@@ -1,6 +1,6 @@
 # Promotional Content Hub
 
-Multi-user tracker for promotional content: **Ingest Tracker → Approval**, **Workload Tracker**, Reports, Knowledge Base, Dashboard, Admin.
+Multi-user tracker for promotional content: **Ingest Tracker → Approval**, **Work Load Tracker**, PSD Daily Plug List, Knowledge Base, Dashboard, Admin.
 Node.js (Express) + PostgreSQL API · **React 18 + Vite** front end · themes with dark/light · top navigation only · mobile-ready PWA · no AI.
 
 ## Quick start
@@ -28,7 +28,7 @@ Open `http://localhost:3000`, sign in with the seeded Admin, set a new password 
 
 ### Production (native, systemd)
 
-Requirements: Node.js 18+ (22 LTS recommended), PostgreSQL 14+, nginx.
+Requirements: Node.js 20+ (22 LTS recommended), PostgreSQL 14+, nginx.
 
 ```bash
 # 1. App user + code
@@ -78,10 +78,8 @@ Upgrading: replace the code, `npm ci --omit=dev`, `npm run build`, `npm run migr
 |------|----------|
 | Dashboard | Ingest KPIs · Recent ingest activity |
 | Ingest Tracker | — |
-| Workload Tracker | — |
+| Work Load Tracker | — |
 | Approval | — |
-| Reports | Ingest & Approval summary · CSV export |
-| Knowledge Base | — |
 
 A section only takes effect if its page is also checked.
 
@@ -123,26 +121,28 @@ Status is the approval state and is never set by the client:
 - **Front end:** React escapes all rendered data (no `innerHTML`); the Vite build has no inline scripts, so the strict CSP stays `script-src 'self'`. Each page URL is still checked server-side before `index.html` is returned (locked pages answer 403).
 
 - **Passwords:** bcrypt 6 (cost 12); 8+ chars with letters and numbers, max 72 bytes, rejects common passwords and ones containing the username/name; forced change for new or reset accounts; other sessions signed out on change.
-- **2FA (TOTP):** `otplib`; required for Admins by default (`REQUIRE_2FA=admin|all|none`) — required users are held on Profile until enrolled and cannot disable it. Secrets are **AES-256-GCM encrypted at rest** (`TOTP_ENC_KEY`, rotatable via `TOTP_ENC_KEY_OLD`), also encrypted inside the session during setup. **Codes are single-use** (replay-protected per time-step).
+- **2FA (TOTP):** `otplib`; **off for everyone from the start.** Only an Admin can turn it on or off for a user (Admin > Users); a user it is on for is held on Profile until they enrol an authenticator, and cannot disable it themselves. Disabling it for a user needs the Admin's own password. Secrets are **AES-256-GCM encrypted at rest** (`TOTP_ENC_KEY`, rotatable via `TOTP_ENC_KEY_OLD`), also encrypted inside the session during setup. **Codes are single-use** (replay-protected per time-step).
 - **Login:** one generic error for unknown user / wrong password / locked / disabled (no username enumeration); account lock after 5 failures (15 min); per-IP login rate limit; constant-ish timing.
-- **Sessions:** PostgreSQL store, regenerated at login, `HttpOnly`, `SameSite=Lax`, `Secure` + `__Host-` cookie prefix over HTTPS, rolling 12 h. Deactivation / password reset kills sessions.
+- **Sessions:** PostgreSQL store, regenerated at login, `HttpOnly`, `SameSite=Lax`, `Secure` + `__Host-` cookie prefix over HTTPS. Signed out after 12 h without activity (`SESSION_HOURS`) and always 7 days after sign-in (`SESSION_MAX_HOURS`). Deactivation / password reset kills sessions.
+- **Confirm it's you:** resetting a user's password, removing a user's 2FA, giving someone the Admin role, and downloading / deleting / restoring a backup all ask the Admin for their own password (plus authenticator code) again. For the user-management actions one confirmation lasts 5 minutes; backups ask every time. Five wrong answers in 15 minutes block further tries (also applies to the current-password box on Profile), so an open session cannot be used to guess a password.
 - **Headers:** Helmet with strict CSP (no inline script/style, `frame-ancestors 'none'`), HSTS 1 year, `Permissions-Policy`, no `X-Powered-By`.
-- **CSRF:** state-changing API calls require `X-Requested-With: PromoHub` plus SameSite cookie.
+- **CSRF:** state-changing API calls need the SameSite cookie, the `X-Requested-With: PromoHub` header, **and** must come from this site according to the browser (`Sec-Fetch-Site`, or `Origin` matching the host; pin it with `APP_ORIGIN`).
+- **API responses** are sent `Cache-Control: no-store`; ids, dates, paging and search text are validated before they reach the database (bad input is a 400/404, never a 500).
 - **Authorization:** role + group checked server-side on every page and API; re-loaded from the DB on every request.
-- **Data:** parameterized SQL everywhere; server-side validation; CSV exports guard against formula injection.
-- **Uploads:** PNG/JPEG/WebP only, 2 MB, magic-byte verified, random filenames, `nosniff`.
-- **Audit log** of logins/failures/locks, every create/update/send/decision, admin and group changes, exports. Append-only for the least-privilege DB login.
+- **Data:** parameterized SQL everywhere; server-side validation.
+- **Uploads:** logo: PNG/JPEG/WebP only, 2 MB, magic-byte verified, random filenames, `nosniff`. Knowledge Base: real PDFs only, random stored names. Excel imports: must be a real `.xlsx`; the archive is measured before it is opened (40 MB unpacked at most, 25 MB per sheet: `IMPORT_MAX_UNPACKED_MB`, `IMPORT_MAX_SHEET_MB`) and imports run one at a time, which bounds how much memory a crafted or oversized file can take. An import may add at most 30 new custom columns.
+- **Audit log** of logins/failures/locks, failed identity confirmations, every create/update/send/decision, Workload and Plug List imports/exports and bulk actions, admin and group changes. Append-only for the least-privilege DB login.
 - **Least privilege DB:** `db/app-role.sql` creates a DML-only runtime login (no DDL, cannot edit roles or delete audit logs); run the app with `MIGRATE_ON_START=false`.
-- **Startup checks:** refuses to start in production without a strong `SESSION_SECRET` or `TOTP_ENC_KEY`; warns on missing `TRUST_PROXY`, `COOKIE_SECURE=false`, `REQUIRE_2FA=none`.
+- **Startup checks:** refuses to start (in any mode) without a strong `SESSION_SECRET` — there is no built-in fallback and placeholder values are rejected — and in production without `TOTP_ENC_KEY`; warns on missing `TRUST_PROXY` or `BACKUP_SIGNING_KEY`, `COOKIE_SECURE=false`. The first Admin's `ADMIN_PASSWORD` must meet the password policy.
 - `npm audit`: 0 known vulnerabilities at time of release.
 
 ### Go-live checklist (public internet)
 
 1. TLS at the reverse proxy (see `deploy/nginx.conf`) forwarding `X-Forwarded-Proto`; app listens on 127.0.0.1 by default in production (`HOST`); firewall Postgres off the internet.
-2. `.env`: `NODE_ENV=production`, `TRUST_PROXY=1`, fresh `SESSION_SECRET` and `TOTP_ENC_KEY` (store the key in your password manager/secret store), strong `ADMIN_PASSWORD`.
+2. `.env`: `NODE_ENV=production`, `TRUST_PROXY=1`, fresh `SESSION_SECRET`, `TOTP_ENC_KEY` and `BACKUP_SIGNING_KEY` (store the keys in your password manager/secret store), strong `ADMIN_PASSWORD`, and `APP_ORIGIN=https://your-address`. Never commit `.env`; if one was ever committed, treat every value in it as leaked and replace it.
 3. Database: owner login for `npm run migrate`; app runs as `promohub_app` from `db/app-role.sql` with `MIGRATE_ON_START=false`.
-4. First sign-in as Admin: change password, enrol 2FA. Consider `REQUIRE_2FA=all`.
-5. Backups: nightly `pg_dump` + `uploads/branding/`, tested restore. Keep `TOTP_ENC_KEY` with (but separate from) backups.
+4. First sign-in as Admin: change password. Turn 2FA on per user from Admin > Users when wanted.
+5. Backups: nightly `pg_dump` + `uploads/branding/` + `uploads/knowledge/` (Knowledge Base PDFs), tested restore. Keep `TOTP_ENC_KEY` with (but separate from) backups.
 6. Keep dependencies patched: `npm audit` monthly; run under systemd (`deploy/promo-hub.service`, auto-restart + sandboxing).
 7. Get an independent penetration test before announcing the URL.
 
@@ -151,10 +151,9 @@ Status is the approval state and is never set by the client:
 | Var | Purpose |
 |-----|---------|
 | `DATABASE_URL` | Postgres connection string |
-| `SESSION_SECRET` | long random string (`openssl rand -hex 48`), 32+ chars required |
+| `SESSION_SECRET` | long random string (`openssl rand -hex 48`), 32+ chars; **required in every mode**, placeholders are refused |
 | `TOTP_ENC_KEY` | 64 hex chars (`openssl rand -hex 32`), encrypts 2FA secrets; required in production |
 | `TOTP_ENC_KEY_OLD` | previous key, only while rotating |
-| `REQUIRE_2FA` | `admin` (default), `all`, `none` |
 | `MIGRATE_ON_START` | `false` to skip migrations at boot (least-privilege DB login) |
 | `LOGIN_RATE_LIMIT` | login attempts per IP per 15 min (default 20) |
 | `PORT` | default 3000 |
@@ -163,10 +162,22 @@ Status is the approval state and is never set by the client:
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_FULLNAME`, `ADMIN_EMAIL` | seed Admin (created once if missing) |
 | `TRUST_PROXY` | set (e.g. `1`) when behind nginx/Traefik so secure cookies and rate limits see the real client |
 | `COOKIE_SECURE` | override; set `false` for plain-HTTP LAN deployments in production mode |
-| `SESSION_HOURS` | session lifetime, default 12 |
+| `SESSION_HOURS` | signed out after this many hours without activity, default 12 |
+| `SESSION_MAX_HOURS` | signed out this many hours after sign-in however active, default 168 (7 days) |
+| `APP_ORIGIN` | address(es) users open the app at, e.g. `https://hub.example.com` (comma-separated). When set, changes are only accepted from that origin. Needed if your proxy rewrites the `Host` header on a plain-HTTP site |
+| `API_RATE_LIMIT` | API requests per minute per client address, default 300 |
+| `REAUTH_GRACE_MINUTES` | how long a "confirm it's you" covers further user-management actions, default 5 (`0` = ask every time) |
+| `BACKUP_SIGNING_KEY` | 64 hex chars (`openssl rand -hex 32`); signs backup manifests. With it set, an unsigned archive is rated HIGH risk at restore |
+| `IMPORT_MAX_UNPACKED_MB`, `IMPORT_MAX_SHEET_MB` | largest Excel import once unpacked (default 40) and largest single sheet (default 25). Reading a sheet needs roughly 10–15× its size in memory, so raise these only on a server with RAM to spare |
+| `SESSION_SECRET_OLD` | previous `SESSION_SECRET`, for **one start** after changing it on an install that never set `TOTP_ENC_KEY` (2FA secrets were encrypted with a key derived from the session secret; this lets them be re-encrypted) |
 | `PGSSL` | `true` to connect to Postgres over TLS |
+| `KNOWLEDGE_MAX_MB` | max size of one Knowledge Base PDF, default 25 (keep nginx `client_max_body_size` above it) |
 
 Note: PWA install and service workers require HTTPS (or `localhost`).
+
+### Knowledge Base
+
+`/knowledge` holds reference PDFs. Anyone whose group has the Knowledge Base page can open and download them; **Admin and Manager** roles can drag & drop (or browse) up to 10 PDFs at a time, rename and delete. Files are checked to be real PDFs, duplicates are rejected, and every upload/rename/delete is written to the audit log. PDFs live in `uploads/knowledge/` (back it up with the database). PDFs placed in `knowledge-seed/` are added to the list once, on the first visit to the page.
 
 ## Layout
 
@@ -175,27 +186,29 @@ server.js                 app wiring, security headers, page routes behind requi
 src/permissions.js        CATALOG (pages/sections), ROLE_ACTIONS — the single source of truth
 src/middleware.js         loadUser (role + group perms), requirePageAccess, requireSection, requireAction, csrfGuard
 src/schema.sql            idempotent schema (runs on every boot)
-src/routes/*.js           auth, profile, ingest, approvals, workload, reports, knowledge, dashboard, admin, notifications, branding
+src/routes/*.js           auth, profile, ingest, approvals, workload, plugs, knowledge, dashboard, admin, backups, notifications, branding
+src/reauth.js             "confirm it's you" (password + 2FA) for sensitive actions, with a wrong-guess limit
+src/xlsx-guard.js         checks an uploaded workbook (type, unpacked size) before it is opened
 client/                   React 18 + Vite front end
   src/App.jsx             routes + client-side page guard (mirrors the server lock)
   src/context.jsx         session (role, group, allowed pages/sections/actions) + branding
-  src/components/         TopNav (nav, notifications, user menu), Modal, Confirm, Toast, Pill, Kpi, Bars
-  src/pages/              Login, Dashboard, Ingest, Approval, Workload, Reports, Knowledge, Profile, admin/*
+  src/components/         TopNav (nav, notifications, user menu), Modal, Confirm, Toast, Pill, Kpi
+  src/pages/              Login, Dashboard, Ingest, Approval, Workload, PlugList, Knowledge, Profile, admin/*
   src/lib/                api client (CSRF header, auth redirects), theme engine, utils
   public/                 theme-boot.js, sw.js, manifest, icons, offline page
   dist/                   build output served by Express (index.html only after the access check)
 ```
 
-### Import / export audit hook (for whoever owns the audit log)
+### Import / export in the audit log
 
-The Import and Export buttons — **Workload Import**, **Workload Export** and the PSD Daily Plug List **Import plug list** — do **not** write to the audit log themselves; that part belongs to someone else. Instead, each run (and each failure) is announced through one small module, `src/transfer-hook.js`, and the audit owner subscribes once:
+The Import and Export buttons — **Workload Import**, **Workload Export** and the PSD Daily Plug List **Import plug list** — announce each run (and each failure) through one small module, `src/transfer-hook.js`, and `server.js` subscribes the audit log to it:
 
 ```js
 const { onTransfer } = require('./src/transfer-hook');
-onTransfer((e) => audit(e.req, e.action, e.entity, e.entityId, e.details));   // e.g. in server.js, once the audit module is loaded
+onTransfer((e) => audit(e.req, e.action, e.entity, e.entityId, e.details));   // in server.js
 ```
 
-Nothing is wired up yet, so until that line is added these actions simply don't appear in the audit log. (One line per event is also written to the server log — `journalctl -u pcshub -f` — whether or not anything is subscribed.)
+So every import and export appears under **Admin → Audit Log** (and in the user's own Activity History): who did it, the file name and size, the filters used, row counts (added / skipped, with the first skip reasons), new columns created, duration, and the error message when it failed. Row contents are never recorded. One line per event is also written to the server log (`journalctl -u pcshub -f`).
 
 **Events** (`e.action`): `workload.export`, `workload.export_failed`, `workload.import`, `workload.import_failed`, `workload.plugs_import`, `workload.plugs_import_failed` — the list is exported as `TRANSFER_ACTIONS`.
 
@@ -252,7 +265,7 @@ The **Artwork / STB** field takes either a **date** (a date picker) or **text** 
 The Dashboard follows a design mockup: a greeting banner (a sun by day and a moon from 6 pm until 5 am — it switches by itself while the page is open — the name, the date and a clapperboard illustration; the wording is Good morning before noon, afternoon until 6 pm, evening after, from the clock of the computer showing the page), then **Active users** beside **Quick Links**, the **Workload Tracker** card with four tinted KPI cards, **Workload by day** beside **By team**, and an **Ingest & Approval** card with four KPI cards. Every block shows only if the signed-in user may see it, the page refreshes every minute, and it **adapts to the screen**: on a wide window it uses two columns and the chart row grows into the spare height (a 1665×944 window fits without scrolling, like the mockup); on a short window (a laptop at 125% scaling, about 740 px tall) everything shrinks a size so it still fits; below about 980 px the blocks stack, and on a phone the cards go one per row. The top navigation got an icon on every link (shown from 1620 px wide; text-only down to 1280 px; the menu button below that) and the user button now stacks name over role with a chevron.
 
 - **Active users** (the Dashboard section *Active users*, granted per group under Admin → Groups) — a card per person working in the app right now, with their role and the page they are on; a card opens that page if you can open it too. With **one or two people** they show as full cards; from **three** they switch to smaller cards in more columns so the block stays about as tall (it fits six people in two rows on a 1665 px window and eight on 1920 px; anyone beyond that scrolls inside the card, and on a phone they stack in one column). **Earlier today** is a small pill in the card header — hover or focus it for the names. “Active” means their app sent a heartbeat within the last 3 minutes: the app sends a small heartbeat (`POST /api/presence`, about once a minute and when changing page) **only while the person is actually using it** — mouse, keys, touch or scroll in the last two minutes, tab visible — so an idle open tab doesn't count (stored one row per user in `user_presence`). A person drops off the list **at once** when they sign out (logout removes their row) or close the tab / browser (the page sends `POST /api/presence/leave` as it unloads); after a crash or power cut they fall off when the 3-minute window runs out. The block refreshes every 10 seconds (`GET /api/dashboard/users`), the Dashboard records that you are on it *before* it loads, and your own card always says you are on the Dashboard. *Earlier today* lists anyone active in the last 24 hours. Disabled accounts are left out.
-- **Quick Links** — always a single row: one tile each for the Ingest Tracker, Workload Tracker, PSD Daily Plug List, Approval and Reports, only for the pages you can open; the tiles share the width and shrink with the screen (icon beside the label when there is room, stacked and smaller when there isn't). The top-row cards are each only as tall as their own content.
+- **Quick Links** — always a single row: one tile each for the Ingest Tracker, Workload Tracker, PSD Daily Plug List and Approval, only for the pages you can open; the tiles share the width and shrink with the screen (icon beside the label when there is room, stacked and smaller when there isn't). The top-row cards are each only as tall as their own content.
 - **Workload Tracker** — *Today*, *This week* (Monday–Sunday), *Breakdates in the next 7 days* and *Priority* (each opens the tracker). The **This week ▾** menu at the top right chooses the days **Workload by day** covers: **All time** (listed first), *This week* (the past week and the week ahead — the default until you pick something else), *This month*, *Last 30 days* or *Next 30 days* (`GET /api/dashboard/days?range=…`; your choice is remembered **only for the sign-in it was made in** — reloads, page changes and other tabs keep it, but signing out, and signing in again (or someone else signing in on that browser), starts at *This week* again; it is stored in the browser against a one-way fingerprint of the sign-in, `session_key` from `GET /api/auth/me`, and cleared at sign-out). *All time* runs from the first day that has any work through the last one — and always through today, so the chart shows where “now” is even when every item is in the past — and picks the bar size so the chart stays readable — one bar per **day** up to about six weeks of history, per **week** (Monday–Sunday) up to about seven months, per **month** up to about five years, per **year** beyond that; the title, the average and the busiest-bar wording follow (“Workload by month”, “Monthly average”, “Busiest month”), the tooltip names what the bar covers (“Sep 28 – Oct 4, 2026”, “April 2026”), and the bar that contains today is highlighted. The four KPI cards are not affected by the menu. The chart has a y axis and gridlines, past days muted, upcoming days in the accent colour, today picked out, weekends lightly shaded, the total in view, daily average and busiest day, and a hover tooltip. **By team** counts items per VGFX / VEDIT / Audio (a VGFX/VEDIT item counts for both).
 - **Ingest & Approval** (the Dashboard section *Ingest KPIs*) — total, pending, approved and rejected, each opening the related list.
 

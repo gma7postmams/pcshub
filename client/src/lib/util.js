@@ -14,6 +14,15 @@ export function fmtDateTime(d) {
   return new Date(d).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+export function fmtBytes(n) {
+  if (n == null || Number.isNaN(Number(n))) return '';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let v = Number(n);
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${i ? v.toFixed(v >= 100 ? 0 : 1) : v} ${units[i]}`;
+}
+
 export function ago(d) {
   const s = Math.round((Date.now() - new Date(d).getTime()) / 1000);
   if (s < 60) return 'just now';

@@ -26,6 +26,10 @@ export async function api(method, url, body, { quiet = false } = {}) {
   let data = null;
   if ((res.headers.get('content-type') || '').includes('application/json')) data = await res.json();
 
+  if (res.status === 503 && data && data.maintenance) {
+    if (!window.__pcsRestoring) window.location.reload(); // shows the server's maintenance page
+    throw new ApiError(data.error, 503, data);
+  }
   if (res.status === 401 && !url.startsWith('/api/auth/') && !quiet) {
     window.location.href = '/login';
     throw new ApiError('Session expired', 401, data);

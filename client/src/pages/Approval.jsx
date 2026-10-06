@@ -3,19 +3,20 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { get, post } from '../lib/api.js';
 import { ago, fmtDate, fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { Empty, Modal, Pill, useConfirm, useToast } from '../components/ui.jsx';
+import { Empty, Modal, Pill, useToast } from '../components/ui.jsx';
 
 const SEGMENTS = [['Pending', 'Pending'], ['Approved', 'Approved'], ['Rejected', 'Rejected'], ['', 'All']];
 
 export default function Approval() {
   const s = useSession();
   const toast = useToast();
-  const confirm = useConfirm();
   const [params] = useSearchParams();
   const canDecide = s.can('approval.decide');
   const [status, setStatus] = useState(params.get('status') ?? (canDecide ? 'Pending' : ''));
   const [data, setData] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [decisionForm, setDecisionForm] = useState(null);
+  const [decisionBusy, setDecisionBusy] = useState(false);
 
   const load = useCallback(async () => {
     const p = new URLSearchParams();
@@ -29,30 +30,40 @@ export default function Approval() {
     if (id) get(`/api/approvals?id=${+id}`).then((d) => { if (d.rows[0]) setDetail(d.rows[0]); }).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const decide = async (r, decision) => {
-    const res = await confirm(
-      decision === 'Approved' ? 'Approve request' : 'Reject request',
-      `${decision === 'Approved' ? 'Approve' : 'Reject'} ingest #${r.ingest_record_id} — ${r.program}?`,
-      {
-        okText: decision === 'Approved' ? 'Approve' : 'Reject',
-        danger: decision === 'Rejected',
-        input: { label: decision === 'Rejected' ? 'Reason for rejection' : 'Note (optional)', required: decision === 'Rejected' },
-      }
-    );
-    if (!res) return;
+  const decide = (r, decision) => {
+    setDetail(null);
+    setDecisionForm({
+      r,
+      decision,
+      note: '',
+      destination_folder: r.destination_folder || '',
+    });
+  };
+
+  const submitDecision = async () => {
+    if (decisionForm.decision === 'Rejected' && !decisionForm.note.trim()) {
+      toast('A rejection reason is required', 'err');
+      return;
+    }
+    setDecisionBusy(true);
     try {
-      await post(`/api/approvals/${r.id}/decide`, { decision, note: res.value });
-      toast(`Request ${decision.toLowerCase()}`);
-      setDetail(null);
+      await post(`/api/approvals/${decisionForm.r.id}/decide`, {
+        decision: decisionForm.decision,
+        note: decisionForm.note,
+        ...(decisionForm.decision === 'Approved' ? { destination_folder: decisionForm.destination_folder } : {}),
+      });
+      toast(`Request ${decisionForm.decision.toLowerCase()}`);
+      setDecisionForm(null);
       load();
     } catch (e) { toast(e.message, 'err'); }
+    finally { setDecisionBusy(false); }
   };
 
   const counts = data ? data.counts : {};
   const all = Object.values(counts).reduce((a, b) => a + b, 0);
 
   return (
-    <main className="container">
+    <main className="container wide wl-page">
       <div className="page-head">
         <div>
           <h1>Approval</h1>
@@ -71,7 +82,7 @@ export default function Approval() {
         </div>
         <div className="table-wrap" id="tbl">
           {!data ? <Empty>Loading…</Empty> : !data.rows.length ? <Empty>No {status ? status.toLowerCase() : ''} approval requests.</Empty> : (
-            <table className="t">
+            <table className="t wl">
               <thead><tr>
                 <th>Req #</th><th>Ingest #</th><th>Program</th><th>Platform</th><th>Episode</th>
                 <th>Sent by</th><th>Sent</th><th>Status</th><th>Decided by</th>{canDecide ? <th /> : null}
@@ -81,7 +92,7 @@ export default function Approval() {
                   <tr key={r.id} className="clickable" onClick={(e) => { if (!e.target.closest('button')) setDetail(r); }}>
                     <td className="dim mono">{r.id}</td><td className="mono">{r.ingest_record_id}</td>
                     <td><strong>{r.program}</strong></td><td>{r.platform}</td>
-                    <td className="nowrap">{fmtDate(r.episode_date)}</td>
+                    <td className="nowrap">{r.episode_break_date_text || fmtDate(r.episode_date)}</td>
                     <td className="nowrap">{r.requested_by_name || '—'}</td>
                     <td className="dim nowrap">{ago(r.requested_at)}</td>
                     <td><Pill s={r.status} /></td>
@@ -125,7 +136,7 @@ export default function Approval() {
             <dt>Ingest record</dt><dd>#{detail.ingest_record_id}{s.canPage('/ingest') ? <> · <Link to={`/ingest?id=${detail.ingest_record_id}`}>open</Link></> : null}</dd>
             <dt>PROGRAM</dt><dd>{detail.program}</dd>
             <dt>Platform</dt><dd>{detail.platform}</dd>
-            <dt>Episode date</dt><dd>{fmtDate(detail.episode_date) || <span className="dim">—</span>}</dd>
+            <dt>Episode / Break Date</dt><dd>{detail.episode_break_date_text || fmtDate(detail.episode_date) || <span className="dim">—</span>}</dd>
             <dt>Source</dt><dd>{detail.source || <span className="dim">—</span>}</dd>
             <dt>Destination Folder</dt><dd>{detail.destination_folder ? <span className="mono">{detail.destination_folder}</span> : <span className="dim">—</span>}</dd>
             <dt>Requested by</dt><dd>{detail.ingest_requested_by_name || <span className="dim">—</span>}</dd>
@@ -134,6 +145,37 @@ export default function Approval() {
             {detail.decided_at ? <><dt>Decision</dt><dd>{detail.status} by {detail.decided_by_name || '—'} · {fmtDateTime(detail.decided_at)}</dd></> : null}
             {detail.decision_note ? <><dt>Note</dt><dd>{detail.decision_note}</dd></> : null}
           </dl>
+        </Modal>
+      ) : null}
+
+      {decisionForm ? (
+        <Modal
+          title={decisionForm.decision === 'Approved' ? 'Approve request' : 'Reject request'}
+          onClose={() => { if (!decisionBusy) setDecisionForm(null); }}
+          footer={(
+            <>
+              <button type="button" className="btn" disabled={decisionBusy} onClick={() => setDecisionForm(null)}>Cancel</button>
+              <button type="button" className={`btn ${decisionForm.decision === 'Approved' ? 'success' : 'danger'}`} disabled={decisionBusy} onClick={submitDecision}>
+                {decisionBusy ? 'Saving…' : decisionForm.decision}
+              </button>
+            </>
+          )}
+        >
+          <p className="muted m-0">
+            {decisionForm.decision} ingest #{decisionForm.r.ingest_record_id} — {decisionForm.r.program}
+          </p>
+          {decisionForm.decision === 'Approved' ? (
+            <label className="f mt-12">
+              <span>Destination Folder (PCS)</span>
+              <textarea maxLength={1000} className="mono" value={decisionForm.destination_folder}
+                onChange={(e) => setDecisionForm((x) => ({ ...x, destination_folder: e.target.value }))} />
+            </label>
+          ) : null}
+          <label className="f mt-12">
+            <span>{decisionForm.decision === 'Rejected' ? 'Reason for rejection' : 'Approval note (optional)'}</span>
+            <textarea maxLength={2000} value={decisionForm.note}
+              onChange={(e) => setDecisionForm((x) => ({ ...x, note: e.target.value }))} />
+          </label>
         </Modal>
       ) : null}
     </main>
