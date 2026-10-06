@@ -111,3 +111,4 @@ router.get('/stream', (req, res) => {
 module.exports = router;
 module.exports.ACTIVE_MINUTES = ACTIVE_MINUTES;
 module.exports.presenceChanged = changed;
+module.exports.presenceBus = bus;   // the Dashboard's live Active users stream listens to it too

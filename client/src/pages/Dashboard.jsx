@@ -252,17 +252,34 @@ export default function Dashboard() {
     const t = setInterval(load, 60000);   // the whole dashboard refreshes every minute
     return () => clearInterval(t);
   }, [load]);
-  // Active users alone refreshes every 10 seconds (a light request), so locations and who is online stay current
+  // Active users is live: a Server-Sent-Events stream pushes the list the moment someone arrives, switches page or leaves. A light poll stays as a
+  // safety net (every 30 s while the stream is open, every 10 s if it can't be), and everything re-syncs when the tab comes back into view.
   const showUsers = !!(d && d.users);
   useEffect(() => {
     if (!showUsers) return undefined;
-    const refresh = () => {
-      if (document.visibilityState !== 'visible') return;
-      get('/api/dashboard/users', { quiet: true }).then((r) => setD((cur) => (cur ? { ...cur, users: r.users } : cur))).catch(() => { /* next time */ });
+    let es = null;
+    let live = true;
+    let busy = false;
+    const apply = (users) => setD((cur) => (cur ? { ...cur, users } : cur));
+    const poll = () => {
+      if (busy || document.visibilityState !== 'visible') return;
+      busy = true;
+      get('/api/dashboard/users', { quiet: true }).then((r) => { if (live) apply(r.users); }).catch(() => { /* next time */ }).then(() => { busy = false; });
     };
-    const t = setInterval(refresh, 10000);
-    document.addEventListener('visibilitychange', refresh);
-    return () => { clearInterval(t); document.removeEventListener('visibilitychange', refresh); };
+    const close = () => { if (es) { es.close(); es = null; } };
+    const open = () => {
+      if (es || typeof EventSource === 'undefined') return;
+      es = new EventSource('/api/dashboard/users/stream');
+      es.onmessage = (e) => { try { const m = JSON.parse(e.data); if (live && m.users) apply(m.users); } catch (err) { /* ignore a bad message */ } };
+      es.onerror = () => { if (es && es.readyState === 2) close(); };   // refused (signed out / no access) is final; a dropped stream reconnects by itself
+    };
+    open();
+    let n = 0;
+    const t = setInterval(() => { n += 1; if (!es || es.readyState !== 1 || n % 3 === 0) poll(); }, 10000);
+    const onVisible = () => { if (document.visibilityState === 'visible') { poll(); open(); } else close(); };   // a hidden tab doesn't hold a connection open
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => { live = false; close(); clearInterval(t); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible); };
   }, [showUsers]);
 
   const changeRange = (key) => {

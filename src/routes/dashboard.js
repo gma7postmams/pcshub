@@ -10,7 +10,7 @@ const router = express.Router();
 //   kpis               -> the Dashboard section "Ingest KPIs" granted to their group
 //   users              -> the Dashboard section "Active users" granted to their group
 //   workload           -> they can open the Workload Tracker
-const { ACTIVE_MINUTES } = require('./presence');   // "active now" = used the app within this many minutes
+const { ACTIVE_MINUTES, presenceBus } = require('./presence');   // "active now" = used the app within this many minutes
 // The window the "Workload by day" chart covers (the dropdown at the top right of the Workload Tracker block).
 const RANGES = Object.assign(Object.create(null), {   // the order here is the order of the menu (All time first); the default is DEFAULT_RANGE below
   all: { label: 'All time', sub: 'all time' },
@@ -144,6 +144,45 @@ router.get('/users', asyncH(async (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json({ users: await activeUsers(req.user) });
 }));
+
+// GET /api/dashboard/users/stream — the same answer as /users, pushed as it changes (Server-Sent Events), so the Active users block follows people
+// the moment they arrive, switch page or leave instead of on the next poll. The first message is the current list; after that one is sent whenever
+// presence changes. A slow tick every 20 seconds also catches people who just went quiet (their heartbeat window ran out) and is the keep-alive.
+// The page falls back to polling /users if this can't stay open.
+router.get('/users/stream', (req, res) => {
+  if (!canSection(req.user, 'dashboard.users')) return res.status(403).json({ error: 'Active users is not enabled for your group' });
+  res.status(200).set({
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-store, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',   // nginx must not hold the events back
+  });
+  res.flushHeaders();
+  res.write('retry: 3000\n\n');
+  let last = '';
+  let closed = false;
+  let busy = false;
+  let again = false;
+  const push = async () => {
+    if (closed) return;
+    if (busy) { again = true; return; }
+    busy = true;
+    try {
+      const users = await activeUsers(req.user);
+      // only what the cards show decides whether there is something new to send (a heartbeat alone changes nothing visible)
+      const key = JSON.stringify([users.active.map((p) => [p.id, p.page, p.role, p.name]), users.earlier.map((p) => [p.id, p.page])]);
+      if (!closed && key !== last) { last = key; res.write(`data: ${JSON.stringify({ users })}\n\n`); } else if (!closed) res.write(': ping\n\n');
+    } catch (e) { /* the next change or tick tries again */ }
+    busy = false;
+    if (again) { again = false; push(); }
+  };
+  let timer = null;
+  const onChange = () => { clearTimeout(timer); timer = setTimeout(push, 120); };   // bursts (several people arriving at once) become one update
+  presenceBus.on('change', onChange);
+  const tick = setInterval(push, 20000);
+  req.on('close', () => { closed = true; clearTimeout(timer); clearInterval(tick); presenceBus.off('change', onChange); });
+  push();
+});
 
 router.get('/', asyncH(async (req, res) => {
   const u = req.user;
