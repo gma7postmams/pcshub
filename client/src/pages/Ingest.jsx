@@ -93,7 +93,7 @@ function InlineCell({ def, initial, options, onSave, onCancel }) {
   else if (def.kind === 'number') input = <input type="number" min="0" step="1" value={val} disabled={busy} onChange={change} />;
   else if (def.kind === 'area') input = <textarea className="mono" maxLength={def.max} value={val} disabled={busy} onChange={change} />;
   else input = <input maxLength={def.max} value={val} disabled={busy} onChange={change} />;
-  return <div className={`cell-editor${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key}>{input}</div>;
+  return <div className={`cell-editor${def.kind === 'number' ? ' num' : ''}${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key}>{input}</div>;
 }
 
 // NON-COMPLIANT needs a reason: asked here right after it is picked in the Status (CM) cell.
@@ -256,7 +256,7 @@ export default function Ingest() {
                   <table className="t wl">
                     <thead><tr>
                       <th>NO.</th><th>Program / Project</th><th>Platform</th><th>Billable Party</th><th>Episode / Break Date</th><th>Source</th>
-                      <th>No. of Materials</th><th>Requested By</th><th>Destination Folder</th><th>Approved By</th><th>Status (CM)</th><th>Updated</th>
+                      <th className="narrow">No. of Materials</th><th>Requested By</th><th>Destination Folder</th><th>Approved By</th><th>Status (CM)</th><th>Updated</th>
                     </tr></thead>
                     <tbody>
                       {data.rows.map((r) => (
