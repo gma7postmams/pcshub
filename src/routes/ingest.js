@@ -59,9 +59,8 @@ async function parseBody(client, body, user, current = null) {
     destination_folder: can(user, 'ingest.approve')
       ? v.str(body.destination_folder, { field: 'Destination Folder', max: 1000 })
       : (current ? current.destination_folder : null),
-    approved_by: can(user, 'ingest.approve')
-      ? v.str(body.approved_by, { field: 'Approved By', max: 200 })
-      : (current ? current.approved_by : null),
+    // Approved By is never typed in: it is set only by the Approve button (POST /:id/approve) from the signed-in approver.
+    approved_by: current ? current.approved_by : null,
     // Requested By is never taken from the client: it is the signed-in user who creates the request
     // (kept as-is when someone else later edits it; legacy rows with no requester fall back to the editor).
     requested_by_user_id: current && (current.requested_by_user_id || current.requested_by_psd) ? current.requested_by_user_id : user.id,
@@ -167,7 +166,6 @@ const CELL_FIELDS = {
   source: (x) => v.str(x, { field: 'Source', max: 500 }),
   materials_count: (x) => v.int(x, { field: 'Materials count', min: 0 }),
   destination_folder: (x) => v.str(x, { field: 'Destination Folder', max: 1000 }),   // PCS / OCS only (below)
-  approved_by: (x) => v.str(x, { field: 'Approved By', max: 200 }),                   // PCS / OCS only (below)
   remarks: (x) => v.str(x, { field: 'Remarks', max: 4000 }),
 };
 
@@ -175,8 +173,8 @@ router.patch('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const field = String((req.body && req.body.field) || '');
   if (!Object.prototype.hasOwnProperty.call(CELL_FIELDS, field)) throw new HttpError(400, 'That column cannot be edited here');
-  if ((field === 'destination_folder' || field === 'approved_by') && !can(req.user, 'ingest.approve')) {
-    throw new HttpError(403, 'Only PCS / OCS can fill in Destination Folder and Approved By');
+  if (field === 'destination_folder' && !can(req.user, 'ingest.approve')) {
+    throw new HttpError(403, 'Only PCS / OCS can fill in the Destination Folder');
   }
   const value = CELL_FIELDS[field](req.body.value);
   const row = await db.tx(async (c) => {
@@ -197,6 +195,34 @@ router.patch('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
     return out.rows[0];
   });
   res.json({ ok: true, row });
+}));
+
+// Approve: final, like the CM decision. Approved By and the time are set from whoever is signed in and presses the button — never typed in.
+// The Destination Folder (filled in by PCS / OCS) must be there first. Audit-logged; the requester and creator are notified.
+router.post('/:id/approve', requireAction('ingest.approve'), asyncH(async (req, res) => {
+  const id = v.id(req.params.id);
+  await db.tx(async (c) => {
+    const cur = await c.query(
+      `SELECT id, program, destination_folder, approved_by, approved_at, created_by, requested_by_user_id
+         FROM ingest_records WHERE id=$1 FOR UPDATE`, [id]
+    );
+    const r = cur.rows[0];
+    if (!r) throw new HttpError(404, 'Ingest record not found');
+    if (r.approved_at || (r.approved_by && String(r.approved_by).trim())) throw new HttpError(409, 'This record is already approved');
+    if (!r.destination_folder || !String(r.destination_folder).trim()) throw new HttpError(400, 'Fill in the Destination Folder before approving');
+    await c.query(
+      `UPDATE ingest_records SET approved_by=$2, approved_by_user_id=$3, approved_at=now(), updated_by=$3, updated_at=now() WHERE id=$1`,
+      [id, req.user.full_name, req.user.id]
+    );
+    await audit(req, 'ingest.approve', 'ingest_record', id, { approved_by: req.user.full_name }, c);
+    const participants = [r.created_by, r.requested_by_user_id].filter((uid) => uid && uid !== req.user.id);
+    await notifyUsers(participants, {
+      title: `Ingest approved: ${r.program}`,
+      body: `${req.user.full_name} approved ingest #${id}`,
+      link: `/ingest?id=${id}`,
+    }, c);
+  });
+  res.json({ ok: true });
 }));
 
 // Status (CM): DONE or NON-COMPLIANT (with a reason). Every change is audit-logged with who and when.

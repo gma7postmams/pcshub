@@ -14,6 +14,7 @@ const ACTION_LABELS = {
 
   'ingest.create': 'Created Ingest Record',
   'ingest.send_for_approval': 'Submitted For Approval',
+  'ingest.approve': 'Approved Ingest Record',
   'ingest.cm_done': 'CM Completed',
   'ingest.cm_non_compliant': 'CM Marked Non-Compliant',
 
@@ -355,6 +356,9 @@ function formatDetails(row) {
 
     case 'knowledge.delete':
       return `Deleted knowledge document: ${d.title || d.filename || ''}`;
+
+    case 'ingest.approve':
+      return 'Approved ingest request';
 
     case 'ingest.cm_done':
       return 'CM completed ingest request';

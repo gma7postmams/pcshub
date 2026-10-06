@@ -151,6 +151,8 @@ CREATE TABLE IF NOT EXISTS ingest_records (
   source                TEXT,
   destination_folder    TEXT,
   approved_by           TEXT,
+  approved_by_user_id   INT REFERENCES users(id) ON DELETE SET NULL,
+  approved_at           TIMESTAMPTZ,
   requested_by_user_id  INT REFERENCES users(id) ON DELETE SET NULL,
   requested_by_psd      TEXT,
   remarks               TEXT,

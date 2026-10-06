@@ -26,6 +26,23 @@ const CmStatus = ({ r, inline }) => (r.cm_status
     </div>
   )
   : <CmChip s="Pending" />);
+// Approved By: the approver's name with the time under it (like Status (CM)); PCS / OCS see an Approve button until it is approved. Final once approved.
+const ApprovedBy = ({ r, canApprove, onApprove }) => {
+  if (r.approved_by) {
+    return (
+      <div className="stack">
+        <span>{r.approved_by}</span>
+        {r.approved_at ? <span className="sub nowrap">{fmtDateTime(r.approved_at)}</span> : null}
+      </div>
+    );
+  }
+  if (!canApprove) return null;
+  const ready = !!(r.destination_folder && String(r.destination_folder).trim());
+  return (
+    <button type="button" className="btn sm primary" disabled={!ready} title={ready ? 'Approve this ingest — you will be recorded as the approver' : 'Fill in the Destination Folder first'}
+      onClick={(e) => { e.stopPropagation(); onApprove(r); }}>Approve</button>
+  );
+};
 const dayText = (x) => (isoDate(x) ? fmtDate(isoDate(x)) : (x || ''));   // a real date reads like the Workload Tracker's; old free text is shown as written
 
 // Columns that can be edited right in the table, like the Workload Tracker: click a cell, change it, Enter or click away saves, Esc cancels.
@@ -38,7 +55,6 @@ const CELLS = {
   source: { kind: 'text', max: 500 },
   materials_count: { kind: 'number' },
   destination_folder: { kind: 'area', max: 1000, approve: true },
-  approved_by: { kind: 'text', max: 200, approve: true },
   cm_status: { kind: 'select', cm: true },   // Status (CM): a dropdown for CM users; NON-COMPLIANT then asks for its reason
 };
 const cellInitial = (r, k) => (k === 'cm_status' ? (r.cm_status || '') : k === 'episode_break_date_text' ? (isoDate(r.episode_break_date_text) || isoDate(r.episode_date))
@@ -154,6 +170,16 @@ export default function Ingest() {
     const fresh = await get(`/api/ingest/${r.id}`);
     setData((d) => (d && d.rows ? { ...d, rows: d.rows.map((x) => (x.id === r.id ? { ...x, ...fresh } : x)) } : d));
   };
+  const approve = async (r) => {
+    if (!(await confirm(`Approve ingest #${r.id}?`, 'You will be recorded as the approver. An approval cannot be undone.', { okText: 'Approve' }))) return;
+    try {
+      await post(`/api/ingest/${r.id}/approve`, {});
+      const fresh = await get(`/api/ingest/${r.id}`);
+      setData((d) => (d && d.rows ? { ...d, rows: d.rows.map((x) => (x.id === r.id ? { ...x, ...fresh } : x)) } : d));
+      setDetail((cur) => (cur && cur.id === r.id ? fresh : cur));
+      toast('Approved');
+    } catch (e) { toast(e.message, 'err'); }
+  };
   const saveCell = async (r, k, value, initial) => {
     if (String(value ?? '') === String(initial ?? '')) { closeCell(r, k); return; }
     if (k === 'cm_status') {
@@ -237,7 +263,7 @@ export default function Ingest() {
                           {cell(r, 'materials_count', r.materials_count != null ? r.materials_count : '', { className: 'num' })}
                           <td title="Filled in automatically from the person who created the request">{r.requested_by_psd || r.requested_by_name || ''}</td>
                           {cell(r, 'destination_folder', r.destination_folder, { className: 'cell-clip mono', title: r.destination_folder || '' })}
-                          {cell(r, 'approved_by', r.approved_by)}
+                          <td><ApprovedBy r={r} canApprove={canApprove} onApprove={approve} /></td>
                           {cell(r, 'cm_status', <CmStatus r={r} />)}
                           <td className="dim nowrap">{ago(r.updated_at)}</td>
                         </tr>
@@ -263,6 +289,8 @@ export default function Ingest() {
           r={detail}
           canWrite={canWrite && (!detail.cm_status || s.can('ingest.cm_complete'))}
           canDelete={canDelete && !detail.cm_status}
+          canApprove={canApprove && !detail.approved_by && !!(detail.destination_folder && String(detail.destination_folder).trim())}
+          onApprove={() => approve(detail)}
           onClose={() => setDetail(null)}
           onEdit={() => { setForm(detail); setDetail(null); }}
           onDelete={async () => {
@@ -290,7 +318,6 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
     materials_count: r.materials_count == null ? '' : String(r.materials_count),
     source: r.source || '',
     destination_folder: r.destination_folder || '',
-    approved_by: r.approved_by || '',
     cm_status: r.cm_status || '',
     cm_reason: r.cm_non_compliant_reason || '',
     remarks: r.remarks || '',
@@ -355,8 +382,6 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
         <label className="f"><span>Source</span><input name="source" maxLength={500} value={f.source} onChange={set('source')} placeholder="e.g. Tape, drive, server path" /></label>
         <label className="f"><span>Number of Materials</span><input type="number" name="materials_count" min="0" step="1" value={f.materials_count} onChange={set('materials_count')} /></label>
         <label className="f"><span>Requested By</span><input name="requested_by" value={requester} readOnly disabled /></label>
-        <label className="f"><span>Approved By <span className="dim">— PCS / OCS</span></span>
-          <input name="approved_by" maxLength={200} value={f.approved_by} onChange={set('approved_by')} disabled={!canApprove} /></label>
         <label className="f full"><span>Destination Folder <span className="dim">— PCS</span></span>
           <textarea name="destination_folder" className="mono" maxLength={1000} value={f.destination_folder} onChange={set('destination_folder')} disabled={!canApprove} /></label>
         <label className="f"><span>Status (CM)</span>
@@ -376,7 +401,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
 
 const KV = ({ k, children }) => <><dt>{k}</dt><dd>{children || <span className="dim">—</span>}</dd></>;
 
-function IngestDetail({ r, canWrite, canDelete, onClose, onEdit, onDelete }) {
+function IngestDetail({ r, canWrite, canDelete, canApprove, onClose, onEdit, onDelete, onApprove }) {
   return (
     <Modal
       title={`Ingest #${r.id}`}
@@ -386,6 +411,7 @@ function IngestDetail({ r, canWrite, canDelete, onClose, onEdit, onDelete }) {
           {canDelete ? <button type="button" className="btn danger" id="del" onClick={onDelete}>Delete</button> : null}
           <span className="grow" />
           <button type="button" className="btn" onClick={onClose}>Close</button>
+          {canApprove ? <button type="button" className="btn primary" id="approve" onClick={onApprove}>Approve</button> : null}
           {canWrite ? <button type="button" className="btn primary" id="edit" onClick={onEdit}>Edit</button> : null}
         </>
       )}
@@ -400,7 +426,7 @@ function IngestDetail({ r, canWrite, canDelete, onClose, onEdit, onDelete }) {
         <KV k="Number of Materials">{r.materials_count != null ? String(r.materials_count) : null}</KV>
         <KV k="Requested By">{r.requested_by_psd || r.requested_by_name}</KV>
         <KV k="Destination Folder">{r.destination_folder ? <span className="mono">{r.destination_folder}</span> : null}</KV>
-        <KV k="Approved By">{r.approved_by}</KV>
+        <KV k="Approved By">{r.approved_by ? `${r.approved_by}${r.approved_at ? ` · ${fmtDateTime(r.approved_at)}` : ''}` : null}</KV>
         <KV k="Status (CM)">{r.cm_status || 'Pending'}</KV>
         {r.cm_status ? <>
           {r.cm_non_compliant_reason ? <KV k="Non-compliant reason">{r.cm_non_compliant_reason}</KV> : null}

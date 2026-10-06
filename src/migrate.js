@@ -19,6 +19,15 @@ async function upgradeIngestRecords(db) {
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS episode_break_date_text TEXT`);
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS materials_count INTEGER`);
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS approved_by TEXT`);
+    // Approval is recorded like the CM decision: who (the signed-in approver) and when. approved_by keeps the name for older records.
+    await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS approved_by_user_id INT`);
+    await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ`);
+    await client.query(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ingest_records_approved_by_user_id_fkey') THEN
+        ALTER TABLE ingest_records ADD CONSTRAINT ingest_records_approved_by_user_id_fkey
+          FOREIGN KEY (approved_by_user_id) REFERENCES users(id) ON DELETE SET NULL;
+      END IF;
+    END $$`);
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS cm_status TEXT`);
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS cm_decided_by INT`);
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS cm_decided_at TIMESTAMPTZ`);
