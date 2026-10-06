@@ -36,7 +36,7 @@ async function parseBody(client, body, user, current = null) {
   let episode_date;
   if (hasEpisodeText) {
     // Date picker: only a real calendar date (YYYY-MM-DD) or empty is accepted from the form.
-    episode_date = v.date(body.episode_break_date_text, { field: 'Episode / Break Date' });
+    episode_date = v.date(body.episode_break_date_text, { field: 'Episode / Breakdate' });
     episode_break_date_text = episode_date;
   } else {
     const hasLegacyDate = Object.prototype.hasOwnProperty.call(body, 'episode_date');
@@ -168,7 +168,7 @@ const CELL_FIELDS = {
   program: (x) => v.str(x, { field: 'Program', max: 200, required: true }),
   platform: (x) => v.str(x, { field: 'Platform', max: 100, required: true }),
   billable_party: (x) => v.str(x, { field: 'Billable Party', max: 200 }),
-  episode_break_date_text: (x) => v.date(x, { field: 'Episode / Break Date' }),
+  episode_break_date_text: (x) => v.date(x, { field: 'Episode / Breakdate' }),
   source: (x) => v.str(x, { field: 'Source', max: 500 }),
   materials_count: (x) => v.int(x, { field: 'Materials count', min: 0 }),
   destination_folder: (x) => v.str(x, { field: 'Destination Folder', max: 1000 }),   // PCS / OCS only (below)

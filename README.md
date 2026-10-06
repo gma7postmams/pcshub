@@ -97,7 +97,7 @@ A section only takes effect if its page is also checked.
 
 **Ingest NO. column.** The number is the record's place in the whole list, in the order the table shows it (newest first): the newest record is 1 and the numbers count **up** down the table (1, 2, 3 …). It is worked out when the list is loaded (`no` in `GET /api/ingest`), so it renumbers by itself when a record is deleted, leaves no gaps, and does not change with filters, search or paging. It is not the database id: dialogs show the same number, and the notification texts no longer quote an id (their title already names the program); links such as `/ingest?id=12` still use the database id.
 
-**Ingest — No. of Materials column.** The heading stays *No. of Materials* on ONE line; its letter-spacing and padding are tightened so the column is about 121 px instead of 138 px, and editing a number in it keeps the same width.
+**Ingest — No. of Materials column.** The heading stays *No. of Materials* on ONE line; its letter-spacing is tightened a little so the column is about 131 px instead of 138 px (121 px was too narrow), and editing a number in it keeps the same width. *Episode / Breakdate* (formerly “Episode / Break Date”) has slightly tighter spacing too, so its column is a little narrower.
 
 **Dashboard — Ingest Tracker cards.** *Total Ingest Records*, **Pending Approval** (requests nobody has approved yet — no approver recorded; opens the Ingest Tracker with `?approval=pending`, shown as an “Awaiting approval ✕” chip you can click to clear), *Pending (CM)* (no CM decision yet — includes requests not yet approved), *Done* and *Non-compliant*. One row on a wide screen (down to about 1180 px), then 3 + 2, 2 + 2 + 1 and one per row. `GET /api/ingest` accepts `approval=pending|approved`.
 
@@ -113,7 +113,7 @@ Adding a new page or section: add it to `CATALOG`, then guard its route with `re
 
 ## Workflow
 
-**Ingest** — one page (the former Approval page is merged into it). Table and form fields: Program / Project (open), Platform (Admin-managed dropdown, *Ingest Platform*), Billable Party (open), Episode / Break Date (date picker), Source (open), Number of Materials, **Requested By** (always the signed-in user who created the record; read-only), **Destination Folder** (open, PCS) and **Approved By** (open, PCS / OCS) — both need `ingest.approve` (Manager+) and stay as stored for everyone else — and **Status (CM)** (dropdown DONE / NON-COMPLIANT with a required reason; blank = Pending), which needs `ingest.cm_complete`.
+**Ingest** — one page (the former Approval page is merged into it). Table and form fields: Program / Project (open), Platform (Admin-managed dropdown, *Ingest Platform*), Billable Party (open), Episode / Breakdate (date picker), Source (open), Number of Materials, **Requested By** (always the signed-in user who created the record; read-only), **Destination Folder** (open, PCS) and **Approved By** (open, PCS / OCS) — both need `ingest.approve` (Manager+) and stay as stored for everyone else — and **Status (CM)** (dropdown DONE / NON-COMPLIANT with a required reason; blank = Pending), which needs `ingest.cm_complete`.
 
 - Status (CM) shows the decision, who made it and when; every change is written to the audit log (`ingest.cm_done` / `ingest.cm_non_compliant`). Once decided, only CM users can edit the record.
 - Managers/Admins are notified when a record is added; the creator and requester are notified on a CM decision.

@@ -243,7 +243,7 @@ export default function Ingest() {
           <label className="wl-search" style={{ flex: '0 1 320px', minWidth: 'min(100%, 300px)' }}>   {/* wide enough for the whole hint, with room to spare for wider fonts (a Mac's system font is wider) */}
             <input type="text" placeholder="Program / Project (exact match)" value={filt.program} onChange={setF('program')} style={{ textOverflow: 'ellipsis' }} />
           </label>
-          <DateRange title="Episode / Break date range" from={filt.from} to={filt.to} onChange={({ from, to }) => { setFilt((f) => ({ ...f, from, to })); setOffset(0); }} />
+          <DateRange title="Episode / Breakdate range" from={filt.from} to={filt.to} onChange={({ from, to }) => { setFilt((f) => ({ ...f, from, to })); setOffset(0); }} />
           {filt.approval ? (   // opened from the Dashboard's Pending Approval card: only requests nobody has approved yet; the chip clears it
             <button type="button" className="btn sm" title="Show every request again" onClick={() => { setFilt((f) => ({ ...f, approval: '' })); setOffset(0); }}>Awaiting approval ✕</button>
           ) : null}
@@ -255,7 +255,7 @@ export default function Ingest() {
                 : (
                   <table className="t wl">
                     <thead><tr>
-                      <th>NO.</th><th>Program / Project</th><th>Platform</th><th>Billable Party</th><th>Episode / Break Date</th><th>Source</th>
+                      <th>NO.</th><th>Program / Project</th><th>Platform</th><th>Billable Party</th><th className="tight">Episode / Breakdate</th><th>Source</th>
                       <th className="narrow">No. of Materials</th><th>Requested By</th><th>Destination Folder</th><th>Approved By</th><th>Status (CM)</th><th>Updated</th>
                     </tr></thead>
                     <tbody>
@@ -389,7 +389,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
         <label className="f"><span>Platform <span className="req">*</span></span>
           <select name="platform" value={f.platform} onChange={set('platform')}><Options list={withCurrent(lookups.platform, r.platform)} blank="Select platform…" /></select></label>
         <label className="f"><span>Billable Party</span><input name="billable_party" maxLength={200} value={f.billable_party} onChange={set('billable_party')} /></label>
-        <label className="f"><span>Episode / Break Date</span><input type="date" name="episode_break_date_text" value={f.episode_break_date_text} onChange={set('episode_break_date_text')} /></label>
+        <label className="f"><span>Episode / Breakdate</span><input type="date" name="episode_break_date_text" value={f.episode_break_date_text} onChange={set('episode_break_date_text')} /></label>
         <label className="f"><span>Source</span><input name="source" maxLength={500} value={f.source} onChange={set('source')} placeholder="e.g. Tape, drive, server path" /></label>
         <label className="f"><span>Number of Materials</span><input type="number" name="materials_count" min="0" step="1" value={f.materials_count} onChange={set('materials_count')} /></label>
         <label className="f"><span>Requested By</span><input name="requested_by" value={requester} readOnly disabled /></label>
@@ -436,7 +436,7 @@ function IngestDetail({ r, canWrite, canDelete, canApprove, approveReady, canUna
         <KV k="Program / Project">{r.program}</KV>
         <KV k="Platform">{r.platform}</KV>
         <KV k="Billable Party">{r.billable_party}</KV>
-        <KV k="Episode / Break Date">{r.episode_break_date_text || r.episode_date}</KV>
+        <KV k="Episode / Breakdate">{r.episode_break_date_text || r.episode_date}</KV>
         <KV k="Source">{r.source}</KV>
         <KV k="Number of Materials">{r.materials_count != null ? String(r.materials_count) : null}</KV>
         <KV k="Requested By">{r.requested_by_psd || r.requested_by_name}</KV>
