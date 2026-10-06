@@ -193,6 +193,16 @@ export default function Dashboard() {
   const [range, setRangeState] = useState(() => readRange(s.session_key));
   const rangeRef = useRef(range);
   rangeRef.current = range;
+  // Active users grows with the number of people online, up to the height of the Recent Activity card beside it, then scrolls inside.
+  const [actH, setActH] = useState(null);
+  const actObs = useRef(null);
+  const actRef = useCallback((node) => {
+    if (actObs.current) { actObs.current.disconnect(); actObs.current = null; }
+    if (!node) { setActH(null); return; }
+    const measure = () => setActH(Math.round(node.getBoundingClientRect().height));
+    measure();
+    if (typeof ResizeObserver !== 'undefined') { actObs.current = new ResizeObserver(measure); actObs.current.observe(node); }
+  }, []);
 
   const load = useCallback(() => get(`/api/dashboard?range=${rangeRef.current}`).then(setD).catch(() => setD((cur) => cur || { error: true })), []);
   useEffect(() => {
@@ -250,7 +260,7 @@ export default function Dashboard() {
       {us || act ? (
         <div className={`dsh-row2${us && act ? '' : ' one'}`}>
           {us ? (
-            <section className="dsh-card dsh-users">
+            <section className="dsh-card dsh-users" style={actH ? { '--act-h': `${actH}px` } : undefined}>
               <CardHead dot title="Active users" hint={us.active.length ? `${us.active.length} working right now` : `no one in the last ${us.windowMinutes} minutes`} right={<EarlierPill people={us.earlier} />} />
               {us.active.length ? (
                 <div className="dsh-userlist">
@@ -276,7 +286,7 @@ export default function Dashboard() {
           ) : null}
 
           {act ? (
-            <section className="dsh-card dsh-activity-card">
+            <section className="dsh-card dsh-activity-card" ref={actRef}>
               <CardHead icon={ClockIcon} hue="blue" title="Recent Activity" sub="Latest updates across the hub"
                 right={<Link to="/activity-history" className="dsh-viewall">View all<ChevronRightIcon /></Link>} />
               {act.length ? (

@@ -41,7 +41,9 @@
 /* ---- Active users + Recent Activity ---- */
 .dsh-row2 { display: grid; grid-template-columns: minmax(300px, 4fr) minmax(0, 6fr); gap: 12px; }
 .dsh-row2.one { grid-template-columns: minmax(0, 1fr); }
-.dsh-row2 { align-items: stretch; }   /* Active users and Recent Activity sit side by side at the same height */
+.dsh-row2 { align-items: start; }   /* Active users is as tall as its people need, but never taller than the Recent Activity card beside it (--act-h, set from its measured height) */
+.dsh-users { display: flex; flex-direction: column; max-height: var(--act-h, none); }
+.dsh-users .dsh-userlist { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; align-content: start; }
 .dsh-userlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 9px; }   /* every person gets the full card (avatar, role, page) at the same size, however many are online */
 .dsh-user-nm { overflow: hidden; text-overflow: ellipsis; }
 .dsh-user { display: flex; align-items: center; gap: 14px; width: 100%; padding: 8px 14px; border-radius: 15px; text-align: left; font: inherit; color: inherit; min-width: 0;
@@ -183,6 +185,8 @@ button.dsh-stat:hover { transform: translateY(-2px); box-shadow: 0 10px 22px col
 }
 @media (max-width: 980px) {
   .dsh-row2 { grid-template-columns: minmax(0, 1fr); }
+  .dsh-users { max-height: none; }
+  .dsh-users .dsh-userlist { max-height: 320px; }
   .dsh-row3 { grid-template-columns: minmax(0, 1fr); }
   .dsh-chart { min-height: 260px; }
   .dsh-head-right { margin-left: 0; width: 100%; }
