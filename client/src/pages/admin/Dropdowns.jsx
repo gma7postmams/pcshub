@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { del, get, post, put } from '../../lib/api.js';
 import { Empty, Modal, useConfirm, useForm, useToast } from '../../components/ui.jsx';
 
-const LABEL = { program: 'PROGRAM', platform: 'Platform', workload_platform: 'Workload Platform', plug_type: 'Plug Type' };
+const LABEL = { program: 'PROGRAM', platform: 'Ingest Platform', workload_platform: 'Workload Platform', plug_type: 'Plug Type' };
 
 export default function Dropdowns() {
   const toast = useToast();
@@ -28,7 +28,7 @@ export default function Dropdowns() {
             <div className="card-head"><h2>{LABEL[cat] || cat} <span className="dim">{rows.length}</span></h2></div>
             <AddForm cat={cat} onAdded={load} />
             <div className="table-wrap">
-              <table className="t">
+              <table className="t wl">
                 <thead><tr><th>Value</th><th className="num">Order</th><th className="num">Used</th><th>Active</th><th /></tr></thead>
                 <tbody>
                   {rows.length ? rows.map((r) => (

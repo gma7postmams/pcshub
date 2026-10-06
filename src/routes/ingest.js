@@ -31,18 +31,14 @@ async function assertDropdown(client, category, value, field) {
   if (!rows.length) throw new HttpError(400, `${field} "${value}" is not a valid option`);
 }
 
-function episodeDateForText(value) {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  try { return v.date(value, { field: 'Episode date' }); } catch (_) { return null; }
-}
-
-async function parseBody(client, body, current = null) {
+async function parseBody(client, body, user, current = null) {
   const hasEpisodeText = Object.prototype.hasOwnProperty.call(body, 'episode_break_date_text');
   let episode_break_date_text;
   let episode_date;
   if (hasEpisodeText) {
-    episode_break_date_text = v.str(body.episode_break_date_text, { field: 'Episode / Break Date', max: 500 });
-    episode_date = episodeDateForText(episode_break_date_text);
+    // Date picker: only a real calendar date (YYYY-MM-DD) or empty is accepted from the form.
+    episode_date = v.date(body.episode_break_date_text, { field: 'Episode / Break Date' });
+    episode_break_date_text = episode_date;
   } else {
     const hasLegacyDate = Object.prototype.hasOwnProperty.call(body, 'episode_date');
     const legacyDate = v.date(body.episode_date, { field: 'Episode date' });
@@ -66,15 +62,13 @@ async function parseBody(client, body, current = null) {
     // Destination Folder is assigned during the PCS approval step. Preserve legacy values
     // when a PSD edits an existing request, but never accept it from this endpoint.
     destination_folder: current ? current.destination_folder : null,
-    requested_by_user_id: v.int(body.requested_by_user_id, { field: 'Requested by', min: 1 }),
-    requested_by_psd: v.str(body.requested_by_psd, { field: 'Requested by (PSD)', max: 200 }),
+    // Requested By is never taken from the client: it is the signed-in user who creates the request
+    // (kept as-is when someone else later edits it; legacy rows with no requester fall back to the editor).
+    requested_by_user_id: current && (current.requested_by_user_id || current.requested_by_psd) ? current.requested_by_user_id : user.id,
+    requested_by_psd: current && (current.requested_by_user_id || current.requested_by_psd) ? current.requested_by_psd : user.full_name,
     remarks: v.str(body.remarks, { field: 'Remarks', max: 4000 }),
   };
   await assertDropdown(client, 'platform', rec.platform, 'Platform');
-  if (rec.requested_by_user_id) {
-    const { rows } = await client.query('SELECT 1 FROM users WHERE id=$1 AND is_active', [rec.requested_by_user_id]);
-    if (!rows.length) throw new HttpError(400, 'Requested by must be an active user');
-  }
   return rec;
 }
 
@@ -123,7 +117,7 @@ router.get('/:id', asyncH(async (req, res) => {
 // Create — status is always 'New' (never taken from the client)
 router.post('/', requireAction('ingest.write'), asyncH(async (req, res) => {
   const created = await db.tx(async (c) => {
-    const r = await parseBody(c, req.body);
+    const r = await parseBody(c, req.body, req.user);
     const { rows } = await c.query(
       `INSERT INTO ingest_records (program, billable_party, platform, episode_date, episode_break_date_text,
          materials_count, source, destination_folder, requested_by_user_id, requested_by_psd, remarks,
@@ -144,14 +138,14 @@ router.put('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
   await db.tx(async (c) => {
     const cur = await c.query(
       `SELECT status, episode_date, to_char(episode_date, 'YYYY-MM-DD') AS episode_date_iso,
-              episode_break_date_text, destination_folder
+              episode_break_date_text, destination_folder, requested_by_user_id, requested_by_psd
          FROM ingest_records WHERE id=$1 FOR UPDATE`, [id]
     );
     if (!cur.rows.length) throw new HttpError(404, 'Ingest record not found');
     if (!EDITABLE.includes(cur.rows[0].status)) {
       throw new HttpError(409, `Record is "${cur.rows[0].status}" and can no longer be edited`);
     }
-    const r = await parseBody(c, req.body, cur.rows[0]);
+    const r = await parseBody(c, req.body, req.user, cur.rows[0]);
     await c.query(
       `UPDATE ingest_records SET program=$2, billable_party=$3, platform=$4, episode_date=$5,
          episode_break_date_text=$6, materials_count=$7, source=$8, destination_folder=$9,

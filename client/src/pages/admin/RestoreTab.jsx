@@ -62,7 +62,7 @@ function UploadCard({ busy, uploadPct, onAnalyze }) {
 
 function Checks({ checks }) {
   return (
-    <table className="t">
+    <table className="t wl">
       <tbody>
         {checks.map((c) => (
           <tr key={c.check}>
@@ -108,7 +108,7 @@ function ImpactTable({ rows }) {
   const [open, setOpen] = useState(null);
   return (
     <div className="table-wrap">
-      <table className="t">
+      <table className="t wl">
         <thead>
           <tr><th>Item</th><th className="num">Current</th><th className="num">Backup</th><th className="num">Added</th><th className="num">Removed</th><th className="num">Modified</th><th /></tr>
         </thead>

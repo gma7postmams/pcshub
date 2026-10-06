@@ -88,6 +88,9 @@ CREATE TABLE IF NOT EXISTS users (
 );
 -- upgrade paths for older databases
 ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_step BIGINT;
+-- 2FA is off for everyone until an Admin turns it on for that user (the user then enrols from Profile)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS twofa_required BOOLEAN NOT NULL DEFAULT FALSE;
+UPDATE users SET twofa_required = TRUE WHERE totp_enabled AND NOT twofa_required;
 -- per-user appearance: system | dark | light
 ALTER TABLE users ADD COLUMN IF NOT EXISTS appearance TEXT NOT NULL DEFAULT 'system' CHECK (appearance IN ('system','dark','light'));  -- last TOTP time-step used (replay protection)
 ALTER TABLE users ADD COLUMN IF NOT EXISTS group_id INT REFERENCES groups(id) ON DELETE RESTRICT;

@@ -121,7 +121,7 @@ Status is the approval state and is never set by the client:
 - **Front end:** React escapes all rendered data (no `innerHTML`); the Vite build has no inline scripts, so the strict CSP stays `script-src 'self'`. Each page URL is still checked server-side before `index.html` is returned (locked pages answer 403).
 
 - **Passwords:** bcrypt 6 (cost 12); 8+ chars with letters and numbers, max 72 bytes, rejects common passwords and ones containing the username/name; forced change for new or reset accounts; other sessions signed out on change.
-- **2FA (TOTP):** `otplib`; required for Admins by default (`REQUIRE_2FA=admin|all|none`) — required users are held on Profile until enrolled and cannot disable it. Turning it on or off needs the account password as well as a code. Secrets are **AES-256-GCM encrypted at rest** (`TOTP_ENC_KEY`, rotatable via `TOTP_ENC_KEY_OLD`), also encrypted inside the session during setup. **Codes are single-use** (replay-protected per time-step).
+- **2FA (TOTP):** `otplib`; **off for everyone from the start.** Only an Admin can turn it on or off for a user (Admin > Users); a user it is on for is held on Profile until they enrol an authenticator, and cannot disable it themselves. Disabling it for a user needs the Admin's own password. Secrets are **AES-256-GCM encrypted at rest** (`TOTP_ENC_KEY`, rotatable via `TOTP_ENC_KEY_OLD`), also encrypted inside the session during setup. **Codes are single-use** (replay-protected per time-step).
 - **Login:** one generic error for unknown user / wrong password / locked / disabled (no username enumeration); account lock after 5 failures (15 min); per-IP login rate limit; constant-ish timing.
 - **Sessions:** PostgreSQL store, regenerated at login, `HttpOnly`, `SameSite=Lax`, `Secure` + `__Host-` cookie prefix over HTTPS. Signed out after 12 h without activity (`SESSION_HOURS`) and always 7 days after sign-in (`SESSION_MAX_HOURS`). Deactivation / password reset kills sessions.
 - **Confirm it's you:** resetting a user's password, removing a user's 2FA, giving someone the Admin role, and downloading / deleting / restoring a backup all ask the Admin for their own password (plus authenticator code) again. For the user-management actions one confirmation lasts 5 minutes; backups ask every time. Five wrong answers in 15 minutes block further tries (also applies to the current-password box on Profile), so an open session cannot be used to guess a password.
@@ -133,7 +133,7 @@ Status is the approval state and is never set by the client:
 - **Uploads:** logo: PNG/JPEG/WebP only, 2 MB, magic-byte verified, random filenames, `nosniff`. Knowledge Base: real PDFs only, random stored names. Excel imports: must be a real `.xlsx`; the archive is measured before it is opened (40 MB unpacked at most, 25 MB per sheet: `IMPORT_MAX_UNPACKED_MB`, `IMPORT_MAX_SHEET_MB`) and imports run one at a time, which bounds how much memory a crafted or oversized file can take. An import may add at most 30 new custom columns.
 - **Audit log** of logins/failures/locks, failed identity confirmations, every create/update/send/decision, Workload and Plug List imports/exports and bulk actions, admin and group changes. Append-only for the least-privilege DB login.
 - **Least privilege DB:** `db/app-role.sql` creates a DML-only runtime login (no DDL, cannot edit roles or delete audit logs); run the app with `MIGRATE_ON_START=false`.
-- **Startup checks:** refuses to start (in any mode) without a strong `SESSION_SECRET` — there is no built-in fallback and placeholder values are rejected — and in production without `TOTP_ENC_KEY`; warns on missing `TRUST_PROXY` or `BACKUP_SIGNING_KEY`, `COOKIE_SECURE=false`, `REQUIRE_2FA=none`. The first Admin's `ADMIN_PASSWORD` must meet the password policy.
+- **Startup checks:** refuses to start (in any mode) without a strong `SESSION_SECRET` — there is no built-in fallback and placeholder values are rejected — and in production without `TOTP_ENC_KEY`; warns on missing `TRUST_PROXY` or `BACKUP_SIGNING_KEY`, `COOKIE_SECURE=false`. The first Admin's `ADMIN_PASSWORD` must meet the password policy.
 - `npm audit`: 0 known vulnerabilities at time of release.
 
 ### Go-live checklist (public internet)
@@ -141,7 +141,7 @@ Status is the approval state and is never set by the client:
 1. TLS at the reverse proxy (see `deploy/nginx.conf`) forwarding `X-Forwarded-Proto`; app listens on 127.0.0.1 by default in production (`HOST`); firewall Postgres off the internet.
 2. `.env`: `NODE_ENV=production`, `TRUST_PROXY=1`, fresh `SESSION_SECRET`, `TOTP_ENC_KEY` and `BACKUP_SIGNING_KEY` (store the keys in your password manager/secret store), strong `ADMIN_PASSWORD`, and `APP_ORIGIN=https://your-address`. Never commit `.env`; if one was ever committed, treat every value in it as leaked and replace it.
 3. Database: owner login for `npm run migrate`; app runs as `promohub_app` from `db/app-role.sql` with `MIGRATE_ON_START=false`.
-4. First sign-in as Admin: change password, enrol 2FA. Consider `REQUIRE_2FA=all`.
+4. First sign-in as Admin: change password. Turn 2FA on per user from Admin > Users when wanted.
 5. Backups: nightly `pg_dump` + `uploads/branding/` + `uploads/knowledge/` (Knowledge Base PDFs), tested restore. Keep `TOTP_ENC_KEY` with (but separate from) backups.
 6. Keep dependencies patched: `npm audit` monthly; run under systemd (`deploy/promo-hub.service`, auto-restart + sandboxing).
 7. Get an independent penetration test before announcing the URL.
@@ -154,7 +154,6 @@ Status is the approval state and is never set by the client:
 | `SESSION_SECRET` | long random string (`openssl rand -hex 48`), 32+ chars; **required in every mode**, placeholders are refused |
 | `TOTP_ENC_KEY` | 64 hex chars (`openssl rand -hex 32`), encrypts 2FA secrets; required in production |
 | `TOTP_ENC_KEY_OLD` | previous key, only while rotating |
-| `REQUIRE_2FA` | `admin` (default), `all`, `none` |
 | `MIGRATE_ON_START` | `false` to skip migrations at boot (least-privilege DB login) |
 | `LOGIN_RATE_LIMIT` | login attempts per IP per 15 min (default 20) |
 | `PORT` | default 3000 |

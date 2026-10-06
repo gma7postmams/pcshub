@@ -32,7 +32,7 @@ export default function Admin() {
 
   const Tab = (TABS.find(([k]) => k === tab) || TABS[0])[2];
   return (
-    <main className="container">
+    <main className="container wide wl-page">
       <div className="page-head"><div><h1>Admin</h1><div className="sub">Users, roles, groups, dropdowns, branding, backup and restore, and audit.</div></div></div>
       <div className="tabs" id="tabs">
         {TABS.map(([k, l]) => <button key={k} type="button" data-t={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}

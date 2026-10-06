@@ -135,7 +135,7 @@ app.use('/api', (req, res, next) => {
   return res.status(403).json({ error: 'Password change required', mustChangePassword: true });
 });
 
-// Enforced 2FA (REQUIRE_2FA): only profile/notifications APIs until 2FA is set up
+// Enforced 2FA (turned on per user by an Admin): only profile/notifications APIs until 2FA is set up
 app.use('/api', (req, res, next) => {
   if (!twofaRequired(req.user) || req.user.totp_enabled) return next();
   if (/^\/(profile|notifications)(\/|$)/.test(req.path)) return next();

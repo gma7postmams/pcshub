@@ -27,7 +27,7 @@ function VerifyDialog({ job, report, onClose }) {
         {job.verify_status === 'ok' ? 'The backup passed all required checks.' : 'The backup failed verification. Do not rely on it.'}
         {job.verified_at ? <span className="dim"> Checked {fmtDateTime(job.verified_at)}.</span> : null}
       </div>
-      <table className="t">
+      <table className="t wl">
         <tbody>
           {checks.map((c) => (
             <tr key={c.check}>
@@ -138,7 +138,7 @@ export default function HistoryTab({ active, refreshKey, onRunning, onChanged, o
         </div>
         <div className="table-wrap">
           {!hist.rows.length ? <Empty>{type === 'restore' ? 'No restores have been performed.' : type === 'backup' ? 'No backups yet. Create the first one from the Backup tab.' : 'No backup or restore activity yet.'}</Empty> : (
-            <table className="t">
+            <table className="t wl">
               <thead>
                 <tr><th>Date</th><th>Type</th><th>User</th><th>File</th><th>Risk Level</th><th>Result</th><th>Duration</th><th /></tr>
               </thead>

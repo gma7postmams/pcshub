@@ -63,7 +63,7 @@ export default function Approval() {
   const all = Object.values(counts).reduce((a, b) => a + b, 0);
 
   return (
-    <main className="container">
+    <main className="container wide wl-page">
       <div className="page-head">
         <div>
           <h1>Approval</h1>
@@ -82,7 +82,7 @@ export default function Approval() {
         </div>
         <div className="table-wrap" id="tbl">
           {!data ? <Empty>Loading…</Empty> : !data.rows.length ? <Empty>No {status ? status.toLowerCase() : ''} approval requests.</Empty> : (
-            <table className="t">
+            <table className="t wl">
               <thead><tr>
                 <th>Req #</th><th>Ingest #</th><th>Program</th><th>Platform</th><th>Episode</th>
                 <th>Sent by</th><th>Sent</th><th>Status</th><th>Decided by</th>{canDecide ? <th /> : null}

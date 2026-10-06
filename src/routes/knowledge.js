@@ -18,7 +18,7 @@ const router = express.Router();
 const DIR = path.join(__dirname, '..', '..', 'uploads', 'knowledge');
 const SEED_DIR = path.join(__dirname, '..', '..', 'knowledge-seed');
 const MAX_MB = parseInt(process.env.KNOWLEDGE_MAX_MB, 10) || 25;
-const MAX_FILES = 10;
+const MAX_FILES = 1;   // one document per upload: it is named first
 fs.mkdirSync(DIR, { recursive: true });
 
 const COLS = 'id, title, filename, size_bytes, uploaded_name, created_at, updated_at';
@@ -35,7 +35,7 @@ const upload = multer({
 const receive = (req, res, next) => upload.array('files', MAX_FILES)(req, res, (err) => {
   if (!err) return next();
   if (err.code === 'LIMIT_FILE_SIZE') return next(new HttpError(413, `A file is larger than ${MAX_MB} MB`));
-  if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') return next(new HttpError(400, `Upload up to ${MAX_FILES} PDFs at a time`));
+  if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') return next(new HttpError(400, 'Upload one PDF at a time'));
   return next(err);
 });
 
@@ -140,6 +140,11 @@ router.get('/:id(\\d+)/file', asyncH(async (req, res) => {
 // so one bad file does not lose the rest.
 router.post('/', requireAction('knowledge.write'), receive, asyncH(async (req, res) => {
   const files = req.files || [];
+  // The document is named before it is uploaded: a title is required.
+  const title = String((req.body && req.body.title) || '').trim();
+  const discard = () => files.forEach((f) => rm(f.path));
+  if (!title) { discard(); throw new HttpError(400, 'Name the document first'); }
+  if (title.length > 200) { discard(); throw new HttpError(400, 'Title is too long (max 200 characters)'); }
   if (!files.length) throw new HttpError(400, 'No files uploaded');
   const results = [];
   for (const f of files) {
@@ -150,7 +155,7 @@ router.post('/', requireAction('knowledge.write'), receive, asyncH(async (req, r
       const hash = sha256(f.path);
       const dup = await db.query('SELECT id, title FROM knowledge_docs WHERE sha256=$1', [hash]);
       if (dup.rowCount) { rm(f.path); results.push({ filename, ok: false, error: `Already uploaded as "${dup.rows[0].title}"` }); continue; }
-      const row = await store(req, f.path, filename, f.size, hash, titleFrom(filename));
+      const row = await store(req, f.path, filename, f.size, hash, title);
       await audit(req, 'knowledge.upload', 'knowledge_docs', row.id, { filename, size: f.size });
       results.push({ filename, ok: true, doc: row });
     } catch (e) {

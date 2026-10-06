@@ -53,7 +53,7 @@ export default function Ingest() {
   const total = data ? data.total : 0;
 
   return (
-    <main className="container">
+    <main className="container wide wl-page">
       <div className="page-head">
         <div><h1>Ingest Tracker</h1><div className="sub">Log ingest requests and send them for approval.</div></div>
         <div className="actions">
@@ -75,7 +75,7 @@ export default function Ingest() {
             : data.error ? <Empty>{data.error}</Empty>
               : !data.rows.length ? <Empty>No ingest records match these filters.</Empty>
                 : (
-                  <table className="t">
+                  <table className="t wl">
                     <thead><tr>
                       <th>#</th><th>Program / Project</th><th>Platform</th><th>Episode / Break Date</th><th>Source</th><th>Destination Folder</th>
                       <th>Requested By</th><th>Status</th><th>Updated</th>
@@ -159,14 +159,16 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
   const toast = useToast();
   const confirm = useConfirm();
   const r = rec || {};
-  const initialEpisodeText = rec ? (r.episode_break_date_text || r.episode_date || '') : '';
+  const isoDate = (x) => (/^\d{4}-\d{2}-\d{2}/.test(x || '') ? String(x).slice(0, 10) : '');
+  const initialEpisodeText = rec ? isoDate(r.episode_break_date_text) || isoDate(r.episode_date) : '';
+  const { user } = useSession();
+  const requester = rec ? (r.requested_by_psd || r.requested_by_name || '') : (user.full_name || user.username);
   const initialForm = {
     program: r.program || '', platform: r.platform || '', billable_party: r.billable_party || '',
     episode_break_date_text: initialEpisodeText,
     materials_count: r.materials_count == null ? '' : String(r.materials_count),
     source: r.source || '',
-    requested_by_user_id: r.requested_by_user_id ?? '',
-    requested_by_psd: r.requested_by_psd || '', remarks: r.remarks || '',
+    remarks: r.remarks || '',
   };
   const [f, set] = useForm(initialForm);
   const [busy, setBusy] = useState(false);
@@ -196,7 +198,6 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
     const payload = {
       ...f,
       materials_count: materialsCount,
-      requested_by_user_id: f.requested_by_user_id || null,
     };
     // Omit an unchanged fallback value so older records keep their stored compatibility fields.
     if (rec && f.episode_break_date_text === initialEpisodeText) delete payload.episode_break_date_text;
@@ -229,10 +230,10 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
         <label className="f"><span>Platform <span className="req">*</span></span>
           <select name="platform" value={f.platform} onChange={set('platform')}><Options list={withCurrent(lookups.platform, r.platform)} blank="Select platform…" /></select></label>
         <label className="f"><span>Billable Party</span><input name="billable_party" maxLength={200} value={f.billable_party} onChange={set('billable_party')} /></label>
-        <label className="f"><span>Episode / Break Date</span><input name="episode_break_date_text" maxLength={500} value={f.episode_break_date_text} onChange={set('episode_break_date_text')} placeholder="e.g. SEP 1, SEP 7-12, 2026-09-15" /></label>
+        <label className="f"><span>Episode / Break Date</span><input type="date" name="episode_break_date_text" value={f.episode_break_date_text} onChange={set('episode_break_date_text')} /></label>
         <label className="f"><span>Number of Materials</span><input type="number" name="materials_count" min="0" step="1" value={f.materials_count} onChange={set('materials_count')} /></label>
         <label className="f"><span>Source</span><input name="source" maxLength={500} value={f.source} onChange={set('source')} placeholder="e.g. Tape, drive, server path" /></label>
-        <label className="f"><span>Requested By</span><input name="requested_by_psd" maxLength={200} value={f.requested_by_psd} onChange={set('requested_by_psd')} /></label>
+        <label className="f"><span>Requested By</span><input name="requested_by" value={requester} readOnly disabled /></label>
         <label className="f full"><span>Remarks</span><textarea name="remarks" maxLength={4000} value={f.remarks} onChange={set('remarks')} /></label>
         {!rec ? <div className="full dim">Status will be set to <strong>New</strong>. Send it for approval when ready.</div> : null}
       </form>

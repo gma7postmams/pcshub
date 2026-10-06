@@ -33,7 +33,7 @@ const loadUser = asyncH(async (req, res, next) => {
   if (Date.now() - req.session.createdAt > SESSION_MAX_MS) return endSession(req, res, next);
   const { rows } = await db.query(
     `SELECT u.id, u.username, u.full_name, u.email, u.role, u.group_id, g.name AS group_name,
-            u.is_active, u.must_change_password, u.totp_enabled, u.appearance,
+            u.is_active, u.must_change_password, u.totp_enabled, u.twofa_required, u.appearance,
             COALESCE((SELECT array_agg(gp.perm_key) FROM group_permissions gp WHERE gp.group_id = u.group_id), '{}') AS perms
        FROM users u LEFT JOIN groups g ON g.id = u.group_id
       WHERE u.id=$1`,

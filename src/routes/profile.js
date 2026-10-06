@@ -63,7 +63,9 @@ router.put('/appearance', asyncH(async (req, res) => {
 }));
 
 // --- TOTP 2FA ---
+// Users cannot turn 2FA on or off themselves: an Admin switches it on for them (Admin > Users) and they enrol here.
 router.post('/2fa/setup', asyncH(async (req, res) => {
+  if (!twofaRequired(req.user)) throw new HttpError(403, '2FA is turned on for an account by an Admin');
   if (req.user.totp_enabled) throw new HttpError(400, '2FA is already enabled');
   const { rows } = await db.query(`SELECT value FROM app_settings WHERE key='app_name'`);
   const issuer = (rows[0] && rows[0].value) || 'Promotional Content Hub';
@@ -74,6 +76,7 @@ router.post('/2fa/setup', asyncH(async (req, res) => {
 }));
 
 router.post('/2fa/enable', asyncH(async (req, res) => {
+  if (!twofaRequired(req.user)) throw new HttpError(403, '2FA is turned on for an account by an Admin');
   const pending = req.session.totpSetup;
   if (!pending) throw new HttpError(400, 'Start 2FA setup first');
   // The account password is needed as well as the code: otherwise anyone holding an open session could attach their
@@ -98,25 +101,6 @@ router.post('/2fa/enable', asyncH(async (req, res) => {
   // Other sessions were established without 2FA — sign them out
   await db.query(`DELETE FROM user_sessions WHERE sid <> $1 AND (sess->>'userId')::int = $2`, [req.sessionID, req.user.id]);
   await audit(req, 'profile.2fa_enable', 'user', req.user.id);
-  res.json({ ok: true });
-}));
-
-router.post('/2fa/disable', asyncH(async (req, res) => {
-  if (twofaRequired(req.user)) throw new HttpError(403, '2FA is required for your account and cannot be disabled');
-  const password = typeof req.body.password === 'string' ? req.body.password : '';
-  const { rows } = await db.query('SELECT password_hash, totp_secret, totp_enabled FROM users WHERE id=$1', [req.user.id]);
-  const u = rows[0];
-  if (!u.totp_enabled) throw new HttpError(400, '2FA is not enabled');
-  stepUp.attempt(req.user.id);
-  const denied = async (msg) => {
-    await audit(req, 'auth.reauth_failed', 'user', req.user.id, { for: 'profile.2fa_disable' });
-    throw new HttpError(400, msg);
-  };
-  if (password.length > 200 || !(await bcrypt.compare(password, u.password_hash))) await denied('Password is incorrect');
-  if (!(await totp.verifyAndConsume(db, req.user.id, u.totp_secret, req.body.token))) await denied('Invalid or already-used authentication code');
-  stepUp.succeed(req.user.id);
-  await db.query('UPDATE users SET totp_secret=NULL, totp_enabled=FALSE, totp_last_step=NULL, updated_at=now() WHERE id=$1', [req.user.id]);
-  await audit(req, 'profile.2fa_disable', 'user', req.user.id);
   res.json({ ok: true });
 }));
 

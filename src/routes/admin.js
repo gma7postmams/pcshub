@@ -122,7 +122,7 @@ router.delete('/groups/:id', asyncH(async (req, res) => {
 router.get('/users', asyncH(async (req, res) => {
   const { rows } = await db.query(
     `SELECT u.id, u.username, u.full_name, u.email, u.role, u.group_id, g.name AS group_name, u.is_active,
-            u.totp_enabled, u.must_change_password, u.last_login_at, u.locked_until, u.created_at
+            u.totp_enabled, u.twofa_required, u.must_change_password, u.last_login_at, u.locked_until, u.created_at
        FROM users u LEFT JOIN groups g ON g.id = u.group_id
       ORDER BY u.is_active DESC, u.full_name`
   );
@@ -233,6 +233,24 @@ router.post('/users/:id/reset-password', asyncH(async (req, res) => {
   await db.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = $1`, [id]);
   await audit(req, 'admin.user_reset_password', 'user', id, { username: target.username });
   res.json({ ok: true, temporary_password: temp });
+}));
+
+// Only an Admin can turn 2FA on or off for an account. On: the user must enrol an authenticator at next use.
+// Off: their authenticator is removed too, so they sign in with the password alone again.
+router.post('/users/:id/2fa', asyncH(async (req, res) => {
+  const id = v.id(req.params.id);
+  if (typeof req.body.enabled !== 'boolean') throw new HttpError(400, 'enabled must be true or false');
+  const enabled = req.body.enabled;
+  if (!(await db.query('SELECT 1 FROM users WHERE id=$1', [id])).rowCount) throw new HttpError(404, 'User not found');
+  if (!enabled) await confirmIdentity(req, 'admin.user_2fa_disable', id);
+  const r = await db.query(
+    enabled
+      ? 'UPDATE users SET twofa_required=TRUE, updated_at=now() WHERE id=$1 RETURNING username'
+      : 'UPDATE users SET twofa_required=FALSE, totp_secret=NULL, totp_enabled=FALSE, totp_last_step=NULL, updated_at=now() WHERE id=$1 RETURNING username',
+    [id]
+  );
+  await audit(req, enabled ? 'admin.user_2fa_enable' : 'admin.user_2fa_disable', 'user', id, { username: r.rows[0].username });
+  res.json({ ok: true });
 }));
 
 router.post('/users/:id/reset-2fa', asyncH(async (req, res) => {

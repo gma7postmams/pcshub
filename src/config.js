@@ -6,14 +6,9 @@ const cookieSecure = process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === '
 // __Host- prefix: browser only accepts it over HTTPS, path=/, no Domain — blocks subdomain cookie injection.
 const COOKIE_NAME = cookieSecure ? '__Host-phub.sid' : 'phub.sid';
 
-// Who must use 2FA: 'admin' (default), 'all', or 'none'
-const REQUIRE_2FA = ['admin', 'all', 'none'].includes(process.env.REQUIRE_2FA) ? process.env.REQUIRE_2FA : 'admin';
-
+// 2FA is off for everyone by default. An Admin turns it on (or off) per user; a user it is on for must enrol before using the app.
 function twofaRequired(user) {
-  if (!user) return false;
-  if (REQUIRE_2FA === 'all') return true;
-  if (REQUIRE_2FA === 'admin') return user.role === 'Admin';
-  return false;
+  return Boolean(user && user.twofa_required);
 }
 
 // Trust proxy: required behind nginx/Traefik so rate limits and audit logs see real client IPs
@@ -60,7 +55,6 @@ function startupChecks() {
   if (PROD && /change[-_ ]?me/i.test(process.env.ADMIN_PASSWORD || '')) warn.push('ADMIN_PASSWORD is still the placeholder from .env.example. Change it (and remove it from .env once the first Admin has signed in).');
   if (PROD && !cookieSecure) warn.push('COOKIE_SECURE=false in production: sessions travel without the Secure flag. Only acceptable on an isolated LAN.');
   if (PROD && !process.env.TRUST_PROXY) warn.push('TRUST_PROXY not set. If this runs behind a reverse proxy, every user shares the proxy IP for rate limiting and audit logs. Set TRUST_PROXY=1.');
-  if (REQUIRE_2FA === 'none' && PROD) warn.push('REQUIRE_2FA=none: Admin accounts can sign in with a password only.');
   warn.forEach((w) => console.warn(`[security] ${w}`));
   if (problems.length) {
     problems.forEach((p) => console.error(`[security] ${p}`));
@@ -69,6 +63,6 @@ function startupChecks() {
 }
 
 module.exports = {
-  PROD, cookieSecure, COOKIE_NAME, REQUIRE_2FA, twofaRequired, trustProxyValue, startupChecks,
+  PROD, cookieSecure, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks,
   SESSION_IDLE_MS, SESSION_MAX_MS, API_RATE_LIMIT, APP_ORIGINS,
 };

@@ -507,7 +507,7 @@ export default function Audit() {
 
       <div className="table-wrap">
         {!d ? <Empty>Loading…</Empty> : !d.rows.length ? <Empty>No audit entries.</Empty> : (
-          <table className="t">
+          <table className="t wl">
             <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Entity</th><th>Details</th><th>IP</th></tr></thead>
             <tbody>
               {d.rows.map((r) => {
