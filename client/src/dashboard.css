@@ -14,6 +14,7 @@
   border: 1px solid color-mix(in srgb, #6aa7ff 28%, var(--border));
   background: linear-gradient(100deg, color-mix(in srgb, #4d86ff 22%, var(--surface)) 0%, color-mix(in srgb, #8b7bff 15%, var(--surface)) 48%, color-mix(in srgb, #ff6b9d 18%, var(--surface)) 100%); }
 .dsh-sun { width: clamp(44px, 4vw, 58px); height: auto; flex: none; filter: drop-shadow(0 4px 8px rgba(255, 150, 30, .3)); }
+.dsh-moon { filter: drop-shadow(0 4px 12px rgba(120, 130, 255, .35)); }
 .dsh-hero-text { min-width: 0; position: relative; z-index: 1; }
 .dsh-hero h1 { margin: 0; font-size: clamp(24px, 2.3vw, 36px); font-weight: 800; letter-spacing: -.02em; line-height: 1.15; }
 .dsh-date { margin-top: 4px; color: var(--text-2); font-size: clamp(13px, 1vw, 15.5px); }
@@ -40,6 +41,7 @@
 /* ---- Active users + Quick Links ---- */
 .dsh-row2 { display: grid; grid-template-columns: minmax(300px, 4fr) minmax(0, 6fr); gap: 12px; }
 .dsh-row2.one { grid-template-columns: minmax(0, 1fr); }
+.dsh-row2 { align-items: start; }   /* each card is as tall as its own content — a card never stretches to the height of its neighbour and shows empty space */
 .dsh-userlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 9px; max-height: 240px; overflow-y: auto; scrollbar-width: thin; }
 /* three or more people: smaller cards in more columns, so the block stays about as tall as with one (it scrolls inside after two rows) */
 .dsh-userlist.compact { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 6px; max-height: 80px; }
@@ -76,12 +78,23 @@
 .dsh-earlier-pop i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
 .dsh-earlier-pop em { margin-left: auto; padding-left: 14px; font-style: normal; color: var(--text-3); font-size: 11.5px; }
 
-.dsh-quick-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-.dsh-quick { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 14px 16px; border-radius: 15px; font-weight: 650; font-size: 14px; color: var(--text); line-height: 1.25;
+.dsh-quick-card { container-type: inline-size; container-name: quick; }
+/* ONE row at every size: the tiles share the width equally and shrink with it (icon beside the label when there is room, stacked and smaller when there isn't) */
+.dsh-quick-grid { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: clamp(6px, 1vw, 12px); }
+.dsh-quick { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 14px 12px; border-radius: 15px; font-weight: 650; font-size: 14px; color: var(--text); line-height: 1.25;
   background: color-mix(in srgb, var(--hc) 11%, var(--surface)); border: 1px solid color-mix(in srgb, var(--hc) 20%, var(--border)); transition: transform .12s, box-shadow .12s; }
 .dsh-quick:hover { text-decoration: none; transform: translateY(-2px); box-shadow: 0 8px 18px color-mix(in srgb, var(--hc) 18%, transparent); }
 .dsh-quick-ico { flex: none; display: grid; place-items: center; color: var(--hc); }
 .dsh-quick-ico svg { width: 26px; height: 26px; }
+.dsh-quick > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+@container quick (max-width: 780px) {
+  .dsh-quick { flex-direction: column; justify-content: center; text-align: center; gap: 6px; padding: 10px 6px; font-size: 12.5px; }
+  .dsh-quick-ico svg { width: 24px; height: 24px; }
+}
+@container quick (max-width: 460px) {
+  .dsh-quick { font-size: 11px; padding: 8px 3px; gap: 4px; line-height: 1.15; border-radius: 12px; }
+  .dsh-quick-ico svg { width: 21px; height: 21px; }
+}
 
 /* ---- KPI cards ---- */
 .dsh-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
@@ -189,7 +202,6 @@ button.dsh-stat:hover { transform: translateY(-2px); box-shadow: 0 10px 22px col
 @media (max-width: 560px) {
   .dsh { gap: 12px; }
   .dsh-stats { grid-template-columns: minmax(0, 1fr); }
-  .dsh-quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dsh-xl-dow { display: none; }
   .dsh-xl-date { font-size: 9.5px; }
   .dsh-chart:not(.dense) .dsh-xl:not(.today):not(:nth-child(2n+1)) .dsh-xl-date { visibility: hidden; }
@@ -245,3 +257,11 @@ button.dsh-stat:hover { transform: translateY(-2px); box-shadow: 0 10px 22px col
   .dsh-track { height: 7px; }
   .dsh-note { font-size: 11px; }
 }
+
+/* "All time": week / month / year bars — wider bars, and only some of the labels are shown */
+.dsh-chart.buckets .dsh-bar { width: 58%; max-width: 56px; }
+.dsh-chart.buckets .dsh-xl:not(.today):not(:nth-child(5n+1)) .dsh-xl-date { visibility: visible; }
+.dsh-chart.buckets .dsh-xl-date.skip { visibility: hidden; }
+.dsh-chart.buckets .dsh-xl-date { font-size: 11px; }
+.dsh-chart.buckets .dsh-xl-date.now { color: var(--accent); font-weight: 800; }
+.dsh-chart-empty { flex: 1; display: grid; place-items: center; min-height: 120px; }

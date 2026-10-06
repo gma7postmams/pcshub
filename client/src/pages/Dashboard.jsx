@@ -6,7 +6,7 @@ import { useSession } from '../context.jsx';
 import { Empty, RoleBadge } from '../components/ui.jsx';
 import {
   CalendarCheckIcon, CalendarGridIcon, CheckCircleIcon, ChevronDownSmall, ChevronRightIcon, ClockIcon, CloudIcon, DocIcon, FlagIcon,
-  HeroArt, HourglassIcon, ListIcon, PulseIcon, SunArt, UsersIcon, XCircleIcon,
+  HeroArt, HourglassIcon, ListIcon, MoonArt, PulseIcon, SunArt, UsersIcon, XCircleIcon,
 } from '../components/DashIcons.jsx';
 import '../dashboard.css';
 
@@ -28,7 +28,13 @@ const dayParts = (iso) => {
 };
 const dayLabel = (iso) => { const p = dayParts(iso); return `${p.dow}, ${monthOf(iso)} ${p.num}`; };
 const RANGE_KEY = 'dash:range';
-const storedRange = () => { try { return localStorage.getItem(RANGE_KEY) || 'week'; } catch (e) { return 'week'; } };
+// The menu choice is remembered only for the sign-in it was made in: it is stored with that sign-in's key (see /api/auth/me → session_key), so
+// reloads and page changes keep it, but after signing out (and in again) it starts at "This week" again — and so does anyone else who signs in.
+const readRange = (sessionKey) => {
+  if (!sessionKey) return 'week';
+  try { const v = JSON.parse(localStorage.getItem(RANGE_KEY)); return v && v.k === sessionKey && typeof v.r === 'string' ? v.r : 'week'; } catch (e) { return 'week'; }
+};
+const saveRange = (sessionKey, r) => { if (!sessionKey) return; try { localStorage.setItem(RANGE_KEY, JSON.stringify({ k: sessionKey, r })); } catch (e) { /* storage unavailable */ } };
 
 /** A card's heading: a tinted icon chip, the title, a little grey hint and an optional control at the right. */
 function CardHead({ icon: Icon, hue, dot, plain, title, hint, sub, right }) {
@@ -103,21 +109,41 @@ function EarlierPill({ people }) {
   );
 }
 
-function dayInfo(byDay) {
-  const days = byDay.map((x) => ({ iso: String(x.day).slice(0, 10), n: x.n }));
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+const partsOf = (iso) => ({ y: iso.slice(0, 4), m: monthOf(iso), d: Number(iso.slice(8, 10)) });
+/** What one bar covers, for the tooltip: a day, a week ("Sep 28 – Oct 4"), a month ("October 2026") or a year. */
+function barLabel(x, bucket) {
+  if (bucket === 'week') { const a = partsOf(x.iso); const z = partsOf(x.last); return `${a.m} ${a.d}${a.y !== z.y ? `, ${a.y}` : ''} – ${z.m} ${z.d}, ${z.y}`; }
+  if (bucket === 'month') return new Date(`${x.iso}T00:00:00Z`).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  if (bucket === 'year') return x.iso.slice(0, 4);
+  return dayLabel(x.iso);
+}
+/** The short label under a bar (and whether to show it: with many bars only every few are labelled). */
+function axisLabel(x, i, days, bucket) {
+  const a = partsOf(x.iso);
+  if (bucket === 'week') return `${a.m} ${a.d}`;
+  if (bucket === 'month') return i === 0 || a.m === 'Jan' ? `${a.m} '${a.y.slice(2)}` : a.m;
+  return a.y;
+}
+
+function dayInfo(byDay, bucket = 'day') {
+  const days = byDay.map((x) => ({ iso: String(x.day).slice(0, 10), last: String(x.last || x.day).slice(0, 10), n: x.n }));
   const total = days.reduce((a, x) => a + x.n, 0);
   const top = Math.max(...days.map((x) => x.n), 0);
-  return { days, total, top, busiest: days.find((x) => x.n === top && top > 0), avg: total / (days.length || 1) };
+  return { days, bucket, total, top, busiest: days.find((x) => x.n === top && top > 0), avg: total / (days.length || 1) };
 }
 
 function DayChart({ info, todayIso }) {
-  const { days, top } = info;
+  const { days, top, bucket } = info;
   const niceMax = Math.max(4, Math.ceil(top / 4) * 4);   // the axis tops out on a multiple of 4, so the gridlines are whole numbers
   const ticks = [1, 0.75, 0.5, 0.25, 0].map((f) => Math.round(niceMax * f));
-  const dense = days.length > 16;   // a month or 30 days: date numbers only
+  const byDays = bucket === 'day';
+  const dense = !byDays || days.length > 16;   // a month or 30 days, or week / month / year bars: no weekday names
+  const step = byDays ? 1 : Math.max(1, Math.ceil(days.length / 12));   // with many bars only every few are labelled
   const cols = { gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))` };
+  if (!days.length) return <div className="dsh-chart-empty"><Empty>No workload yet.</Empty></div>;
   return (
-    <div className={`dsh-chart${dense ? ' dense' : ''}`}>
+    <div className={`dsh-chart${dense ? ' dense' : ''}${byDays ? '' : ' buckets'}`}>
       <div className="dsh-plotwrap">
         <div className="dsh-y">{ticks.map((t) => <span key={t}>{t}</span>)}</div>
         <div className="dsh-plot">
@@ -127,12 +153,12 @@ function DayChart({ info, todayIso }) {
             {days.map((x) => {
               const p = dayParts(x.iso);
               const h = x.n ? Math.max((x.n / niceMax) * 100, 3) : 0;
-              const kind = x.iso === todayIso ? 'today' : x.iso < todayIso ? 'past' : 'next';
+              const kind = x.last < todayIso ? 'past' : x.iso <= todayIso ? 'today' : 'next';   // a bar that contains today is "today"
               return (
-                <div key={x.iso} className={`dsh-col ${kind}${p.weekend ? ' weekend' : ''}`}>
+                <div key={x.iso} className={`dsh-col ${kind}${byDays && p.weekend ? ' weekend' : ''}`}>
                   {x.n ? <span className="dsh-val" style={{ bottom: `calc(${h}% + 4px)` }}>{x.n}</span> : <span className="dsh-zero" />}
                   <div className="dsh-bar" style={{ height: `${h}%` }} />
-                  <span className="dsh-tip" style={{ bottom: `calc(${h}% + 26px)` }}>{dayLabel(x.iso)}<b>{x.n} item{x.n === 1 ? '' : 's'}</b></span>
+                  <span className="dsh-tip" style={{ bottom: h > 62 ? `calc(${h}% - 58px)` : `calc(${h}% + 26px)` }}>{barLabel(x, bucket)}<b>{x.n} item{x.n === 1 ? '' : 's'}</b></span>
                 </div>
               );
             })}
@@ -142,12 +168,16 @@ function DayChart({ info, todayIso }) {
       <div className="dsh-xaxis" style={cols}>
         {days.map((x, i) => {
           const p = dayParts(x.iso);
-          const isToday = x.iso === todayIso;
+          const isToday = x.last >= todayIso && x.iso <= todayIso;
           const showMonth = i === 0 || p.num === 1;
+          const label = byDays
+            ? (dense ? (showMonth ? `${monthOf(x.iso)} ${p.num}` : p.num) : `${monthOf(x.iso)} ${p.num}`)
+            : axisLabel(x, i, days, bucket);
+          const skipped = !byDays && !isToday && i % step !== 0 && !(bucket === 'month' && partsOf(x.iso).m === 'Jan');   // the start of a year is always labelled
           return (
-            <div key={x.iso} className={`dsh-xl${isToday ? ' today' : ''}${p.weekend ? ' weekend' : ''}`}>
+            <div key={x.iso} className={`dsh-xl${isToday ? ' today' : ''}${byDays && p.weekend ? ' weekend' : ''}`}>
               {dense ? null : <span className="dsh-xl-dow">{p.dow}</span>}
-              {isToday ? <span className="dsh-xl-pill">{p.num}</span> : <span className="dsh-xl-date">{dense ? (showMonth ? `${monthOf(x.iso)} ${p.num}` : p.num) : `${monthOf(x.iso)} ${p.num}`}</span>}
+              {isToday && byDays ? <span className="dsh-xl-pill">{p.num}</span> : <span className={`dsh-xl-date${skipped ? ' skip' : ''}${isToday ? ' now' : ''}`}>{label}</span>}
             </div>
           );
         })}
@@ -160,7 +190,7 @@ export default function Dashboard() {
   const s = useSession();
   const navigate = useNavigate();
   const [d, setD] = useState(null);
-  const [range, setRangeState] = useState(storedRange);
+  const [range, setRangeState] = useState(() => readRange(s.session_key));
   const rangeRef = useRef(range);
   rangeRef.current = range;
 
@@ -186,8 +216,8 @@ export default function Dashboard() {
 
   const changeRange = (key) => {
     setRangeState(key);
-    try { localStorage.setItem(RANGE_KEY, key); } catch (e) { /* storage unavailable */ }
-    get(`/api/dashboard/days?range=${key}`).then((r) => setD((cur) => (cur && cur.workload ? { ...cur, workload: { ...cur.workload, byDay: r.days, range: r.range, rangeLabel: r.label, rangeSub: r.sub } } : cur))).catch(() => { /* keep the old chart */ });
+    saveRange(s.session_key, key);
+    get(`/api/dashboard/days?range=${key}`).then((r) => setD((cur) => (cur && cur.workload ? { ...cur, workload: { ...cur.workload, byDay: r.days, bucket: r.bucket, range: r.range, rangeLabel: r.label, rangeSub: r.sub } } : cur))).catch(() => { /* keep the old chart */ });
   };
 
   if (!d) return <main className="container wide dsh"><Empty>Loading…</Empty></main>;
@@ -196,6 +226,7 @@ export default function Dashboard() {
   const now = new Date();
   const hour = now.getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const night = hour >= 18 || hour < 5;   // the moon from 6 pm until 5 am, the sun in between (the wording of the greeting is separate)
   const go = (href) => (href ? () => navigate(href) : null);
   const w = d.workload;
   const us = d.users;
@@ -208,12 +239,12 @@ export default function Dashboard() {
     d.canOpen.approval && { to: '/approval', label: 'Approval', icon: CheckCircleIcon, hue: 'amber' },
   ].filter(Boolean);
   const nothing = !w && !us && !d.kpis && !links.length;
-  const info = w ? dayInfo(w.byDay) : null;
+  const info = w ? dayInfo(w.byDay, w.bucket) : null;
 
   return (
     <main className="container wide dsh">
       <section className="dsh-hero">
-        <SunArt />
+        {night ? <MoonArt /> : <SunArt />}
         <div className="dsh-hero-text">
           <h1>{greet}, {s.user.full_name.split(' ')[0]}!</h1>
           <div className="dsh-date">{now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>
@@ -264,7 +295,7 @@ export default function Dashboard() {
 
       {w ? (
         <section className="dsh-card">
-          <CardHead icon={PulseIcon} hue="blue" title="Workload Tracker" hint={`${w.total} item${w.total === 1 ? '' : 's'} in total`} right={<RangeMenu ranges={w.ranges} value={range} onChange={changeRange} />} />
+          <CardHead icon={PulseIcon} hue="blue" title="Workload Tracker" hint={`${w.total} item${w.total === 1 ? '' : 's'} in total`} right={<RangeMenu ranges={w.ranges} value={w.range} onChange={changeRange} />} />
           <div className="dsh-stats">
             <StatCard icon={CalendarGridIcon} hue="blue" label="Today" value={w.today} foot={w.today === 1 ? 'item to work on' : 'items to work on'} onClick={go('/workload')} />
             <StatCard icon={CalendarGridIcon} hue="purple" label="This week" value={w.thisWeek} foot="Monday to Sunday" onClick={go('/workload')} />
@@ -277,12 +308,12 @@ export default function Dashboard() {
       {w ? (
         <div className="dsh-row3">
           <section className="dsh-card dsh-chart-card">
-            <CardHead icon={UsersIcon} hue="blue" title="Workload by day" sub={w.rangeSub}
+            <CardHead icon={UsersIcon} hue="blue" title={`Workload by ${info.bucket}`} sub={w.rangeSub}
               right={(
                 <div className="dsh-cstats">
                   <span>In view <b>{info.total}</b></span>
-                  <span>Daily average <b>{info.avg.toFixed(1)}</b></span>
-                  <span>Busiest day <b>{info.busiest ? `${dayLabel(info.busiest.iso)} · ${info.busiest.n}` : '—'}</b></span>
+                  <span>{{ day: 'Daily', week: 'Weekly', month: 'Monthly', year: 'Yearly' }[info.bucket]} average <b>{info.avg.toFixed(1)}</b></span>
+                  <span>Busiest {info.bucket} <b>{info.busiest ? `${barLabel(info.busiest, info.bucket)} · ${info.busiest.n}` : '—'}</b></span>
                   <span className="dsh-legend"><i className="past" />Past<i className="next" />Upcoming<i className="today" />Today</span>
                 </div>
               )} />

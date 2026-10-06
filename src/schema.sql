@@ -494,11 +494,8 @@ DO $$ BEGIN
   END IF;
 END $$;
 
--- User Presence Tracking.
--- Active sessions periodically send heartbeats while using the system.
--- Used by Dashboard Active Users and collaboration awareness features.
+-- Who is working in the app right now: the signed-in app sends a small heartbeat (about once a minute, only while the person is actually
 -- using the page) and the Dashboard's "Active users" block reads it. One row per user.
-
 CREATE TABLE IF NOT EXISTS user_presence (
   user_id         INT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   last_active_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
