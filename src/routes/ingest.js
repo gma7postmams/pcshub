@@ -12,9 +12,12 @@ const router = express.Router();
 const CM_STATUSES = ['DONE', 'NON-COMPLIANT'];
 
 const SELECT = `
-  SELECT i.*, ru.full_name AS requested_by_name, cu.full_name AS created_by_name,
+  SELECT i.*, n.no, ru.full_name AS requested_by_name, cu.full_name AS created_by_name,
          uu.full_name AS updated_by_name, cmu.full_name AS cm_decided_by_name
     FROM ingest_records i
+    -- NO.: the record's place in the whole list, oldest = 1, newest = the highest (the table shows newest first, so it counts DOWN). It is worked out
+    -- from what exists now, so it renumbers by itself when a record is deleted, and it does not change with filters or search.
+    LEFT JOIN (SELECT id, (row_number() OVER (ORDER BY created_at, id))::int AS no FROM ingest_records) n ON n.id = i.id
     LEFT JOIN users ru ON ru.id = i.requested_by_user_id
     LEFT JOIN users cu ON cu.id = i.created_by
     LEFT JOIN users uu ON uu.id = i.updated_by
@@ -121,7 +124,7 @@ router.post('/', requireAction('ingest.write'), asyncH(async (req, res) => {
     await audit(req, 'ingest.create', 'ingest_record', rows[0].id, r, c);
     await notifyCapable('ingest.approve', {
       title: `New ingest: ${r.program}`,
-      body: `${req.user.full_name} added ingest #${rows[0].id} (${r.platform}). Destination Folder and Approved By are waiting.`,
+      body: `${req.user.full_name} added a new ingest request (${r.platform}). Destination Folder and Approved By are waiting.`,
       link: `/ingest?id=${rows[0].id}`,
     }, { excludeUserId: req.user.id }, c);
     return rows[0];
@@ -218,7 +221,7 @@ router.post('/:id/approve', requireAction('ingest.approve'), asyncH(async (req, 
     const participants = [r.created_by, r.requested_by_user_id].filter((uid) => uid && uid !== req.user.id);
     await notifyUsers(participants, {
       title: `Ingest approved: ${r.program}`,
-      body: `${req.user.full_name} approved ingest #${id}`,
+      body: `${req.user.full_name} approved this ingest request`,
       link: `/ingest?id=${id}`,
     }, c);
   });
@@ -284,7 +287,7 @@ router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(asyn
     const reasonSuffix = decision === 'NON-COMPLIANT' ? ` — ${reason}` : '';
     await notifyUsers(participants, {
       title: `Ingest ${decision}: ${r.program}`,
-      body: `${req.user.full_name} marked ingest #${id} ${decision}${reasonSuffix}`,
+      body: `${req.user.full_name} marked this ingest request ${decision}${reasonSuffix}`,
       link: `/ingest?id=${id}`,
     }, c);
   });

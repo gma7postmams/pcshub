@@ -107,7 +107,7 @@ function ReasonModal({ r, onClose, onSave }) {
     try { await onSave(reason); } catch (e) { toast(e.message, 'err'); setBusy(false); }
   };
   return (
-    <Modal title={`Ingest #${r.id}: NON-COMPLIANT`} onClose={() => { if (!busy) onClose(); }}
+    <Modal title={`Ingest #${r.no ?? r.id}: NON-COMPLIANT`} onClose={() => { if (!busy) onClose(); }}
       footer={(<>
         <button type="button" className="btn" disabled={busy} onClick={onClose}>Cancel</button>
         <button type="button" className="btn primary" disabled={busy} onClick={save}>Save</button>
@@ -258,7 +258,7 @@ export default function Ingest() {
                     <tbody>
                       {data.rows.map((r) => (
                         <tr key={r.id} className="clickable" onClick={() => openDetail(r.id)}>
-                          <td className="dim mono">{r.id}</td>
+                          <td className="dim mono">{r.no ?? r.id}</td>
                           {cell(r, 'program', <strong>{r.program}</strong>)}
                           {cell(r, 'platform', <PlatformCell value={r.platform} />)}
                           {cell(r, 'billable_party', r.billable_party)}
@@ -302,7 +302,7 @@ export default function Ingest() {
           onEdit={() => { setForm(detail); setDetail(null); }}
           onDelete={async () => {
             const done = detail.cm_status === 'DONE';
-            if (!(await confirm('Delete ingest record', done ? `Ingest #${detail.id} is already DONE in CM. Deleting it permanently removes this historical record.` : `Permanently delete ingest #${detail.id}?`, { okText: 'Delete', danger: true }))) return;
+            if (!(await confirm('Delete ingest record', done ? `Ingest #${detail.no ?? detail.id} is already DONE in CM. Deleting it permanently removes this historical record.` : `Permanently delete ingest #${detail.no ?? detail.id}?`, { okText: 'Delete', danger: true }))) return;
             try { await del(`/api/ingest/${detail.id}`); toast('Deleted'); setDetail(null); load(); } catch (e) { toast(e.message, 'err'); }
           }}
         />
@@ -371,7 +371,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
 
   return (
     <Modal
-      title={rec ? `Edit Ingest #${rec.id}` : 'New Ingest'}
+      title={rec ? `Edit Ingest #${rec.no ?? rec.id}` : 'New Ingest'}
       onClose={requestClose}
       footer={(
         <>
@@ -412,7 +412,7 @@ const KV = ({ k, children }) => <><dt>{k}</dt><dd>{children || <span className="
 function IngestDetail({ r, canWrite, canDelete, canApprove, approveReady, canUnapprove, onClose, onEdit, onDelete, onApprove, onUnapprove }) {
   return (
     <Modal
-      title={`Ingest #${r.id}`}
+      title={`Ingest #${r.no ?? r.id}`}
       onClose={onClose}
       footer={(
         <>
