@@ -9,13 +9,13 @@ import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } fr
 
 // Status (CM) is blank (Pending) until CM picks one of these
 const CM_OPTIONS = ['DONE', 'NON-COMPLIANT'];
-const STATUS_FILTER = ['Pending', ...CM_OPTIONS];
+const STATUS_FILTER = ['PENDING', ...CM_OPTIONS];
 const PAGE = 50;
 const withCurrent = (list, v) => (v && !list.includes(v) ? [...list, v] : list);
 const isoDate = (x) => (/^\d{4}-\d{2}-\d{2}/.test(x || '') ? String(x).slice(0, 10) : '');
 
 // Status (CM) cell: the decision plus its audit-trail timestamp. Same chips as the Workload Tracker (soft colour + dot).
-const CM_HUE = { DONE: 'green', 'NON-COMPLIANT': 'red', Pending: 'amber' };
+const CM_HUE = { DONE: 'green', 'NON-COMPLIANT': 'red', PENDING: 'amber' };
 const CmChip = ({ s }) => <Chip hue={CM_HUE[s] || 'amber'} dot>{s}</Chip>;
 const CmStatus = ({ r, inline }) => (r.cm_status
   ? (
@@ -25,7 +25,7 @@ const CmStatus = ({ r, inline }) => (r.cm_status
       {r.cm_status === 'NON-COMPLIANT' && r.cm_non_compliant_reason ? <span className="sub" title={r.cm_non_compliant_reason}>{r.cm_non_compliant_reason}</span> : null}
     </div>
   )
-  : <CmChip s="Pending" />);
+  : <CmChip s="PENDING" />);
 // Approved By: the approver's name with the time under it (like Status (CM)); PCS / OCS see an Approve button until it is approved, and an Undo once it is.
 const ApprovedBy = ({ r, canApprove, onApprove, onUnapprove }) => {
   if (r.approved_by) {
@@ -56,7 +56,7 @@ const CELLS = {
   source: { kind: 'text', max: 500 },
   materials_count: { kind: 'number' },
   destination_folder: { kind: 'area', max: 1000, approve: true },
-  cm_status: { kind: 'select', cm: true, blank: 'Pending' },   // Status (CM): a dropdown for CM users; NON-COMPLIANT then asks for its reason
+  cm_status: { kind: 'select', cm: true, blank: 'PENDING' },   // Status (CM): a dropdown for CM users; NON-COMPLIANT then asks for its reason
 };
 const cellInitial = (r, k) => (k === 'cm_status' ? (r.cm_status || '') : k === 'episode_break_date_text' ? (isoDate(r.episode_break_date_text) || isoDate(r.episode_date))
   : r[k] == null ? '' : String(r[k]));
@@ -132,7 +132,7 @@ export default function Ingest() {
   const canDelete = s.can('ingest.delete');
 
   const [lookups, setLookups] = useState(null);
-  const [filt, setFilt] = useState({ q: '', status: params.get('status') || '', program: '', platform: '', from: '', to: '' });
+  const [filt, setFilt] = useState({ q: '', status: /^pending$/i.test(params.get('status') || '') ? 'PENDING' : (params.get('status') || ''), program: '', platform: '', from: '', to: '' });
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);     // null | {} (new) | record (edit)
@@ -398,7 +398,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
           <textarea name="destination_folder" className="mono" maxLength={1000} value={f.destination_folder} onChange={set('destination_folder')} disabled={!canApprove} /></label>
         <label className="f"><span>Status (CM)</span>
           <select name="cm_status" value={f.cm_status} onChange={set('cm_status')} disabled={!canCm}>
-            <Options list={CM_OPTIONS} blank="Pending" />
+            <Options list={CM_OPTIONS} blank="PENDING" />
           </select></label>
         {f.cm_status === 'NON-COMPLIANT' ? (
           <label className="f"><span>Reason <span className="req">*</span></span>
@@ -440,7 +440,7 @@ function IngestDetail({ r, canWrite, canDelete, canApprove, canUnapprove, onClos
         <KV k="Requested By">{r.requested_by_psd || r.requested_by_name}</KV>
         <KV k="Destination Folder">{r.destination_folder ? <span className="mono">{r.destination_folder}</span> : null}</KV>
         <KV k="Approved By">{r.approved_by ? `${r.approved_by}${r.approved_at ? ` · ${fmtDateTime(r.approved_at)}` : ''}` : null}</KV>
-        <KV k="Status (CM)">{r.cm_status || 'Pending'}</KV>
+        <KV k="Status (CM)">{r.cm_status || 'PENDING'}</KV>
         {r.cm_status ? <>
           {r.cm_non_compliant_reason ? <KV k="Non-compliant reason">{r.cm_non_compliant_reason}</KV> : null}
         </> : null}

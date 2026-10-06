@@ -76,7 +76,7 @@ router.get('/', asyncH(async (req, res) => {
   const params = [];
   const add = (sql, val) => { params.push(val); where.push(sql.replace('?', `$${params.length}`)); };
   if (req.query.status && CM_STATUSES.includes(req.query.status)) add('i.cm_status = ?', req.query.status);
-  else if (req.query.status === 'Pending') where.push('i.cm_status IS NULL');
+  else if (/^pending$/i.test(String(req.query.status || ''))) where.push('i.cm_status IS NULL');
   if (req.query.program) add('i.program = ?', String(req.query.program));
   if (req.query.platform) add('i.platform = ?', String(req.query.platform));
   if (req.query.from) add('i.episode_date >= ?', v.date(req.query.from, { field: 'from' }));
