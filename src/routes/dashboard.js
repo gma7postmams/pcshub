@@ -76,6 +76,60 @@ async function activeUsers(u) {
   return { windowMinutes: ACTIVE_MINUTES, active: rows.filter((r) => r.active).map(row), earlier: rows.filter((r) => !r.active).slice(0, 12).map(row) };
 }
 
+// ---- Recent Activity ----
+// The latest things people did in the hub, taken from the audit log. Each kind of action belongs to a page, and a person only sees the
+// actions for pages their group can open, so the card never shows work they have no access to.
+const ACTIVITY = Object.assign(Object.create(null), {
+  'ingest.create':            { page: '/ingest',   hue: 'blue',   verb: 'added a new ingest record', kind: 'ingest' },
+  'ingest.update':            { page: '/ingest',   hue: 'blue',   verb: 'updated ingest record', kind: 'ingest' },
+  'ingest.send_for_approval': { page: '/ingest',   hue: 'blue',   verb: 'submitted for approval', kind: 'ingest' },
+  'ingest.cm_done':           { page: '/ingest',   hue: 'blue',   verb: 'marked compliant', kind: 'ingest' },
+  'ingest.cm_non_compliant':  { page: '/ingest',   hue: 'blue',   verb: 'marked non-compliant', kind: 'ingest' },
+  'ingest.delete':            { page: '/ingest',   hue: 'blue',   verb: 'deleted ingest record', kind: 'ingest' },
+  'approval.approved':        { page: '/approval', hue: 'green',  verb: 'approved', kind: 'ingest' },
+  'approval.rejected':        { page: '/approval', hue: 'red',    verb: 'rejected', kind: 'ingest' },
+  'workload.create':          { page: '/workload', hue: 'purple', verb: 'added workload item', kind: 'workload' },
+  'workload.update':          { page: '/workload', hue: 'purple', verb: 'updated workload item', kind: 'workload' },
+  'workload.delete':          { page: '/workload', hue: 'purple', verb: 'deleted workload item', kind: 'workload' },
+  'workload.plug_add':        { page: '/plug-list', hue: 'amber', verb: 'added to the PSD Daily Plug List', kind: 'plug' },
+  'workload.plug_edit':       { page: '/plug-list', hue: 'amber', verb: 'edited the PSD Daily Plug List', kind: 'plug' },
+  'workload.plug_delete':     { page: '/plug-list', hue: 'amber', verb: 'removed from the PSD Daily Plug List', kind: 'plug' },
+  'knowledge.upload':         { page: '/knowledge', hue: 'teal',  verb: 'uploaded', kind: 'doc' },
+  'knowledge.rename':         { page: '/knowledge', hue: 'teal',  verb: 'renamed', kind: 'doc' },
+  'knowledge.delete':         { page: '/knowledge', hue: 'teal',  verb: 'deleted', kind: 'doc' },
+});
+const ACTIVITY_SHOWN = 5;
+
+async function recentActivity(u) {
+  const actions = Object.keys(ACTIVITY).filter((a) => canPage(u, ACTIVITY[a].page));
+  if (!actions.length) return null;
+  // join keys are compared as text, so a non-numeric entity_id on some other kind of row can never make the cast fail
+  const { rows } = await db.query(
+    `SELECT x.id, x.user_id, x.action, x.entity_id, x.details, x.created_at,
+            COALESCE(NULLIF(btrim(u.full_name), ''), x.username, 'Someone') AS name,
+            COALESCE(i.program, w.prog_name, x.details->>'program', x.details->>'prog_name', x.details->>'title', x.details->>'filename') AS label
+       FROM (SELECT a.*, CASE WHEN a.entity = 'approval_request' THEN a.details->>'ingest_record_id'
+                              WHEN a.entity = 'ingest_record' THEN a.entity_id END AS ingest_key
+               FROM audit_logs a WHERE a.action = ANY($1) ORDER BY a.created_at DESC, a.id DESC LIMIT 60) x
+       LEFT JOIN users u ON u.id = x.user_id
+       LEFT JOIN ingest_records i ON i.id::text = x.ingest_key
+       LEFT JOIN workload_items w ON x.entity = 'workload_item' AND w.id::text = x.entity_id
+      ORDER BY x.created_at DESC, x.id DESC`, [actions]
+  );
+  // a burst of edits to the same thing by the same person (typing into cells) is one line, not ten
+  const seen = new Set();
+  const items = [];
+  for (const r of rows) {
+    const k = `${r.user_id}|${r.action}|${r.entity_id}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const a = ACTIVITY[r.action];
+    items.push({ id: r.id, name: r.name, verb: a.verb, label: r.label || null, hue: a.hue, path: a.page, at: r.created_at, you: r.user_id === u.id });
+    if (items.length >= ACTIVITY_SHOWN) break;
+  }
+  return items;
+}
+
 // Just the chart's days for another range (the dropdown), without recomputing the whole dashboard.
 router.get('/days', asyncH(async (req, res) => {
   if (!canPage(req.user, '/workload')) return res.status(403).json({ error: 'No access to the Workload Tracker' });
@@ -103,6 +157,7 @@ router.get('/', asyncH(async (req, res) => {
     },
     kpis: null,
     users: null,
+    activity: null,
     workload: null,
     today: (await db.query('SELECT CURRENT_DATE AS d')).rows[0].d,
   };
@@ -122,6 +177,8 @@ router.get('/', asyncH(async (req, res) => {
   }
   // ---- Active users ----
   if (out.sections.users) out.users = await activeUsers(u);
+  // ---- Recent Activity ----
+  out.activity = await recentActivity(u);
 
   // ---- Workload Tracker ----
   if (out.canOpen.workload) {

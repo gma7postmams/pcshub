@@ -5,14 +5,14 @@ import { ago, fmtDate, initials } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { Empty, RoleBadge } from '../components/ui.jsx';
 import {
-  CalendarCheckIcon, CalendarGridIcon, CheckCircleIcon, ChevronDownSmall, ChevronRightIcon, ClockIcon, CloudIcon, DocIcon, FlagIcon,
-  HeroArt, HourglassIcon, ListIcon, MoonArt, PulseIcon, SunArt, UsersIcon, XCircleIcon,
+  CalendarCheckIcon, CalendarGridIcon, CheckCircleIcon, ChevronDownSmall, ChevronRightIcon, ClockIcon, DocIcon, FlagIcon,
+  HeroArt, HourglassIcon, MoonArt, PulseIcon, SunArt, UsersIcon, XCircleIcon,
 } from '../components/DashIcons.jsx';
 import '../dashboard.css';
 
 // Dashboard. Everything on it is shown only if the signed-in user may see it:
-//   greeting banner · Active users + Quick Links · Workload Tracker (KPI cards) · Workload by day + By team · Ingest & Approval (KPI cards)
-// It lays itself out for the screen: two columns on a wide screen, stacked on a narrow one, and on a tall window the chart row grows to fill the height.
+//   greeting banner · Active users + Recent Activity · Workload Tracker (KPI cards) · Workload by day + By team · Ingest & Approval (KPI cards)
+// It lays itself out for the screen: two columns on a wide screen, stacked on a narrow one. The chart row keeps a fixed height on a big screen.
 const TEAMS = [
   { key: 'VGFX', label: 'VGFX', color: 'var(--purple)' },
   { key: 'VEDIT', label: 'VEDIT', color: '#f0883e' },
@@ -232,13 +232,8 @@ export default function Dashboard() {
   const us = d.users;
   const st = d.kpis ? d.kpis.byStatus : {};
   const todayIso = String(d.today || '').slice(0, 10);
-  const links = [
-    d.canOpen.ingest && { to: '/ingest', label: 'Ingest Tracker', icon: CloudIcon, hue: 'blue' },
-    d.canOpen.workload && { to: '/workload', label: 'Workload Tracker', icon: ListIcon, hue: 'purple' },
-    d.canOpen.plugs && { to: '/plug-list', label: 'PSD Daily Plug List', icon: DocIcon, hue: 'green' },
-    d.canOpen.approval && { to: '/approval', label: 'Approval', icon: CheckCircleIcon, hue: 'amber' },
-  ].filter(Boolean);
-  const nothing = !w && !us && !d.kpis && !links.length;
+  const act = d.activity;
+  const nothing = !w && !us && !d.kpis && !act;
   const info = w ? dayInfo(w.byDay, w.bucket) : null;
 
   return (
@@ -252,13 +247,13 @@ export default function Dashboard() {
         <HeroArt />
       </section>
 
-      {us || links.length ? (
-        <div className={`dsh-row2${us && links.length ? '' : ' one'}`}>
+      {us || act ? (
+        <div className={`dsh-row2${us && act ? '' : ' one'}`}>
           {us ? (
             <section className="dsh-card dsh-users">
               <CardHead dot title="Active users" hint={us.active.length ? `${us.active.length} working right now` : `no one in the last ${us.windowMinutes} minutes`} right={<EarlierPill people={us.earlier} />} />
               {us.active.length ? (
-                <div className={`dsh-userlist${us.active.length >= 3 ? ' compact' : ''}`}>
+                <div className="dsh-userlist">
                   {us.active.map((p) => {
                     const where = p.you ? 'Dashboard' : p.page;
                     const target = p.you ? null : (p.path && s.canPage(p.path) ? p.path : null);   // a card opens the page that person is on, if you can open it too
@@ -280,14 +275,25 @@ export default function Dashboard() {
             </section>
           ) : null}
 
-          {links.length ? (
-            <section className="dsh-card dsh-quick-card">
-              <CardHead icon={CalendarGridIcon} hue="blue" title="Quick Links" />
-              <div className="dsh-quick-grid">
-                {links.map((l) => (
-                  <Link key={l.to} to={l.to} className={`dsh-quick h-${l.hue}`}><span className="dsh-quick-ico"><l.icon /></span><span>{l.label}</span></Link>
-                ))}
-              </div>
+          {act ? (
+            <section className="dsh-card dsh-activity-card">
+              <CardHead icon={ClockIcon} hue="blue" title="Recent Activity" sub="Latest updates across the hub"
+                right={<Link to="/activity-history" className="dsh-viewall">View all<ChevronRightIcon /></Link>} />
+              {act.length ? (
+                <ul className="dsh-activity">
+                  {act.map((a) => (
+                    <li key={a.id}>
+                      <Link to={a.path} className="dsh-act">
+                        <span className="dsh-act-av" style={{ background: hueFor(a.name) }}>{initials(a.name).slice(0, 2)}</span>
+                        <span className="dsh-act-name">{a.you ? 'You' : a.name}</span>
+                        <span className="dsh-act-text">{a.verb}{a.label ? <> <b>{a.label}</b></> : null}</span>
+                        <span className="dsh-act-time">{ago(a.at)}</span>
+                        <i className={`dsh-act-dot h-${a.hue}`} />
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : <Empty>No activity yet.</Empty>}
             </section>
           ) : null}
         </div>
