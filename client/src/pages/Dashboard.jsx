@@ -346,7 +346,7 @@ export default function Dashboard() {
           {act ? (
             <section className="dsh-card dsh-activity-card" ref={actRef}>
               <CardHead icon={ClockIcon} hue="blue" title="Recent Activity" sub="Latest updates across the hub"
-                right={<Link to="/activity-history" className="dsh-viewall">View all<ChevronRightIcon /></Link>} />
+                right={<Link to={s.canPage('/admin') ? '/admin#audit' : '/activity-history'} className="dsh-viewall">View all<ChevronRightIcon /></Link>} />   {/* Admins have no Activity History page — their full log is Admin → Audit Log; everyone else sees their own history */}
               {act.length ? (
                 <ul className="dsh-activity">
                   {act.map((a) => (
