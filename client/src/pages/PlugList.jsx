@@ -211,7 +211,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
                 <thead>
                   <tr>
                     {canWrite ? <th className="chk"><input type="checkbox" checked={allOn} disabled={!todo.length} onChange={() => setPicked(allOn ? new Set() : new Set(todo.map((r) => r.id)))} title="Select every plug on this page that is not yet in the Workload Tracker" /></th> : null}
-                    <th>NO</th><th>DATE</th><th>PLUG ID</th><th>PROG. NAME / PROJ. TITLE</th><th>PSD</th><th>ACCOUNT BY</th><th>IN WORKLOAD</th>{canWrite ? <th className="right">Actions</th> : null}
+                    <th>NO</th><th>DATE</th><th>PLUG ID</th><th>PROG. NAME / PROJ. TITLE</th><th>PSD</th><th>ACCOUNT BY</th><th>IN WORKLOAD</th>{canWrite ? <th className="plug-actions">Actions</th> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -226,7 +226,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
                       <td>{r.account_by}</td>
                       <td>{r.in_workload ? <span className="chip c-green">In workload</span> : <span className="dim">—</span>}</td>
                       {canWrite ? (
-                        <td className="actions-cell">
+                        <td className="plug-actions">
                           <button type="button" className="btn sm ghost" onClick={() => setEditing(r)}>Edit</button>
                           <button type="button" className="btn sm ghost" onClick={() => removePlug(r)}>Delete</button>
                         </td>

@@ -824,6 +824,10 @@ table.t.wl tbody tr.picked td { box-shadow: inset 0 1px 0 color-mix(in srgb, var
 .plug-foot .grow { flex: 1; }
 .plug-foot .fsel { min-width: 130px; }
 .plug-t td.nowrap { white-space: nowrap; }
+/* Edit and Delete side by side, in a column no wider than the two buttons */
+.plug-t th.plug-actions, .plug-t td.plug-actions { width: 1%; white-space: nowrap; padding-left: 6px; padding-right: 6px; text-align: center; }
+.plug-t td.plug-actions .btn { display: inline-flex; width: auto; margin: 0; padding: 4px 8px; }
+.plug-t td.plug-actions .btn + .btn { margin-left: 2px; }
 .plug-bar .wl-search { flex: 1 1 180px; min-width: 180px; }
 .plug-bar { row-gap: 8px; }
 
