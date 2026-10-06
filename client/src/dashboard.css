@@ -43,7 +43,15 @@
 .dsh-row2.one { grid-template-columns: minmax(0, 1fr); }
 .dsh-row2 { align-items: start; }   /* Active users is as tall as its people need, but never taller than the Recent Activity card beside it (--act-h, set from its measured height) */
 .dsh-users { display: flex; flex-direction: column; max-height: var(--act-h, none); }
-.dsh-users .dsh-userlist { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; align-content: start; }
+.dsh-ulwrap { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.dsh-users .dsh-userlist { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; align-content: start; }
+/* "+N more": a faint fade at the bottom edge of the list, with a small pill on it (styled like the Earlier today pill) */
+.dsh-ulfade { position: absolute; left: 0; right: 9px; bottom: 0; height: 46px; pointer-events: none; border-radius: 0 0 14px 14px;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--surface) 0%, transparent), var(--surface) 88%); }
+.dsh-more { position: absolute; left: 50%; bottom: 7px; transform: translateX(-50%); padding: 3px 11px; border-radius: 999px; font: inherit; font-size: 12px; line-height: 1.4; color: var(--text-2);
+  background: color-mix(in srgb, var(--h-blue) 9%, var(--surface-2)); border: 1px solid color-mix(in srgb, var(--h-blue) 16%, var(--border)); cursor: pointer; font-variant-numeric: tabular-nums; }
+.dsh-more:hover { background: color-mix(in srgb, var(--h-blue) 15%, var(--surface-2)); color: var(--text); }
+.dsh-more:focus-visible { outline: 2px solid var(--accent, var(--h-blue)); outline-offset: 2px; }
 .dsh-userlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 9px; }   /* every person gets the full card (avatar, role, page) at the same size, however many are online */
 .dsh-user-nm { overflow: hidden; text-overflow: ellipsis; }
 .dsh-user { display: flex; align-items: center; gap: 14px; width: 100%; padding: 8px 14px; border-radius: 15px; text-align: left; font: inherit; color: inherit; min-width: 0;

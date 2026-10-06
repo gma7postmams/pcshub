@@ -109,6 +109,47 @@ function EarlierPill({ people }) {
   );
 }
 
+/** The scrolling list of online people. When some are scrolled out of sight a small "+N more" pill sits on a faint fade at the bottom edge
+    (same look as the "Earlier today" pill); click it to scroll down. At the end of the list the pill and the fade go away. */
+function UserScroller({ count, children }) {
+  const ref = useRef(null);
+  const [more, setMore] = useState(0);
+  const measure = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const edge = el.scrollTop + el.clientHeight + 2;
+    let n = 0;
+    for (const c of el.children) if (c.offsetTop + c.offsetHeight > edge) n += 1;   // not fully in view yet
+    setMore((cur) => (cur === n ? cur : n));
+  }, []);
+  useEffect(() => { measure(); });   // after every render: people come and go every few seconds
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    if (ro) ro.observe(el);
+    window.addEventListener('resize', measure);
+    return () => { if (ro) ro.disconnect(); window.removeEventListener('resize', measure); };
+  }, [measure]);
+  const down = () => {
+    const el = ref.current;
+    if (!el) return;
+    const calm = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    el.scrollBy({ top: Math.max(60, Math.round(el.clientHeight * 0.8)), behavior: calm ? 'auto' : 'smooth' });
+  };
+  return (
+    <div className="dsh-ulwrap">
+      <div className="dsh-userlist" ref={ref} onScroll={measure} data-count={count}>{children}</div>
+      {more > 0 ? (
+        <>
+          <div className="dsh-ulfade" aria-hidden="true" />
+          <button type="button" className="dsh-more" onClick={down} aria-label={`${more} more ${more === 1 ? 'person' : 'people'} online, scroll down`}>+{more} more</button>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 const partsOf = (iso) => ({ y: iso.slice(0, 4), m: monthOf(iso), d: Number(iso.slice(8, 10)) });
 /** What one bar covers, for the tooltip: a day, a week ("Sep 28 – Oct 4"), a month ("October 2026") or a year. */
@@ -263,7 +304,7 @@ export default function Dashboard() {
             <section className="dsh-card dsh-users" style={actH ? { '--act-h': `${actH}px` } : undefined}>
               <CardHead dot title="Active users" hint={us.active.length ? `${us.active.length} working right now` : `no one in the last ${us.windowMinutes} minutes`} right={<EarlierPill people={us.earlier} />} />
               {us.active.length ? (
-                <div className="dsh-userlist">
+                <UserScroller count={us.active.length}>
                   {us.active.map((p) => {
                     const where = p.you ? 'Dashboard' : p.page;
                     const target = p.you ? null : (p.path && s.canPage(p.path) ? p.path : null);   // a card opens the page that person is on, if you can open it too
@@ -280,7 +321,7 @@ export default function Dashboard() {
                       </Tag>
                     );
                   })}
-                </div>
+                </UserScroller>
               ) : <Empty>No one has been active in the last {us.windowMinutes} minutes.</Empty>}
             </section>
           ) : null}
