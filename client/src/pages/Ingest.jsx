@@ -240,8 +240,8 @@ export default function Ingest() {
           </label>
           <FilterSelect label="Status" value={filt.status} onChange={setF('status')}><Options list={STATUS_FILTER} blank="All" /></FilterSelect>
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All" /></FilterSelect>
-          <label className="wl-search" style={{ flex: '0 1 230px' }}>
-            <input type="text" placeholder="Program / Project (exact match)" value={filt.program} onChange={setF('program')} />
+          <label className="wl-search" style={{ flex: '0 1 320px', minWidth: 'min(100%, 300px)' }}>   {/* wide enough for the whole hint, with room to spare for wider fonts (a Mac's system font is wider) */}
+            <input type="text" placeholder="Program / Project (exact match)" value={filt.program} onChange={setF('program')} style={{ textOverflow: 'ellipsis' }} />
           </label>
           <DateRange title="Episode / Break date range" from={filt.from} to={filt.to} onChange={({ from, to }) => { setFilt((f) => ({ ...f, from, to })); setOffset(0); }} />
         </div>
