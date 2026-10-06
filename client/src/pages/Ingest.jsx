@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
-import { ago, fmtDateTime } from '../lib/util.js';
+import { ago, fmtDate, fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { PlusIcon } from '../components/Icons.jsx';
-import { Empty, Modal, Options, Pill, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
+import { PlusIcon, SearchIcon } from '../components/Icons.jsx';
+import { Chip, DateChip, DateRange, FilterSelect, Pager, PlatformCell } from '../components/wl.jsx';
+import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
 // Status (CM) is blank (Pending) until CM picks one of these
 const CM_OPTIONS = ['DONE', 'NON-COMPLIANT'];
@@ -13,16 +14,19 @@ const PAGE = 50;
 const withCurrent = (list, v) => (v && !list.includes(v) ? [...list, v] : list);
 const isoDate = (x) => (/^\d{4}-\d{2}-\d{2}/.test(x || '') ? String(x).slice(0, 10) : '');
 
-// Status (CM) cell: the decision plus its audit-trail timestamp
+// Status (CM) cell: the decision plus its audit-trail timestamp. Same chips as the Workload Tracker (soft colour + dot).
+const CM_HUE = { DONE: 'green', 'NON-COMPLIANT': 'red', Pending: 'amber' };
+const CmChip = ({ s }) => <Chip hue={CM_HUE[s] || 'amber'} dot>{s}</Chip>;
 const CmStatus = ({ r, inline }) => (r.cm_status
   ? (
     <div className={`stack${inline ? ' inline' : ''}`}>
-      <Pill s={r.cm_status} />
+      <CmChip s={r.cm_status} />
       <span className="sub nowrap">{fmtDateTime(r.cm_decided_at)}{r.cm_decided_by_name ? ` · ${r.cm_decided_by_name}` : ''}</span>
       {r.cm_status === 'NON-COMPLIANT' && r.cm_non_compliant_reason ? <span className="sub" title={r.cm_non_compliant_reason}>{r.cm_non_compliant_reason}</span> : null}
     </div>
   )
-  : <Pill s="Pending" />);
+  : <CmChip s="Pending" />);
+const dayText = (x) => (isoDate(x) ? fmtDate(isoDate(x)) : (x || ''));   // a real date reads like the Workload Tracker's; old free text is shown as written
 
 // Columns that can be edited right in the table, like the Workload Tracker: click a cell, change it, Enter or click away saves, Esc cancels.
 // Requested By is not one of them — it is filled in from whoever created the request. Destination Folder and Approved By are for PCS / OCS only.
@@ -198,14 +202,18 @@ export default function Ingest() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="filters">
-          <input type="search" placeholder="Search program, billable party, episode / break date, source, folder, approved by, remarks…" value={filt.q} onChange={setF('q')} />
-          <select value={filt.status} onChange={setF('status')}><Options list={STATUS_FILTER} blank="All statuses" /></select>
-          <input type="text" placeholder="Program / Project (exact match)" value={filt.program} onChange={setF('program')} />
-          <select value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All platforms" /></select>
-          <input type="date" title="Episode / Break date from" value={filt.from} onChange={setF('from')} />
-          <input type="date" title="Episode / Break date to" value={filt.to} onChange={setF('to')} />
+      <div className="card wl-card">
+        <div className="wl-filters">
+          <label className="wl-search">
+            <SearchIcon />
+            <input type="search" placeholder="Search program, billable party, episode / break date, source, folder, approved by, remarks…" value={filt.q} onChange={setF('q')} />
+          </label>
+          <FilterSelect label="Status" value={filt.status} onChange={setF('status')}><Options list={STATUS_FILTER} blank="All" /></FilterSelect>
+          <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All" /></FilterSelect>
+          <label className="wl-search" style={{ flex: '0 1 230px' }}>
+            <input type="text" placeholder="Program / Project (exact match)" value={filt.program} onChange={setF('program')} />
+          </label>
+          <DateRange title="Episode / Break date range" from={filt.from} to={filt.to} onChange={({ from, to }) => { setFilt((f) => ({ ...f, from, to })); setOffset(0); }} />
         </div>
         <div className="table-wrap" id="tbl">
           {!data ? <Empty>Loading…</Empty>
@@ -222,9 +230,9 @@ export default function Ingest() {
                         <tr key={r.id} className="clickable" onClick={() => openDetail(r.id)}>
                           <td className="dim mono">{r.id}</td>
                           {cell(r, 'program', <strong>{r.program}</strong>)}
-                          {cell(r, 'platform', r.platform)}
+                          {cell(r, 'platform', <PlatformCell value={r.platform} />)}
                           {cell(r, 'billable_party', r.billable_party)}
-                          {cell(r, 'episode_break_date_text', r.episode_break_date_text || r.episode_date || '', { className: 'nowrap' })}
+                          {cell(r, 'episode_break_date_text', <DateChip>{dayText(r.episode_break_date_text || r.episode_date)}</DateChip>, { className: 'nowrap' })}
                           {cell(r, 'source', r.source, { className: 'cell-clip', title: r.source || '' })}
                           {cell(r, 'materials_count', r.materials_count != null ? r.materials_count : '', { className: 'num' })}
                           <td title="Filled in automatically from the person who created the request">{r.requested_by_psd || r.requested_by_name || ''}</td>
@@ -238,12 +246,7 @@ export default function Ingest() {
                   </table>
                 )}
         </div>
-        <div className="pager">
-          <span>{total ? `${offset + 1}–${Math.min(offset + PAGE, total)} of ${total}` : ''}</span>
-          <span className="grow" />
-          <button type="button" className="btn sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</button>
-          <button type="button" className="btn sm" disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</button>
-        </div>
+        <Pager total={total} offset={offset} size={PAGE} onOffset={setOffset} />
       </div>
 
       {form && lookups ? (

@@ -108,7 +108,7 @@ export function FilterSelect({ label, value, onChange, blank = 'All', children }
 
 const shift = (iso, days) => { const d = new Date(dayNum(iso) * 86400000 + days * 86400000); return d.toISOString().slice(0, 10); };
 /** Single control showing the date range; opens a small panel with presets and From / To */
-export function DateRange({ from, to, onChange }) {
+export function DateRange({ from, to, onChange, title = 'Work date range' }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -131,7 +131,7 @@ export function DateRange({ from, to, onChange }) {
   const label = from || to ? `${from ? fmtDate(from) : 'Any'} – ${to ? fmtDate(to) : 'Any'}` : 'All dates';
   return (
     <div className="daterange" ref={ref}>
-      <button type="button" className="daterange-btn" title="Work date range" onClick={() => setOpen((o) => !o)}><CalendarIcon /><span>{label}</span></button>
+      <button type="button" className="daterange-btn" title={title} onClick={() => setOpen((o) => !o)}><CalendarIcon /><span>{label}</span></button>
       {open ? (
         <div className="popover daterange-pop">
           <div className="presets">
