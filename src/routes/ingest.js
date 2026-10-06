@@ -15,9 +15,9 @@ const SELECT = `
   SELECT i.*, n.no, ru.full_name AS requested_by_name, cu.full_name AS created_by_name,
          uu.full_name AS updated_by_name, cmu.full_name AS cm_decided_by_name
     FROM ingest_records i
-    -- NO.: the record's place in the whole list, oldest = 1, newest = the highest (the table shows newest first, so it counts DOWN). It is worked out
-    -- from what exists now, so it renumbers by itself when a record is deleted, and it does not change with filters or search.
-    LEFT JOIN (SELECT id, (row_number() OVER (ORDER BY created_at, id))::int AS no FROM ingest_records) n ON n.id = i.id
+    -- NO.: the record's place in the whole list in the order the table shows it (newest first): the newest is 1 and the numbers count UP down the
+    -- table. It is worked out from what exists now, so it renumbers by itself when a record is deleted, and it does not change with filters or search.
+    LEFT JOIN (SELECT id, (row_number() OVER (ORDER BY created_at DESC, id DESC))::int AS no FROM ingest_records) n ON n.id = i.id
     LEFT JOIN users ru ON ru.id = i.requested_by_user_id
     LEFT JOIN users cu ON cu.id = i.created_by
     LEFT JOIN users uu ON uu.id = i.updated_by
