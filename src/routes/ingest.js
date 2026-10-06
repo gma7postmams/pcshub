@@ -157,6 +157,48 @@ router.put('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// Click-to-edit one cell in the table (the same idea as the Workload Tracker): PATCH { field, value } writes only that column, so other people's
+// edits to the rest of the row are kept. Requested By is deliberately not here: it is always the signed-in person who created the request.
+const CELL_FIELDS = {
+  program: (x) => v.str(x, { field: 'Program', max: 200, required: true }),
+  platform: (x) => v.str(x, { field: 'Platform', max: 100, required: true }),
+  billable_party: (x) => v.str(x, { field: 'Billable Party', max: 200 }),
+  episode_break_date_text: (x) => v.date(x, { field: 'Episode / Break Date' }),
+  source: (x) => v.str(x, { field: 'Source', max: 500 }),
+  materials_count: (x) => v.int(x, { field: 'Materials count', min: 0 }),
+  destination_folder: (x) => v.str(x, { field: 'Destination Folder', max: 1000 }),   // PCS / OCS only (below)
+  approved_by: (x) => v.str(x, { field: 'Approved By', max: 200 }),                   // PCS / OCS only (below)
+  remarks: (x) => v.str(x, { field: 'Remarks', max: 4000 }),
+};
+
+router.patch('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
+  const id = v.id(req.params.id);
+  const field = String((req.body && req.body.field) || '');
+  if (!Object.prototype.hasOwnProperty.call(CELL_FIELDS, field)) throw new HttpError(400, 'That column cannot be edited here');
+  if ((field === 'destination_folder' || field === 'approved_by') && !can(req.user, 'ingest.approve')) {
+    throw new HttpError(403, 'Only PCS / OCS can fill in Destination Folder and Approved By');
+  }
+  const value = CELL_FIELDS[field](req.body.value);
+  const row = await db.tx(async (c) => {
+    const cur = await c.query('SELECT cm_status FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
+    if (!cur.rows.length) throw new HttpError(404, 'Ingest record not found');
+    if (cur.rows[0].cm_status && !can(req.user, 'ingest.cm_complete')) {
+      throw new HttpError(409, `Record is marked ${cur.rows[0].cm_status} and can no longer be edited`);
+    }
+    if (field === 'platform') await assertDropdown(c, 'platform', value, 'Platform');
+    // `field` is one of the fixed keys above (never user text), so it is safe to name the column here
+    if (field === 'episode_break_date_text') {
+      await c.query('UPDATE ingest_records SET episode_date=$2, episode_break_date_text=$3, updated_by=$4, updated_at=now() WHERE id=$1', [id, value, value, req.user.id]);   // separate params: one column is a date, the other text
+    } else {
+      await c.query(`UPDATE ingest_records SET ${field}=$2, updated_by=$3, updated_at=now() WHERE id=$1`, [id, value, req.user.id]);
+    }
+    await audit(req, 'ingest.update', 'ingest_record', id, { [field]: value }, c);
+    const out = await c.query(`${SELECT} WHERE i.id=$1`, [id]);
+    return out.rows[0];
+  });
+  res.json({ ok: true, row });
+}));
+
 // Status (CM): DONE or NON-COMPLIANT (with a reason). Every change is audit-logged with who and when.
 router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);

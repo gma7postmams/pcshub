@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { del, get, post, put } from '../lib/api.js';
+import { del, get, patch, post, put } from '../lib/api.js';
 import { ago, fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { PlusIcon } from '../components/Icons.jsx';
@@ -24,6 +24,61 @@ const CmStatus = ({ r, inline }) => (r.cm_status
   )
   : <Pill s="Pending" />);
 
+// Columns that can be edited right in the table, like the Workload Tracker: click a cell, change it, Enter or click away saves, Esc cancels.
+// Requested By is not one of them — it is filled in from whoever created the request. Destination Folder and Approved By are for PCS / OCS only.
+const CELLS = {
+  program: { kind: 'text', max: 200 },
+  platform: { kind: 'select' },
+  billable_party: { kind: 'text', max: 200 },
+  episode_break_date_text: { kind: 'date' },   // the browser's own date picker
+  source: { kind: 'text', max: 500 },
+  materials_count: { kind: 'number' },
+  destination_folder: { kind: 'area', max: 1000, approve: true },
+  approved_by: { kind: 'text', max: 200, approve: true },
+};
+const cellInitial = (r, k) => (k === 'episode_break_date_text' ? (isoDate(r.episode_break_date_text) || isoDate(r.episode_date))
+  : r[k] == null ? '' : String(r[k]));
+
+// One table cell turned into its own editor. Dropdowns save as soon as you pick; a failed save keeps the editor open with the message shown.
+function InlineCell({ def, initial, options, onSave, onCancel }) {
+  const [val, setVal] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const box = useRef(null);
+  const finished = useRef(false);
+  const field = () => box.current && box.current.querySelector('input, select, textarea');
+  useEffect(() => {
+    const el = field();
+    if (!el) return;
+    el.focus();
+    if (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type === 'text')) el.setSelectionRange(el.value.length, el.value.length);
+    try { if (el.tagName === 'SELECT') el.showPicker(); } catch (e) { /* needs a user gesture; the field is focused anyway */ }
+  }, []);
+  const save = async (value) => {
+    if (finished.current) return;
+    finished.current = true;
+    setBusy(true);
+    try { await onSave(value); } catch (e) {
+      finished.current = false;
+      setBusy(false);
+      setTimeout(() => { const el = field(); if (el) el.focus(); }, 0);
+    }
+  };
+  const change = (e) => { const nv = e.target.value; setVal(nv); if (def.kind === 'select') save(nv); };
+  const blur = (e) => { if (box.current && !box.current.contains(e.relatedTarget)) save(val); };
+  const key = (e) => {
+    if (e.key === 'Escape') { finished.current = true; onCancel(); return; }
+    const tag = e.target.tagName;
+    if (e.key === 'Enter' && tag !== 'SELECT' && (tag !== 'TEXTAREA' || e.ctrlKey || e.metaKey)) { e.preventDefault(); save(val); }
+  };
+  let input;
+  if (def.kind === 'select') input = <select value={val} disabled={busy} onChange={change}><Options list={options} blank="Select…" /></select>;
+  else if (def.kind === 'date') input = <input type="date" value={val} disabled={busy} onChange={change} />;
+  else if (def.kind === 'number') input = <input type="number" min="0" step="1" value={val} disabled={busy} onChange={change} />;
+  else if (def.kind === 'area') input = <textarea className="mono" maxLength={def.max} value={val} disabled={busy} onChange={change} />;
+  else input = <input maxLength={def.max} value={val} disabled={busy} onChange={change} />;
+  return <div className={`cell-editor${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key}>{input}</div>;
+}
+
 export default function Ingest() {
   const s = useSession();
   const toast = useToast();
@@ -38,6 +93,7 @@ export default function Ingest() {
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);     // null | {} (new) | record (edit)
   const [detail, setDetail] = useState(null);
+  const [editing, setEditing] = useState(null);   // { id, k }: the one cell being edited in the table
   const q = useDebounced(filt.q, 300);
 
   useEffect(() => {
@@ -60,6 +116,40 @@ export default function Ingest() {
     if (params.get('new') && canWrite) setForm({});
     if (params.get('id')) openDetail(+params.get('id'));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const canApprove = s.can('ingest.approve');
+  const canCm = s.can('ingest.cm_complete');
+  const closeCell = (r, k) => setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur));
+  // Save ONE cell (PATCH writes only that column, so other people's edits to the row are kept)
+  const saveCell = async (r, k, value, initial) => {
+    if (String(value ?? '') === String(initial ?? '')) { closeCell(r, k); return; }
+    try {
+      const out = await patch(`/api/ingest/${r.id}`, { field: k, value: k === 'materials_count' ? (value === '' ? null : Number(value)) : value });
+      setData((d) => (d && d.rows ? { ...d, rows: d.rows.map((x) => (x.id === r.id ? { ...x, ...out.row } : x)) } : d));
+      closeCell(r, k);
+    } catch (e) { toast(e.message, 'err'); throw e; }
+  };
+  // A cell in the table: editable in place when you may change it, otherwise plain (clicking it opens the details as before).
+  const cell = (r, k, children, props = {}) => {
+    const def = CELLS[k];
+    const may = canWrite && (!r.cm_status || canCm) && (!def || !def.approve || canApprove);
+    if (!def || !may) return <td {...props}>{children}</td>;
+    if (editing && editing.id === r.id && editing.k === k) {
+      const initial = cellInitial(r, k);
+      return (
+        <td className="editing" onClick={(e) => e.stopPropagation()}>
+          <InlineCell def={def} initial={initial} options={withCurrent(lookups ? lookups.platform : [], r.platform)}
+            onSave={(value) => saveCell(r, k, value, initial)} onCancel={() => setEditing(null)} />
+        </td>
+      );
+    }
+    const open = () => setEditing({ id: r.id, k });
+    return (
+      <td {...props} className={`${props.className || ''} editable`.trim()} title="Click to edit" tabIndex={0}
+        onClick={(e) => { e.stopPropagation(); open(); }}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); open(); } }}>{children}</td>
+    );
+  };
 
   const setF = (k) => (e) => { setFilt((f) => ({ ...f, [k]: e.target.value })); setOffset(0); };
   const total = data ? data.total : 0;
@@ -96,15 +186,15 @@ export default function Ingest() {
                       {data.rows.map((r) => (
                         <tr key={r.id} className="clickable" onClick={() => openDetail(r.id)}>
                           <td className="dim mono">{r.id}</td>
-                          <td><strong>{r.program}</strong></td>
-                          <td>{r.platform}</td>
-                          <td>{r.billable_party}</td>
-                          <td className="nowrap">{r.episode_break_date_text || r.episode_date || ''}</td>
-                          <td className="cell-clip" title={r.source || ''}>{r.source}</td>
-                          <td className="num">{r.materials_count != null ? r.materials_count : ''}</td>
-                          <td>{r.requested_by_psd || r.requested_by_name || ''}</td>
-                          <td className="cell-clip mono" title={r.destination_folder || ''}>{r.destination_folder}</td>
-                          <td>{r.approved_by}</td>
+                          {cell(r, 'program', <strong>{r.program}</strong>)}
+                          {cell(r, 'platform', r.platform)}
+                          {cell(r, 'billable_party', r.billable_party)}
+                          {cell(r, 'episode_break_date_text', r.episode_break_date_text || r.episode_date || '', { className: 'nowrap' })}
+                          {cell(r, 'source', r.source, { className: 'cell-clip', title: r.source || '' })}
+                          {cell(r, 'materials_count', r.materials_count != null ? r.materials_count : '', { className: 'num' })}
+                          <td title="Filled in automatically from the person who created the request">{r.requested_by_psd || r.requested_by_name || ''}</td>
+                          {cell(r, 'destination_folder', r.destination_folder, { className: 'cell-clip mono', title: r.destination_folder || '' })}
+                          {cell(r, 'approved_by', r.approved_by)}
                           <td><CmStatus r={r} /></td>
                           <td className="dim nowrap">{ago(r.updated_at)}</td>
                         </tr>
