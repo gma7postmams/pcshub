@@ -89,7 +89,7 @@ export default function Ingest() {
                 : (
                   <table className="t wl">
                     <thead><tr>
-                      <th>NO</th><th>Program / Project</th><th>Platform</th><th>Billable Party</th><th>Episode / Break Date</th><th>Source</th>
+                      <th>NO.</th><th>Program / Project</th><th>Platform</th><th>Billable Party</th><th>Episode / Break Date</th><th>Source</th>
                       <th>No. of Materials</th><th>Requested By</th><th>Destination Folder</th><th>Approved By</th><th>Status (CM)</th><th>Updated</th>
                     </tr></thead>
                     <tbody>
