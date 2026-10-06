@@ -1,73 +1,322 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { get } from '../lib/api.js';
-import { ago, fmtDate } from '../lib/util.js';
+import { get, post } from '../lib/api.js';
+import { ago, fmtDate, initials } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { Empty, Kpi, Pill } from '../components/ui.jsx';
+import { Empty, RoleBadge } from '../components/ui.jsx';
+import {
+  CalendarCheckIcon, CalendarGridIcon, CheckCircleIcon, ChevronDownSmall, ChevronRightIcon, ClockIcon, CloudIcon, DocIcon, FlagIcon,
+  HeroArt, HourglassIcon, ListIcon, PulseIcon, SunArt, UsersIcon, XCircleIcon,
+} from '../components/DashIcons.jsx';
+import '../dashboard.css';
+
+// Dashboard. Everything on it is shown only if the signed-in user may see it:
+//   greeting banner · Active users + Quick Links · Workload Tracker (KPI cards) · Workload by day + By team · Ingest & Approval (KPI cards)
+// It lays itself out for the screen: two columns on a wide screen, stacked on a narrow one, and on a tall window the chart row grows to fill the height.
+const TEAMS = [
+  { key: 'VGFX', label: 'VGFX', color: 'var(--purple)' },
+  { key: 'VEDIT', label: 'VEDIT', color: '#f0883e' },
+  { key: 'AUDIO', label: 'Audio', color: '#26b5ad' },
+];
+const HUES = ['#4f8cff', '#a78bfa', '#34c38f', '#f0883e', '#e5568f', '#26b5ad', '#f1b44c'];
+const hueFor = (name) => HUES[[...String(name)].reduce((a, c) => a + c.charCodeAt(0), 0) % HUES.length];
+const pct = (n, of) => (of ? Math.round((n / of) * 100) : 0);
+const monthOf = (iso) => new Date(`${String(iso).slice(0, 10)}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', timeZone: 'UTC' });
+const dayParts = (iso) => {
+  const d = new Date(`${String(iso).slice(0, 10)}T00:00:00Z`);
+  return { dow: d.toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' }), num: d.getUTCDate(), weekend: [0, 6].includes(d.getUTCDay()) };
+};
+const dayLabel = (iso) => { const p = dayParts(iso); return `${p.dow}, ${monthOf(iso)} ${p.num}`; };
+const RANGE_KEY = 'dash:range';
+const storedRange = () => { try { return localStorage.getItem(RANGE_KEY) || 'week'; } catch (e) { return 'week'; } };
+
+/** A card's heading: a tinted icon chip, the title, a little grey hint and an optional control at the right. */
+function CardHead({ icon: Icon, hue, dot, plain, title, hint, sub, right }) {
+  return (
+    <div className="dsh-head">
+      {dot ? <i className="dsh-live" /> : <span className={`dsh-chip h-${hue}${plain ? ' plain' : ''}`}><Icon /></span>}
+      <div className="dsh-head-text">
+        <h2>{title}{hint ? <span className="dsh-hint">{hint}</span> : null}</h2>
+        {sub ? <div className="dsh-sub">{sub}</div> : null}
+      </div>
+      {right ? <div className="dsh-head-right">{right}</div> : null}
+    </div>
+  );
+}
+
+/** A KPI card: a round icon, the label, a big number and a line of detail; the whole card opens the related page. */
+function StatCard({ icon: Icon, hue, soft, label, value, foot, onClick }) {
+  const Tag = onClick ? 'button' : 'div';
+  return (
+    <Tag type={onClick ? 'button' : undefined} className={`dsh-stat h-${hue}${soft ? ' soft' : ''}${onClick ? ' link' : ''}`} onClick={onClick || undefined}>
+      <span className="dsh-stat-ico"><Icon /></span>
+      <span className="dsh-stat-body">
+        <span className="dsh-stat-label">{label}</span>
+        <b className="dsh-stat-val">{value}</b>
+        <span className="dsh-stat-foot">{foot}</span>
+      </span>
+      {onClick ? <span className="dsh-stat-go"><ChevronRightIcon /></span> : null}
+    </Tag>
+  );
+}
+
+/** The little "This week ▾" menu on the Workload Tracker card: which days the chart covers. */
+function RangeMenu({ ranges, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const down = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
+    const key = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', down);
+    document.addEventListener('keydown', key);
+    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key); };
+  }, [open]);
+  const current = ranges.find((r) => r.key === value) || ranges[0];
+  return (
+    <div className="dsh-range" ref={box}>
+      <button type="button" className="dsh-range-btn" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span className="dsh-range-ico"><CalendarGridIcon /></span>{current.label}<span className="dsh-range-chev"><ChevronDownSmall /></span>
+      </button>
+      {open ? (
+        <ul className="dsh-range-list" role="listbox">
+          {ranges.map((r) => (
+            <li key={r.key} role="option" aria-selected={r.key === value} className={r.key === value ? 'sel' : ''}
+              onMouseDown={(e) => { e.preventDefault(); setOpen(false); onChange(r.key); }}>{r.label}</li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/** "Earlier today · 2": people active in the last 24 hours who aren't now; hover or focus it for their names. (A pill, not a row, so Active users never grows taller.) */
+function EarlierPill({ people }) {
+  if (!people.length) return null;
+  return (
+    <span className="dsh-earlier" tabIndex={0} aria-label={`Earlier today: ${people.map((p) => p.name).join(', ')}`}>
+      Earlier today<b>{people.length}</b>
+      <span className="dsh-earlier-pop" role="tooltip">
+        {people.map((p) => <span key={p.id}><i style={{ background: hueFor(p.name) }} />{p.name}<em>{ago(p.lastActiveAt)}</em></span>)}
+      </span>
+    </span>
+  );
+}
+
+function dayInfo(byDay) {
+  const days = byDay.map((x) => ({ iso: String(x.day).slice(0, 10), n: x.n }));
+  const total = days.reduce((a, x) => a + x.n, 0);
+  const top = Math.max(...days.map((x) => x.n), 0);
+  return { days, total, top, busiest: days.find((x) => x.n === top && top > 0), avg: total / (days.length || 1) };
+}
+
+function DayChart({ info, todayIso }) {
+  const { days, top } = info;
+  const niceMax = Math.max(4, Math.ceil(top / 4) * 4);   // the axis tops out on a multiple of 4, so the gridlines are whole numbers
+  const ticks = [1, 0.75, 0.5, 0.25, 0].map((f) => Math.round(niceMax * f));
+  const dense = days.length > 16;   // a month or 30 days: date numbers only
+  const cols = { gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))` };
+  return (
+    <div className={`dsh-chart${dense ? ' dense' : ''}`}>
+      <div className="dsh-plotwrap">
+        <div className="dsh-y">{ticks.map((t) => <span key={t}>{t}</span>)}</div>
+        <div className="dsh-plot">
+          {[0, 25, 50, 75].map((p) => <div key={p} className="dsh-line" style={{ top: `${p}%` }} />)}
+          <div className="dsh-line base" />
+          <div className="dsh-cols" style={cols}>
+            {days.map((x) => {
+              const p = dayParts(x.iso);
+              const h = x.n ? Math.max((x.n / niceMax) * 100, 3) : 0;
+              const kind = x.iso === todayIso ? 'today' : x.iso < todayIso ? 'past' : 'next';
+              return (
+                <div key={x.iso} className={`dsh-col ${kind}${p.weekend ? ' weekend' : ''}`}>
+                  {x.n ? <span className="dsh-val" style={{ bottom: `calc(${h}% + 4px)` }}>{x.n}</span> : <span className="dsh-zero" />}
+                  <div className="dsh-bar" style={{ height: `${h}%` }} />
+                  <span className="dsh-tip" style={{ bottom: `calc(${h}% + 26px)` }}>{dayLabel(x.iso)}<b>{x.n} item{x.n === 1 ? '' : 's'}</b></span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+      <div className="dsh-xaxis" style={cols}>
+        {days.map((x, i) => {
+          const p = dayParts(x.iso);
+          const isToday = x.iso === todayIso;
+          const showMonth = i === 0 || p.num === 1;
+          return (
+            <div key={x.iso} className={`dsh-xl${isToday ? ' today' : ''}${p.weekend ? ' weekend' : ''}`}>
+              {dense ? null : <span className="dsh-xl-dow">{p.dow}</span>}
+              {isToday ? <span className="dsh-xl-pill">{p.num}</span> : <span className="dsh-xl-date">{dense ? (showMonth ? `${monthOf(x.iso)} ${p.num}` : p.num) : `${monthOf(x.iso)} ${p.num}`}</span>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const s = useSession();
   const navigate = useNavigate();
   const [d, setD] = useState(null);
+  const [range, setRangeState] = useState(storedRange);
+  const rangeRef = useRef(range);
+  rangeRef.current = range;
 
-  useEffect(() => { get('/api/dashboard').then(setD).catch(() => setD({ error: true })); }, []);
-  if (!d) return <main className="container"><Empty>Loading…</Empty></main>;
-  if (d.error) return <main className="container"><Empty>Could not load the dashboard.</Empty></main>;
+  const load = useCallback(() => get(`/api/dashboard?range=${rangeRef.current}`).then(setD).catch(() => setD((cur) => cur || { error: true })), []);
+  useEffect(() => {
+    // Say "I'm on the Dashboard" BEFORE asking for the numbers, so Active users never shows where you were a moment ago
+    post('/api/presence', { path: '/dashboard' }, { quiet: true }).catch(() => { /* best effort */ }).then(load);
+    const t = setInterval(load, 60000);   // the whole dashboard refreshes every minute
+    return () => clearInterval(t);
+  }, [load]);
+  // Active users alone refreshes every 10 seconds (a light request), so locations and who is online stay current
+  const showUsers = !!(d && d.users);
+  useEffect(() => {
+    if (!showUsers) return undefined;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      get('/api/dashboard/users', { quiet: true }).then((r) => setD((cur) => (cur ? { ...cur, users: r.users } : cur))).catch(() => { /* next time */ });
+    };
+    const t = setInterval(refresh, 10000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', refresh); };
+  }, [showUsers]);
 
-  const hour = new Date().getHours();
+  const changeRange = (key) => {
+    setRangeState(key);
+    try { localStorage.setItem(RANGE_KEY, key); } catch (e) { /* storage unavailable */ }
+    get(`/api/dashboard/days?range=${key}`).then((r) => setD((cur) => (cur && cur.workload ? { ...cur, workload: { ...cur.workload, byDay: r.days, range: r.range, rangeLabel: r.label, rangeSub: r.sub } } : cur))).catch(() => { /* keep the old chart */ });
+  };
+
+  if (!d) return <main className="container wide dsh"><Empty>Loading…</Empty></main>;
+  if (d.error) return <main className="container wide dsh"><Empty>Could not load the dashboard.</Empty></main>;
+
+  const now = new Date();
+  const hour = now.getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const go = (href) => (href ? () => navigate(href) : null);
-  const ingestHref = (st) => (d.canOpen.ingest ? `/ingest?status=${encodeURIComponent(st)}` : null);
+  const w = d.workload;
+  const us = d.users;
   const st = d.kpis ? d.kpis.byStatus : {};
+  const todayIso = String(d.today || '').slice(0, 10);
+  const links = [
+    d.canOpen.ingest && { to: '/ingest', label: 'Ingest Tracker', icon: CloudIcon, hue: 'blue' },
+    d.canOpen.workload && { to: '/workload', label: 'Workload Tracker', icon: ListIcon, hue: 'purple' },
+    d.canOpen.plugs && { to: '/plug-list', label: 'PSD Daily Plug List', icon: DocIcon, hue: 'green' },
+    d.canOpen.approval && { to: '/approval', label: 'Approval', icon: CheckCircleIcon, hue: 'amber' },
+  ].filter(Boolean);
+  const nothing = !w && !us && !d.kpis && !links.length;
+  const info = w ? dayInfo(w.byDay) : null;
 
   return (
-    <main className="container">
-      <div className="page-head">
-        <div>
-          <h1>{greet}, {s.user.full_name.split(' ')[0]}</h1>
-          <div className="sub">Here&apos;s where promotional content stands today.</div>
+    <main className="container wide dsh">
+      <section className="dsh-hero">
+        <SunArt />
+        <div className="dsh-hero-text">
+          <h1>{greet}, {s.user.full_name.split(' ')[0]}!</h1>
+          <div className="dsh-date">{now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>
         </div>
-        <div className="actions">
-          {s.can('ingest.write') ? <Link className="btn primary" to="/ingest?new=1">+ New Ingest</Link> : null}
-          {d.canOpen.reports ? <Link className="btn" to="/reports">View Reports</Link> : null}
+        <HeroArt />
+      </section>
+
+      {us || links.length ? (
+        <div className={`dsh-row2${us && links.length ? '' : ' one'}`}>
+          {us ? (
+            <section className="dsh-card dsh-users">
+              <CardHead dot title="Active users" hint={us.active.length ? `${us.active.length} working right now` : `no one in the last ${us.windowMinutes} minutes`} right={<EarlierPill people={us.earlier} />} />
+              {us.active.length ? (
+                <div className={`dsh-userlist${us.active.length >= 3 ? ' compact' : ''}`}>
+                  {us.active.map((p) => {
+                    const where = p.you ? 'Dashboard' : p.page;
+                    const target = p.you ? null : (p.path && s.canPage(p.path) ? p.path : null);   // a card opens the page that person is on, if you can open it too
+                    const Tag = target ? 'button' : 'div';
+                    return (
+                      <Tag key={p.id} type={target ? 'button' : undefined} className={`dsh-user${target ? ' link' : ''}`} onClick={target ? () => navigate(target) : undefined}
+                        title={`${p.name} · ${p.role}${where ? ` · on ${where}` : ''} · ${p.you ? 'just now' : ago(p.lastActiveAt)}`}>
+                        <span className="dsh-avatar" style={{ background: hueFor(p.name) }}>{initials(p.name).slice(0, 2)}<i className="dsh-status" /></span>
+                        <span className="dsh-user-info">
+                          <span className="dsh-user-name"><span className="dsh-user-nm">{p.name}</span>{p.you ? <span className="dsh-you">You</span> : null}</span>
+                          <span className="dsh-user-meta"><RoleBadge role={p.role} />{where ? <span className="dim">on {where}</span> : null}</span>
+                        </span>
+                        {target ? <span className="dsh-go"><ChevronRightIcon /></span> : null}
+                      </Tag>
+                    );
+                  })}
+                </div>
+              ) : <Empty>No one has been active in the last {us.windowMinutes} minutes.</Empty>}
+            </section>
+          ) : null}
+
+          {links.length ? (
+            <section className="dsh-card dsh-quick-card">
+              <CardHead icon={CalendarGridIcon} hue="blue" title="Quick Links" />
+              <div className="dsh-quick-grid">
+                {links.map((l) => (
+                  <Link key={l.to} to={l.to} className={`dsh-quick h-${l.hue}`}><span className="dsh-quick-ico"><l.icon /></span><span>{l.label}</span></Link>
+                ))}
+              </div>
+            </section>
+          ) : null}
         </div>
-      </div>
+      ) : null}
+
+      {w ? (
+        <section className="dsh-card">
+          <CardHead icon={PulseIcon} hue="blue" title="Workload Tracker" hint={`${w.total} item${w.total === 1 ? '' : 's'} in total`} right={<RangeMenu ranges={w.ranges} value={range} onChange={changeRange} />} />
+          <div className="dsh-stats">
+            <StatCard icon={CalendarGridIcon} hue="blue" label="Today" value={w.today} foot={w.today === 1 ? 'item to work on' : 'items to work on'} onClick={go('/workload')} />
+            <StatCard icon={CalendarGridIcon} hue="purple" label="This week" value={w.thisWeek} foot="Monday to Sunday" onClick={go('/workload')} />
+            <StatCard icon={ClockIcon} hue="teal" label="Breakdates, next 7 days" value={w.breakdatesNext7Days} foot="VGFX and VEDIT times coming up" onClick={go('/workload')} />
+            <StatCard icon={FlagIcon} hue="rose" label="Priority" value={w.priority} foot={w.priority === 1 ? 'item flagged priority' : 'items flagged priority'} onClick={go('/workload')} />
+          </div>
+        </section>
+      ) : null}
+
+      {w ? (
+        <div className="dsh-row3">
+          <section className="dsh-card dsh-chart-card">
+            <CardHead icon={UsersIcon} hue="blue" title="Workload by day" sub={w.rangeSub}
+              right={(
+                <div className="dsh-cstats">
+                  <span>In view <b>{info.total}</b></span>
+                  <span>Daily average <b>{info.avg.toFixed(1)}</b></span>
+                  <span>Busiest day <b>{info.busiest ? `${dayLabel(info.busiest.iso)} · ${info.busiest.n}` : '—'}</b></span>
+                  <span className="dsh-legend"><i className="past" />Past<i className="next" />Upcoming<i className="today" />Today</span>
+                </div>
+              )} />
+            <DayChart info={info} todayIso={todayIso} />
+          </section>
+
+          <section className="dsh-card dsh-team-card">
+            <CardHead icon={UsersIcon} hue="blue" title="By team" hint="items each team is on" />
+            <div className="dsh-teams">
+              {TEAMS.map((t) => (
+                <div className="dsh-team" key={t.key}>
+                  <div className="dsh-team-top"><span className="dsh-team-name"><i style={{ background: t.color }} />{t.label}</span><b>{w.byTeam[t.key] || 0}</b></div>
+                  <div className="dsh-track"><div style={{ width: `${pct(w.byTeam[t.key] || 0, w.total)}%`, background: t.color }} /></div>
+                </div>
+              ))}
+              <div className="dsh-note"><span>VGFX/VEDIT</span> item counts for both teams.</div>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {d.kpis ? (
-        <div className="grid grid-4">
-          <Kpi label="Total Ingest Records" value={d.kpis.total} foot={`${d.kpis.thisMonth.created} created this month`} color="c-blue" onClick={go(d.canOpen.ingest ? '/ingest' : null)} />
-          <Kpi label="Pending Approval" value={st['Pending Approval'] || 0} foot="Awaiting a decision" color="c-amber" onClick={go(d.canOpen.approval ? '/approval?status=Pending' : null)} />
-          <Kpi label="Approved" value={st.Approved || 0} foot={`${d.kpis.thisMonth.approved} this month`} color="c-green" onClick={go(ingestHref('Approved'))} />
-          <Kpi label="Rejected" value={st.Rejected || 0} foot="Needs rework & resubmission" color="c-red" onClick={go(ingestHref('Rejected'))} />
-        </div>
+        <section className="dsh-card">
+          <CardHead icon={DocIcon} hue="blue" plain title="Ingest & Approval" hint={`${d.kpis.total} record${d.kpis.total === 1 ? '' : 's'}`} />
+          <div className="dsh-stats compact">
+            <StatCard icon={CalendarCheckIcon} hue="blue" soft label="Total Ingest Records" value={d.kpis.total} foot={`${d.kpis.thisMonth.created} created this month`} onClick={go(d.canOpen.ingest ? '/ingest' : null)} />
+            <StatCard icon={HourglassIcon} hue="amber" soft label="Pending Approval" value={st['Pending Approval'] || 0} foot="Awaiting a decision" onClick={go(d.canOpen.approval ? '/approval?status=Pending' : null)} />
+            <StatCard icon={CheckCircleIcon} hue="green" label="Approved" value={st.Approved || 0} foot={`${d.kpis.thisMonth.approved} this month`} onClick={go(d.canOpen.ingest ? '/ingest?status=Approved' : null)} />
+            <StatCard icon={XCircleIcon} hue="red" label="Rejected" value={st.Rejected || 0} foot="Needs rework & resubmission" onClick={go(d.canOpen.ingest ? '/ingest?status=Rejected' : null)} />
+          </div>
+        </section>
       ) : null}
 
-      {d.recent ? (
-        <div className={`card ${d.kpis ? 'mt-16' : ''}`}>
-          <div className="card-head">
-            <h2>Recent Ingest Activity</h2>
-            {d.canOpen.ingest ? <Link className="btn sm" to="/ingest">Open tracker</Link> : null}
-          </div>
-          <div className="table-wrap">
-            {d.recent.length ? (
-              <table className="t">
-                <thead><tr><th>#</th><th>Program</th><th>Platform</th><th>Episode</th><th>Status</th><th>Updated</th></tr></thead>
-                <tbody>
-                  {d.recent.map((r) => (
-                    <tr key={r.id} className={d.canOpen.ingest ? 'clickable' : ''} onClick={d.canOpen.ingest ? () => navigate(`/ingest?id=${r.id}`) : undefined}>
-                      <td className="dim mono">{r.id}</td><td>{r.program}</td><td>{r.platform}</td>
-                      <td className="nowrap">{fmtDate(r.episode_date)}</td><td><Pill s={r.status} /></td>
-                      <td className="dim nowrap">{ago(r.updated_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : <Empty>No ingest records yet.</Empty>}
-          </div>
-        </div>
-      ) : null}
-
-      {!d.kpis && !d.recent ? <div className="card"><Empty>Your group has no Dashboard sections enabled.</Empty></div> : null}
+      {nothing ? <div className="dsh-card"><Empty>Nothing to show yet — your group has no Dashboard sections or tracker pages enabled.</Empty></div> : null}
     </main>
   );
 }

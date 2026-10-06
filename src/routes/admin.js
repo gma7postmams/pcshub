@@ -9,16 +9,33 @@ const db = require('../db');
 const v = require('../validate');
 const { asyncH, HttpError } = require('../middleware');
 const { audit } = require('../audit');
+const stepUp = require('../reauth');
 const { THEME_KEYS } = require('../themes');
 const { ROLES, CATALOG, FIXED_PAGES, ROLE_ACTIONS, ACTION_PAGE, normalizeKeys } = require('../permissions');
 
-// Mounted behind requirePageAccess('/admin') => Admin role only.
+// Mounted behind requirePageAccess('/admin') => Admin role only; the role is re-checked here as defence in depth.
 const router = express.Router();
+router.use((req, res, next) => (req.user && req.user.role === 'Admin' ? next() : res.status(403).json({ error: 'Admin role required' })));
+
+// "Confirm it's you" for the changes that hand out or take over accounts: granting the Admin role, resetting a
+// password, removing 2FA. The Admin re-enters their own password (+ authenticator code) in body.reauth; a confirmation
+// from the last few minutes still counts. Without it, someone at an unlocked screen or holding a stolen session
+// could quietly make themselves a permanent way back in.
+const confirmIdentity = (req, action, id) => stepUp.recentOrVerify(
+  req, { action: 'auth.reauth_failed', entity: 'user', id, details: { for: action } }, (req.body && req.body.reauth) || {}
+);
 
 const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads', 'branding');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-const DROPDOWN_CATEGORIES = ['program', 'platform'];
+const DROPDOWN_CATEGORIES = ['program', 'platform', 'workload_platform', 'plug_type'];
+// Which table/column each dropdown category is stored in (used for usage counts, rename propagation, delete guard)
+const DROPDOWN_USAGE = Object.assign(Object.create(null), {
+  program: { table: 'ingest_records', col: 'program' },
+  platform: { table: 'ingest_records', col: 'platform' },
+  workload_platform: { table: 'workload_items', col: 'platform' },
+  plug_type: { table: 'workload_items', col: 'plug_type' },
+});
 
 // ---------- Access model reference (catalog of assignable pages/sections + role actions) ----------
 router.get('/access-model', (req, res) => {
@@ -144,6 +161,7 @@ async function assertAnotherAdmin(c, excludingId) {
 
 router.post('/users', asyncH(async (req, res) => {
   const u = await parseUser(req.body, { creating: true });
+  if (u.role === 'Admin') await confirmIdentity(req, 'admin.user_create', null);
   const hash = await bcrypt.hash(u.password, 12);
   try {
     const { rows } = await db.query(
@@ -162,8 +180,12 @@ router.post('/users', asyncH(async (req, res) => {
 router.put('/users/:id', asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const u = await parseUser(req.body, { creating: false });
+  if (u.role === 'Admin' && u.is_active) {
+    const now = (await db.query('SELECT role, is_active FROM users WHERE id=$1', [id])).rows[0];
+    if (now && !(now.role === 'Admin' && now.is_active)) await confirmIdentity(req, 'admin.user_update', id);
+  }
   await db.tx(async (c) => {
-    const cur = await c.query('SELECT role, group_id, is_active FROM users WHERE id=$1 FOR UPDATE', [id]);
+    const cur = await c.query('SELECT username, full_name, email, role, group_id, is_active FROM users WHERE id=$1 FOR UPDATE', [id]);
     if (!cur.rows.length) throw new HttpError(404, 'User not found');
     const wasAdmin = cur.rows[0].role === 'Admin' && cur.rows[0].is_active;
     const staysAdmin = u.role === 'Admin' && u.is_active;
@@ -175,16 +197,32 @@ router.put('/users/:id', asyncH(async (req, res) => {
     if (!u.is_active) {
       await c.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = $1`, [id]);
     }
-    await audit(req, 'admin.user_update', 'user', id, {
-      from: cur.rows[0], to: { role: u.role, group_id: u.group_id, is_active: u.is_active },
-    }, c);
+    const old = cur.rows[0];
+    const next = { full_name: u.full_name, email: u.email, role: u.role, group_id: u.group_id, is_active: u.is_active };
+    const from = {};
+    const to = {};
+    for (const k of Object.keys(next)) {
+      if ((old[k] ?? null) !== (next[k] ?? null)) { from[k] = old[k] ?? null; to[k] = next[k] ?? null; }
+    }
+    if ('group_id' in to) {
+      const ids = [from.group_id, to.group_id].filter((x) => x != null);
+      const names = ids.length
+        ? (await c.query('SELECT id, name FROM groups WHERE id = ANY($1)', [ids])).rows : [];
+      const nm = (gid) => (gid == null ? null : (names.find((r) => r.id === gid) || {}).name || `#${gid}`);
+      from.group = nm(from.group_id);
+      to.group = nm(to.group_id);
+    }
+    await audit(req, 'admin.user_update', 'user', id, { username: old.username, from, to }, c);
   });
   res.json({ ok: true });
 }));
 
 router.post('/users/:id/reset-password', asyncH(async (req, res) => {
   const id = v.id(req.params.id);
-  const temp = req.body.password ? v.password(req.body.password)
+  const target = (await db.query('SELECT username, full_name FROM users WHERE id=$1', [id])).rows[0];
+  if (!target) throw new HttpError(404, 'User not found');
+  await confirmIdentity(req, 'admin.user_reset_password', id);
+  const temp = req.body.password ? v.password(req.body.password, { username: target.username, fullName: target.full_name })
     : `${crypto.randomBytes(12).toString('base64url')}${crypto.randomInt(10, 99)}`;
   const hash = await bcrypt.hash(temp, 12);
   const r = await db.query(
@@ -193,32 +231,51 @@ router.post('/users/:id/reset-password', asyncH(async (req, res) => {
   );
   if (!r.rowCount) throw new HttpError(404, 'User not found');
   await db.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = $1`, [id]);
-  await audit(req, 'admin.user_reset_password', 'user', id);
+  await audit(req, 'admin.user_reset_password', 'user', id, { username: target.username });
   res.json({ ok: true, temporary_password: temp });
 }));
 
 router.post('/users/:id/reset-2fa', asyncH(async (req, res) => {
   const id = v.id(req.params.id);
+  if (!(await db.query('SELECT 1 FROM users WHERE id=$1', [id])).rowCount) throw new HttpError(404, 'User not found');
+  await confirmIdentity(req, 'admin.user_reset_2fa', id);
   const r = await db.query(
-    `UPDATE users SET totp_secret=NULL, totp_enabled=FALSE, updated_at=now() WHERE id=$1`, [id]
+    `UPDATE users SET totp_secret=NULL, totp_enabled=FALSE, totp_last_step=NULL, updated_at=now() WHERE id=$1 RETURNING username`, [id]
   );
   if (!r.rowCount) throw new HttpError(404, 'User not found');
-  await audit(req, 'admin.user_reset_2fa', 'user', id);
+  await audit(req, 'admin.user_reset_2fa', 'user', id, { username: r.rows[0].username });
   res.json({ ok: true });
 }));
 
 router.post('/users/:id/unlock', asyncH(async (req, res) => {
   const id = v.id(req.params.id);
-  await db.query('UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=$1', [id]);
-  await audit(req, 'admin.user_unlock', 'user', id);
+  const cur = await db.query(
+    'SELECT username FROM users WHERE id=$1',
+    [id]
+  );
+
+  if (!cur.rows.length) throw new HttpError(404, 'User not found');
+
+  await db.query(
+    'UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=$1',
+    [id]
+  );
+
+  await audit(req, 'admin.user_unlock', 'user', id, {
+    username: cur.rows[0].username
+  });
   res.json({ ok: true });
 }));
 
 // ---------- Dropdowns ----------
 router.get('/dropdowns', asyncH(async (req, res) => {
   const { rows } = await db.query(
-    `SELECT d.*, (SELECT count(*)::int FROM ingest_records i
-                   WHERE (d.category='program' AND i.program=d.value) OR (d.category='platform' AND i.platform=d.value)) AS usage
+    `SELECT d.*, (
+              (SELECT count(*)::int FROM ingest_records i
+                WHERE (d.category='program' AND i.program=d.value) OR (d.category='platform' AND i.platform=d.value))
+            + (SELECT count(*)::int FROM workload_items w
+                WHERE (d.category='workload_platform' AND w.platform=d.value)
+                   OR (d.category='plug_type' AND w.plug_type=d.value))) AS usage
        FROM dropdown_options d ORDER BY category, sort_order, value`
   );
   res.json({ categories: DROPDOWN_CATEGORIES, rows });
@@ -257,10 +314,10 @@ router.put('/dropdowns/:id', asyncH(async (req, res) => {
       if (e.code === '23505') throw new HttpError(409, `"${value}" already exists`);
       throw e;
     }
-    // Renaming propagates to existing ingest records so reports stay consistent
+    // Renaming propagates to existing records so filters and counts stay consistent
     if (old.value !== value) {
-      const col = old.category === 'program' ? 'program' : 'platform';
-      await c.query(`UPDATE ingest_records SET ${col}=$2 WHERE ${col}=$1`, [old.value, value]);
+      const u = DROPDOWN_USAGE[old.category];
+      await c.query(`UPDATE ${u.table} SET ${u.col}=$2 WHERE ${u.col}=$1`, [old.value, value]);
     }
     await audit(req, 'admin.dropdown_update', 'dropdown_option', id,
       { from: { value: old.value, is_active: old.is_active }, to: { value, is_active } }, c);
@@ -273,13 +330,76 @@ router.delete('/dropdowns/:id', asyncH(async (req, res) => {
   const cur = await db.query('SELECT * FROM dropdown_options WHERE id=$1', [id]);
   if (!cur.rows.length) throw new HttpError(404, 'Option not found');
   const o = cur.rows[0];
-  const col = o.category === 'program' ? 'program' : 'platform';
-  const used = await db.query(`SELECT count(*)::int AS n FROM ingest_records WHERE ${col}=$1`, [o.value]);
+  const u = DROPDOWN_USAGE[o.category];
+  const used = await db.query(`SELECT count(*)::int AS n FROM ${u.table} WHERE ${u.col}=$1`, [o.value]);
   if (used.rows[0].n > 0) {
-    throw new HttpError(409, `"${o.value}" is used by ${used.rows[0].n} ingest record(s). Deactivate it instead.`);
+    const what = u.table === 'workload_items' ? 'workload item(s)' : 'ingest record(s)';
+    throw new HttpError(409, `"${o.value}" is used by ${used.rows[0].n} ${what}. Deactivate it instead.`);
   }
   await db.query('DELETE FROM dropdown_options WHERE id=$1', [id]);
   await audit(req, 'admin.dropdown_delete', 'dropdown_option', id, { category: o.category, value: o.value });
+  res.json({ ok: true });
+}));
+
+// ---------- Workload Tracker: custom columns (Add Column, in both Table and Excel modes) ----------
+const shapeCol = (r) => ({ id: r.id, key: r.col_key, label: r.label, sort_order: r.sort_order });
+router.get('/workload-columns', asyncH(async (req, res) => {
+  const { rows } = await db.query('SELECT id, col_key, label, sort_order FROM workload_custom_columns ORDER BY sort_order, id');
+  res.json({ columns: rows.map(shapeCol) });
+}));
+
+router.post('/workload-columns', asyncH(async (req, res) => {
+  const label = v.str(req.body.label, { field: 'Column name', max: 60, required: true });
+  const dupe = await db.query('SELECT 1 FROM workload_custom_columns WHERE lower(label)=lower($1)', [label]);
+  if (dupe.rows.length) throw new HttpError(409, `A column named "${label}" already exists`);
+  const col = await db.tx(async (c) => {
+    const { rows: [{ id }] } = await c.query(
+      'INSERT INTO workload_custom_columns (label, sort_order, created_by) VALUES ($1, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM workload_custom_columns), $2) RETURNING id',
+      [label, req.user.id]
+    );
+    const { rows: [row] } = await c.query('UPDATE workload_custom_columns SET col_key=$2 WHERE id=$1 RETURNING id, col_key, label, sort_order', [id, `custom_${id}`]);
+    return row;
+  });
+  await audit(req, 'admin.workload_column_add', 'workload_custom_column', col.id, { label });
+  res.status(201).json({ ok: true, column: shapeCol(col) });
+}));
+
+router.delete('/workload-columns/:id', asyncH(async (req, res) => {
+  const id = v.id(req.params.id);
+  const cur = await db.query('SELECT * FROM workload_custom_columns WHERE id=$1', [id]);
+  if (!cur.rows.length) throw new HttpError(404, 'Column not found');
+  await db.query('DELETE FROM workload_custom_columns WHERE id=$1', [id]);
+  // Values already entered under this column are left in place in custom_fields (harmless, just orphaned/hidden)
+  // rather than rewriting every row — removing the column definition is enough to hide it going forward.
+  await audit(req, 'admin.workload_column_delete', 'workload_custom_column', id, { label: cur.rows[0].label });
+  res.json({ ok: true });
+}));
+
+// ---------- Workload Tracker: date locks (freeze a period so its rows can't be edited/deleted/created) ----------
+router.get('/workload-locks', asyncH(async (req, res) => {
+  const { rows } = await db.query('SELECT id, from_date, to_date, note FROM workload_locks ORDER BY from_date DESC');
+  res.json({ locks: rows });
+}));
+
+router.post('/workload-locks', asyncH(async (req, res) => {
+  const from_date = v.date(req.body.from_date, { field: 'From date', required: true });
+  const to_date = v.date(req.body.to_date, { field: 'To date', required: true });
+  if (to_date < from_date) throw new HttpError(400, 'To date must be on or after From date');
+  const note = v.str(req.body.note, { field: 'Note', max: 200 });
+  const { rows: [lock] } = await db.query(
+    'INSERT INTO workload_locks (from_date, to_date, note, created_by) VALUES ($1, $2, $3, $4) RETURNING id, from_date, to_date, note',
+    [from_date, to_date, note, req.user.id]
+  );
+  await audit(req, 'admin.workload_lock_add', 'workload_lock', lock.id, { from_date, to_date, note });
+  res.status(201).json({ ok: true, lock });
+}));
+
+router.delete('/workload-locks/:id', asyncH(async (req, res) => {
+  const id = v.id(req.params.id);
+  const cur = await db.query('SELECT * FROM workload_locks WHERE id=$1', [id]);
+  if (!cur.rows.length) throw new HttpError(404, 'Lock not found');
+  await db.query('DELETE FROM workload_locks WHERE id=$1', [id]);
+  await audit(req, 'admin.workload_lock_delete', 'workload_lock', id, { from_date: cur.rows[0].from_date, to_date: cur.rows[0].to_date });
   res.json({ ok: true });
 }));
 
@@ -291,18 +411,30 @@ router.put('/branding', asyncH(async (req, res) => {
   const accent_color = v.str(req.body.accent_color, { field: 'Accent color', max: 7 }) || '';
   if (accent_color && !/^#[0-9a-fA-F]{6}$/.test(accent_color)) throw new HttpError(400, 'Accent color must be a hex value like #4f8cff (or empty to use the theme accent)');
   await db.tx(async (c) => {
-    for (const [k, val] of Object.entries({ app_name, tagline, theme, accent_color })) {
+    const next = { app_name, tagline, theme, accent_color };
+    const { rows: curRows } = await c.query(
+      'SELECT key, value FROM app_settings WHERE key = ANY($1)', [Object.keys(next)]
+    );
+    const old = Object.fromEntries(curRows.map((r) => [r.key, r.value]));
+    const from = {};
+    const to = {};
+    for (const k of Object.keys(next)) {
+      if ((old[k] ?? '') !== next[k]) { from[k] = old[k] ?? ''; to[k] = next[k]; }
+    }
+    for (const [k, val] of Object.entries(next)) {
       await c.query(
         `INSERT INTO app_settings (key, value, updated_at) VALUES ($1,$2,now())
          ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [k, val]
       );
     }
-    await audit(req, 'admin.branding_update', 'app_settings', null, { app_name, tagline, theme, accent_color }, c);
+    if (Object.keys(to).length) {
+      await audit(req, 'admin.branding_update', 'app_settings', null, { from, to }, c);
+    }
   });
   res.json({ ok: true });
 }));
 
-const ALLOWED_LOGO = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' };
+const ALLOWED_LOGO = Object.assign(Object.create(null), { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' });
 const upload = multer({
   storage: multer.diskStorage({
     destination: UPLOAD_DIR,
@@ -363,12 +495,11 @@ router.get('/audit', asyncH(async (req, res) => {
   const params = [];
   const where = [];
   const add = (sql, val) => { params.push(val); where.push(sql.replace('?', `$${params.length}`)); };
-  if (req.query.action) add('action ILIKE ?', `%${String(req.query.action).slice(0, 60).replace(/[%_\\]/g, '\\$&')}%`);
-  if (req.query.user) add('username ILIKE ?', `%${String(req.query.user).slice(0, 60).replace(/[%_\\]/g, '\\$&')}%`);
+  if (req.query.action) add('action ILIKE ?', v.like(req.query.action, 60));
+  if (req.query.user) add('username ILIKE ?', v.like(req.query.user, 60));
   if (req.query.from) add('created_at >= ?::date', v.date(req.query.from, { field: 'From' }));
   if (req.query.to) add(`created_at < (?::date + 1)`, v.date(req.query.to, { field: 'To' }));
-  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
-  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+  const { limit, offset } = v.paging(req.query, { def: 50, max: 200 });
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const [cnt, list] = await Promise.all([
     db.query(`SELECT count(*)::int AS n FROM audit_logs ${whereSql}`, params),

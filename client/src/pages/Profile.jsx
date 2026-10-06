@@ -130,8 +130,9 @@ export default function Profile() {
 function SetupModal({ setup, onClose, onEnabled }) {
   const toast = useToast();
   const [token, setToken] = useState('');
+  const [password, setPassword] = useState('');
   const enable = async () => {
-    try { await post('/api/profile/2fa/enable', { token }); onEnabled(); } catch (e) { toast(e.message, 'err'); }
+    try { await post('/api/profile/2fa/enable', { token, password }); onEnabled(); } catch (e) { toast(e.message, 'err'); }
   };
   return (
     <Modal
@@ -148,6 +149,9 @@ function SetupModal({ setup, onClose, onEnabled }) {
         <label className="f"><span>2. Enter the 6-digit code</span>
           <input id="tok" className="otp-input" inputMode="numeric" maxLength={6} autoComplete="one-time-code" value={token}
             onChange={(e) => setToken(e.target.value.replace(/\D/g, '').slice(0, 6))} />
+        </label>
+        <label className="f"><span>3. Confirm with your password</span>
+          <input id="tokpw" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </label>
       </div>
     </Modal>

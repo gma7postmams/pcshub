@@ -2,11 +2,11 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const rateLimit = require('express-rate-limit');
 const db = require('../db');
-const { asyncH, HttpError, requireAuth } = require('../middleware');
+const { asyncH, HttpError, requireAuth, clearSessionCookie } = require('../middleware');
 const { audit } = require('../audit');
 const { allowedPages, allowedActions, allowedSections, landingPath } = require('../permissions');
 const totp = require('../totp');
-const { COOKIE_NAME, twofaRequired } = require('../config');
+const { twofaRequired } = require('../config');
 
 const router = express.Router();
 
@@ -46,6 +46,7 @@ async function recordFailure(user) {
 async function completeLogin(req, user) {
   await regenerate(req);
   req.session.userId = user.id;
+  req.session.createdAt = Date.now();   // start of the absolute session lifetime (SESSION_MAX_HOURS)
   await db.query('UPDATE users SET failed_attempts=0, locked_until=NULL, last_login_at=now() WHERE id=$1', [user.id]);
   req.user = { id: user.id, username: user.username };
   await audit(req, 'auth.login', 'user', user.id);
@@ -56,6 +57,8 @@ router.post('/login', loginLimiter, asyncH(async (req, res) => {
   const username = typeof req.body.username === 'string' ? req.body.username.trim() : '';
   const password = typeof req.body.password === 'string' ? req.body.password : '';
   if (!username || !password) throw new HttpError(400, 'Username and password are required');
+  // Nothing valid is this long: answer like any other failure without hashing it or writing it to the audit log
+  if (username.length > 60 || password.length > 200) throw new HttpError(401, GENERIC_FAIL);
 
   const { rows } = await db.query('SELECT * FROM users WHERE lower(username)=lower($1)', [username]);
   const user = rows[0];
@@ -120,7 +123,7 @@ router.post('/2fa', loginLimiter, asyncH(async (req, res) => {
 router.post('/logout', asyncH(async (req, res) => {
   if (req.user) await audit(req, 'auth.logout', 'user', req.user.id);
   req.session.destroy(() => {
-    res.clearCookie(COOKIE_NAME, { path: '/' });
+    clearSessionCookie(res);
     res.json({ ok: true });
   });
 }));

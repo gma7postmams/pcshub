@@ -5,6 +5,7 @@ import { useSession } from '../../context.jsx';
 import { PlusIcon } from '../../components/Icons.jsx';
 import { Empty, Modal, Options, RoleBadge, useConfirm, useForm, useToast } from '../../components/ui.jsx';
 import { keyLabels } from './labels.js';
+import { useStepUp } from './ReauthDialog.jsx';
 
 export default function Users({ model }) {
   const [list, setList] = useState(null);
@@ -74,16 +75,26 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
     : g ? `Opens: ${g.perms.filter((k) => !k.includes('.')).map((k) => LABEL[k] || k).join(', ') || 'no pages'} + Profile`
       : 'Not enrolled: user can only open Profile until assigned to a group.';
 
+  // Granting Admin, resetting a password and removing 2FA ask the signed-in Admin to confirm their own password first
+  const [stepUp, stepUpDialog] = useStepUp();
+  const fail = (e) => { if (!(e.data && e.data.cancelled)) toast(e.message, 'err'); };
   const save = async () => {
     const body = { ...f, is_active: self ? true : f.is_active };
     try {
-      if (u) await put(`/api/admin/users/${u.id}`, body); else await post('/api/admin/users', body);
+      await stepUp(
+        (reauth) => (u ? put(`/api/admin/users/${u.id}`, { ...body, reauth }) : post('/api/admin/users', { ...body, reauth })),
+        { intro: `Giving ${f.full_name || 'this user'} the Admin role needs your password.` }
+      );
       toast('User saved'); onSaved();
-    } catch (e) { toast(e.message, 'err'); }
+    } catch (e) { fail(e); }
   };
-  const action = async (path, msg, confirmArgs) => {
+  const action = async (path, msg, confirmArgs, intro) => {
     if (confirmArgs && !(await confirm(...confirmArgs))) return null;
-    try { const r = await post(`/api/admin/users/${u.id}/${path}`); if (msg) { toast(msg); onSaved(); } return r; } catch (e) { toast(e.message, 'err'); return null; }
+    try {
+      const r = await stepUp((reauth) => post(`/api/admin/users/${u.id}/${path}`, { reauth }), { intro });
+      if (msg) { toast(msg); onSaved(); }
+      return r;
+    } catch (e) { fail(e); return null; }
   };
 
   return (
@@ -116,16 +127,19 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
             <h3 className="mt-16 mb-12">Security</h3>
             <div className="row">
               <button type="button" className="btn sm" id="rpw" onClick={async () => {
-                const r = await action('reset-password', null, ['Reset password', `Generate a temporary password for ${u.full_name}? Their sessions will be signed out.`, { okText: 'Reset' }]);
+                const r = await action('reset-password', null, ['Reset password', `Generate a temporary password for ${u.full_name}? Their sessions will be signed out.`, { okText: 'Reset' }],
+                  `Resetting the password for ${u.full_name} needs your own password.`);
                 if (r) setTemp(r.temporary_password);
               }}>Reset password</button>
               <button type="button" className="btn sm" id="r2fa" disabled={!u.totp_enabled}
-                onClick={() => action('reset-2fa', '2FA reset', ['Reset 2FA', `Remove 2FA from ${u.full_name}? They can set it up again from Profile.`, { okText: 'Reset 2FA', danger: true }])}>Reset 2FA</button>
+                onClick={() => action('reset-2fa', '2FA reset', ['Reset 2FA', `Remove 2FA from ${u.full_name}? They can set it up again from Profile.`, { okText: 'Reset 2FA', danger: true }],
+                  `Removing 2FA from ${u.full_name} needs your own password.`)}>Reset 2FA</button>
               <button type="button" className="btn sm" id="unlock" onClick={() => action('unlock', 'Account unlocked')}>Unlock</button>
             </div>
           </>
         ) : null}
       </Modal>
+      {stepUpDialog}
       {temp ? (
         <Modal title="Temporary password" size="sm" onClose={() => setTemp(null)} footer={<button type="button" className="btn primary" onClick={() => setTemp(null)}>Done</button>}>
           <p className="muted m-0">Share this securely. It is shown once.</p>

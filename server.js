@@ -14,12 +14,12 @@ const {
 } = require('./src/middleware');
 const { PAGE_BY_PATH, landingPath } = require('./src/permissions');
 const {
-  PROD, cookieSecure, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks,
+  PROD, cookieSecure, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks, SESSION_IDLE_MS, API_RATE_LIMIT,
 } = require('./src/config');
-require('./src/totp'); // validates TOTP_ENC_KEY at boot
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
-startupChecks();
+startupChecks();          // exits when SESSION_SECRET is missing or weak
+require('./src/totp');    // validates TOTP_ENC_KEY at boot
 
 const app = express();
 app.disable('x-powered-by');
@@ -46,6 +46,7 @@ app.use(helmet({
     },
   },
   crossOriginEmbedderPolicy: false,
+  frameguard: { action: 'deny' },   // same answer as frame-ancestors 'none' for browsers that only read the older header
   hsts: cookieSecure ? { maxAge: 31536000, includeSubDomains: true } : false,
 }));
 app.use((req, res, next) => {
@@ -53,15 +54,19 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: false, limit: '100kb' }));
+// During a restore everything except the status endpoint answers 503. Registered before sessions: it must not touch the database.
+const maintenance = require('./src/backup/maintenance');
+app.use(maintenance.middleware);
+app.get('/api/maintenance/status', maintenance.status);
+
+app.use(express.json({ limit: '1mb' }));   // the app only speaks JSON (and multipart for uploads): no form-encoded parser
 
 // ---------- Sessions (PostgreSQL) ----------
 app.use(session({
   name: COOKIE_NAME,
   // table is created by src/schema.sql, so the runtime DB role needs no DDL rights
   store: new PgStore({ pool: db.pool, tableName: 'user_sessions', createTableIfMissing: false, pruneSessionInterval: 60 * 15 }),
-  secret: process.env.SESSION_SECRET || 'dev-only-insecure-secret-change-me',
+  secret: process.env.SESSION_SECRET,   // startupChecks() has already refused to start without a strong one
   resave: false,
   saveUninitialized: false,
   rolling: true,
@@ -70,7 +75,7 @@ app.use(session({
     sameSite: 'lax',
     secure: cookieSecure,
     path: '/',
-    maxAge: (parseInt(process.env.SESSION_HOURS, 10) || 12) * 3600 * 1000,
+    maxAge: SESSION_IDLE_MS,
   },
 }));
 
@@ -88,7 +93,9 @@ app.get('/sw.js', (req, res) => {
 });
 // Hashed bundles never change → cache for a year
 app.use('/assets', express.static(path.join(CLIENT_DIST, 'assets'), { immutable: true, maxAge: '365d', index: false }));
-app.use(express.static(CLIENT_DIST, { index: false, maxAge: PROD ? '1h' : 0 }));
+// The app shell is only handed out by the access-controlled page routes further down, never as a plain file
+app.get('/index.html', (req, res) => res.redirect('/'));
+app.use(express.static(CLIENT_DIST, { index: false, dotfiles: 'ignore', maxAge: PROD ? '1h' : 0 }));
 app.use('/uploads/branding', express.static(path.join(__dirname, 'uploads', 'branding'), {
   maxAge: '7d',
   setHeaders: (res) => res.set('X-Content-Type-Options', 'nosniff'),
@@ -96,15 +103,23 @@ app.use('/uploads/branding', express.static(path.join(__dirname, 'uploads', 'bra
 
 app.use(loadUser);
 
+// Workload / Plug List imports and exports announce themselves through src/transfer-hook.js; this writes each one
+// (and each failure) to the audit log: who, file name and size, filters, row counts, duration. Never row contents.
+const { audit } = require('./src/audit');
+require('./src/transfer-hook').onTransfer((e) => audit(e.req, e.action, e.entity, e.entityId, e.details));
+
 // ---------- API ----------
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  limit: 300,
+  limit: API_RATE_LIMIT,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many requests, slow down.' },
 });
-app.use('/api', apiLimiter, csrfGuard);
+// API answers are per-user data: neither the browser nor a proxy in between may keep a copy
+// (the few routes that serve files set their own Cache-Control afterwards).
+const noStoreApi = (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); };
+app.use('/api', apiLimiter, csrfGuard, noStoreApi);
 
 // Public
 app.use('/api/branding', require('./src/routes/branding'));
@@ -129,13 +144,17 @@ app.use('/api', (req, res, next) => {
 
 app.use('/api/profile',       requirePageAccess('/profile'),   require('./src/routes/profile'));
 app.use('/api/notifications', require('./src/routes/notifications'));
+app.use('/api/presence',      require('./src/routes/presence'));   // who is working right now (feeds the Dashboard's Active users)
 app.use('/api',               require('./src/routes/lookups'));
 app.use('/api/dashboard',     requirePageAccess('/dashboard'), require('./src/routes/dashboard'));
 app.use('/api/ingest',        requirePageAccess('/ingest'),    require('./src/routes/ingest'));
 app.use('/api/approvals',     requirePageAccess('/approval'),  require('./src/routes/approvals'));
 app.use('/api/workload',      requirePageAccess('/workload'),  require('./src/routes/workload'));
-app.use('/api/reports',       requirePageAccess('/reports'),   require('./src/routes/reports'));
+app.use('/api/plugs',         require('./src/routes/plugs')(require('./src/routes/workload').helpers));   // PSD Daily Plug List (page + API of its own)
+app.use('/api/knowledge',     requirePageAccess('/knowledge'), require('./src/routes/knowledge'));
+app.use('/api/admin/backups', requirePageAccess('/admin'),     require('./src/routes/backups'));
 app.use('/api/admin',         requirePageAccess('/admin'),     require('./src/routes/admin'));
+
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 
@@ -173,12 +192,34 @@ app.use(errorHandler);
 // ---------- Boot ----------
 // MIGRATE_ON_START=false: run `npm run migrate` with an owner DB login instead, and give the app a DML-only login
 // (see db/app-role.sql).
-const boot = process.env.MIGRATE_ON_START === 'false' ? db.query('SELECT 1 FROM users LIMIT 1') : migrate(db);
+const boot = process.env.MIGRATE_ON_START === 'false'
+  ? db.query('SELECT 1 FROM users LIMIT 1')
+  : migrate(db);
+
 boot
-  .then(() => {
+  .then(() => require('./src/backup/service').recoverStale())
+  .then(() => require('./src/backup/analysis').startupCleanup())
+  .then(async () => {
+    // Workload rows that have a Plug ID but no PSD / PROG. NAME yet are filled from the PSD Daily Plug List
+    try {
+      const n = await require('./src/routes/plugs').backfillWorkload(db);
+      if (n) {
+        console.log(
+          `[workload] filled PSD / PROG. NAME on ${n} existing row(s) from the PSD Daily Plug List`
+        );
+      }
+    } catch (e) {
+      console.error('[workload] plug list fill skipped:', e.message);
+    }
+
     // Production default: localhost only — users reach the app through the HTTPS reverse proxy.
     const HOST = process.env.HOST || (PROD ? '127.0.0.1' : '0.0.0.0');
-    app.listen(PORT, HOST, () => console.log(`Promotional Content Hub listening on ${HOST}:${PORT} (${PROD ? 'production' : 'development'})`));
+
+    app.listen(PORT, HOST, () =>
+      console.log(
+        `Promotional Content Hub listening on ${HOST}:${PORT} (${PROD ? 'production' : 'development'})`
+      )
+    );
   })
   .catch((e) => {
     console.error('Startup failed:', e);

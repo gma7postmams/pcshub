@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { get, put } from './lib/api.js';
 import { cachedMode, setMode, setPalette } from './lib/theme.js';
+import { applyFavicon } from './lib/favicon.js';
 
 const DEFAULT_BRANDING = { app_name: 'Promotional Content Hub', tagline: '', theme: 'midnight', accent_color: '', themes: [], logo_url: null };
 
@@ -19,6 +20,9 @@ export function BrandingProvider({ children }) {
     return b;
   }, []);
   useEffect(() => { reload(); }, [reload]);
+  // the browser-tab icon follows the logo on the Branding page (transparent background); no logo = the built-in icon
+  const logoUrl = branding ? branding.logo_url || '' : null;
+  useEffect(() => { if (logoUrl !== null) applyFavicon(logoUrl); }, [logoUrl]);
   if (!branding) return null;
   return <BrandingCtx.Provider value={{ branding, reload }}>{children}</BrandingCtx.Provider>;
 }

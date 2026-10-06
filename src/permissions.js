@@ -16,48 +16,76 @@ const ROLES = ['Admin', 'Manager', 'Editor', 'Viewer'];
 // A section is only effective if its page is also granted.
 const CATALOG = [
   {
-    key: 'dashboard', label: 'Dashboard', path: '/dashboard',
+    key: 'dashboard',
+    label: 'Dashboard',
+    path: '/dashboard',
     sections: [
       { key: 'dashboard.kpis', label: 'Ingest KPIs' },
-      { key: 'dashboard.recent', label: 'Recent ingest activity' },
+      { key: 'dashboard.users', label: 'Active users' },
     ],
   },
+
   { key: 'ingest', label: 'Ingest Tracker', path: '/ingest', sections: [] },
-  { key: 'workload', label: 'Work Load Tracker', path: '/workload', sections: [] },
+  { key: 'workload', label: 'Workload Tracker', path: '/workload', sections: [] },
+  { key: 'plugs', label: 'PSD Daily Plug List', path: '/plug-list', sections: [] },
   { key: 'approval', label: 'Approval', path: '/approval', sections: [] },
+
   {
-    key: 'reports', label: 'Reports', path: '/reports',
-    sections: [
-      { key: 'reports.ingest', label: 'Ingest & Approval summary' },
-      { key: 'reports.export', label: 'CSV export' },
-    ],
+    key: 'knowledge',
+    label: 'Knowledge Base',
+    path: '/knowledge',
+    sections: [],
   },
 ];
 
 const FIXED_PAGES = [
   { key: 'admin', label: 'Admin', path: '/admin', roleOnly: 'Admin' },
+  { key: 'activity-history', label: 'Activity History', path: '/activity-history', always: true },
   { key: 'profile', label: 'Profile', path: '/profile', always: true, inNav: false },
 ];
 
 const ALL_KEYS = CATALOG.flatMap((p) => [p.key, ...p.sections.map((s) => s.key)]);
-const PAGE_BY_PATH = Object.fromEntries([...CATALOG, ...FIXED_PAGES].map((p) => [p.path, p]));
-const SECTION_PAGE = Object.fromEntries(CATALOG.flatMap((p) => p.sections.map((s) => [s.key, p.key])));
+// Lookup tables keyed by text that can come from a request are created without a prototype, so a key such as
+// "__proto__" or "constructor" is simply absent instead of resolving to something inherited.
+const dict = (entries) => Object.assign(Object.create(null), Object.fromEntries(entries));
+const PAGE_BY_PATH = dict([...CATALOG, ...FIXED_PAGES].map((p) => [p.path, p]));
+const SECTION_PAGE = dict(CATALOG.flatMap((p) => p.sections.map((s) => [s.key, p.key])));
 
 // Role -> actions
-const ROLE_ACTIONS = {
-  Admin:   ['ingest.write', 'ingest.delete', 'approval.decide', 'workload.write', 'admin'],
-  Manager: ['ingest.write', 'approval.decide', 'workload.write'],
+const ROLE_ACTIONS = Object.assign(Object.create(null), {
+  Admin: [
+    'ingest.write',
+    'ingest.delete',
+    'approval.decide',
+    'ingest.cm_complete',
+    'workload.write',
+    'knowledge.write',
+    'plugs.write',
+    'admin'
+  ],
+
+  Manager: [
+    'ingest.write',
+    'approval.decide',
+    'ingest.cm_complete',
+    'workload.write',
+    'knowledge.write',
+    'plugs.write'
+  ],
   Editor:  ['ingest.write'],
   Viewer:  [],
-};
+});
 // Action -> page the action happens on (the user's group must grant it)
-const ACTION_PAGE = {
+const ACTION_PAGE = Object.assign(Object.create(null), {
   'ingest.write': 'ingest',
   'ingest.delete': 'ingest',
+  'ingest.cm_complete': 'ingest',
   'approval.decide': 'approval',
   'workload.write': 'workload',
+  'knowledge.write': 'knowledge',
+  'plugs.write': 'plugs',
   'admin': null,
-};
+});
 
 function isValidKey(k) { return ALL_KEYS.includes(k); }
 
@@ -95,9 +123,28 @@ function can(user, action) {
 
 function allowedPages(user) {
   const eff = effectiveKeys(user);
-  const pages = CATALOG.filter((p) => eff.has(p.key)).map(({ key, label, path }) => ({ key, label, path }));
-  if (user && user.role === 'Admin') pages.push({ key: 'admin', label: 'Admin', path: '/admin' });
-  pages.push({ key: 'profile', label: 'Profile', path: '/profile', inNav: false });
+
+  const pages = CATALOG
+    .filter((p) => eff.has(p.key))
+    .map(({ key, label, path }) => ({ key, label, path }));
+
+  if (user && user.role === 'Admin') {
+    pages.push({ key: 'admin', label: 'Admin', path: '/admin' });
+  } else {
+    pages.push({
+      key: 'activity-history',
+      label: 'Activity History',
+      path: '/activity-history',
+    });
+  }
+
+  pages.push({
+    key: 'profile',
+    label: 'Profile',
+    path: '/profile',
+    inNav: false,
+  });
+
   return pages;
 }
 
