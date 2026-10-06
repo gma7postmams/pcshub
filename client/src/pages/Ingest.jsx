@@ -234,9 +234,9 @@ export default function Ingest() {
 
       <div className="card wl-card">
         <div className="wl-filters">
-          <label className="wl-search">
+          <label className="wl-search" style={{ minWidth: 'min(100%, 410px)' }}>
             <SearchIcon />
-            <input type="search" placeholder="Search program, billable party, episode / break date, source, folder, approved by, remarks…" value={filt.q} onChange={setF('q')} />
+            <input type="search" placeholder="Search program, party, source, folder, remarks…" style={{ textOverflow: 'ellipsis' }} value={filt.q} onChange={setF('q')} />
           </label>
           <FilterSelect label="Status" value={filt.status} onChange={setF('status')}><Options list={STATUS_FILTER} blank="All" /></FilterSelect>
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All" /></FilterSelect>
