@@ -13,6 +13,10 @@ const ACTION_LABELS = {
   'auth.login_blocked_locked': 'Login Blocked (Locked Account)',
 
   'ingest.create': 'Created Ingest Record',
+  'ingest.update': 'Updated Ingest Record',
+  'ingest.delete': 'Deleted Ingest Record',
+  'ingest.edit_blocked': 'Ingest Edit Refused (CM Locked)',
+  'ingest.delete_blocked': 'Ingest Delete Refused',
   'ingest.send_for_approval': 'Submitted For Approval',
   'ingest.approve': 'Approved Ingest Record',
   'ingest.unapprove': 'Removed Ingest Approval',
@@ -303,6 +307,23 @@ function formatDetails(row) {
         : d.title
           ? `Created ingest record (${d.title})`
           : 'Created ingest record';
+
+    case 'ingest.update': {
+      const L = { program: 'PROG. NAME / PROJ. TITLE', billable_party: 'Billable Party', platform: 'Platform', episode_break_date_text: 'Episode / Breakdate', materials_count: 'No. of Materials', source: 'Source', destination_folder: 'Destination Folder', remarks: 'Remarks' };
+      const show = (x) => (x == null || x === '' ? '(empty)' : String(x).length > 60 ? `${String(x).slice(0, 57)}…` : String(x));
+      const ch = d.changes && typeof d.changes === 'object' ? Object.entries(d.changes) : [];
+      const list = ch.map(([k, c2]) => `${L[k] || k}: ${show(c2 && c2.from)} → ${show(c2 && c2.to)}`).join('; ');
+      return `Updated ingest record${d.program ? ` (${d.program})` : ''}${list ? ` — ${list}` : ''}`;
+    }
+
+    case 'ingest.delete':
+      return `Deleted ingest record${d.program ? ` (${d.program})` : ''}${d.cm_status ? ` — CM status was ${d.cm_status}` : ''}${d.batch ? ' (batch delete)' : ''}`;
+
+    case 'ingest.edit_blocked':
+      return `Edit refused: ingest record${d.program ? ` (${d.program})` : ''} is ${d.cm_status || 'locked'} in CM${d.field ? ` (tried to change ${d.field})` : ''}`;
+
+    case 'ingest.delete_blocked':
+      return `Delete refused for ingest record${d.program ? ` (${d.program})` : ''} — ${d.reason || 'not allowed'}${d.batch ? ' (batch delete)' : ''}`;
 
     case 'ingest.send_for_approval':
       return d.program

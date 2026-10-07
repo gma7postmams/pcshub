@@ -100,6 +100,20 @@ function orderBy(q) {
   return `${col} ${q.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, i.created_at DESC, i.id DESC`;
 }
 
+// ---- audit helpers ----
+const AUDITED = ['program', 'billable_party', 'platform', 'episode_break_date_text', 'materials_count', 'source', 'destination_folder', 'remarks'];
+const same = (a, b) => String(a == null ? '' : a) === String(b == null ? '' : b);
+/** { field: { from, to } } for every audited field whose value differs */
+function changesOf(before, after) {
+  const out = {};
+  for (const f of AUDITED) if (!same(before[f], after[f])) out[f] = { from: before[f] == null ? null : before[f], to: after[f] == null ? null : after[f] };
+  return out;
+}
+/** A refused action (record locked by CM, delete not allowed) is logged too. Runs outside the failed transaction so the entry survives its rollback. */
+async function auditBlocked(req, action, id, details) {
+  await audit(req, action, 'ingest_record', id, details).catch(() => {});
+}
+
 router.get('/', asyncH(async (req, res) => {
   const where = [];
   const params = [];
@@ -165,14 +179,18 @@ router.post('/', requireAction('ingest.write'), asyncH(async (req, res) => {
 
 router.put('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
+  let blocked = null;
+  try {
   await db.tx(async (c) => {
     const cur = await c.query(
       `SELECT cm_status, episode_date, to_char(episode_date, 'YYYY-MM-DD') AS episode_date_iso,
-              episode_break_date_text, destination_folder, approved_by, requested_by_user_id, requested_by_psd
+              episode_break_date_text, destination_folder, approved_by, requested_by_user_id, requested_by_psd,
+              program, billable_party, platform, materials_count, source, remarks
          FROM ingest_records WHERE id=$1 FOR UPDATE`, [id]
     );
     if (!cur.rows.length) throw new HttpError(404, 'Ingest record not found');
     if (cur.rows[0].cm_status && !can(req.user, 'ingest.cm_complete')) {
+      blocked = { cm_status: cur.rows[0].cm_status, program: cur.rows[0].program };
       throw new HttpError(409, `Record is marked ${cur.rows[0].cm_status} and can no longer be edited`);
     }
     const r = await parseBody(c, req.body, req.user, cur.rows[0]);
@@ -185,8 +203,13 @@ router.put('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
         r.materials_count, r.source, r.destination_folder, r.approved_by, r.requested_by_user_id,
         r.requested_by_psd, r.remarks, req.user.id]
     );
-    await audit(req, 'ingest.update', 'ingest_record', id, r, c);
+    const changes = changesOf(cur.rows[0], r);
+    if (Object.keys(changes).length) await audit(req, 'ingest.update', 'ingest_record', id, { program: r.program, changes }, c);
   });
+  } catch (e) {
+    if (blocked) await auditBlocked(req, 'ingest.edit_blocked', id, { ...blocked, reason: e.message });
+    throw e;
+  }
   res.json({ ok: true });
 }));
 
@@ -211,10 +234,14 @@ router.patch('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
     throw new HttpError(403, 'Only PCS / OCS can fill in the Destination Folder');
   }
   const value = CELL_FIELDS[field](req.body.value);
-  const row = await db.tx(async (c) => {
-    const cur = await c.query('SELECT cm_status FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
+  let blocked = null;
+  let row;
+  try {
+  row = await db.tx(async (c) => {
+    const cur = await c.query('SELECT cm_status, program, billable_party, platform, episode_break_date_text, materials_count, source, destination_folder, remarks FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
     if (!cur.rows.length) throw new HttpError(404, 'Ingest record not found');
     if (cur.rows[0].cm_status && !can(req.user, 'ingest.cm_complete')) {
+      blocked = { cm_status: cur.rows[0].cm_status, program: cur.rows[0].program, field };
       throw new HttpError(409, `Record is marked ${cur.rows[0].cm_status} and can no longer be edited`);
     }
     if (field === 'platform') await assertDropdown(c, 'platform', value, 'Platform');
@@ -228,10 +255,18 @@ router.patch('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
     } else {
       await c.query(`UPDATE ingest_records SET ${field}=$2, updated_by=$3, updated_at=now() WHERE id=$1`, [id, value, req.user.id]);
     }
-    await audit(req, 'ingest.update', 'ingest_record', id, { [field]: value }, c);
+    const newVal = field === 'episode_break_date_text' ? value.text : value;
+    const changes = changesOf(cur.rows[0], { [field]: newVal });
+    delete changes.__none;
+    const only = {}; if (changes[field]) only[field] = changes[field];
+    if (Object.keys(only).length) await audit(req, 'ingest.update', 'ingest_record', id, { program: cur.rows[0].program, changes: only, via: 'table cell' }, c);
     const out = await c.query(`${SELECT} WHERE i.id=$1`, [id]);
     return out.rows[0];
   });
+  } catch (e) {
+    if (blocked) await auditBlocked(req, 'ingest.edit_blocked', id, { ...blocked, reason: e.message });
+    throw e;
+  }
   res.json({ ok: true, row });
 }));
 
@@ -337,14 +372,20 @@ function deleteBlock(cm, user) {
 
 router.delete('/:id', requireAction('ingest.delete'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
+  let blocked = null;
+  try {
   await db.tx(async (c) => {
     const cur = await c.query('SELECT program, cm_status FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
     if (!cur.rows.length) throw new HttpError(404, 'Ingest record not found');
     const block = deleteBlock(cur.rows[0].cm_status, req.user);
-    if (block) throw new HttpError(409, block);
+    if (block) { blocked = { ...cur.rows[0], reason: block }; throw new HttpError(409, block); }
     await c.query('DELETE FROM ingest_records WHERE id=$1', [id]);
     await audit(req, 'ingest.delete', 'ingest_record', id, cur.rows[0], c);
   });
+  } catch (e) {
+    if (blocked) await auditBlocked(req, 'ingest.delete_blocked', id, blocked);
+    throw e;
+  }
   res.json({ ok: true });
 }));
 
@@ -361,6 +402,9 @@ router.post('/delete', requireAction('ingest.delete'), asyncH(async (req, res) =
     if (ok.length) {
       await c.query('DELETE FROM ingest_records WHERE id = ANY($1::int[])', [ok.map((r) => r.id)]);
       for (const r of ok) await audit(req, 'ingest.delete', 'ingest_record', r.id, { program: r.program, cm_status: r.cm_status, batch: true }, c);
+    }
+    for (const r of rows.filter((x) => deleteBlock(x.cm_status, req.user))) {
+      await audit(req, 'ingest.delete_blocked', 'ingest_record', r.id, { program: r.program, cm_status: r.cm_status, reason: deleteBlock(r.cm_status, req.user), batch: true }, c);
     }
     return { deleted: ok.length, kept, missing: ids.length - rows.length };
   });
