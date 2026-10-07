@@ -23,6 +23,17 @@ const SELECT = `
     LEFT JOIN users uu ON uu.id = i.updated_by
     LEFT JOIN users cmu ON cmu.id = i.cm_decided_by`;
 
+// Episode / Breakdate: one date (YYYY-MM-DD) or a range (YYYY-MM-DD/YYYY-MM-DD, start first). Returns the text as stored and its first day.
+function episodeRange(x) {
+  const raw = x == null ? '' : String(x).trim();
+  const m = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/.exec(raw);
+  if (!m) { const d = v.date(raw, { field: 'Episode / Breakdate' }); return { text: d, start: d }; }
+  const a = v.date(m[1], { field: 'Episode / Breakdate (from)' });
+  const b = v.date(m[2], { field: 'Episode / Breakdate (to)' });
+  if (b < a) throw new HttpError(400, 'Episode / Breakdate: the end date is before the start date');
+  return { text: a === b ? a : `${a}/${b}`, start: a };
+}
+
 async function assertDropdown(client, category, value, field) {
   const { rows } = await client.query(
     'SELECT 1 FROM dropdown_options WHERE category=$1 AND value=$2 AND is_active', [category, value]
@@ -36,8 +47,9 @@ async function parseBody(client, body, user, current = null) {
   let episode_date;
   if (hasEpisodeText) {
     // Date picker: only a real calendar date (YYYY-MM-DD) or empty is accepted from the form.
-    episode_date = v.date(body.episode_break_date_text, { field: 'Episode / Breakdate' });
-    episode_break_date_text = episode_date;
+    const ep = episodeRange(body.episode_break_date_text);
+    episode_date = ep.start;
+    episode_break_date_text = ep.text;
   } else {
     const hasLegacyDate = Object.prototype.hasOwnProperty.call(body, 'episode_date');
     const legacyDate = v.date(body.episode_date, { field: 'Episode date' });
@@ -86,7 +98,9 @@ router.get('/', asyncH(async (req, res) => {
   else if (/^approved$/i.test(String(req.query.approval || ''))) where.push(`(i.approved_at IS NOT NULL OR COALESCE(btrim(i.approved_by), '') <> '')`);
   if (req.query.program) add('i.program = ?', String(req.query.program));
   if (req.query.platform) add('i.platform = ?', String(req.query.platform));
-  if (req.query.from) add('i.episode_date >= ?', v.date(req.query.from, { field: 'from' }));
+  // a range counts when it overlaps the filter: it ends on/after "from" and starts on/before "to"
+  const epEnd = `COALESCE(CASE WHEN i.episode_break_date_text ~ '^\\d{4}-\\d{2}-\\d{2}/\\d{4}-\\d{2}-\\d{2}$' THEN split_part(i.episode_break_date_text, '/', 2)::date END, i.episode_date)`;
+  if (req.query.from) add(`${epEnd} >= ?`, v.date(req.query.from, { field: 'from' }));
   if (req.query.to) add('i.episode_date <= ?', v.date(req.query.to, { field: 'to' }));
   if (req.query.q) {
     params.push(v.like(req.query.q, 100));
@@ -169,7 +183,7 @@ const CELL_FIELDS = {
   program: (x) => v.str(x, { field: 'Program', max: 200, required: true }),
   platform: (x) => v.str(x, { field: 'Platform', max: 100, required: true }),
   billable_party: (x) => v.str(x, { field: 'Billable Party', max: 200 }),
-  episode_break_date_text: (x) => v.date(x, { field: 'Episode / Breakdate' }),
+  episode_break_date_text: (x) => episodeRange(x),
   source: (x) => v.str(x, { field: 'Source', max: 500 }),
   materials_count: (x) => v.int(x, { field: 'Materials count', min: 0 }),
   destination_folder: (x) => v.str(x, { field: 'Destination Folder', max: 1000 }),   // PCS / OCS only (below)
@@ -197,7 +211,7 @@ router.patch('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
     }
     // `field` is one of the fixed keys above (never user text), so it is safe to name the column here
     if (field === 'episode_break_date_text') {
-      await c.query('UPDATE ingest_records SET episode_date=$2, episode_break_date_text=$3, updated_by=$4, updated_at=now() WHERE id=$1', [id, value, value, req.user.id]);   // separate params: one column is a date, the other text
+      await c.query('UPDATE ingest_records SET episode_date=$2, episode_break_date_text=$3, updated_by=$4, updated_at=now() WHERE id=$1', [id, value.start, value.text, req.user.id]);   // separate params: one column is a date, the other text
     } else {
       await c.query(`UPDATE ingest_records SET ${field}=$2, updated_by=$3, updated_at=now() WHERE id=$1`, [id, value, req.user.id]);
     }

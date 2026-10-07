@@ -39,7 +39,9 @@ const ApprovedBy = ({ r, canApprove }) => {
   }
   return canApprove ? <span className="dim">Awaiting approval</span> : null;
 };
-const dayText = (x) => (isoDate(x) ? fmtDate(isoDate(x)) : (x || ''));   // a real date reads like the Workload Tracker's; old free text is shown as written
+const RANGE = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/;
+const splitRange = (x) => { const m = RANGE.exec(String(x || '')); return m ? { from: m[1], to: m[2] } : { from: isoDate(x) || '', to: '' }; };
+const dayText = (x) => { const m = RANGE.exec(String(x || '')); return m ? `${fmtDate(m[1])} – ${fmtDate(m[2])}` : (isoDate(x) ? fmtDate(isoDate(x)) : (x || '')); };   // a single date, a range, or old free text as written; a real date reads like the Workload Tracker's; old free text is shown as written
 
 // Columns that can be edited right in the table, like the Workload Tracker: click a cell, change it, Enter or click away saves, Esc cancels.
 // Requested By is not one of them — it is filled in from whoever created the request. Destination Folder and Approved By are for PCS / OCS only.
@@ -47,14 +49,27 @@ const CELLS = {
   program: { kind: 'select' },
   platform: { kind: 'select' },
   billable_party: { kind: 'text', max: 200 },
-  episode_break_date_text: { kind: 'date' },   // the browser's own date picker
+  episode_break_date_text: { kind: 'daterange' },   // one date or a from–to range, with the browser's own date pickers
   source: { kind: 'text', max: 500 },
   materials_count: { kind: 'number' },
   destination_folder: { kind: 'area', max: 1000, approve: true },
   cm_status: { kind: 'select', cm: true, blank: 'PENDING' },   // Status (CM): a dropdown for CM users; NON-COMPLIANT then asks for its reason
 };
-const cellInitial = (r, k) => (k === 'cm_status' ? (r.cm_status || '') : k === 'episode_break_date_text' ? (isoDate(r.episode_break_date_text) || isoDate(r.episode_date))
+const cellInitial = (r, k) => (k === 'cm_status' ? (r.cm_status || '') : k === 'episode_break_date_text' ? (RANGE.test(r.episode_break_date_text || '') ? r.episode_break_date_text : (isoDate(r.episode_break_date_text) || isoDate(r.episode_date)))
   : r[k] == null ? '' : String(r[k]));
+
+// Episode / Breakdate: a date, or a from – to range (the second date is optional). The value is "YYYY-MM-DD" or "YYYY-MM-DD/YYYY-MM-DD".
+function DateRangeInput({ value, onChange, disabled }) {
+  const { from, to } = splitRange(value);
+  const join = (a, b) => (a && b ? `${a}/${b}` : a || '');
+  return (
+    <span className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+      <input type="date" value={from} disabled={disabled} max={to || undefined} aria-label="From" onChange={(e) => onChange(join(e.target.value, to))} />
+      <span className="dim">–</span>
+      <input type="date" value={to} disabled={disabled || !from} min={from || undefined} aria-label="To (optional)" onChange={(e) => onChange(join(from, e.target.value))} />
+    </span>
+  );
+}
 
 // One table cell turned into its own editor. Dropdowns save as soon as you pick; a failed save keeps the editor open with the message shown.
 function InlineCell({ def, initial, options, onSave, onCancel }) {
@@ -90,10 +105,11 @@ function InlineCell({ def, initial, options, onSave, onCancel }) {
   let input;
   if (def.kind === 'select') input = <select value={val} disabled={busy} onChange={change}><Options list={options} blank={def.blank || 'Select…'} /></select>;
   else if (def.kind === 'date') input = <input type="date" value={val} disabled={busy} onChange={change} />;
+  else if (def.kind === 'daterange') input = <DateRangeInput value={val} disabled={busy} onChange={(nv) => setVal(nv)} />;
   else if (def.kind === 'number') input = <input type="number" min="0" step="1" value={val} disabled={busy} onChange={change} />;
   else if (def.kind === 'area') input = <textarea className="mono" maxLength={def.max} value={val} disabled={busy} onChange={change} />;
   else input = <input maxLength={def.max} value={val} disabled={busy} onChange={change} />;
-  return <div className={`cell-editor${def.kind === 'number' ? ' num' : def.kind === 'date' ? ' date' : ''}${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key}>{input}</div>;
+  return <div className={`cell-editor${def.kind === 'number' ? ' num' : def.kind === 'date' || def.kind === 'daterange' ? ' date' : ''}${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key}>{input}</div>;
 }
 
 // NON-COMPLIANT needs a reason: asked here right after it is picked in the Status (CM) cell.
@@ -342,7 +358,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
   const canApprove = s.can('ingest.approve');   // Destination Folder + Approved By (PCS / OCS)
   const canCm = s.can('ingest.cm_complete');    // Status (CM)
   const r = rec || {};
-  const initialEpisodeText = rec ? isoDate(r.episode_break_date_text) || isoDate(r.episode_date) : '';
+  const initialEpisodeText = rec ? (RANGE.test(r.episode_break_date_text || '') ? r.episode_break_date_text : (isoDate(r.episode_break_date_text) || isoDate(r.episode_date))) : '';
   const requester = rec ? (r.requested_by_psd || r.requested_by_name || '') : (s.user.full_name || s.user.username);
   const initialForm = {
     program: r.program || '', platform: r.platform || '', billable_party: r.billable_party || '',
@@ -411,7 +427,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
         <label className="f"><span>Platform <span className="req">*</span></span>
           <select name="platform" value={f.platform} onChange={set('platform')}><Options list={withCurrent(lookups.platform, r.platform)} blank="Select platform…" /></select></label>
         <label className="f"><span>Billable Party</span><input name="billable_party" maxLength={200} value={f.billable_party} onChange={set('billable_party')} /></label>
-        <label className="f"><span>Episode / Breakdate</span><input type="date" name="episode_break_date_text" value={f.episode_break_date_text} onChange={set('episode_break_date_text')} /></label>
+        <label className="f"><span>Episode / Breakdate</span><DateRangeInput value={f.episode_break_date_text} onChange={(nv) => set('episode_break_date_text')({ target: { value: nv } })} /></label>
         <label className="f"><span>Source</span><input name="source" maxLength={500} value={f.source} onChange={set('source')} placeholder="e.g. Tape, drive, server path" /></label>
         <label className="f"><span>Number of Materials</span><input type="number" name="materials_count" min="0" step="1" value={f.materials_count} onChange={set('materials_count')} /></label>
         <label className="f"><span>Requested By</span><input name="requested_by" value={requester} readOnly disabled /></label>
@@ -458,7 +474,7 @@ function IngestDetail({ r, canWrite, canDelete, canApprove, approveReady, canUna
         <KV k="PROG. NAME / PROJ. TITLE">{r.program}</KV>
         <KV k="Platform">{r.platform}</KV>
         <KV k="Billable Party">{r.billable_party}</KV>
-        <KV k="Episode / Breakdate">{r.episode_break_date_text || r.episode_date}</KV>
+        <KV k="Episode / Breakdate">{dayText(r.episode_break_date_text || r.episode_date)}</KV>
         <KV k="Source">{r.source}</KV>
         <KV k="Number of Materials">{r.materials_count != null ? String(r.materials_count) : null}</KV>
         <KV k="Requested By">{r.requested_by_psd || r.requested_by_name}</KV>
