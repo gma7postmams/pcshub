@@ -353,6 +353,7 @@ export default function Workload() {
   const boxRef = useRef(null);    // Excel mode: the focusable wrapper that receives copy / cut / paste / Delete for a range or whole rows
   const drag = useRef(null);      // Excel mode: 'cell' | 'row' | 'col' while the mouse is held down selecting
   const moveRef = useRef(null);   // Excel mode: latest mouse-move handler for drag selection (kept fresh every render)
+  const pasteSeen = useRef(false);   // did the browser send its own paste event for the Ctrl/Cmd+V just pressed?
   const internalClip = useRef(null);   // Excel mode: the last text copied inside the grid (right-click Paste falls back to it where the browser blocks reading the clipboard)
   const hist = useRef({ past: [], future: [], tag: null });   // Excel mode: undo / redo snapshots of the grid rows
   const [epoch, setEpoch] = useState(0);   // bumped whenever the grid is changed from outside a cell's own typing (paste, undo, clear …)
@@ -918,6 +919,7 @@ export default function Workload() {
     if (failure) toast(failure.message, 'err'); else toast(`Deleted ${target.length} row${target.length === 1 ? '' : 's'}`);
   };
   const gridPaste = (cols) => (e) => {
+    pasteSeen.current = true;
     if (doPaste(e.clipboardData.getData('text/plain'), cols, false, e.target)) e.preventDefault();
   };
   // Keys while the wrapper (not a cell's own text box) has focus, i.e. after selecting rows / columns / a range
@@ -947,6 +949,17 @@ export default function Workload() {
         if (next) { next.focus(); try { const len = next.value.length; next.setSelectionRange(len, len); } catch (err) { /* not a text control */ } }
       }
       return;
+    }
+    // Copy / cut / paste with a whole row, column or range selected (the grid box itself has the focus, no cell has the cursor). Browsers send no copy or cut
+    // event when nothing is selected as text, so Ctrl/Cmd+C and +X are done here; for +V the browser's own paste event is used when it arrives, else the clipboard is read.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !isTextTarget(e.target) && gridSel) {
+      const key = e.key.toLowerCase();
+      if (key === 'c' || (key === 'x' && canWrite)) { e.preventDefault(); menuCopy(xlKeys(), key === 'x'); return; }
+      if (key === 'v' && canWrite) {
+        pasteSeen.current = false;
+        setTimeout(() => { if (!pasteSeen.current) menuPaste(xlKeys()); }, 150);
+        return;
+      }
     }
     if (isTextTarget(e.target)) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
@@ -1436,9 +1449,9 @@ export default function Workload() {
                       </thead>
                       <tbody>
                         {grid.rows.length ? grid.rows.map((r, ri) => (
-                          <tr key={r._key} data-ri={ri} className={r._dirty ? 'dirty' : ''}>
+                          <tr key={r._key} data-ri={ri} className={`${r._dirty ? 'dirty' : ''}${r.is_priority ? ' prio-row' : ''}`.trim()}>
                             <td className={`rn${rowInSel(ri) ? ' hl' : ''}`} title="Click to select the whole row (Ctrl+C to copy)"
-                              onMouseDown={(e) => startSel('row', ri, 0, e)}>{ri + 1}</td>
+                              onMouseDown={(e) => startSel('row', ri, 0, e)}>{ri + 1}{r.is_priority ? <i className="prio-dot" title="Priority" /> : null}</td>
                             {tableCols.map((k, ci) => (
                               <td key={k} data-k={k} data-r={ri} data-c={ci} onMouseDown={cellMouseDown(ri, ci)} onBlur={() => { hist.current.tag = null; }}
                                 onFocus={(e) => { if (isTextTarget(e.target)) setGridSel((sel) => (sel && sel.r0 === ri && sel.r1 === ri && sel.c0 === ci && sel.c1 === ci ? sel : { r0: ri, c0: ci, r1: ri, c1: ci })); }}
