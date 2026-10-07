@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
-import { fmtDate, isoDate } from '../lib/util.js';
-import { PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
+import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
+import { DownloadIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
 import { FilterSelect, Pager, SortTh, useNarrow } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
 
@@ -107,6 +107,14 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
     } catch (e) { setData({ rows: [], total: 0 }); toast(e.message, 'err'); }
   }, [anchor, range.from, range.to, query, limit, offset, period, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setData(null); setPicked(new Set()); loadRows(); }, [loadRows]);
+  const exportXlsx = async () => {   // the days and search on screen, in the sort on screen
+    const p = new URLSearchParams({ order: period === 'all' ? 'desc' : 'asc' });
+    if (range.from) p.set('from', range.from);
+    if (range.to) p.set('to', range.to);
+    if (query) p.set('q', query);
+    if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
+    try { await downloadFile(`/api/plugs/export?${p}`, 'PSD_Plug_List.xlsx'); } catch (e) { toast(e.message, 'err'); }
+  };
 
   // ---- moving through time ----
   const dayList = days || [];
@@ -184,6 +192,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
           <input type="search" placeholder="Search plug ID, program, PSD…" value={q} onChange={(e) => setQ(e.target.value)} />
         </label>
         <span className="grow" />
+        <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button>
         {canWrite ? (
           <>
             <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files[0])} />
