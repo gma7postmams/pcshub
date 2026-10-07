@@ -39,6 +39,26 @@ function toBreakdateIso(t) {
 }
 // Both teams' times in one pasted cell ('VGFX  Sep 28, 2026 4:00 PM' / 'VEDIT  Sep 28, 2026 10:00 PM', on separate lines, with
 // the label on its own line, or run together as copied from the web table's pills) -> { breakdate_vgfx, breakdate_vedit }
+// The Sept 2026 template writes times as "VGFX: Sep 1, 10am" / "VEDIT: SEP 3, 12nn" — no year, no minutes. Such lines are rewritten to the full form this app
+// reads ("VGFX  Sep 1, 2026 10:00 AM") before parsing, so a Breakdate column pasted from the template is no longer silently dropped. Other text is left alone.
+const BD_LOOSE = /^(VGFX|VEDIT)\b\s*[:\-\u2013]?\s*([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:\s*,\s*|\s+)?(\d{4})?(?:\s*,?\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm|nn|mn)\b)?/i;
+function normBreakdate(raw, defaultYear) {
+  return String(raw ?? '').split('\n').map((line) => {
+    const m = BD_LOOSE.exec(line.trim());
+    if (!m) return line;
+    const mon = MON3.indexOf(m[2].slice(0, 3).toLowerCase());
+    if (mon < 0 || +m[3] < 1 || +m[3] > 31) return line;
+    let time = '';
+    if (m[7]) {
+      let h = m[5] ? +m[5] : 12;
+      let ap = m[7].toLowerCase();
+      if (ap === 'nn') { h = 12; ap = 'pm'; } else if (ap === 'mn') { h = 12; ap = 'am'; }
+      if (h < 1 || h > 12) return line;
+      time = ` ${h}:${m[6] || '00'} ${ap.toUpperCase()}`;
+    }
+    return `${m[1].toUpperCase()}  ${MON3[mon][0].toUpperCase()}${MON3[mon].slice(1)} ${+m[3]}, ${m[4] || defaultYear}${time}${line.trim().slice(m[0].length)}`;
+  }).join('\n');
+}
 const BD_DATE = '(?:[A-Za-z]{3,9}\\.?\\s+\\d{1,2},?\\s+\\d{4}(?:\\s+\\d{1,2}:\\d{2}\\s*(?:AM|PM))?|\\d{1,2}\\s+[A-Za-z]{3,9}\\.?,?\\s+\\d{4}(?:\\s+\\d{1,2}:\\d{2}\\s*(?:AM|PM)?)?|\\d{4}-\\d{2}-\\d{2}(?:[T ]\\d{2}:\\d{2})?)';
 const BD_PAIR = new RegExp(`(VGFX|VEDIT)\\s*[:\\-\\u2013]?\\s*(${BD_DATE})`, 'gi');
 function parseBreakdatePairs(raw) {
@@ -71,7 +91,7 @@ const bdText = (row, unitTeams) => bdTeams(unitTeams, row.units_concerned).filte
     new content; otherwise (typing) a line that is only half written leaves that team's time as it was. */
 function bdApply(row, text, unitTeams, replace) {
   const teams = bdTeams(unitTeams, row.units_concerned);
-  const raw = String(text ?? '');
+  const raw = normBreakdate(text, /^\d{4}/.test(row.work_date || '') ? row.work_date.slice(0, 4) : new Date().getFullYear());
   const patch = {};
   if (!raw.trim()) { teams.forEach((t) => { patch[bdField(t)] = ''; }); return patch; }
   const upper = raw.toUpperCase();
@@ -366,7 +386,7 @@ export default function Workload() {
     const outside = (e) => {
       const t = e.target;
       if (!t || !t.closest) return;
-      if ((boxRef.current && boxRef.current.contains(t)) || t.closest('.xl-menu')) return;
+      if ((boxRef.current && boxRef.current.contains(t)) || t.closest('.xl-menu') || t.closest('[data-keep-sel]')) return;   // the toolbar buttons that act ON the selection (Set Priority, Delete Rows) must not drop it first
       setGridSel(null);
     };
     window.addEventListener('mousedown', outside);
@@ -582,6 +602,11 @@ export default function Workload() {
   // one place that knows how to put a value into a grid cell (the merged Breakdate / Time cell is text for both teams' times)
   const setCellValue = (row, k, val, replace) => {
     if (k === 'breakdate_vgfx') return { ...row, ...bdApply(row, val, meta.unitTeams, replace) };
+    // the template writes these as "available (082826)" (MMDDYY): that is a date — 2026-08-28
+    if (replace && (k === 'script' || k === 'art_stb' || k === 'audio_guide')) {
+      const dm = /^\s*(?:available\s*(?:approved\s*)?)?\(?(\d{2})(\d{2})(\d{2})\)?\s*$/i.exec(String(val ?? ''));
+      if (dm && +dm[1] >= 1 && +dm[1] <= 12 && +dm[2] >= 1 && +dm[2] <= 31) val = `20${dm[3]}-${dm[1]}-${dm[2]}`;
+    }
     const next = withAutoPlatform(meta.platformRules, row, k, val);
     return k === 'plug_id' || k === 'work_date' ? fillFromPlug(next, row, findPlug) : next;
   };
@@ -765,7 +790,8 @@ export default function Workload() {
     const sel0 = normSel();
     // A Breakdate / Time cell holding BOTH teams (a VGFX line + a VEDIT line) pasted with a row / other cell selected
     // fills that row's VGFX and VEDIT times together — never extra rows.
-    if (sel0 && Object.keys(parseBreakdatePairs(rawText)).length && rawText.replace(BD_PAIR, '').replace(/["\s]+/g, '') === '') {
+    const bdText0 = normBreakdate(rawText, new Date().getFullYear());
+    if (sel0 && Object.keys(parseBreakdatePairs(bdText0)).length && bdText0.replace(BD_PAIR, '').replace(/["\s]+/g, '') === '') {
       if (!canWrite) return true;
       pushHistory(null);
       setEpoch((v) => v + 1);
@@ -863,6 +889,15 @@ export default function Workload() {
     focusBox();
   };
   // Right-click → Delete row(s): removes the selected whole rows (saved ones are deleted on the server too, after a confirmation)
+  // Set / remove Priority on the rows of the selection (Table mode does it in the New / Edit form). The row's Breakdate / Time cell turns red; Save changes keeps it.
+  const togglePriority = () => {
+    const n = normSel();
+    if (!n || !canWrite || !grid) return;
+    const make = !grid.rows.slice(n.rLo, n.rHi + 1).every((r) => r.is_priority);
+    setCtx(null);
+    pushHistory(null);
+    setGrid((g) => ({ ...g, rows: g.rows.map((r, i) => (i >= n.rLo && i <= n.rHi ? { ...r, is_priority: make, _dirty: true } : r)) }));
+  };
   const deleteSelectedRows = async () => {
     setCtx(null);
     const n = normSel();
@@ -894,7 +929,11 @@ export default function Workload() {
       return;
     }
     if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a') {
-      // Ctrl/Cmd+A selects every cell of the grid — also while a cell has the cursor (the only way to select all)
+      // With the cursor in ONE cell that has text, the first Ctrl/Cmd+A selects the text inside that cell (like typing in any box); pressing it again —
+      // or with a row, column or several cells selected, or in an empty cell — selects every cell of the grid.
+      const t = e.target;
+      const several = !!gridSel && (gridSel.r0 !== gridSel.r1 || gridSel.c0 !== gridSel.c1);
+      if (!several && isTextTarget(t) && t.tagName !== 'SELECT' && typeof t.value === 'string' && t.value.length && !(t.selectionStart === 0 && t.selectionEnd === t.value.length)) return;
       e.preventDefault();
       if (grid && grid.rows.length) { setGridSel({ r0: 0, c0: 0, r1: grid.rows.length - 1, c1: xlKeys().length - 1 }); focusBox(); }
       return;
@@ -1196,6 +1235,10 @@ export default function Workload() {
   // Table mode only: Breakdate/Time (VGFX) and (VEDIT) merge into ONE column/cell, holding one or two pills —
   // 'breakdate_vgfx' is kept as that column's position; breakdateCell() below decides what actually shows in it.
   const tableCols = cols.filter((k) => k !== 'breakdate_vedit');
+  const selNow = isGrid ? normSel() : null;                                   // Excel mode: what is selected right now
+  const selRows = selNow && grid && grid.rows ? grid.rows.slice(selNow.rLo, selNow.rHi + 1) : [];
+  const allPrio = selRows.length > 0 && selRows.every((r) => r.is_priority);
+  const wholeRowsSel = !!selNow && selNow.cLo === 0 && selNow.cHi === tableCols.length - 1 && selRows.length > 0;   // a row number was clicked
   const head = (k) => (k === 'breakdate_vgfx' ? 'Breakdate / Time' : meta.fields[k].label);   // table header only; Excel mode reads meta.fields directly and keeps the (VGFX)/(VEDIT) labels
   const firstLineOf = (t) => String(t || '').split('\n');
   // every cell except Remarks stays on one line: line breaks in pasted text are shown as " · "
@@ -1346,6 +1389,8 @@ export default function Workload() {
               </>
             ) : null}
             {canWrite && isGrid && !isAll ? <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add Row</button> : null}
+            {canWrite && isGrid && selRows.length ? <button type="button" className="btn" id="priority-btn" data-keep-sel onClick={togglePriority} title="Highlights the Breakdate / Time of the selected row(s)">{allPrio ? 'Remove Priority' : 'Set Priority'}</button> : null}
+            {canWrite && isGrid && wholeRowsSel ? <button type="button" className="btn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}>Delete {selRows.length > 1 ? `${selRows.length} Rows` : 'Row'}</button> : null}
             {s.canPage('/admin') ? <button type="button" className="btn" id="lock-dates-btn" onClick={() => setManagingLocks(true)}><LockIcon /> Lock Dates</button> : null}
             {canWrite && !isGrid ? (
               <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({ rec: null })}><PlusIcon /> New Workload</button>
@@ -1429,6 +1474,8 @@ export default function Workload() {
                   <button type="button" onClick={() => menuCopy(tableCols, false)}>Copy<span>Ctrl+C</span></button>
                   <button type="button" disabled={!canWrite} onClick={() => menuPaste(tableCols)}>Paste<span>Ctrl+V</span></button>
                   {wholeRows ? <button type="button" disabled={!canWrite} onClick={() => menuInsertRows(tableCols)}>Insert copied row(s) above</button> : null}
+                  <hr />
+                  <button type="button" disabled={!canWrite} onClick={togglePriority}>{allPrio ? 'Remove priority' : 'Set priority'}</button>
                   <hr />
                   <button type="button" disabled={!canWrite} onClick={() => { setCtx(null); clearSel(); }}>Delete<span>Del</span></button>
                   {wholeRows ? <button type="button" disabled={!canWrite} onClick={deleteSelectedRows}>Delete row{nSel.rHi > nSel.rLo ? 's' : ''}</button> : null}
