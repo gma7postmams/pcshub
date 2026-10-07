@@ -1381,7 +1381,7 @@ export default function Workload() {
                     {!allMatching && pageAllPicked && isAdminUser && total > pageRows.length ? <span className="dim">Press Ctrl+A again to select all {total} matching rows</span> : null}
                     <button type="button" className="linkbtn" onClick={clearPicks}>Clear</button>
                   </span>
-                ) : <span className="dim sel-count">Drag across rows to select them (Shift / Ctrl+click to extend) · Ctrl+A selects all</span>}
+                ) : <span className="dim sel-count">Tick the boxes (or drag across rows; Shift / Ctrl+click to extend) · Ctrl+A selects all</span>}
                 <span className="grow" />
                 <button type="button" className="btn danger sm" disabled={!pickedCount} onClick={() => deleteSelected()}>Delete selected{pickedCount ? ` (${pickedCount})` : ''}</button>
                 {isAdminUser ? <button type="button" className="btn danger sm" onClick={() => setDeletingAll(true)} title="Delete every row that matches the current tab and filters">Delete all…</button> : null}
@@ -1389,14 +1389,14 @@ export default function Workload() {
             ) : null}
             <div className="table-wrap" id="tbl" onClickCapture={(e) => {
               if (tblSuppress.current) { tblSuppress.current = false; e.stopPropagation(); e.preventDefault(); return; }   // the click that ended a drag / Shift / Ctrl+click
-              if (canWrite && (picked.size || allMatching) && !(e.target.closest && e.target.closest('.actions-cell'))) clearPicks();
+              if (canWrite && (picked.size || allMatching) && !(e.target.closest && e.target.closest('.actions-cell, .chk'))) clearPicks();
             }}>
               {!data ? <Empty>Loading…</Empty>
                 : data.error ? <Empty>{data.error}</Empty>
                   : !data.rows.length ? <Empty>No workload items match these filters.</Empty>
                     : (
                       <table className={`t wl${cards ? ' cards' : ''}`}>
-                        <thead><tr>{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
+                        <thead><tr>{canWrite ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {data.rows.map((r, idx) => (
                             <tr key={r.id} data-id={r.id}
@@ -1404,6 +1404,12 @@ export default function Workload() {
                               onMouseDown={canWrite ? (e) => rowDown(e, r, idx) : undefined}
                               onContextMenu={canWrite ? (e) => rowMenu(e, r) : undefined}
                               onClick={canWrite ? undefined : () => setForm({ rec: r })}>
+                              {canWrite ? (
+                                <td className="chk">
+                                  <input type="checkbox" checked={allMatching || picked.has(r.id)} disabled={rowLocked(r)} title={rowLocked(r) ? 'Locked period: cannot be selected' : undefined} aria-label={`Select row ${r.plug_id || r.id}`}
+                                    onChange={() => { setAllMatching(false); setPicked((cur) => { const n = new Set(allMatching ? pickable.map((x) => x.id) : cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; }); lastPick.current = r.id; }} />
+                                </td>
+                              ) : null}
                               {tableCols.map((k) => (k === 'breakdate_vgfx' ? breakdateCell(r) : cell(r, k)))}
                               {canWrite ? (
                                 <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
