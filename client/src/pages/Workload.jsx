@@ -745,7 +745,7 @@ export default function Workload() {
     return { _key: newKey(), _new: true, _dirty: true, work_date: last || filt.from || isoDate(), units_concerned: filt.units || meta.tabDefaultUnits[tab] };
   };
   // Returns false when the paste should be left to the browser (a single value into one ordinary cell); true when the grid took it.
-  const doPaste = (rawText, cols, force) => {
+  const doPaste = (rawText, cols, force, el) => {
     const sel0 = normSel();
     // A Breakdate / Time cell holding BOTH teams (a VGFX line + a VEDIT line) pasted with a row / other cell selected
     // fills that row's VGFX and VEDIT times together — never extra rows.
@@ -763,7 +763,24 @@ export default function Workload() {
     const bR = block.length;
     const bC = Math.max(1, ...block.map((row) => row.length));
     const multi = !!n && (n.rHi > n.rLo || n.cHi > n.cLo);
-    if (!force && bR === 1 && bC === 1 && !multi && !(sel0 && cols[sel0.cLo] === 'breakdate_vgfx')) return false;   // a single value into one ordinary cell: normal paste
+    // text as a spreadsheet sends it for ONE cell (no quotes or trailing line break added around it) can simply be pasted by the browser
+    const plain = block.every((row) => row.length === 1) && block.map((row) => row[0]).join('\n') === rawText.replace(/\r\n?/g, '\n');
+    if (!force && bR === 1 && bC === 1 && !multi && plain && !(sel0 && cols[sel0.cLo] === 'breakdate_vgfx')) return false;   // a single value into one ordinary cell: normal paste
+    // ONE cell selected and the text is a single column with line breaks in it: every line stays inside THAT cell (a multi-line cell) instead of
+    // spilling into the cells below. To fill several rows, select that many cells first (the lines then go one per selected cell, as before).
+    // (Also a single cell copied from Excel / Sheets, which wraps it in quotes and adds a final line break: those are removed here.)
+    if (n && !multi && bC === 1 && cols[c0]) {
+      if (plain && el && el.tagName === 'TEXTAREA') return false;   // a multi-line cell with the cursor in it: the browser inserts the whole text at the cursor
+      if (!canWrite) return true;
+      const col = cols[c0];
+      const text = block.map((row) => row[0]).join(meta.fields[col] && meta.fields[col].multiline ? '\n' : ' ');   // a one-line cell gets the lines side by side
+      pushHistory(null);
+      setEpoch((v) => v + 1);
+      setGrid((g) => ({ ...g, rows: g.rows.map((row, ri) => (ri === r0 ? { ...setCellValue(row, col, text, true), _dirty: true } : row)) }));
+      setGridSel({ r0, c0, r1: r0, c1: c0 });
+      focusBox();
+      return true;
+    }
     if (!canWrite) return true;
     const selR = n ? n.rHi - n.rLo + 1 : 0;
     const selC = n ? n.cHi - n.cLo + 1 : 0;
@@ -841,7 +858,7 @@ export default function Workload() {
     if (failure) toast(failure.message, 'err'); else toast(`Deleted ${target.length} row${target.length === 1 ? '' : 's'}`);
   };
   const gridPaste = (cols) => (e) => {
-    if (doPaste(e.clipboardData.getData('text/plain'), cols)) e.preventDefault();
+    if (doPaste(e.clipboardData.getData('text/plain'), cols, false, e.target)) e.preventDefault();
   };
   // Keys while the wrapper (not a cell's own text box) has focus, i.e. after selecting rows / columns / a range
   const gridKey = (e) => {
