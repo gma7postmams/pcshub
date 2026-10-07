@@ -22,13 +22,18 @@ function date(v, { field, required = false } = {}) {
   return s;
 }
 
-function int(v, { field, required = false, min } = {}) {
+// PostgreSQL integer columns are 32-bit: anything larger must be refused here, otherwise the database raises an
+// error and the caller gets a 500 instead of a clean 400/404.
+const PG_INT_MAX = 2147483647;
+
+function int(v, { field, required = false, min = -PG_INT_MAX, max = PG_INT_MAX } = {}) {
   if (v === undefined || v === null || v === '') {
     if (required) throw new HttpError(400, `${field} is required`);
     return null;
   }
+  if (typeof v !== 'string' && typeof v !== 'number') throw new HttpError(400, `${field} must be an integer`);
   const s = String(v);
-  if (!validator.isInt(s, min !== undefined ? { min } : {})) throw new HttpError(400, `${field} must be an integer`);
+  if (!validator.isInt(s, { min, max })) throw new HttpError(400, `${field} must be an integer`);
   return parseInt(s, 10);
 }
 
@@ -70,8 +75,24 @@ function password(v, { username, fullName } = {}) {
 }
 
 function id(v) {
-  if (!validator.isInt(String(v), { min: 1 })) throw new HttpError(400, 'Invalid id');
-  return parseInt(v, 10);
+  if ((typeof v !== 'string' && typeof v !== 'number') || !/^[1-9][0-9]{0,9}$/.test(String(v)) || Number(v) > PG_INT_MAX) {
+    throw new HttpError(400, 'Invalid id');
+  }
+  return Number(v);
 }
 
-module.exports = { str, date, int, num, oneOf, password, id };
+/** Paging from the query string. Never negative, never above `max` (a negative LIMIT/OFFSET is a database error). */
+function paging(q, { def = 50, max = 200 } = {}) {
+  const n = (x, fallback) => {
+    const i = parseInt(Array.isArray(x) ? x[0] : x, 10);
+    return Number.isFinite(i) && i >= 0 ? i : fallback;
+  };
+  return { limit: Math.min(Math.max(n(q.limit, def), 1), max), offset: Math.min(n(q.offset, 0), PG_INT_MAX) };
+}
+
+/** A user-typed search term as an ILIKE pattern: capped in length, wildcards escaped so % and _ match literally. */
+function like(v, max = 100) {
+  return `%${String(Array.isArray(v) ? v[0] : v).trim().slice(0, max).replace(/[%_\\]/g, '\\$&')}%`;
+}
+
+module.exports = { str, date, int, num, oneOf, password, id, paging, like, PG_INT_MAX };

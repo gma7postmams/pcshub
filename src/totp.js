@@ -20,7 +20,21 @@ function loadKey() {
 const KEY = loadKey();
 // Rotation: set TOTP_ENC_KEY to the new key and TOTP_ENC_KEY_OLD to the previous one, restart once
 // (secrets are re-encrypted on boot), then remove TOTP_ENC_KEY_OLD.
-const OLD_KEY = /^[0-9a-fA-F]{64}$/.test(process.env.TOTP_ENC_KEY_OLD || '') ? Buffer.from(process.env.TOTP_ENC_KEY_OLD, 'hex') : null;
+//
+// Installs that never set TOTP_ENC_KEY had their key derived from SESSION_SECRET. So that changing SESSION_SECRET, or
+// setting TOTP_ENC_KEY for the first time, does not leave everyone's 2FA unreadable, secrets written under such a
+// derived key can still be opened (and are re-encrypted under the current key on the next start):
+//   - the key derived from the current SESSION_SECRET,
+//   - the key derived from SESSION_SECRET_OLD (set it for one start when you change SESSION_SECRET),
+//   - the keys older versions derived when SESSION_SECRET was missing or still the .env.example placeholder.
+const derived = (secret) => crypto.createHash('sha256').update(`totp:${secret}`).digest();
+const OLD_KEYS = [
+  /^[0-9a-fA-F]{64}$/.test(process.env.TOTP_ENC_KEY_OLD || '') ? Buffer.from(process.env.TOTP_ENC_KEY_OLD, 'hex') : null,
+  process.env.SESSION_SECRET ? derived(process.env.SESSION_SECRET) : null,
+  process.env.SESSION_SECRET_OLD ? derived(process.env.SESSION_SECRET_OLD) : null,
+  derived('dev'),
+  derived('change-me-to-a-random-32-character-secret'),
+].filter((k) => k && !k.equals(KEY));
 
 function encrypt(plain) {
   const iv = crypto.randomBytes(12);
@@ -34,18 +48,21 @@ function decrypt(stored) {
   if (!stored.startsWith(PREFIX)) return stored; // legacy plaintext (encrypted by migrateSecrets on boot)
   const [iv, tag, ct] = stored.slice(PREFIX.length).split(':').map((x) => Buffer.from(x, 'base64'));
   const open = (key) => {
-    const d = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    const d = crypto.createDecipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });   // a shortened tag is refused, not accepted
     d.setAuthTag(tag);
     return Buffer.concat([d.update(ct), d.final()]).toString('utf8');
   };
-  try { return open(KEY); } catch (e) { if (!OLD_KEY) throw e; return open(OLD_KEY); }
+  try { return open(KEY); } catch (e) {
+    for (const k of OLD_KEYS) { try { return open(k); } catch (_) { /* try the next one */ } }
+    throw e;
+  }
 }
 
 function decryptsWithCurrentKey(stored) {
   if (!stored || !stored.startsWith(PREFIX)) return false;
   const [iv, tag, ct] = stored.slice(PREFIX.length).split(':').map((x) => Buffer.from(x, 'base64'));
   try {
-    const d = crypto.createDecipheriv('aes-256-gcm', KEY, iv);
+    const d = crypto.createDecipheriv('aes-256-gcm', KEY, iv, { authTagLength: 16 });
     d.setAuthTag(tag); d.update(ct); d.final();
     return true;
   } catch (_) { return false; }
@@ -97,7 +114,7 @@ async function migrateSecrets(db) {
   }
   if (plain) console.log(`[migrate] encrypted ${plain} plaintext TOTP secret(s).`);
   if (rekeyed) console.log(`[migrate] re-encrypted ${rekeyed} TOTP secret(s) with the new TOTP_ENC_KEY.`);
-  if (unreadable) console.warn(`[security] ${unreadable} TOTP secret(s) cannot be decrypted with TOTP_ENC_KEY — those users need an Admin "Reset 2FA" (or set TOTP_ENC_KEY_OLD).`);
+  if (unreadable) console.warn(`[security] ${unreadable} TOTP secret(s) cannot be decrypted with TOTP_ENC_KEY — set TOTP_ENC_KEY_OLD (or SESSION_SECRET_OLD if no TOTP_ENC_KEY was ever set) to the previous value for one start, or have an Admin "Reset 2FA" for those users.`);
 }
 
 module.exports = { encrypt, decrypt, generateSecret, keyUri, matchStep, verifyAndConsume, migrateSecrets };

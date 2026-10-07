@@ -15,7 +15,6 @@ export default function Profile() {
   const [acct, setAcct] = useForm({ full_name: u.full_name, email: u.email || '' });
   const [pw, setPw, setPwAll] = useForm({ current: '', password: '', confirm: '' });
   const [setup, setSetup] = useState(null);   // { secret, qr }
-  const [disabling, setDisabling] = useState(false);
 
   const startSetup = async () => {
     try { setSetup(await post('/api/profile/2fa/setup')); } catch (e) { toast(e.message, 'err'); }
@@ -98,12 +97,9 @@ export default function Profile() {
           <div className="card-pad stack">
             <p className="muted m-0">{u.totp_enabled
               ? 'Your account requires a 6-digit code from your authenticator app at sign-in.'
-              : 'Protect your account with a time-based code from Google Authenticator, Microsoft Authenticator, 1Password, Authy, etc.'}</p>
-            <div>
-              {u.totp_enabled && u.totp_required ? <span className="dim">Required for your account — cannot be disabled.</span>
-                : u.totp_enabled ? <button type="button" className="btn danger" id="tfa" disabled={forced} onClick={() => setDisabling(true)}>Disable 2FA</button>
-                  : <button type="button" className="btn primary" id="tfa" disabled={forced} onClick={startSetup}>Set up 2FA</button>}
-            </div>
+              : u.totp_required ? 'An Admin has turned on 2FA for your account. Set it up with an authenticator app to continue.'
+                : '2FA is off for your account. Only an Admin can turn it on or off.'}</p>
+            {!u.totp_enabled && u.totp_required ? <div><button type="button" className="btn primary" id="tfa" disabled={forced} onClick={startSetup}>Set up 2FA</button></div> : null}
           </div>
         </div>
       </div>
@@ -120,9 +116,6 @@ export default function Profile() {
           }}
         />
       ) : null}
-      {disabling ? (
-        <DisableModal onClose={() => setDisabling(false)} onDone={() => { setDisabling(false); toast('2FA disabled'); s.patchUser({ totp_enabled: false }); }} />
-      ) : null}
     </main>
   );
 }
@@ -130,8 +123,9 @@ export default function Profile() {
 function SetupModal({ setup, onClose, onEnabled }) {
   const toast = useToast();
   const [token, setToken] = useState('');
+  const [password, setPassword] = useState('');
   const enable = async () => {
-    try { await post('/api/profile/2fa/enable', { token }); onEnabled(); } catch (e) { toast(e.message, 'err'); }
+    try { await post('/api/profile/2fa/enable', { token, password }); onEnabled(); } catch (e) { toast(e.message, 'err'); }
   };
   return (
     <Modal
@@ -149,29 +143,11 @@ function SetupModal({ setup, onClose, onEnabled }) {
           <input id="tok" className="otp-input" inputMode="numeric" maxLength={6} autoComplete="one-time-code" value={token}
             onChange={(e) => setToken(e.target.value.replace(/\D/g, '').slice(0, 6))} />
         </label>
+        <label className="f"><span>3. Confirm with your password</span>
+          <input id="tokpw" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        </label>
       </div>
     </Modal>
   );
 }
 
-function DisableModal({ onClose, onDone }) {
-  const toast = useToast();
-  const [password, setPassword] = useState('');
-  const [token, setToken] = useState('');
-  const disable = async () => {
-    try { await post('/api/profile/2fa/disable', { password, token }); onDone(); } catch (e) { toast(e.message, 'err'); }
-  };
-  return (
-    <Modal
-      title="Disable two-factor authentication"
-      size="sm"
-      onClose={onClose}
-      footer={<><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className="btn danger" id="dis" onClick={disable}>Disable 2FA</button></>}
-    >
-      <div className="stack">
-        <label className="f"><span>Password</span><input id="pw" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
-        <label className="f"><span>Current 6-digit code</span><input id="tok" className="otp-input" inputMode="numeric" maxLength={6} value={token} onChange={(e) => setToken(e.target.value.replace(/\D/g, '').slice(0, 6))} /></label>
-      </div>
-    </Modal>
-  );
-}

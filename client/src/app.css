@@ -118,8 +118,15 @@ h3 { font-size: 15px; }
 .brand .name { font-size: 15px; }
 .navlinks { display: flex; align-items: center; gap: 2px; height: 100%; }
 .navlinks a {
+  display: inline-flex; align-items: center; gap: 8px;
   color: var(--text-2); padding: 7px 12px; border-radius: 8px; font-weight: 500; white-space: nowrap;
 }
+.navlinks a .nav-ico { display: inline-grid; place-items: center; }
+.navlinks a .nav-ico svg { width: 19px; height: 19px; }
+.navlinks a.active .nav-ico { color: var(--accent); }
+/* a little less room for the icons on mid-size screens; text-only below that */
+@media (max-width: 1500px) { .navlinks a { padding: 7px 9px; gap: 6px; font-size: 13.5px; } .navlinks a .nav-ico svg { width: 17px; height: 17px; } }
+@media (max-width: 1620px) and (min-width: 1280px) { .navlinks a .nav-ico { display: none; } }
 .navlinks a:hover { color: var(--text); background: var(--surface-2); text-decoration: none; }
 .navlinks a.active { color: var(--text); background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
 .nav-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
@@ -144,6 +151,12 @@ h3 { font-size: 15px; }
   background: var(--surface-3); font-weight: 700; font-size: 12px; color: var(--text);
 }
 .usermenu-btn .uname { font-weight: 550; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usermenu-btn .uinfo { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; line-height: 1.15; min-width: 0; }
+.usermenu-btn .uinfo .role-badge { font-size: 10.5px; padding: 1px 7px; }
+.usermenu-btn .uchev { display: grid; place-items: center; color: var(--text-3); }
+.usermenu-btn .uchev svg { width: 14px; height: 14px; }
+.usermenu-btn .avatar { width: 36px; height: 36px; font-size: 13px; }
+@media (max-width: 900px) { .usermenu-btn .uinfo, .usermenu-btn .uchev { display: none; } }
 .menu-toggle { display: none; }
 
 .dropdown {
@@ -166,7 +179,7 @@ h3 { font-size: 15px; }
 .notif .n-time { color: var(--text-3); font-size: 11.5px; margin-top: 3px; }
 
 /* Mobile nav: links collapse into a top drop panel (still top navigation, no sidebar) */
-@media (max-width: 900px) {
+@media (max-width: 1279px) {
   .menu-toggle { display: grid; }
   .brand .name { display: none; }
   .navlinks {
@@ -176,7 +189,6 @@ h3 { font-size: 15px; }
   }
   .navlinks.open { display: flex; }
   .navlinks a { padding: 11px 12px; }
-  .usermenu-btn .uname, .usermenu-btn .role-badge { display: none; }
   .topnav { padding: 0 10px; }
 }
 
@@ -196,6 +208,8 @@ h3 { font-size: 15px; }
 @media (max-width: 1000px) { .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .grid-3 { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 680px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } .container { padding: 16px 12px 50px; } }
 .stack > * + * { margin-top: 14px; }
+.stack.inline { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }   /* status pill + its date on one line, with room between them */
+.stack.inline > * + * { margin-top: 0; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* ---------- KPI tiles ---------- */
@@ -288,19 +302,8 @@ table.t td.num, table.t th.num { text-align: right; font-variant-numeric: tabula
 .r-Manager { background: color-mix(in srgb, var(--purple) 16%, transparent); color: var(--purple); }
 .r-Editor { background: color-mix(in srgb, var(--blue) 16%, transparent); color: var(--blue); }
 .r-Viewer { background: color-mix(in srgb, var(--gray) 18%, transparent); color: var(--text-2); }
-
-/* ---------- Bars (reports) ---------- */
-.bars { display: grid; gap: 9px; }
-.bar-row { display: grid; grid-template-columns: minmax(90px, 34%) 1fr 48px; gap: 10px; align-items: center; font-size: 13px; }
-.bar-row .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
-.bar-track { height: 10px; background: var(--surface-3); border-radius: 5px; overflow: hidden; }
-.bar-fill { height: 100%; width: 0; background: var(--accent); border-radius: 5px; transition: width .5s ease; }
-.bar-row .val { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
-.cols { display: flex; align-items: flex-end; gap: 6px; height: 160px; padding-top: 10px; }
-.cols .col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; height: 100%; justify-content: flex-end; min-width: 0; }
-.cols .col .c-bar { width: 100%; max-width: 44px; background: var(--accent); border-radius: 5px 5px 2px 2px; min-height: 2px; }
-.cols .col .c-val { font-size: 11.5px; font-weight: 600; }
-.cols .col .c-lbl { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.r-Ingest { background: color-mix(in srgb, #14b8a6 18%, transparent); color: color-mix(in srgb, #14b8a6 78%, var(--text)); }
+.r-custom { background: color-mix(in srgb, var(--rc) 16%, transparent); color: color-mix(in srgb, var(--rc) 78%, var(--text)); }
 
 /* ---------- Modal ---------- */
 .modal-backdrop { position: fixed; inset: 0; background: var(--backdrop); z-index: 100; display: grid; place-items: center; padding: 16px; animation: fade .12s ease; }
@@ -362,10 +365,10 @@ table.xl .x-btn:hover { color: var(--red); }
 .auth-wrap { min-height: 100vh; display: grid; place-items: center; padding: 20px;
   background: radial-gradient(900px 500px at 15% -10%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 60%),
               radial-gradient(700px 400px at 110% 110%, color-mix(in srgb, var(--accent-2) 14%, transparent), transparent 60%), var(--bg); }
-.auth-card { width: 100%; max-width: 400px; padding: 30px 28px; }
+.auth-card { width: 100%; max-width: 420px; padding: 34px 30px; }
 .auth-card .brand { margin: 0 0 22px; justify-content: center; flex-direction: column; gap: 12px; text-align: center; }
-.auth-card .brand img { height: 56px; max-width: 200px; }
-.auth-card .brand .mark { width: 52px; height: 52px; font-size: 22px; border-radius: 14px; }
+.auth-card .brand img { height: 112px; max-width: 320px; }
+.auth-card .brand .mark { width: 84px; height: 84px; font-size: 34px; border-radius: 22px; }
 .auth-card .brand .name { display: block; font-size: 19px; }
 .auth-card .tagline { color: var(--text-2); font-size: 13px; font-weight: 400; }
 .auth-card .btn { width: 100%; height: 40px; }
@@ -428,3 +431,463 @@ td.overdue { color: var(--red); }
 .dropdown .dd-mode { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
 .dropdown .dd-mode .segmented { flex: 1; display: flex; }
 .dropdown .dd-mode .segmented button { flex: 1; padding: 5px 6px; }
+
+/* Workload Tracker — Excel (grid) mode */
+table.t.xl th { white-space: nowrap; }
+table.t.xl td { padding: 4px 6px; }
+table.t.xl input, table.t.xl select, table.t.xl textarea { width: 100%; min-width: 120px; font-size: 13px; }
+table.t.xl input, table.t.xl select { height: 32px; }
+table.t.xl textarea { height: 32px; min-height: 32px; resize: vertical; padding-top: 6px; line-height: 1.35; }
+table.t.xl input[type="date"] { min-width: 140px; }
+table.t.xl tr.dirty td, table.t.xl tr.dirty:hover td { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+
+/* Audio Guide control: N/A | Date (+ date picker) */
+.ag { display: flex; gap: 6px; align-items: center; }
+.ag select { flex: 0 0 auto; width: auto; min-width: 84px; }
+.ag input[type="date"], .ag input[type="text"] { flex: 1 1 auto; min-width: 130px; }
+label.f > small { display: block; margin-top: 4px; font-size: 12px; }
+table.t.xl .ag select { width: 84px; min-width: 84px; flex: none; }
+table.t.xl .ag input[type="date"] { width: auto; min-width: 140px; flex: 1 1 auto; }
+
+/* ---------- Workload: use the whole window; wrap instead of cropping ---------- */
+.container.wide { max-width: none; padding-left: clamp(12px, 2vw, 32px); padding-right: clamp(12px, 2vw, 32px); }
+table.t.wl { font-size: 12.5px; }
+table.t.wl th { padding: 8px 8px; white-space: normal; line-height: 1.25; vertical-align: bottom; }
+table.t.wl td { padding: 7px 8px; }
+/* keep line breaks from pasted multi-line cells; wrap long text rather than cutting it off */
+table.t.wl td.actions-cell { white-space: normal; width: 1%; }
+table.t.wl td.actions-cell .btn { display: block; width: 100%; margin: 0 0 4px; }
+table.t.wl td.actions-cell .btn:last-child { margin-bottom: 0; }
+/* Excel grid: wider columns for the long-text fields (textareas grow with their content) */
+table.t.xl td[data-k="plug_id"] textarea, table.t.xl td[data-k="remarks"] textarea, table.t.xl td[data-k="others"] textarea,
+table.t.xl td[data-k="vo"] textarea, table.t.xl td[data-k="total_mats"] textarea { min-width: 190px; }
+table.t.xl td[data-k="units_concerned"] select, table.t.xl td[data-k="platform"] select { min-width: 150px; }
+table.t.xl textarea { overflow: hidden; resize: none; }
+
+/* Card layout: used when the table would need sideways scrolling (phones, tablets, or many columns on a laptop).
+   Every row becomes a card with label-above-value fields; blank fields are skipped. */
+table.t.wl.cards, table.t.wl.cards tbody { display: block; width: 100%; }
+table.t.wl.cards thead { display: none; }
+table.t.wl.cards tbody { padding: 10px; display: grid; gap: 10px; }
+table.t.wl.cards tr { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(160px, 44%), 1fr)); gap: 8px 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+table.t.wl.cards tbody tr:hover { background: var(--surface-2); }
+table.t.wl.cards td { display: flex; flex-direction: column; gap: 2px; padding: 0; border: 0; min-width: 0 !important; background: none; overflow-wrap: anywhere; }
+table.t.wl.cards tbody tr:hover td { background: none; }   /* hover only changes the card, never the cell layout */
+table.t.wl.cards td > * { min-width: 0; }
+table.t.wl.cards td::before { content: attr(data-label); color: var(--text-3); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; overflow-wrap: normal; }
+table.t.wl.cards td:empty { display: none; }
+table.t.wl.cards td[data-k="plug_id"] { grid-column: 1 / -1; order: -1; font-size: 14px; }
+table.t.wl.cards td[data-k="plug_id"]::before { content: none; }
+table.t.wl.cards td[data-k="remarks"], table.t.wl.cards td[data-k="vo"],
+table.t.wl.cards td[data-k="others"], table.t.wl.cards td[data-k="total_mats"], table.t.wl.cards td[data-k="prog_name"] { grid-column: span 2; }
+table.t.wl.cards td.actions-cell { grid-column: 1 / -1; order: 99; flex-direction: row; justify-content: flex-end; gap: 8px; padding-top: 4px; width: auto; }
+table.t.wl.cards td.actions-cell::before { content: none; }
+table.t.wl.cards td.actions-cell .btn { display: inline-flex; width: auto; margin: 0; }
+
+/* ---------- Workload Tracker: pills, summary cards, filters, row menu ---------- */
+/* Colour tokens reuse the theme's own variables so every theme and light/dark mode stays readable */
+.c-blue { --c: var(--blue); } .c-green { --c: var(--green); } .c-amber { --c: var(--amber); }
+.c-purple { --c: var(--purple); } .c-gray { --c: var(--gray); } .c-red { --c: var(--red); }
+.c-orange { --c: #f0883e; } .c-teal { --c: #26b5ad; } .c-pink { --c: #e5568f; }
+.c-slate { --c: #64748b; }   /* kept defined, currently unused */
+.c-cyan { --c: #22d3ee; }      /* Work Date / Breakdate / Script / Artwork-STB — reserved, not in the hash palette */
+.c-lime { --c: #a3e635; }      /* kept defined, currently unused */
+.c-fuchsia { --c: #e879f9; }   /* Audio Guide only — reserved; a warm magenta, deliberately far from cyan's cool blue */
+html[data-mode="light"] .c-orange { --c: #b95a12; } html[data-mode="light"] .c-teal { --c: #0d8a84; } html[data-mode="light"] .c-pink { --c: #b8326b; }
+html[data-mode="light"] .c-slate { --c: #475569; }
+html[data-mode="light"] .c-cyan { --c: #0e7490; }
+html[data-mode="light"] .c-lime { --c: #4d7c0f; }
+html[data-mode="light"] .c-fuchsia { --c: #a21caf; }
+
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.4; white-space: nowrap; color: var(--c); background: color-mix(in srgb, var(--c) 14%, var(--surface)); }
+.chip.sm { padding: 1px 8px; font-size: 11px; font-weight: 550; }
+.chip .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+
+.wl-tabbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 0 16px; border-bottom: 1px solid var(--border); }
+.wl-tabbar .tabs { margin: 0; border: 0; }
+.wl-tabbar .tabs button { display: inline-flex; align-items: center; gap: 8px; padding: 15px 14px; }
+.tabs .count { font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; color: var(--text-2); background: var(--surface-3); }
+.tabs button.on .count { color: var(--accent); background: var(--accent-soft); }
+.wl-tabactions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0; }
+
+.wl-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: stretch; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.wl-search { flex: 1 1 260px; display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 38px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); color: var(--text-3); }
+.wl-search svg { width: 15px; height: 15px; flex: none; }
+.wl-search input { flex: 1; min-width: 0; height: auto; padding: 0; border: 0; background: transparent; box-shadow: none; color: var(--text); }
+.wl-search:focus-within, .fsel:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.fsel { position: relative; display: block; min-width: 150px; height: 38px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); }
+.fsel-btn { display: block; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; border-radius: inherit; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.fsel-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fsel-row { display: flex; align-items: center; gap: 14px; height: 100%; padding: 0 28px 0 12px; pointer-events: none; }
+.fsel-label { flex: none; font-size: 12px; line-height: 1; color: var(--text-2); font-weight: 550; white-space: nowrap; }
+.fsel-value { flex: 1; min-width: 0; text-align: right; font-weight: 600; font-size: 13.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fsel svg { position: absolute; right: 10px; top: 50%; width: 13px; height: 13px; transform: translateY(-50%); pointer-events: none; color: var(--text-2); z-index: 1; }
+.daterange { position: relative; display: flex; }
+.daterange-btn { display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; height: 38px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); color: var(--text); font: 600 13px var(--font); cursor: pointer; white-space: nowrap; }
+.daterange-btn svg { width: 15px; height: 15px; color: var(--text-2); }
+.popover { position: absolute; z-index: 60; top: calc(100% + 6px); right: 0; width: 280px; padding: 14px; display: grid; gap: 10px; background: var(--surface); border: 1px solid var(--border-2); border-radius: 12px; box-shadow: var(--shadow); }
+.daterange-pop .presets { display: flex; flex-wrap: wrap; gap: 6px; }
+@media (max-width: 680px) { .fsel { flex: 1 1 45%; min-width: 0; } .daterange { flex: 1 1 100%; } .daterange-btn { flex: 1; justify-content: center; } .popover { left: 0; right: 0; width: auto; } }
+
+/* table polish */
+table.t.wl { font-size: 13px; }
+table.t.wl thead th { background: var(--surface-3); font-size: 11px; letter-spacing: .05em; color: var(--text-2); vertical-align: middle; border-bottom: 1px solid var(--border-2); }   /* same header treatment as the Excel-mode grid */
+table.t.wl th { text-align: center; }
+table.t.wl th.right { text-align: right; }
+table.t.wl th, table.t.wl td { padding: 9px 10px; }
+table.t.wl td { vertical-align: middle; }
+/* Light grid: vertical lines between columns, softer than the Excel-mode grid (which uses --border-2), so the two
+   don't look identical. Cards mode stays borderless (each row is already its own bordered card). */
+table.t.wl:not(.cards) { border-collapse: separate; border-spacing: 0; }
+table.t.wl:not(.cards) th, table.t.wl:not(.cards) td { border-right: 1px solid var(--border); }
+table.t.wl:not(.cards) thead th { border-right-color: var(--border-2); }   /* more contrast against the tinted header background */
+table.t.wl:not(.cards) th:last-child, table.t.wl:not(.cards) td:last-child { border-right: 0; }
+table.t.wl .strong { font-weight: 650; color: var(--text); }
+table.t.wl .sub { margin-top: 2px; font-size: 12px; color: var(--text-2); }
+table.t.wl .sub.pre { white-space: pre-wrap; }
+table.t.wl .stack { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+table.t.wl .stack .sub { margin: 0; }
+
+.kebab { display: inline-grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); cursor: pointer; }
+.kebab:hover, .kebab[aria-expanded="true"] { background: var(--surface-3); color: var(--text); }
+.kebab svg { width: 20px; height: 20px; }
+.rowmenu { position: fixed; z-index: 120; min-width: 150px; padding: 6px; display: grid; background: var(--surface); border: 1px solid var(--border-2); border-radius: 10px; box-shadow: var(--shadow); }
+.rowmenu button { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font: 550 13.5px var(--font); text-align: left; cursor: pointer; }
+.rowmenu button:hover { background: var(--surface-3); }
+.rowmenu button.danger { color: var(--red); }
+.rowmenu svg { width: 16px; height: 16px; flex: none; }
+
+.wl-card .pager { padding: 12px 16px; border-top: 1px solid var(--border); }
+.pager .pg { min-width: 32px; justify-content: center; }
+.pager .pg.on { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+.pg-gap { padding: 0 4px; color: var(--text-3); }
+table.t.wl td[data-k="work_date"] strong { white-space: nowrap; }
+/* Units Concerned etc. stay on ONE row in the Workload table. Scoped to the table (not a bare .chips) so the Admin → Groups page, which reuses the
+   class name for its permission chips and defines it later in this file, can no longer override it and make three-team pills wrap. */
+table.t.wl .chips { flex-wrap: nowrap; max-width: none; }
+table.t.wl.cards .chips { flex-wrap: wrap; }
+table.t.wl .stack { gap: 3px; }
+table.t.wl .stack > strong { line-height: 1.3; }
+.chip.sm { line-height: 1.3; }
+table.t.wl.cards td { align-items: flex-start; }
+@media (max-width: 680px) {
+  .wl-tabbar { padding: 0 6px; }
+  .wl-tabbar .tabs button { padding: 13px 9px; gap: 6px; font-size: 13.5px; }
+  .wl-tabbar .tabs { overflow-x: auto; max-width: 100%; }
+}
+
+/* cards: put the ⋮ menu in the card's top-right corner instead of a row of its own */
+table.t.wl.cards tr { position: relative; }
+table.t.wl.cards td.actions-cell { position: absolute; top: 6px; right: 8px; order: 0; padding: 0; width: auto; grid-column: auto; }
+table.t.wl.cards td[data-k="plug_id"] { padding-right: 38px; }
+
+/* One line per row: every cell stays on a single line (a wide table scrolls sideways inside the card), except Remarks which wraps */
+table.t.wl td { white-space: nowrap; }
+table.t.wl td .rem { min-width: 260px; max-width: 460px; white-space: pre-wrap; overflow-wrap: anywhere; }
+table.t.wl .dim-inline { color: var(--text-2); font-weight: 400; }
+table.t.wl th { white-space: nowrap; }
+/* ...but on phones each row is a card, where text has to wrap */
+table.t.wl.cards td { white-space: pre-wrap; }
+table.t.wl.cards td .rem { min-width: 0; max-width: none; }
+
+/* Centre every cell's content except Remarks, which stays left-aligned (it's the one column meant to be read as text) */
+table.t.wl:not(.cards) td { text-align: center; }
+table.t.wl:not(.cards) td[data-k="remarks"] { text-align: left; }
+table.t.wl:not(.cards) td .stack { align-items: center; }
+
+/* cards: long pills (e.g. "REG/TDMD (GMA MUSIC)") get the whole card width and may wrap rather than spill into the next column */
+table.t.wl.cards td[data-k="platform"], table.t.wl.cards td[data-k="units_concerned"] { grid-column: 1 / -1; }
+table.t.wl.cards .chip { white-space: normal; max-width: 100%; }
+
+/* click-to-edit cells */
+table.t.wl td.editable { cursor: pointer; }
+table.t.wl td.editable:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }   /* clearly visible tint (stronger than the row's own hover), no box */
+table.t.wl td.editable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+table.t.wl td.editing { padding: 4px; white-space: normal; }   /* the cell itself looks normal; only the input inside is highlighted */
+.cell-editor { display: flex; align-items: center; min-width: 170px; }
+.cell-editor.busy { opacity: .6; }
+.cell-editor input, .cell-editor select, .cell-editor textarea { width: 100%; min-width: 150px; height: 32px; padding: 4px 8px; font-size: 13px; }
+.cell-editor textarea { min-width: 260px; min-height: 32px; resize: none; overflow: hidden; line-height: 1.35; }
+.cell-editor input[type="datetime-local"] { min-width: 215px; }
+.cell-editor .ag { flex-wrap: wrap; max-width: 230px; }   /* wrap instead of overflowing into the next column if the cell is narrow */
+.cell-editor .ag select { min-width: 84px; }   /* the generic ".cell-editor select" rule above (150px) was overriding this back up, which is what pushed the date input into the Remarks column */
+.cell-editor .ag input[type="date"], .cell-editor .ag input[type="text"] { min-width: 130px; }
+table.t.xl input[type="datetime-local"] { min-width: 215px; }
+table.t.wl.cards td.editing { padding: 0; }
+
+/* ---------- Knowledge Base (PDF drop zone + list) ---------- */
+.dropzone { display: flex; align-items: center; gap: 16px; padding: 22px 24px; border: 2px dashed var(--border-2); border-radius: var(--radius); background: var(--surface); color: var(--text-2); cursor: pointer; transition: border-color .12s, background .12s; }
+.dropzone svg { width: 34px; height: 34px; flex: none; color: var(--accent); }
+.dropzone strong { color: var(--text); font-size: 15px; }
+.dropzone:hover, .dropzone:focus-visible { border-color: var(--accent); outline: none; }
+.dropzone.over { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone.busy { opacity: .7; cursor: progress; }
+.doc-link { display: inline-flex; align-items: center; gap: 8px; font-weight: 550; color: var(--text); }
+.doc-link svg { width: 18px; height: 18px; flex: none; color: var(--text-3); }
+.doc-link:hover { color: var(--accent); text-decoration: none; }
+.doc-file { margin: 2px 0 0 26px; }
+td.doc-actions { text-align: right; white-space: nowrap; }
+td.doc-actions .iconbtn { display: inline-grid; place-items: center; width: 32px; height: 32px; vertical-align: middle; }
+td.doc-actions .iconbtn svg { width: 17px; height: 17px; }
+
+.group-col {
+  min-width: 220px;
+  white-space: normal;
+}
+
+.perm-col {
+  vertical-align: top;
+}
+
+.actions-col {
+  min-width: 120px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.perm-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.perm-chip.sec {
+  background: var(--surface-3);
+  color: var(--text-2);
+  border-color: var(--border);
+}
+/* Lock Dates modal */
+.lock-list { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.lock-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-2); }
+
+/* Excel mode: selected cell range / whole rows — tinted, with only the OUTLINE of the range drawn (like Excel) */
+.xl-box { outline: none; }
+table.t.xl td.xl-sel { position: relative; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+table.t.xl td.xl-sel::after { content: ''; position: absolute; inset: 0; pointer-events: none; border: 0 solid var(--accent); }
+table.t.xl td.xl-sel.xl-t::after { border-top-width: 2px; }
+table.t.xl td.xl-sel.xl-b::after { border-bottom-width: 2px; }
+table.t.xl td.xl-sel.xl-l::after { border-left-width: 2px; }
+table.t.xl td.xl-sel.xl-r::after { border-right-width: 2px; }
+/* row-number column + clickable column headers */
+table.t.xl th.rn, table.t.xl td.rn { position: sticky; left: 0; width: 44px; min-width: 44px; text-align: center; padding: 0 4px; user-select: none; cursor: pointer; z-index: 1; }
+table.t.xl th.rn { z-index: 4; }
+table.t.xl td.rn { background: var(--surface); color: var(--text-3); font-size: 11.5px; }
+table.t.xl td.rn:hover, table.t.xl th.rn:hover, table.t.xl th.xl-colhead:hover { background: color-mix(in srgb, var(--accent) 16%, var(--surface-3)); }
+table.t.xl td.rn.hl, table.t.xl th.xl-colhead.hl { background: color-mix(in srgb, var(--accent) 28%, var(--surface-3)); color: var(--text); }
+table.t.xl th.xl-colhead { cursor: pointer; user-select: none; }
+.xl-hint { font-size: 12px; padding: 6px 4px 0; }
+
+/* Merged Breakdate/Time cell (Table mode): one or two independently-clickable pills in one cell */
+table.t.wl .wl-pill-edit { cursor: pointer; border-radius: 999px; }
+table.t.wl .wl-pill-edit:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+table.t.wl .cell-editor-inline { display: inline-flex; }
+table.t.wl .cell-editor-inline .cell-editor { min-width: 190px; }
+
+.row-lock { display: inline-flex; vertical-align: middle; margin-left: 6px; color: var(--text-2); }
+.row-lock svg { width: 14px; height: 14px; }
+
+/* Prioritised workload row: highlight its Breakdate / Time cell */
+table.t.wl td.prio, table.t.wl tr:hover td.prio { background: color-mix(in srgb, #ef4444 24%, transparent); box-shadow: inset 3px 0 0 #ef4444, inset 0 0 0 1px color-mix(in srgb, #ef4444 45%, transparent); }   /* red: clearly apart from the VGFX purple / VEDIT orange pills */
+.prio-toggle > span { display: flex; align-items: center; gap: 4px; font-size: 14px; color: var(--text); font-weight: 600; cursor: pointer; }
+.prio-toggle .dim { font-weight: 400; }
+
+/* Team label inside each Breakdate / Time pill (VGFX / VEDIT) */
+.chip-tag { font-size: 10px; font-weight: 700; letter-spacing: .05em; padding: 0 5px; border-radius: 4px; line-height: 1.5; background: color-mix(in srgb, currentColor 20%, transparent); }
+
+/* Breakdate / Time: VGFX pill on top, VEDIT pill below (not side by side) */
+table.t.wl .chips.bd-chips { flex-direction: column; flex-wrap: nowrap; align-items: center; gap: 4px; }
+table.t.wl td[data-k="breakdate_vgfx"] { text-align: center; }
+
+/* Excel grid: all text (headers too) centered, each editable box centered in its cell, and every column as wide as its
+   longest value so nothing is cropped (multi-line fields wrap at ~60 characters and grow taller instead) */
+table.t.xl th { text-align: center; }
+table.t.xl td { vertical-align: middle; text-align: center; }
+.xl-cell { display: grid; min-width: 96px; font-size: 13px; }
+.xl-cell::after { content: attr(data-value); grid-area: 1 / 1; visibility: hidden; pointer-events: none; white-space: pre; line-height: 1.35; padding: 4px calc(8px + 1.5ch); }
+.xl-cell.multi::after { white-space: pre-wrap; max-width: 60ch; overflow-wrap: anywhere; padding: 6px calc(8px + 1.5ch) 9px; }
+table.t.xl .xl-cell > input, table.t.xl .xl-cell > textarea { grid-area: 1 / 1; width: 100%; min-width: 0; box-sizing: border-box; text-align: center; }
+table.t.xl .xl-cell > textarea { height: 100%; min-height: 32px; padding: 6px 8px; line-height: 1.35; overflow: hidden; resize: none; }
+table.t.xl .xl-cell > textarea { border: 0; border-radius: 0; background: transparent; }
+table.t.xl .xl-cell > textarea:focus { box-shadow: inset 0 0 0 2px var(--accent); background: var(--surface); }
+
+/* Excel grid: Plug ID, VO and Remarks get long columns, like in Table mode */
+table.t.xl td[data-k="plug_id"] .xl-cell, table.t.xl td[data-k="vo"] .xl-cell, table.t.xl td[data-k="remarks"] .xl-cell { min-width: 380px; }
+table.t.xl td, table.t.xl .xl-cell, table.t.xl .xl-cell > input, table.t.xl .xl-cell > textarea { cursor: default; }   /* a normal pointer, not the text I-beam (the caret still shows while typing) */
+
+/* Excel look: no separate white edit box — the cell itself is the editor, marked by the selection outline */
+table.t.xl .xl-cell > input:focus, table.t.xl .xl-cell > textarea:focus { box-shadow: none; background: transparent; outline: none; }
+table.t.xl td.xl-sel.xl-single, table.t.xl td.xl-sel.xl-active { background: var(--surface); }
+table.t.xl td.xl-sel.xl-single::after { border-width: 2px; }
+
+/* Right-click menu (Copy / Cut / Paste) */
+.xl-menu { position: fixed; z-index: 1000; min-width: 180px; padding: 4px; background: var(--surface); border: 1px solid var(--border-2); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.28); }
+.xl-menu button { display: flex; width: 100%; justify-content: space-between; gap: 24px; align-items: center; padding: 7px 10px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; cursor: default; text-align: left; }
+.xl-menu button span { color: var(--text-3); font-size: 11.5px; }
+.xl-menu button:hover:not(:disabled) { background: var(--accent-soft, color-mix(in srgb, var(--accent) 16%, transparent)); }
+.xl-menu button:disabled { opacity: .4; }
+
+.xl-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 2px; }
+table.t.xl td[data-k="breakdate_vgfx"] .xl-cell { min-width: 250px; }
+
+/* Backup & Recovery */
+.stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.stat { display: flex; flex-direction: column; gap: 6px; padding: 14px 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); min-width: 0; }
+.stat-label { color: var(--text-2); font-size: 12.5px; font-weight: 500; }
+.stat-value { font-size: 24px; font-weight: 700; line-height: 1.1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.kv-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 2px; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+.kv-row:last-of-type { border-bottom: 0; }
+.kv-label { color: var(--text-2); }
+.kv-value { display: inline-flex; align-items: baseline; gap: 12px; font-variant-numeric: tabular-nums; }
+.hist-stats { display: flex; flex-wrap: wrap; gap: 8px 28px; margin-left: 16px; flex: 1; }
+.hist-stats > div { display: flex; flex-direction: column; line-height: 1.25; }
+.hist-stats span { color: var(--text-3); font-size: 11.5px; font-weight: 500; text-transform: uppercase; letter-spacing: .03em; }
+.hist-stats strong { font-size: 15px; font-variant-numeric: tabular-nums; }
+@media (max-width: 800px) { .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } }
+
+/* Restore analysis */
+.dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 96px; padding: 16px; border: 2px dashed var(--border-2); border-radius: 10px; cursor: pointer; text-align: center; }
+.dropzone.over, .dropzone:hover { border-color: var(--accent); background: var(--accent-soft); }
+.readiness { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 32px; }
+.readiness .stat-label { display: block; margin-bottom: 4px; }
+.pill.risk { font-size: 14px; padding: 4px 14px; }
+.reasons { list-style: none; margin: 0; padding: 0; }
+.reasons li { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.reasons li:last-child { border-bottom: 0; }
+.c-add { color: var(--green); }
+.c-rem { color: var(--red); }
+.c-mod { color: var(--amber); }
+.diff-row > td { background: var(--surface-2); }
+.diff-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding: 4px 4px 8px; }
+.diff-col ul { margin: 6px 0; padding-left: 18px; }
+.diff-col li { margin-bottom: 4px; overflow-wrap: anywhere; }
+.diff-title { font-weight: 600; font-size: 13px; }
+@media (max-width: 800px) { .diff-grid { grid-template-columns: 1fr; } }
+.sub-tabs { margin-bottom: 14px; }
+.restore-overlay { z-index: 1000; }
+/* PSD Daily Plug List tab */
+.plug-list { padding: 12px 16px 16px; }
+.plug-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.plug-bar .grow { flex: 1; }
+.plug-date { display: inline-flex; gap: 4px; align-items: center; }
+.plug-date select { min-width: 250px; }
+.plug-t td, .plug-t th { vertical-align: middle; }
+.plug-t th.chk, .plug-t td.chk { width: 34px; text-align: center; }
+.plug-t tr.done td { opacity: .6; }
+.plug-add { margin-left: 8px; font-size: 10.5px; }
+.plug-sum { max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; margin-top: 10px; font-size: 13px; }
+.plug-sum > div { display: flex; justify-content: space-between; gap: 16px; padding: 3px 0; }
+.plug-warn { color: var(--danger, #c0392b); font-size: 13px; margin: 8px 0 0 18px; }
+select.plug-pick { margin-top: 6px; font-size: 12.5px; }
+
+.chip.unset { cursor: pointer; opacity: .85; }
+
+/* The Units / Platform / Plug Type dropdowns: the real <select> is invisible (color: transparent) and the label above it is drawn by hand,
+   so its option list inherited "transparent" text on the system's white popup. Give the options their own readable colours. */
+
+/* Table mode: row ticks, selection bar, highlighted row */
+table.t.wl tbody tr.picked td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+table.t.wl.cards tr.picked { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.sel-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.sel-bar .grow { flex: 1; }
+.sel-count { display: inline-flex; align-items: center; gap: 10px; }
+.linkbtn { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; }
+.xl-selall { padding: 8px 4px 0; }
+
+/* dragging across rows: don't select the text underneath */
+#tbl.selecting, #tbl.selecting * { user-select: none; -webkit-user-select: none; cursor: default; }
+table.t.wl tbody tr.picked td { box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 40%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--accent) 40%, transparent); }
+
+/* Filter dropdown list (drawn by the app, so the values get proper padding and follow the theme) */
+.fsel.open { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.fsel-list { position: absolute; z-index: 60; top: calc(100% + 4px); left: 0; min-width: 100%; max-width: 360px; max-height: 300px; overflow-y: auto; margin: 0; padding: 6px; list-style: none; background: var(--surface); border: 1px solid var(--border-2); border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.22); }
+.fsel-list li { padding: 9px 14px; border-radius: 6px; font-size: 13.5px; line-height: 1.25; color: var(--text); white-space: nowrap; cursor: pointer; }
+.fsel-list li.hi { background: var(--accent-soft); }
+.fsel-list li.sel { font-weight: 700; color: var(--accent); }
+
+.radio-row { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; }
+.radio-row input { width: auto; margin: 0; }
+
+/* PSD Daily Plug List: period / paging controls */
+.plug-range { font-weight: 600; font-size: 13.5px; margin-left: 6px; white-space: nowrap; }
+.plug-from { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.plug-from input { height: 36px; }
+.plug-foot { display: flex; align-items: center; gap: 14px; margin-top: 10px; }
+.plug-foot .grow { flex: 1; }
+.plug-foot .fsel { min-width: 130px; }
+.plug-t td.nowrap { white-space: nowrap; }
+/* Edit and Delete side by side, in a column no wider than the two buttons */
+.plug-t th.plug-actions, .plug-t td.plug-actions { width: 1%; white-space: nowrap; padding-left: 6px; padding-right: 6px; text-align: center; }
+.plug-t td.plug-actions .btn { display: inline-flex; width: auto; margin: 0; padding: 4px 8px; }
+.plug-t td.plug-actions .btn + .btn { margin-left: 2px; }
+.plug-bar .wl-search { flex: 1 1 180px; min-width: 180px; }
+.plug-bar { row-gap: 8px; }
+
+/* People on this page (Workload Tracker header) */
+.presence { display: flex; align-items: center; padding-left: 5px; }
+.pa { position: relative; flex: none; width: 34px; height: 34px; margin-left: -5px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 12px; font-weight: 700;
+  letter-spacing: .02em; border: 2px solid var(--surface); box-shadow: 0 1px 4px rgba(0, 0, 0, .22); cursor: default; user-select: none; transition: transform .12s; }
+.pa:hover { transform: translateY(-2px); z-index: 5; }
+.pa.you { box-shadow: 0 0 0 2px var(--accent), 0 1px 4px rgba(0, 0, 0, .22); }
+.pa.more { background: var(--surface-3); color: var(--text-2); font-size: 11.5px; }
+.pa::after { content: attr(data-tip); position: absolute; top: calc(100% + 8px); right: -4px; padding: 4px 10px; border-radius: 7px; background: var(--text); color: var(--bg);
+  font-size: 12px; font-weight: 600; letter-spacing: 0; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 30; box-shadow: 0 6px 18px rgba(0, 0, 0, .25); }
+.pa:hover::after { opacity: 1; }
+
+/* A column that holds a short value (Ingest: No. of Materials) is kept as narrow as its one-line heading allows. */
+table.t.wl th.narrow { white-space: nowrap; width: 1%; min-width: 160px; letter-spacing: .03em; }   /* No. of Materials: a fixed, comfortable 160 px — it is not stretched on a wide screen */   /* "No. of Materials" stays on ONE line; tighter letter-spacing and padding keep the column as narrow as that allows */
+/* editing a number in a narrow column (No. of Materials): the box stays as narrow as the column instead of widening it to 170px */
+.cell-editor.num { min-width: 0; }
+.cell-editor.num input { min-width: 0; width: 100%; max-width: 90px; text-align: center; padding-left: 4px; padding-right: 4px; }
+/* a heading that is longer than its content (Ingest: Episode / Breakdate) gets slightly tighter spacing so the column is a little narrower */
+table.t.wl th.tight { letter-spacing: .02em; padding-left: 6px; padding-right: 6px; width: 1%; min-width: 160px; }   /* Episode / Breakdate: a fixed 160 px — not stretched on a wide screen, and not squeezed to the width of its heading */
+/* editing a date in the narrow Episode / Breakdate column: the date box fits the column (no 170 px jump) */
+.cell-editor.date { min-width: 0; }
+.cell-editor.date input { min-width: 0; width: 100%; max-width: 140px; padding: 4px 3px 4px 6px; font-size: 12.5px; }
+
+table.t th.chk, table.t td.chk { width: 34px; text-align: center; }
+
+/* sortable table headers */
+/* The heading cell keeps its own padding (so classes like .narrow / .tight still work); the button inside fills it with NO padding of its own — it used
+   to repeat the cell's padding, which doubled the header height — and centres its text like every other heading. */
+th.sortable .sort-btn { all: unset; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; padding: 0; cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; text-align: center; line-height: inherit; }
+/* the select-all tick box in a header cell sat in a text line (with its extra line space) and made the whole header row ~8 px taller than the headings need */
+table.t thead th > input[type="checkbox"] { display: block; margin: 0 auto; }
+th.sortable .sort-btn:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: -2px; }
+th.sortable .sort-ind { font-size: 9px; opacity: .35; }
+th.sortable.sorted .sort-ind { opacity: .9; }
+
+/* ---------- phones: Ingest / Plug List rows become cards (same look as the Workload cards), admin grids fit the screen ---------- */
+table.t.wl.cards td.chk { grid-column: 1 / -1; flex-direction: row; justify-content: flex-start; width: auto; text-align: left; }
+table.t.wl.cards td.chk::before { content: none; }
+table.t.wl.cards td[data-k="program"] { grid-column: 1 / -1; order: -1; font-size: 14px; }
+table.t.wl.cards td[data-k="program"]::before { content: none; }
+table.t.wl.cards td[data-k="source"], table.t.wl.cards td[data-k="destination_folder"] { grid-column: 1 / -1; }
+table.t.wl.cards td.plug-actions { grid-column: 1 / -1; flex-direction: row; justify-content: flex-end; gap: 8px; width: auto; }
+table.t.wl.cards td.plug-actions::before { content: none; }
+table.t.wl.cards td.num { text-align: left; }
+table.t.wl.cards td.cell-clip { max-width: none; white-space: normal; }
+@media (max-width: 680px) {
+  .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); }   /* min-content of a wide table must not stretch the column */
+  .card { min-width: 0; }
+  .perm-matrix td:first-child, .perm-matrix th:first-child { width: 170px; min-width: 170px; max-width: 170px; white-space: normal !important; overflow-wrap: anywhere; position: sticky; left: 0; z-index: 1; background: var(--surface); text-align: left !important; font-size: 12.5px; }
+  .perm-matrix td:first-child .mono { display: block; font-size: 10.5px; }
+  .perm-matrix th:first-child { background: var(--surface-2, var(--surface)); }
+}
+
+table.t.wl.cards td.chk { position: absolute; top: 10px; right: 12px; width: auto; padding: 0; grid-column: auto; order: 0; }
+table.t.wl.cards tr { position: relative; }
+table.t.wl.cards td[data-k="program"], table.t.wl.cards td[data-k="plug_id"] { padding-right: 36px; }
+table.t.wl.cards td .sub, table.t.wl.cards td .cm-meta { white-space: normal; overflow-wrap: anywhere; max-width: 100%; display: block; }
