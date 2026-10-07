@@ -254,13 +254,14 @@ ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate       TIMESTAMP;  
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS vo              TEXT;   -- open
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS script          DATE;   -- date
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS art_stb         TEXT;   -- a date (YYYY-MM-DD) OR free text
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS audio_guide     TEXT;   -- dropdown: 'N/A' or a date (YYYY-MM-DD)
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS audio_guide     TEXT;   -- 'N/A', a date (YYYY-MM-DD) or free text
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS remarks         TEXT;   -- open
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS total_mats      TEXT;   -- open
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS prog_name       TEXT;   -- copied from the PSD daily plug list
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS plug_type       TEXT;   -- dropdown (admin-managed)
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS length          TEXT;   -- Audio: open (older installs already have this column)
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS others          TEXT;   -- Audio: open
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS audio_status    TEXT;   -- Audio: open (the Audio sheet's STATUS column)
 -- (Older installs may still have an unused status column from the first build; it is left untouched.)
 
 -- Breakdate and Time used to be two fields (a date, and a time that was free text and then a picked HH:MM). They are now one
@@ -316,7 +317,7 @@ ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate_note  TEXT;       
 ALTER TABLE workload_items DROP COLUMN IF EXISTS work_status;
 ALTER TABLE workload_items DROP CONSTRAINT IF EXISTS workload_items_units_check;
 ALTER TABLE workload_items ADD CONSTRAINT workload_items_units_check CHECK (units_concerned IN
-  ('VGFX Only', 'VEDIT Only', 'VGFX/VEDIT', 'Audio - RADIO', 'Audio – AUDIO GUIDE', 'VGFX/VEDIT/Audio'));
+  ('VGFX Only', 'VEDIT Only', 'VGFX/VEDIT', 'Audio - RADIO', 'Audio - TV', 'Audio – AUDIO GUIDE', 'VGFX/VEDIT/Audio'));
 CREATE INDEX IF NOT EXISTS workload_items_date_units_idx ON workload_items (work_date DESC, units_concerned);
 
 CREATE TABLE IF NOT EXISTS app_settings (

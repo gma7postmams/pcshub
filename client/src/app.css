@@ -903,3 +903,11 @@ table.t.xl tr.prio-row td.rn { box-shadow: inset 4px 0 0 #ef4444; color: #ef4444
 table.t.xl tr.prio-row td:not(.rn) { background-image: linear-gradient(color-mix(in srgb, #ef4444 8%, transparent), color-mix(in srgb, #ef4444 8%, transparent)); }
 table.t.xl tr.prio-row td.prio { background-color: color-mix(in srgb, #ef4444 26%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, #ef4444 50%, transparent); }
 .prio-dot { display: inline-block; width: 7px; height: 7px; margin-left: 4px; border-radius: 50%; background: #ef4444; vertical-align: middle; }
+
+/* Excel mode: the Audio "Others" column is as wide as Remarks / VO / Plug ID, and Status has room for its text */
+table.t.xl td[data-k="others"] .xl-cell { min-width: 380px; }
+table.t.xl td[data-k="audio_status"] .xl-cell { min-width: 200px; }
+/* a PENDING (no time yet) Breakdate / Time placeholder: grey and bold like a pill, not like typed text */
+table.t.xl td[data-k="breakdate_vgfx"] textarea::placeholder { color: var(--text-3); font-weight: 700; letter-spacing: .04em; opacity: 1; }
+/* Table mode, Audio view: Remarks is short status-like text, centred like every other Audio column (VGFX / VEDIT keep their left-aligned long notes) */
+table.t.wl.v-audio:not(.cards) td[data-k="remarks"] { text-align: center; }

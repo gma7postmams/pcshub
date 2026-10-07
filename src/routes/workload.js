@@ -15,13 +15,14 @@ const { emitTransfer } = require('../transfer-hook');   // import / export event
 // Sept 2026 PCS Workload template: "dropdown", "Date" and "Open" (free text you can type or paste).
 const router = express.Router();
 
-const UNITS = ['VGFX Only', 'VEDIT Only', 'VGFX/VEDIT', 'Audio - RADIO', 'Audio – AUDIO GUIDE', 'VGFX/VEDIT/Audio'];
+const UNITS = ['VGFX Only', 'VEDIT Only', 'VGFX/VEDIT', 'Audio - RADIO', 'Audio - TV', 'Audio – AUDIO GUIDE', 'VGFX/VEDIT/Audio'];
 // Which teams each Units Concerned option covers (drives the team tabs)
 const UNIT_TEAMS = Object.assign(Object.create(null), {
   'VGFX Only': ['VGFX'],
   'VEDIT Only': ['VEDIT'],
   'VGFX/VEDIT': ['VGFX', 'VEDIT'],
   'Audio - RADIO': ['AUDIO'],
+  'Audio - TV': ['AUDIO'],
   'Audio – AUDIO GUIDE': ['AUDIO'],
   'VGFX/VEDIT/Audio': ['VGFX', 'VEDIT', 'AUDIO'],
 });
@@ -53,6 +54,7 @@ const FIELDS = {
   // Audio sheet's Assigned / Done / Resched-cancelled tables: open columns you can type or paste into
   length:         { label: 'Length', kind: 'text', max: 100, hint: OPEN },
   others:         { label: 'Others', kind: 'text', multiline: true, max: 2000, hint: OPEN },
+  audio_status:   { label: 'Status', kind: 'text', max: 200, hint: OPEN },   // Audio only (the Audio sheet's STATUS: SENT FOR APPROVAL, LOGGED SEP 9, ...)
 };
 const COLS = Object.keys(FIELDS);
 
@@ -60,12 +62,12 @@ const COLS = Object.keys(FIELDS);
 const MAIN_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd',
   'breakdate_vgfx', 'breakdate_vedit',
   'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats', 'prog_name', 'plug_type'];
-const AUDIO_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'vo', 'script', 'remarks', 'length', 'others', 'plug_type'];
+const AUDIO_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'vo', 'script', 'remarks', 'length', 'others', 'audio_status', 'plug_type'];
 // Audio-only columns; any row that involves Audio (e.g. VGFX/VEDIT/Audio) also gets these in the form
-const AUDIO_EXTRA = ['length', 'others'];
+const AUDIO_EXTRA = ['length', 'others', 'audio_status'];
 const VIEWS = {
   // All tab = every column (the template's main columns plus Length and Others), each in its own column
-  ALL: [...MAIN_COLS.slice(0, -1), 'length', 'others', 'plug_type'],
+  ALL: [...MAIN_COLS.slice(0, -1), 'length', 'others', 'audio_status', 'plug_type'],
   VGFX: MAIN_COLS,
   VEDIT: MAIN_COLS,
   AUDIO: AUDIO_COLS,
@@ -104,7 +106,7 @@ function derivePlatform(plugId) {
 }
 
 const MAX_BATCH = 200;
-const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'billable_party', 'remarks', 'vo', 'total_mats', 'audio_guide', 'length', 'others'];
+const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'billable_party', 'remarks', 'vo', 'total_mats', 'audio_guide', 'length', 'others', 'audio_status'];
 
 // ---------- Custom columns ("Add Column"): stored in workload_custom_columns, values in workload_items.custom_fields ----------
 // col_key is always 'custom_<id>' (not the label), so adding/removing/renaming a column never needs a schema change.
@@ -168,14 +170,9 @@ async function assertOption(client, category, value, field, current) {
 }
 
 /** Audio Guide dropdown: "N/A" or a date (YYYY-MM-DD). A value already stored on the row is left alone. */
-function parseAudioGuide(raw, current) {
-  const s = v.str(raw, { field: 'Audio Guide', max: 100 });
-  if (!s || s === 'N/A') return s;
-  if (current && s === current) return s;
-  if (!validator.isDate(s, { format: 'YYYY-MM-DD', strictMode: true })) {
-    throw new HttpError(400, 'Audio Guide must be N/A or a date');
-  }
-  return s;
+function parseAudioGuide(raw) {
+  // N/A, a date (YYYY-MM-DD) or any text — "available, approved 090726", "music only", "FOR AUDIO GUIDE - sent for oks"
+  return v.str(raw, { field: 'Audio Guide', max: 200 });
 }
 
 /** Date and time picked together: 'YYYY-MM-DDTHH:MM' (a bare date means 12:00 AM). Returns 'YYYY-MM-DD HH:MM:00' or null. */
@@ -220,14 +217,15 @@ async function parseRow(client, body, current, customCols = [], opts = {}) {
   const rec = {};
   for (const k of COLS) {
     const f = FIELDS[k];
-    if (k === 'audio_guide') rec[k] = parseAudioGuide(body[k], cur[k]);
+    if (k === 'audio_guide') rec[k] = parseAudioGuide(body[k]);
     else if (f.kind === 'date_or_text') rec[k] = parseDateOrText(body[k], f);
     else if (f.kind === 'date') rec[k] = v.date(body[k], { field: f.label, required: !!f.required });
     else if (f.kind === 'datetime') rec[k] = parseDateTime(body[k], f.label);
     else if (k === 'units_concerned') rec[k] = unitsMayBeBlank && !body[k] ? null : v.oneOf(body[k], UNITS, { field: f.label });
     else rec[k] = v.str(body[k], { field: f.label, max: f.max, required: !!f.required });
   }
-  const typedProg = rec.prog_name;   // checked against the dropdown; a title filled in from the PSD Daily Plug List below is taken as it is
+  // PROG. NAME / PROJ. TITLE is open text: a title typed by hand (Excel mode, Import, the form) is saved as it is — it does not have to be in the dropdown
+  // list or on that day's PSD Daily Plug List (picking from them is still the quick way, and a plug's own title is filled in below).
   await fillFromPlugList(client, rec);
   // Platform follows the Plug ID prefix unless one was chosen (only if that option exists and is active)
   if (!rec.platform) {
@@ -240,12 +238,6 @@ async function parseRow(client, body, current, customCols = [], opts = {}) {
     }
   }
   await assertOption(client, 'workload_platform', rec.platform, 'Platform', cur.platform);
-  if (typedProg && rec.work_date) {   // a title that comes from that day's PSD Daily Plug List (picked or auto-filled by the form) is fine too
-    const { rows } = await client.query('SELECT 1 FROM workload_plugs WHERE plug_date=$1 AND prog_name=$2 LIMIT 1', [rec.work_date, typedProg]);
-    if (rows.length) rec._progOk = true;
-  }
-  if (!rec._progOk) await assertOption(client, 'program', typedProg, 'PROG. NAME / PROJ. TITLE', cur.prog_name);
-  delete rec._progOk;
   await assertOption(client, 'plug_type', rec.plug_type, 'Plug Type', cur.plug_type);
   // Priority flag (not a template column, so it lives outside FIELDS): keep the stored value when the request doesn't mention it
   const p = body.is_priority;
@@ -495,6 +487,7 @@ router.get('/export', asyncH(async (req, res) => {
               { text: l.text, font: { color: { argb: pal.black } } },
             ]) };
           }
+          else if (!r.units_concerned || teams.includes('VGFX') || teams.includes('VEDIT')) { cell.value = 'PENDING'; cell.font = { bold: true, color: { argb: pal.pillFg('gray') } }; }   // no time yet
           cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
         } else if (f.kind === 'date' || f.kind === 'datetime' || k === 'audio_guide' || k === 'art_stb') {
           if (cell.value != null) cell.font = { color: { argb: pal.black } };

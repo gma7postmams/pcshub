@@ -167,21 +167,37 @@ function withAutoPlatform(rules, row, k, val) {
 }
 
 // Audio Guide: dropdown "N/A" or "Date" (then pick the date). Stored as 'N/A' or YYYY-MM-DD.
+// On the All tab, filtering Units to ONE kind of work shows that team's columns: Audio only -> the Audio columns (Length, Others, Status ...), VGFX / VEDIT only
+// -> the main columns (without the Audio-only ones); a mix, or no filter -> everything.
+function viewForUnits(meta, units) {
+  const teams = units ? meta.unitTeams[units] : null;
+  if (!teams) return 'ALL';
+  if (teams.length === 1 && teams[0] === 'AUDIO') return 'AUDIO';
+  if (!teams.includes('AUDIO')) return 'VGFX';
+  return 'ALL';
+}
 function AudioGuideInput({ value, onChange, disabled }) {
   const v = value || '';
   const isDate = ISO.test(v);
-  const legacy = v && !isDate && v !== 'N/A';
-  const mode = isDate ? 'DATE' : v;
+  const isText = !!v && !isDate && v !== 'N/A';
+  const [textMode, setTextMode] = useState(isText);   // "Text" stays chosen while the box is still empty
+  useEffect(() => { if (v) setTextMode(isText); }, [v, isText]);
+  const mode = isDate ? 'DATE' : (textMode || isText) ? 'TEXT' : v;
   const emit = (x) => onChange({ target: { value: x } });
+  const pick = (m) => {
+    setTextMode(m === 'TEXT');
+    emit(m === 'DATE' ? isoDate() : m === 'TEXT' ? (isText ? v : '') : m);
+  };
   return (
     <div className="ag">
-      <select value={mode} disabled={disabled} onChange={(e) => emit(e.target.value === 'DATE' ? isoDate() : e.target.value)}>
+      <select value={mode} disabled={disabled} aria-label="Audio Guide: N/A, date or text" onChange={(e) => pick(e.target.value)}>
         <option value="">—</option>
         <option value="N/A">N/A</option>
         <option value="DATE">Date</option>
-        {legacy ? <option value={v}>{firstLine(v)} (old)</option> : null}
+        <option value="TEXT">Text</option>
       </select>
       {isDate ? <input type="date" value={v} disabled={disabled} onChange={(e) => emit(e.target.value)} /> : null}
+      {mode === 'TEXT' ? <input type="text" maxLength={200} value={isText ? v : ''} disabled={disabled} onChange={(e) => emit(e.target.value)} /> : null}
     </div>
   );
 }
@@ -432,6 +448,7 @@ export default function Workload() {
       window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); window.removeEventListener('mousedown', down);
     };
   }, []);
+  const viewKey = meta && tab === 'ALL' ? viewForUnits(meta, filt.units) : tab;   // which column set to show (see viewForUnits)
   const isGrid = mode === 'excel';   // on the All tab the Excel grid holds the rows still waiting for a team (see load below); on a team tab, that team's rows
 
   // Rows are one line each (Remarks wraps), so a wide table scrolls sideways inside the card, like Excel.
@@ -616,7 +633,7 @@ export default function Workload() {
     pushHistory(`${key}:${k}`);
     setGrid((g) => ({ ...g, rows: g.rows.map((r) => (r._key === key ? { ...setCellValue(r, k, val, false), _dirty: true } : r)) }));
   };
-  const xlKeys = () => meta.views[tab].filter((k) => k !== 'breakdate_vedit');   // the grid's columns: VGFX + VEDIT times share one
+  const xlKeys = () => meta.views[viewKey].filter((k) => k !== 'breakdate_vedit');   // the grid's columns: VGFX + VEDIT times share one
 
   // ---- Excel mode: works like a spreadsheet ----
   // Click a cell, drag or Shift+click for a range; click a ROW NUMBER to select the whole row (drag / Shift+click for
@@ -970,7 +987,7 @@ export default function Workload() {
       clearSel();
     } else if (e.key === 'Escape') setGridSel(null);
   };
-  const isEmptyRow = (r) => meta.views[tab].filter((k) => k !== 'work_date' && k !== 'units_concerned').every((k) => !String(r[k] ?? '').trim());
+  const isEmptyRow = (r) => meta.views[viewKey].filter((k) => k !== 'work_date' && k !== 'units_concerned').every((k) => !String(r[k] ?? '').trim());
   const addRow = () => { pushHistory(null); addRowNow(); };
   // A new row goes to the TOP of the grid (row 1), with the cursor in its first cell and the grid scrolled up to it — not at the bottom, out of sight.
   const addRowNow = () => {
@@ -1244,7 +1261,7 @@ export default function Workload() {
   };
 
   const isAll = tab === 'ALL';
-  const cols = meta.views[tab];   // raw column list (Table mode's tableCols below merges the two Breakdate / Time columns; Excel mode does the same)
+  const cols = meta.views[viewKey];   // raw column list (Table mode's tableCols below merges the two Breakdate / Time columns; Excel mode does the same)
   // Table mode only: Breakdate/Time (VGFX) and (VEDIT) merge into ONE column/cell, holding one or two pills —
   // 'breakdate_vgfx' is kept as that column's position; breakdateCell() below decides what actually shows in it.
   const tableCols = cols.filter((k) => k !== 'breakdate_vedit');
@@ -1332,6 +1349,7 @@ export default function Workload() {
     return (
       <td key="breakdate_vgfx" data-k="breakdate_vgfx" className={r.is_priority ? 'prio' : undefined} title={locked ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}>
         <span className="chips bd-chips">
+          {!parts.length && !r.units_concerned ? <DateChip hue="gray">PENDING</DateChip> : null}
           {parts.map(({ k, hue, tag }) => {
             if (editing && editing.id === r.id && editing.k === k) {
               return (
@@ -1347,7 +1365,9 @@ export default function Workload() {
                 onClick={clickable ? (e) => { e.stopPropagation(); setEditing({ id: r.id, k }); } : undefined}
                 onKeyDown={clickable ? (e) => { if (e.key === 'Enter') { e.preventDefault(); setEditing({ id: r.id, k }); } } : undefined}
               >
-                <DateChip hue={hue}>{r[k] ? <><span className="chip-tag">{tag}</span>{fmtBreakdate(r[k])}</> : null}</DateChip>
+                {r[k]
+                  ? <DateChip hue={hue}><span className="chip-tag">{tag}</span>{fmtBreakdate(r[k])}</DateChip>
+                  : <DateChip hue="gray"><span className="chip-tag">{tag}</span>PENDING</DateChip>}
               </span>
             );
           })}
@@ -1436,7 +1456,7 @@ export default function Workload() {
               {!grid ? <Empty>Loading…</Empty>
                 : grid.error ? <Empty>{grid.error}</Empty>
                   : (
-                    <table className="t xl">
+                    <table className={`t xl v-${viewKey.toLowerCase()}`}>
                       <thead>
                         <tr>
                           <th className="rn" title="Select all" onMouseDown={(e) => startSel('all', 0, 0, e)} />
@@ -1457,7 +1477,8 @@ export default function Workload() {
                                 onFocus={(e) => { if (isTextTarget(e.target)) setGridSel((sel) => (sel && sel.r0 === ri && sel.r1 === ri && sel.c0 === ci && sel.c1 === ci ? sel : { r0: ri, c0: ci, r1: ri, c1: ci })); }}
                                 className={`${selClass(ri, ci)}${r.is_priority && k === 'breakdate_vgfx' ? ' prio' : ''}`.trim()}>
                                 {k === 'breakdate_vgfx' ? (
-                                  <BreakdateCellInput text={bdText(r, meta.unitTeams)} epoch={epoch} disabled={!canWrite} onText={(t) => setCell(r._key, k, t)} />
+                                  <BreakdateCellInput text={bdText(r, meta.unitTeams)} epoch={epoch} disabled={!canWrite} onText={(t) => setCell(r._key, k, t)}
+                                    placeholder={!r.units_concerned || (meta.unitTeams[r.units_concerned] || []).some((t) => t === 'VGFX' || t === 'VEDIT') ? 'PENDING' : undefined} />
                                 ) : (
                                   <GridCellInput
                                     def={meta.fields[k]} value={r[k]} disabled={!canWrite}
@@ -1523,7 +1544,7 @@ export default function Workload() {
                 : data.error ? <Empty>{data.error}</Empty>
                   : !data.rows.length ? <Empty>No workload items match these filters.</Empty>
                     : (
-                      <table className={`t wl${cards ? ' cards' : ''}`}>
+                      <table className={`t wl v-${viewKey.toLowerCase()}${cards ? ' cards' : ''}`}>
                         <thead><tr>{canWrite ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {data.rows.map((r, idx) => (
