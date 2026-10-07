@@ -187,7 +187,11 @@ export default function Ingest() {
     } catch (e) { toast(e.message, 'err'); }
   };
   const saveCell = async (r, k, value, initial) => {
-    if (String(value ?? '') === String(initial ?? '')) { closeCell(r, k); return; }
+    if (String(value ?? '') === String(initial ?? '')) {
+      closeCell(r, k);
+      if (k === 'cm_status' && value === 'NON-COMPLIANT') setReasonFor(r);   // picking NON-COMPLIANT again = update its reason
+      return;
+    }
     if (k === 'cm_status') {
       if (!value) { try { await decide(r, 'Pending', ''); closeCell(r, k); toast('Saved'); } catch (e) { toast(e.message, 'err'); throw e; } return; }   // back to Pending
       if (value === 'NON-COMPLIANT') { closeCell(r, k); setReasonFor(r); return; }
@@ -376,6 +380,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
     if (cmChanged && f.cm_status === 'NON-COMPLIANT' && !f.cm_reason.trim()) { toast('Enter the reason it is NON-COMPLIANT', 'err'); return; }
     const { cm_status: _s, cm_reason: _r, ...rest } = f;
     const payload = { ...rest, materials_count: materialsCount };
+    if (!rec) delete payload.remarks;   // Remarks are not part of the New Ingest form
     // Omit an unchanged fallback value so older records keep their stored compatibility fields.
     if (rec && f.episode_break_date_text === initialEpisodeText) delete payload.episode_break_date_text;
     setBusy(true);
@@ -421,7 +426,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
             <input name="cm_reason" maxLength={2000} value={f.cm_reason} onChange={set('cm_reason')} disabled={!canCm} /></label>
         ) : <div />}
         {rec && rec.cm_status ? <div className="full dim">Decided {fmtDateTime(rec.cm_decided_at)}{rec.cm_decided_by_name ? ` by ${rec.cm_decided_by_name}` : ''}. Changes are recorded in the audit trail.</div> : null}
-        <label className="f full"><span>Remarks</span><textarea name="remarks" maxLength={4000} value={f.remarks} onChange={set('remarks')} /></label>
+        {rec ? <label className="f full"><span>Remarks</span><textarea name="remarks" maxLength={4000} value={f.remarks} onChange={set('remarks')} /></label> : null}
       </form>
     </Modal>
   );

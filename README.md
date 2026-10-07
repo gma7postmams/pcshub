@@ -62,7 +62,7 @@ Upgrading: replace the code, `npm ci --omit=dev`, `npm run build`, `npm run migr
 | | **Role** | **Group** |
 |---|---|---|
 | What it controls | What a user can **do** (actions) | Which pages / sections a user can **open** |
-| Values | Fixed: Admin, Manager, Editor, Viewer | Admin-defined (Admin → Groups), any number |
+| Values | Fixed: Admin, Manager, Editor, Ingest, Viewer | Admin-defined (Admin → Groups), any number |
 | Per user | exactly one | one enrolment (or none) |
 
 **Rules**
@@ -84,14 +84,14 @@ A section only takes effect if its page is also checked.
 
 **Role actions** (`ROLE_ACTIONS`)
 
-| Action | Needs page | Admin | Manager | Editor | Viewer |
-|--------|-----------|:-----:|:-------:|:------:|:------:|
-| Create / edit ingest | Ingest | ✓ | ✓ | ✓ | — |
-| Delete ingest | Ingest | ✓ | — | — | — |
-| Ingest: Destination Folder / Approved By (`ingest.approve`) | Ingest | ✓ | ✓ | — | — |
-| Ingest: Status (CM) (`ingest.cm_complete`) | Ingest | ✓ | ✓ | — | — |
-| Edit Workload | Workload | ✓ | ✓ | — | — |
-| Users, groups, dropdowns, branding, audit | Admin | ✓ | — | — | — |
+| Action | Needs page | Admin | Manager | Editor | Ingest | Viewer |
+|--------|-----------|:-----:|:-------:|:------:|:------:|:------:|
+| Create / edit ingest | Ingest | ✓ | ✓ | ✓ | — | — |
+| Delete ingest | Ingest | ✓ | — | — | — | — |
+| Ingest: Destination Folder / Approved By (`ingest.approve`) | Ingest | ✓ | ✓ | — | — | — |
+| Ingest: Status (CM) (`ingest.cm_complete`) | Ingest | ✓ | ✓ | — | ✓ | — |
+| Edit Workload | Workload | ✓ | ✓ | — | — | — |
+| Users, groups, dropdowns, branding, audit | Admin | ✓ | — | — | — | — |
 
 **Ingest approvals and deletes.** The table has no Approve button: click a row (or its *Approved By* cell) to open the details dialog, where people who can approve press **Approve** (disabled, with the reason, until the Destination Folder is filled in) and later **Undo approval**; the table only shows who approved and when, and *Awaiting approval* on unapproved rows to people who can approve. A request that has a CM decision is kept as a historical record and can't be deleted — except that an **Admin can delete a request that is DONE in CM** (the dialog warns first, and the delete is written to the audit log with its CM status). NON-COMPLIANT requests stay for everyone.
 

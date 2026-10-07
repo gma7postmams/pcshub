@@ -10,7 +10,7 @@
 //    (e.g. filling Destination Folder / Approved by requires Manager role + a group with the Ingest Tracker page).
 //  - Profile is always available. Admin page is Admin-role only (not group-assignable).
 
-const ROLES = ['Admin', 'Manager', 'Editor', 'Viewer'];
+const ROLES = ['Admin', 'Manager', 'Editor', 'Ingest', 'Viewer'];
 
 // Pages (and their sections) that a group can be granted. Keys are stored in group_permissions.
 // A section is only effective if its page is also granted.
@@ -72,6 +72,7 @@ const ROLE_ACTIONS = Object.assign(Object.create(null), {
     'plugs.write'
   ],
   Editor:  ['ingest.write'],
+  Ingest:  ['ingest.cm_complete'],   // Ingest Tracker only: Status (CM) and its NON-COMPLIANT reason, nothing else
   Viewer:  [],
 });
 // Action -> page the action happens on (the user's group must grant it)

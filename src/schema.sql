@@ -46,9 +46,13 @@ INSERT INTO roles (name, description, rank) VALUES
    'Create and update content on pages granted by group permissions',
    2),
 
+  ('Ingest',
+   'Ingest Tracker only: can set Status (CM) and its NON-COMPLIANT reason; nothing else',
+   1),
+
   ('Viewer',
    'Read-only access to pages granted by group permissions',
-   1)
+   0)
 ON CONFLICT (name) DO NOTHING;
 
 -- GROUPS: where a user is enrolled. Admin-defined. Decide which pages/sections members can open.
