@@ -55,6 +55,16 @@ INSERT INTO roles (name, description, rank) VALUES
    0)
 ON CONFLICT (name) DO NOTHING;
 
+-- Actions each role may perform (managed in Admin > Roles). Built-in roles are seeded from src/permissions.js once (see migrate.js).
+ALTER TABLE roles ADD COLUMN IF NOT EXISTS is_builtin BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE roles ADD COLUMN IF NOT EXISTS actions_seeded BOOLEAN NOT NULL DEFAULT false;
+UPDATE roles SET is_builtin = true WHERE name IN ('Admin','Manager','Editor','Ingest','Viewer');
+CREATE TABLE IF NOT EXISTS role_actions (
+  role    TEXT NOT NULL REFERENCES roles(name) ON UPDATE CASCADE ON DELETE CASCADE,
+  action  TEXT NOT NULL,
+  PRIMARY KEY (role, action)
+);
+
 -- GROUPS: where a user is enrolled. Admin-defined. Decide which pages/sections members can open.
 CREATE TABLE IF NOT EXISTS groups (
   id          SERIAL PRIMARY KEY,

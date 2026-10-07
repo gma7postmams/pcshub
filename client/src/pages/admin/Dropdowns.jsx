@@ -10,6 +10,7 @@ export default function Dropdowns() {
   const [d, setD] = useState(null);
   const [editing, setEditing] = useState(null);
   const fileRef = useRef(null);
+  const [picked, setPicked] = useState(() => new Set());   // option ids ticked for batch delete
 
   const load = useCallback(async () => setD(await get('/api/admin/dropdowns')), []);
   useEffect(() => { load(); }, [load]);
@@ -18,6 +19,22 @@ export default function Dropdowns() {
   const remove = async (r) => {
     if (!(await confirm('Delete option', `Delete "${r.value}"?`, { okText: 'Delete', danger: true }))) return;
     try { await del(`/api/admin/dropdowns/${r.id}`); toast('Deleted'); load(); } catch (e) { toast(e.message, 'err'); }
+  };
+
+  const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggleMany = (ids, on) => setPicked((p) => { const n = new Set(p); ids.forEach((i) => (on ? n.add(i) : n.delete(i))); return n; });
+  const removePicked = async () => {
+    const chosen = d.rows.filter((r) => picked.has(r.id));
+    if (!chosen.length) return;
+    const inUse = chosen.filter((r) => r.usage > 0).length;
+    const msg = `Delete ${chosen.length} option(s)?${inUse ? ` ${inUse} of them are in use and will be kept (deactivate those instead).` : ''}`;
+    if (!(await confirm('Delete options', msg, { okText: 'Delete', danger: true }))) return;
+    try {
+      const r = await post('/api/admin/dropdowns/delete', { ids: chosen.map((x) => x.id) });
+      toast(`${r.deleted} deleted${r.kept.length ? `, ${r.kept.length} kept (in use)` : ''}`, r.kept.length && !r.deleted ? 'err' : undefined);
+      setPicked(new Set());
+      load();
+    } catch (e) { toast(e.message, 'err'); }
   };
 
   // Import: a JSON file made by Export. Missing options are added, existing ones only get their Active flag updated.
@@ -36,6 +53,7 @@ export default function Dropdowns() {
   return (
     <>
     <div className="row mb-12">
+      {picked.size ? <button type="button" className="btn danger sm" id="dd-del-sel" onClick={removePicked}>Delete selected ({picked.size})</button> : null}
       <span className="grow" />
       <a className="btn sm" href="/api/admin/dropdowns/export" download>Export JSON</a>
       <button type="button" className="btn sm" onClick={() => fileRef.current && fileRef.current.click()}>Import JSON</button>
@@ -50,10 +68,11 @@ export default function Dropdowns() {
             <AddForm cat={cat} onAdded={load} />
             <div className="table-wrap">
               <table className="t wl">
-                <thead><tr><th>Value</th><th className="num">Used</th><th>Active</th><th /></tr></thead>
+                <thead><tr><th className="chk"><input type="checkbox" disabled={!rows.length} checked={rows.length > 0 && rows.every((r) => picked.has(r.id))} onChange={(e) => toggleMany(rows.map((r) => r.id), e.target.checked)} aria-label={`Select all ${LABEL[cat] || cat}`} /></th><th>Value</th><th className="num">Used</th><th>Active</th><th /></tr></thead>
                 <tbody>
                   {rows.length ? rows.map((r) => (
                     <tr key={r.id}>
+                      <td className="chk"><input type="checkbox" checked={picked.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${r.value}`} /></td>
                       <td>{r.value}</td><td className="num">{r.usage}</td>
                       <td>{r.is_active ? <span className="yes">Yes</span> : <span className="no">NO</span>}</td>
                       <td className="right nowrap">
@@ -61,7 +80,7 @@ export default function Dropdowns() {
                         <button type="button" className="btn sm ghost" disabled={r.usage > 0} title={r.usage ? 'In use — deactivate instead' : undefined} onClick={() => remove(r)}>Delete</button>
                       </td>
                     </tr>
-                  )) : <tr><td colSpan={4} className="empty">No options yet</td></tr>}
+                  )) : <tr><td colSpan={5} className="empty">No options yet</td></tr>}
                 </tbody>
               </table>
             </div>

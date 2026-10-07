@@ -8,6 +8,7 @@ async function migrate(db, { seed = true } = {}) {
   const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   await db.query(sql);
   await db.query('INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING', [require('./version').SCHEMA_VERSION]);
+  await seedRoleActions(db);
   await upgradeIngestRecords(db);
   await require('./totp').migrateSecrets(db);
   if (seed) await seedAdmin(db);
@@ -90,6 +91,17 @@ async function upgradeV1(db) {
     throw e;
   } finally {
     client.release();
+  }
+}
+
+// Built-in roles get their default actions once; after that Admin > Roles owns them (an emptied role stays empty).
+async function seedRoleActions(db) {
+  const { DEFAULT_ROLE_ACTIONS } = require('./permissions');
+  const { rows } = await db.query('SELECT name FROM roles WHERE is_builtin AND NOT actions_seeded');
+  for (const { name } of rows) {
+    const acts = DEFAULT_ROLE_ACTIONS[name] || [];
+    if (acts.length) await db.query('INSERT INTO role_actions (role, action) SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING', [name, acts]);
+    await db.query('UPDATE roles SET actions_seeded = true WHERE name=$1', [name]);
   }
 }
 

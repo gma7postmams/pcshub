@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { get } from '../../lib/api.js';
 import { Empty } from '../../components/ui.jsx';
 import Users from './Users.jsx';
@@ -22,7 +22,8 @@ export default function Admin() {
   const [tab, setTab] = useState(fromHash);
   const [model, setModel] = useState(null);
 
-  useEffect(() => { get('/api/admin/access-model').then(setModel); }, []);
+  const refreshModel = useCallback(() => get('/api/admin/access-model').then(setModel), []);
+  useEffect(() => { refreshModel(); }, [refreshModel]);
   useEffect(() => {
     const onHash = () => setTab(fromHash());
     window.addEventListener('hashchange', onHash);
@@ -37,7 +38,7 @@ export default function Admin() {
       <div className="tabs" id="tabs">
         {TABS.map(([k, l]) => <button key={k} type="button" data-t={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
       </div>
-      <div id="pane">{model ? <Tab model={model} /> : <Empty>Loading…</Empty>}</div>
+      <div id="pane">{model ? <Tab model={model} refreshModel={refreshModel} /> : <Empty>Loading…</Empty>}</div>
     </main>
   );
 }

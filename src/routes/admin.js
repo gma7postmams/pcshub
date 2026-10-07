@@ -10,7 +10,8 @@ const v = require('../validate');
 const { asyncH, HttpError } = require('../middleware');
 const { audit } = require('../audit');
 const { THEME_KEYS } = require('../themes');
-const { ROLES, CATALOG, FIXED_PAGES, ROLE_ACTIONS, ACTION_PAGE, normalizeKeys } = require('../permissions');
+const { ROLES, CATALOG, FIXED_PAGES, ROLE_ACTIONS, ACTION_PAGE, ALL_ACTIONS, normalizeKeys } = require('../permissions');
+const { loadRoles } = require('../roles');
 
 // Mounted behind requirePageAccess('/admin') => Admin role only; the role is re-checked here as defence in depth.
 const router = express.Router();
@@ -32,6 +33,81 @@ const DROPDOWN_USAGE = Object.assign(Object.create(null), {
 router.get('/access-model', (req, res) => {
   res.json({ roles: ROLES, catalog: CATALOG, fixedPages: FIXED_PAGES, roleActions: ROLE_ACTIONS, actionPage: ACTION_PAGE });
 });
+
+// ---------- Roles (what a user can DO). Admin is fixed; the others are edited here; custom roles can be added and removed ----------
+router.get('/roles', asyncH(async (req, res) => {
+  const { rows } = await db.query(
+    `SELECT r.name, r.description, r.is_builtin,
+            COALESCE((SELECT array_agg(a.action ORDER BY a.action) FROM role_actions a WHERE a.role = r.name), '{}') AS actions,
+            (SELECT count(*)::int FROM users u WHERE u.role = r.name) AS users
+       FROM roles r ORDER BY r.rank DESC, r.name`
+  );
+  res.json(rows.map((r) => (r.name === 'Admin' ? { ...r, actions: [...ALL_ACTIONS] } : r)));
+}));
+
+function parseRole(body) {
+  const name = v.str(body.name, { field: 'Role name', max: 40, required: true });
+  if (!/^[A-Za-z0-9][A-Za-z0-9 _-]*$/.test(name)) throw new HttpError(400, 'Role name may use letters, numbers, spaces, - and _');
+  const description = v.str(body.description, { field: 'Description', max: 300 });
+  if (!Array.isArray(body.actions)) throw new HttpError(400, 'actions must be a list');
+  const actions = [...new Set(body.actions.map(String))];
+  const bad = actions.find((a) => !ALL_ACTIONS.includes(a) || a === 'admin');
+  if (bad) throw new HttpError(400, `"${bad}" is not an action a role can be given`);
+  return { name, description, actions };
+}
+async function saveRoleActions(c, name, actions) {
+  await c.query('DELETE FROM role_actions WHERE role=$1', [name]);
+  if (actions.length) await c.query('INSERT INTO role_actions (role, action) SELECT $1, unnest($2::text[])', [name, actions]);
+}
+
+router.post('/roles', asyncH(async (req, res) => {
+  const b = parseRole(req.body || {});
+  try {
+    await db.tx(async (c) => {
+      await c.query('INSERT INTO roles (name, description, rank, actions_seeded) VALUES ($1,$2,1,true)', [b.name, b.description]);
+      await saveRoleActions(c, b.name, b.actions);
+      await audit(req, 'admin.role_create', 'role', b.name, { actions: b.actions }, c);
+    });
+  } catch (e) {
+    if (e.code === '23505') throw new HttpError(409, `Role "${b.name}" already exists`);
+    throw e;
+  }
+  await loadRoles(db);
+  res.status(201).json({ ok: true });
+}));
+
+router.put('/roles/:name', asyncH(async (req, res) => {
+  const old = req.params.name;
+  const b = parseRole(req.body || {});
+  const cur = await db.query('SELECT is_builtin FROM roles WHERE name=$1', [old]);
+  if (!cur.rows.length) throw new HttpError(404, 'Role not found');
+  if (old === 'Admin') throw new HttpError(400, 'The Admin role is fixed and cannot be changed');
+  if (cur.rows[0].is_builtin && b.name !== old) throw new HttpError(400, 'Built-in roles cannot be renamed');
+  try {
+    await db.tx(async (c) => {
+      await c.query('UPDATE roles SET name=$2, description=$3 WHERE name=$1', [old, b.name, b.description]);   // users and role_actions follow a rename (ON UPDATE CASCADE)
+      await saveRoleActions(c, b.name, b.actions);
+      await audit(req, 'admin.role_update', 'role', b.name, { from: old, actions: b.actions }, c);
+    });
+  } catch (e) {
+    if (e.code === '23505') throw new HttpError(409, `Role "${b.name}" already exists`);
+    throw e;
+  }
+  await loadRoles(db);
+  res.json({ ok: true });
+}));
+
+router.delete('/roles/:name', asyncH(async (req, res) => {
+  const name = req.params.name;
+  const cur = await db.query('SELECT is_builtin, (SELECT count(*)::int FROM users WHERE role=$1) AS users FROM roles WHERE name=$1', [name]);
+  if (!cur.rows.length) throw new HttpError(404, 'Role not found');
+  if (cur.rows[0].is_builtin) throw new HttpError(400, 'Built-in roles cannot be deleted');
+  if (cur.rows[0].users) throw new HttpError(409, `${cur.rows[0].users} user(s) have the "${name}" role. Move them to another role first.`);
+  await db.query('DELETE FROM roles WHERE name=$1', [name]);
+  await audit(req, 'admin.role_delete', 'role', name, {});
+  await loadRoles(db);
+  res.json({ ok: true });
+}));
 
 // ---------- Groups (enrolment + page/section access) ----------
 router.get('/groups', asyncH(async (req, res) => {
@@ -406,6 +482,25 @@ router.put('/dropdowns/:id', asyncH(async (req, res) => {
       { from: { value: old.value, is_active: old.is_active }, to: { value, is_active } }, c);
   });
   res.json({ ok: true });
+}));
+
+// Delete several options at once. Options still in use are kept (and reported), like the single delete.
+router.post('/dropdowns/delete', asyncH(async (req, res) => {
+  const ids = [...new Set((Array.isArray(req.body && req.body.ids) ? req.body.ids : []).map((x) => parseInt(x, 10)).filter((x) => Number.isInteger(x) && x > 0))].slice(0, 500);
+  if (!ids.length) throw new HttpError(400, 'Choose at least one option');
+  const { rows } = await db.query('SELECT id, category, value FROM dropdown_options WHERE id = ANY($1::int[])', [ids]);
+  const deleted = []; const kept = [];
+  for (const o of rows) {
+    let n = 0;
+    for (const u of [].concat(DROPDOWN_USAGE[o.category])) {
+      n += (await db.query(`SELECT count(*)::int AS n FROM ${u.table} WHERE ${u.col}=$1`, [o.value])).rows[0].n;
+    }
+    if (n > 0) { kept.push({ id: o.id, value: o.value, used: n }); continue; }
+    await db.query('DELETE FROM dropdown_options WHERE id=$1', [o.id]);
+    await audit(req, 'admin.dropdown_delete', 'dropdown_option', o.id, { category: o.category, value: o.value });
+    deleted.push(o.id);
+  }
+  res.json({ ok: true, deleted: deleted.length, kept });
 }));
 
 router.delete('/dropdowns/:id', asyncH(async (req, res) => {

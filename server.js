@@ -199,6 +199,7 @@ const boot = process.env.MIGRATE_ON_START === 'false'
   : migrate(db);
 
 boot
+  .then(() => require('./src/roles').loadRoles(db))
   .then(() => require('./src/backup/service').recoverStale())
   .then(() => require('./src/backup/analysis').startupCleanup())
   .then(async () => {

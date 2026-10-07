@@ -51,7 +51,7 @@ const PAGE_BY_PATH = dict([...CATALOG, ...FIXED_PAGES].map((p) => [p.path, p]));
 const SECTION_PAGE = dict(CATALOG.flatMap((p) => p.sections.map((s) => [s.key, p.key])));
 
 // Role -> actions
-const ROLE_ACTIONS = Object.assign(Object.create(null), {
+const DEFAULT_ROLE_ACTIONS = Object.assign(Object.create(null), {
   Admin: [
     'ingest.write',
     'ingest.delete',
@@ -75,6 +75,10 @@ const ROLE_ACTIONS = Object.assign(Object.create(null), {
   Ingest:  ['ingest.cm_complete'],   // Ingest Tracker only: Status (CM) and its NON-COMPLIANT reason, nothing else
   Viewer:  [],
 });
+// The live role -> actions map. It starts from the built-in defaults and is replaced from the database (roles / role_actions,
+// managed in Admin > Roles) at startup and after every change, in place, so every module that imported it sees the update.
+const ROLE_ACTIONS = Object.assign(Object.create(null), JSON.parse(JSON.stringify(DEFAULT_ROLE_ACTIONS)));
+
 // Action -> page the action happens on (the user's group must grant it)
 const ACTION_PAGE = Object.assign(Object.create(null), {
   'ingest.write': 'ingest',
@@ -86,6 +90,19 @@ const ACTION_PAGE = Object.assign(Object.create(null), {
   'plugs.write': 'plugs',
   'admin': null,
 });
+
+const ALL_ACTIONS = Object.keys(ACTION_PAGE);
+const BUILTIN_ROLES = ['Admin', 'Manager', 'Editor', 'Ingest', 'Viewer'];
+
+/** rows: [{ name, actions: string[] }]. Admin always holds every action; unknown actions are dropped. */
+function applyRoles(rows) {
+  const names = rows.map((r) => r.name);
+  if (!names.includes('Admin')) names.unshift('Admin');
+  ROLES.splice(0, ROLES.length, ...names);
+  for (const k of Object.keys(ROLE_ACTIONS)) delete ROLE_ACTIONS[k];
+  for (const r of rows) ROLE_ACTIONS[r.name] = r.name === 'Admin' ? [...ALL_ACTIONS] : (r.actions || []).filter((a) => ALL_ACTIONS.includes(a));
+  if (!ROLE_ACTIONS.Admin) ROLE_ACTIONS.Admin = [...ALL_ACTIONS];
+}
 
 function isValidKey(k) { return ALL_KEYS.includes(k); }
 
@@ -163,6 +180,6 @@ function landingPath(user) {
 }
 
 module.exports = {
-  ROLES, CATALOG, FIXED_PAGES, ROLE_ACTIONS, ACTION_PAGE, PAGE_BY_PATH,
+  ROLES, CATALOG, FIXED_PAGES, ROLE_ACTIONS, DEFAULT_ROLE_ACTIONS, ALL_ACTIONS, BUILTIN_ROLES, applyRoles, ACTION_PAGE, PAGE_BY_PATH,
   normalizeKeys, canPage, canSection, can, allowedPages, allowedSections, allowedActions, landingPath,
 };
