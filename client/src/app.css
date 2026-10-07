@@ -858,8 +858,11 @@ table.t.wl th.tight { letter-spacing: .02em; padding-left: 6px; padding-right: 6
 table.t th.chk, table.t td.chk { width: 34px; text-align: center; }
 
 /* sortable table headers */
-th.sortable { padding: 0; }
-th.sortable .sort-btn { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 4px; width: 100%; padding: inherit; cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; }
+/* The heading cell keeps its own padding (so classes like .narrow / .tight still work); the button inside fills it with NO padding of its own — it used
+   to repeat the cell's padding, which doubled the header height — and centres its text like every other heading. */
+th.sortable .sort-btn { all: unset; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; padding: 0; cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; text-align: center; line-height: inherit; }
+/* the select-all tick box in a header cell sat in a text line (with its extra line space) and made the whole header row ~8 px taller than the headings need */
+table.t thead th > input[type="checkbox"] { display: block; margin: 0 auto; }
 th.sortable .sort-btn:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: -2px; }
 th.sortable .sort-ind { font-size: 9px; opacity: .35; }
 th.sortable.sorted .sort-ind { opacity: .9; }
