@@ -48,7 +48,7 @@ const FIELDS = {
   audio_guide:    { label: 'Audio Guide', kind: 'audio_guide' },
   remarks:        { label: 'Remarks', kind: 'text', multiline: true, max: 4000, hint: OPEN },
   total_mats:     { label: 'Total Mats', kind: 'text', multiline: true, max: 500, hint: OPEN },
-  prog_name:      { label: 'PROG. NAME / PROJ. TITLE', kind: 'text', max: 300, hint: FROM_PSD },
+  prog_name:      { label: 'PROG. NAME / PROJ. TITLE', kind: 'select', lookup: 'program', max: 300, hint: FROM_PSD },
   plug_type:      { label: 'Plug Type', kind: 'select', lookup: 'plug_type', max: 100 },
   // Audio sheet's Assigned / Done / Resched-cancelled tables: open columns you can type or paste into
   length:         { label: 'Length', kind: 'text', max: 100, hint: OPEN },
@@ -225,6 +225,7 @@ async function parseRow(client, body, current, customCols = [], opts = {}) {
     else if (k === 'units_concerned') rec[k] = unitsMayBeBlank && !body[k] ? null : v.oneOf(body[k], UNITS, { field: f.label });
     else rec[k] = v.str(body[k], { field: f.label, max: f.max, required: !!f.required });
   }
+  const typedProg = rec.prog_name;   // checked against the dropdown; a title filled in from the PSD Daily Plug List below is taken as it is
   await fillFromPlugList(client, rec);
   // Platform follows the Plug ID prefix unless one was chosen (only if that option exists and is active)
   if (!rec.platform) {
@@ -237,6 +238,12 @@ async function parseRow(client, body, current, customCols = [], opts = {}) {
     }
   }
   await assertOption(client, 'workload_platform', rec.platform, 'Platform', cur.platform);
+  if (typedProg && rec.work_date) {   // a title that comes from that day's PSD Daily Plug List (picked or auto-filled by the form) is fine too
+    const { rows } = await client.query('SELECT 1 FROM workload_plugs WHERE plug_date=$1 AND prog_name=$2 LIMIT 1', [rec.work_date, typedProg]);
+    if (rows.length) rec._progOk = true;
+  }
+  if (!rec._progOk) await assertOption(client, 'program', typedProg, 'PROG. NAME / PROJ. TITLE', cur.prog_name);
+  delete rec._progOk;
   await assertOption(client, 'plug_type', rec.plug_type, 'Plug Type', cur.plug_type);
   // Priority flag (not a template column, so it lives outside FIELDS): keep the stored value when the request doesn't mention it
   const p = body.is_priority;
@@ -246,7 +253,7 @@ async function parseRow(client, body, current, customCols = [], opts = {}) {
 }
 
 const colList = COLS.map((c) => `"${c}"`);
-const CUR_COLS = 'platform, plug_type, audio_guide, work_date, is_priority';
+const CUR_COLS = 'platform, plug_type, prog_name, audio_guide, work_date, is_priority';
 
 async function insertRow(client, rec, userId) {
   const params = [...COLS.map((c) => rec[c]), !!rec.is_priority, JSON.stringify(rec.custom_fields || {}), userId];

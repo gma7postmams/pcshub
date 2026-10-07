@@ -44,7 +44,7 @@ const dayText = (x) => (isoDate(x) ? fmtDate(isoDate(x)) : (x || ''));   // a re
 // Columns that can be edited right in the table, like the Workload Tracker: click a cell, change it, Enter or click away saves, Esc cancels.
 // Requested By is not one of them — it is filled in from whoever created the request. Destination Folder and Approved By are for PCS / OCS only.
 const CELLS = {
-  program: { kind: 'text', max: 200 },
+  program: { kind: 'select' },
   platform: { kind: 'select' },
   billable_party: { kind: 'text', max: 200 },
   episode_break_date_text: { kind: 'date' },   // the browser's own date picker
@@ -134,15 +134,17 @@ export default function Ingest() {
   const [detail, setDetail] = useState(null);
   const [reasonFor, setReasonFor] = useState(null);   // the record whose NON-COMPLIANT reason is being asked for
   const [editing, setEditing] = useState(null);   // { id, k }: the one cell being edited in the table
+  const [picked, setPicked] = useState(() => new Set());   // rows ticked for batch delete
   const q = useDebounced(filt.q, 300);
 
   useEffect(() => {
-    get('/api/dropdowns?categories=platform').then(setLookups);
+    get('/api/dropdowns?categories=platform,program').then(setLookups);
   }, []);
 
   const load = useCallback(async () => {
     const p = new URLSearchParams({ limit: PAGE, offset });
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
+    setPicked(new Set());
     try { setData(await get(`/api/ingest?${p}`)); } catch (e) { setData({ error: e.message, rows: [], total: 0 }); }
   }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -207,7 +209,7 @@ export default function Ingest() {
       const initial = cellInitial(r, k);
       return (
         <td className="editing" onClick={(e) => e.stopPropagation()}>
-          <InlineCell def={def} initial={initial} options={k === 'cm_status' ? CM_OPTIONS : withCurrent(lookups ? lookups.platform : [], r.platform)}
+          <InlineCell def={def} initial={initial} options={k === 'cm_status' ? CM_OPTIONS : k === 'program' ? withCurrent(lookups ? lookups.program : [], r.program) : withCurrent(lookups ? lookups.platform : [], r.platform)}
             onSave={(value) => saveCell(r, k, value, initial)} onCancel={() => setEditing(null)} />
         </td>
       );
@@ -223,11 +225,25 @@ export default function Ingest() {
   const setF = (k) => (e) => { setFilt((f) => ({ ...f, [k]: e.target.value })); setOffset(0); };
   const total = data ? data.total : 0;
 
+  const rows = data && data.rows ? data.rows : [];
+  const allOn = rows.length > 0 && rows.every((r) => picked.has(r.id));
+  const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const removePicked = async () => {
+    const ids = [...picked];
+    if (!(await confirm('Delete ingest records', `Permanently delete ${ids.length} selected record${ids.length === 1 ? '' : 's'}? Records with a CM decision are kept (only an Admin can delete DONE ones).`, { okText: 'Delete', danger: true }))) return;
+    try {
+      const r = await post('/api/ingest/delete', { ids });
+      toast(`${r.deleted} deleted${r.kept ? `, ${r.kept} kept (CM decided)` : ''}`, r.deleted ? undefined : 'err');
+      load();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+
   return (
     <main className="container wide wl-page">
       <div className="page-head">
         <div><h1>Ingest Tracker</h1><div className="sub">Log ingest requests, set their destination and approval, and track the CM status.</div></div>
         <div className="actions">
+          {canDelete && picked.size ? <button type="button" className="btn danger" id="del-sel" onClick={removePicked}>Delete selected ({picked.size})</button> : null}
           {canWrite ? <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({})}><PlusIcon /> New Ingest</button> : null}
         </div>
       </div>
@@ -241,7 +257,7 @@ export default function Ingest() {
           <FilterSelect label="Status" value={filt.status} onChange={setF('status')}><Options list={STATUS_FILTER} blank="All" /></FilterSelect>
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All" /></FilterSelect>
           <label className="wl-search" style={{ flex: '0 1 320px', minWidth: 'min(100%, 300px)' }}>   {/* wide enough for the whole hint, with room to spare for wider fonts (a Mac's system font is wider) */}
-            <input type="text" placeholder="Program / Project (exact match)" value={filt.program} onChange={setF('program')} style={{ textOverflow: 'ellipsis' }} />
+            <input type="text" placeholder="PROG. NAME / PROJ. TITLE (exact match)" value={filt.program} onChange={setF('program')} style={{ textOverflow: 'ellipsis' }} />
           </label>
           <DateRange title="Episode / Breakdate range" from={filt.from} to={filt.to} onChange={({ from, to }) => { setFilt((f) => ({ ...f, from, to })); setOffset(0); }} />
           {filt.approval ? (   // opened from the Dashboard's Pending Approval card: only requests nobody has approved yet; the chip clears it
@@ -255,12 +271,14 @@ export default function Ingest() {
                 : (
                   <table className="t wl">
                     <thead><tr>
-                      <th>Program / Project</th><th>Platform</th><th>Billable Party</th><th className="tight">Episode / Breakdate</th><th>Source</th>
+                      {canDelete ? <th className="chk"><input type="checkbox" checked={allOn} onChange={() => setPicked(allOn ? new Set() : new Set(rows.map((r) => r.id)))} aria-label="Select all records on this page" /></th> : null}
+                      <th>PROG. NAME / PROJ. TITLE</th><th>Platform</th><th>Billable Party</th><th className="tight">Episode / Breakdate</th><th>Source</th>
                       <th className="narrow">No. of Materials</th><th>Requested By</th><th>Destination Folder</th><th>Approved By</th><th>Status (CM)</th><th>Updated</th>
                     </tr></thead>
                     <tbody>
                       {data.rows.map((r) => (
                         <tr key={r.id} className="clickable" onClick={() => openDetail(r.id)}>
+                          {canDelete ? <td className="chk" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={picked.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${r.program}`} /></td> : null}
                           {cell(r, 'program', <strong>{r.program}</strong>)}
                           {cell(r, 'platform', <PlatformCell value={r.platform} />)}
                           {cell(r, 'billable_party', r.billable_party)}
@@ -348,7 +366,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
   };
 
   const submit = async () => {
-    if (!f.program || !f.platform) { toast('Program / Project and Platform are required', 'err'); return; }
+    if (!f.program || !f.platform) { toast('PROG. NAME / PROJ. TITLE and Platform are required', 'err'); return; }
     const materialsCount = f.materials_count === '' ? null : Number(f.materials_count);
     if (materialsCount !== null && (!Number.isInteger(materialsCount) || materialsCount < 0)) {
       toast('Number of Materials must be a nonnegative integer', 'err');
@@ -383,8 +401,8 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
       )}
     >
       <form id="ing-form" className="form-grid" noValidate onSubmit={(e) => e.preventDefault()}>
-        <label className="f"><span>Program / Project <span className="req">*</span></span>
-          <input name="program" maxLength={200} value={f.program} onChange={set('program')} /></label>
+        <label className="f"><span>PROG. NAME / PROJ. TITLE <span className="req">*</span></span>
+          <select name="program" value={f.program} onChange={set('program')}><Options list={withCurrent(lookups.program, r.program)} blank="Select…" /></select></label>
         <label className="f"><span>Platform <span className="req">*</span></span>
           <select name="platform" value={f.platform} onChange={set('platform')}><Options list={withCurrent(lookups.platform, r.platform)} blank="Select platform…" /></select></label>
         <label className="f"><span>Billable Party</span><input name="billable_party" maxLength={200} value={f.billable_party} onChange={set('billable_party')} /></label>
@@ -432,7 +450,7 @@ function IngestDetail({ r, canWrite, canDelete, canApprove, approveReady, canUna
     >
       <div className="row mb-12"><CmStatus r={r} inline /><span className="dim">Created {fmtDateTime(r.created_at)} by {r.created_by_name || '—'}</span></div>
       <dl className="kv">
-        <KV k="Program / Project">{r.program}</KV>
+        <KV k="PROG. NAME / PROJ. TITLE">{r.program}</KV>
         <KV k="Platform">{r.platform}</KV>
         <KV k="Billable Party">{r.billable_party}</KV>
         <KV k="Episode / Breakdate">{r.episode_break_date_text || r.episode_date}</KV>

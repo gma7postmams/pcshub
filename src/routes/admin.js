@@ -22,7 +22,7 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const DROPDOWN_CATEGORIES = ['program', 'platform', 'workload_platform', 'plug_type'];
 // Which table/column each dropdown category is stored in (used for usage counts, rename propagation, delete guard)
 const DROPDOWN_USAGE = Object.assign(Object.create(null), {
-  program: { table: 'ingest_records', col: 'program' },
+  program: [{ table: 'ingest_records', col: 'program' }, { table: 'workload_items', col: 'prog_name' }, { table: 'workload_plugs', col: 'prog_name' }],
   platform: { table: 'ingest_records', col: 'platform' },
   workload_platform: { table: 'workload_items', col: 'platform' },
   plug_type: { table: 'workload_items', col: 'plug_type' },
@@ -398,8 +398,9 @@ router.put('/dropdowns/:id', asyncH(async (req, res) => {
     }
     // Renaming propagates to existing records so filters and counts stay consistent
     if (old.value !== value) {
-      const u = DROPDOWN_USAGE[old.category];
-      await c.query(`UPDATE ${u.table} SET ${u.col}=$2 WHERE ${u.col}=$1`, [old.value, value]);
+      for (const u of [].concat(DROPDOWN_USAGE[old.category])) {
+        await c.query(`UPDATE ${u.table} SET ${u.col}=$2 WHERE ${u.col}=$1`, [old.value, value]);
+      }
     }
     await audit(req, 'admin.dropdown_update', 'dropdown_option', id,
       { from: { value: old.value, is_active: old.is_active }, to: { value, is_active } }, c);
@@ -412,12 +413,13 @@ router.delete('/dropdowns/:id', asyncH(async (req, res) => {
   const cur = await db.query('SELECT * FROM dropdown_options WHERE id=$1', [id]);
   if (!cur.rows.length) throw new HttpError(404, 'Option not found');
   const o = cur.rows[0];
-  const u = DROPDOWN_USAGE[o.category];
-  const used = await db.query(`SELECT count(*)::int AS n FROM ${u.table} WHERE ${u.col}=$1`, [o.value]);
-  if (used.rows[0].n > 0) {
-    const what = u.table === 'workload_items' ? 'workload item(s)' : 'ingest record(s)';
-    throw new HttpError(409, `"${o.value}" is used by ${used.rows[0].n} ${what}. Deactivate it instead.`);
+  const parts = [];
+  for (const u of [].concat(DROPDOWN_USAGE[o.category])) {
+    const used = await db.query(`SELECT count(*)::int AS n FROM ${u.table} WHERE ${u.col}=$1`, [o.value]);
+    const n = used.rows[0].n;
+    if (n > 0) parts.push(`${n} ${u.table === 'workload_items' ? 'workload item(s)' : u.table === 'workload_plugs' ? 'plug list entr(ies)' : 'ingest record(s)'}`);
   }
+  if (parts.length) throw new HttpError(409, `"${o.value}" is used by ${parts.join(', ')}. Deactivate it instead.`);
   await db.query('DELETE FROM dropdown_options WHERE id=$1', [id]);
   await audit(req, 'admin.dropdown_delete', 'dropdown_option', id, { category: o.category, value: o.value });
   res.json({ ok: true });

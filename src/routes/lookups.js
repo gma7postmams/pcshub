@@ -7,7 +7,7 @@ const router = express.Router();
 
 // Which page each dropdown category belongs to. A user only gets the values for pages their group can open.
 const CATEGORY_PAGE = Object.assign(Object.create(null), {
-  program: '/ingest',
+  program: ['/ingest', '/workload', '/plugs'],
   platform: '/ingest',
   workload_platform: '/workload',
   plug_type: '/workload',
@@ -19,7 +19,7 @@ router.get('/dropdowns', asyncH(async (req, res) => {
     .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 10))];
   if (!cats.length) throw new HttpError(400, 'category is required');
   if (cats.some((c) => !CATEGORY_PAGE[c])) throw new HttpError(400, 'Unknown category');
-  if (cats.some((c) => !canPage(req.user, CATEGORY_PAGE[c]))) throw new HttpError(403, 'Not permitted');
+  if (cats.some((c) => ![].concat(CATEGORY_PAGE[c]).some((pg) => canPage(req.user, pg)))) throw new HttpError(403, 'Not permitted');
   const { rows } = await db.query(
     `SELECT category, value FROM dropdown_options
       WHERE is_active AND category = ANY($1::text[]) ORDER BY category, sort_order, value`,

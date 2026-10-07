@@ -256,8 +256,15 @@ module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, lo
   });
   const dupe = (e) => { if (e && e.code === '23505') throw new HttpError(409, 'That plug (same Plug ID, program and PSD) is already on this day\'s list'); throw e; };
 
+  const checkProg = async (name, current) => {
+    if (!name || name === current) return;
+    const { rows } = await db.query("SELECT 1 FROM dropdown_options WHERE category='program' AND value=$1 AND is_active", [name]);
+    if (!rows.length) throw new HttpError(400, `PROG. NAME / PROJ. TITLE "${name}" is not a valid option`);
+  };
+
   router.post('/', requireAction('plugs.write'), asyncH(async (req, res) => {
     const b = plugBody(req.body || {});
+    await checkProg(b.prog_name, null);
     let row;
     try {
       ({ rows: [row] } = await db.query(
@@ -273,6 +280,8 @@ module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, lo
 
   router.put('/:id(\\d+)', requireAction('plugs.write'), asyncH(async (req, res) => {
     const b = plugBody(req.body || {});
+    const cur = await db.query('SELECT prog_name FROM workload_plugs WHERE id=$1', [req.params.id]);
+    await checkProg(b.prog_name, cur.rows[0] && cur.rows[0].prog_name);
     try {
       const r = await db.query(
         `UPDATE workload_plugs SET plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=$6, updated_at=now() WHERE id=$1`,

@@ -71,6 +71,7 @@ async function parseBody(client, body, user, current = null) {
     remarks: v.str(body.remarks, { field: 'Remarks', max: 4000 }),
   };
   await assertDropdown(client, 'platform', rec.platform, 'Platform');
+  if (!current || current.program !== rec.program) await assertDropdown(client, 'program', rec.program, 'PROG. NAME / PROJ. TITLE');
   return rec;
 }
 
@@ -190,6 +191,10 @@ router.patch('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
       throw new HttpError(409, `Record is marked ${cur.rows[0].cm_status} and can no longer be edited`);
     }
     if (field === 'platform') await assertDropdown(c, 'platform', value, 'Platform');
+    if (field === 'program') {
+      const old = await c.query('SELECT program FROM ingest_records WHERE id=$1', [id]);
+      if (old.rows[0].program !== value) await assertDropdown(c, 'program', value, 'PROG. NAME / PROJ. TITLE');
+    }
     // `field` is one of the fixed keys above (never user text), so it is safe to name the column here
     if (field === 'episode_break_date_text') {
       await c.query('UPDATE ingest_records SET episode_date=$2, episode_break_date_text=$3, updated_by=$4, updated_at=now() WHERE id=$1', [id, value, value, req.user.id]);   // separate params: one column is a date, the other text
@@ -297,20 +302,42 @@ router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(asyn
   res.json({ ok: true, status: decision });
 }));
 
+// A request with a CM decision is kept as a historical record — except that an Admin may delete one that is DONE (NON-COMPLIANT ones stay).
+function deleteBlock(cm, user) {
+  if (!cm || (cm === 'DONE' && user && user.role === 'Admin')) return null;
+  return cm === 'DONE' ? 'Only an Admin can delete a request that is DONE in CM' : 'CM-completed requests are preserved as historical records';
+}
+
 router.delete('/:id', requireAction('ingest.delete'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   await db.tx(async (c) => {
     const cur = await c.query('SELECT program, cm_status FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
     if (!cur.rows.length) throw new HttpError(404, 'Ingest record not found');
-    // A request with a CM decision is kept as a historical record — except that an Admin may delete one that is DONE (NON-COMPLIANT ones stay).
-    const cm = cur.rows[0].cm_status;
-    if (cm && !(cm === 'DONE' && req.user && req.user.role === 'Admin')) {
-      throw new HttpError(409, cm === 'DONE' ? 'Only an Admin can delete a request that is DONE in CM' : 'CM-completed requests are preserved as historical records');
-    }
+    const block = deleteBlock(cur.rows[0].cm_status, req.user);
+    if (block) throw new HttpError(409, block);
     await c.query('DELETE FROM ingest_records WHERE id=$1', [id]);
     await audit(req, 'ingest.delete', 'ingest_record', id, cur.rows[0], c);
   });
   res.json({ ok: true });
+}));
+
+// Batch delete: removes every selected record that may be deleted and reports the ones that were kept (same rules as above).
+router.post('/delete', requireAction('ingest.delete'), asyncH(async (req, res) => {
+  const raw = req.body && req.body.ids;
+  if (!Array.isArray(raw) || !raw.length) throw new HttpError(400, 'Choose at least one record');
+  if (raw.length > 500) throw new HttpError(400, 'Delete at most 500 records at a time');
+  const ids = [...new Set(raw.map((x) => v.id(x)))];
+  const out = await db.tx(async (c) => {
+    const { rows } = await c.query('SELECT id, program, cm_status FROM ingest_records WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE', [ids]);
+    const ok = rows.filter((r) => !deleteBlock(r.cm_status, req.user));
+    const kept = rows.length - ok.length;
+    if (ok.length) {
+      await c.query('DELETE FROM ingest_records WHERE id = ANY($1::int[])', [ok.map((r) => r.id)]);
+      for (const r of ok) await audit(req, 'ingest.delete', 'ingest_record', r.id, { program: r.program, cm_status: r.cm_status, batch: true }, c);
+    }
+    return { deleted: ok.length, kept, missing: ids.length - rows.length };
+  });
+  res.json({ ok: true, ...out });
 }));
 
 module.exports = router;
