@@ -65,3 +65,21 @@ export function fmtBreakdate(v) {
   if (!m) return v || '';
   return m[2] === '00' && m[3] === '00' ? fmtDate(m[1]) : `${fmtDate(m[1])} ${fmtTime(`${m[2]}:${m[3]}`)}`;
 }
+
+/** Download a file the server builds (e.g. an Excel export): fetches with the session, then saves it under the name the server chose. */
+export async function downloadFile(url, fallbackName = 'export.xlsx') {
+  const res = await fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'PromoHub' } });
+  if (!res.ok) {
+    let msg = `Export failed (${res.status})`;
+    try { msg = (await res.json()).error || msg; } catch (e) { /* not JSON */ }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const m = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = m ? m[1] : fallbackName;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
