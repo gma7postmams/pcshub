@@ -4,7 +4,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { ago, fmtDate, fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { PlusIcon, SearchIcon } from '../components/Icons.jsx';
-import { Chip, DateChip, DateRange, FilterSelect, Pager, PlatformCell, SortTh } from '../components/wl.jsx';
+import { Chip, DateChip, DateRange, FilterSelect, Pager, PlatformCell, SortTh, useNarrow } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
 // Status (CM) is blank (Pending) until CM picks one of these
@@ -142,6 +142,7 @@ export default function Ingest() {
   const canWrite = s.can('ingest.write');
   const canDelete = s.can('ingest.delete');
 
+  const narrow = useNarrow();
   const [lookups, setLookups] = useState(null);
   const [filt, setFilt] = useState({ q: '', status: /^pending$/i.test(params.get('status') || '') ? 'PENDING' : (params.get('status') || ''), program: '', platform: '', from: '', to: '', approval: /^pending$/i.test(params.get('approval') || '') ? 'pending' : '' });
   const [offset, setOffset] = useState(0);
@@ -224,7 +225,9 @@ export default function Ingest() {
     } catch (e) { toast(e.message, 'err'); throw e; }
   };
   // A cell in the table: editable in place when you may change it, otherwise plain (clicking it opens the details as before).
-  const cell = (r, k, children, props = {}) => {
+  const LBL = { program: 'PROG. NAME / PROJ. TITLE', platform: 'Platform', billable_party: 'Billable Party', episode_break_date_text: 'Episode / Breakdate', source: 'Source', materials_count: 'No. of Materials', requested_by: 'Requested By', destination_folder: 'Destination Folder', approved_by: 'Approved By', cm_status: 'Status (CM)', updated: 'Updated' };
+  const cell = (r, k, children, props0 = {}) => {
+    const props = { 'data-k': k, 'data-label': LBL[k], ...props0 };
     const def = CELLS[k];
     const may = def && def.cm ? canCm : canWrite && (!r.cm_status || canCm) && (!def || !def.approve || canApprove);
     if (!def || !may) return <td {...props}>{children}</td>;
@@ -292,7 +295,7 @@ export default function Ingest() {
             : data.error ? <Empty>{data.error}</Empty>
               : !data.rows.length ? <Empty>No ingest records match these filters.</Empty>
                 : (
-                  <table className="t wl">
+                  <table className={`t wl ing${narrow ? ' cards' : ''}`}>
                     <thead><tr>
                       {canDelete ? <th className="chk"><input type="checkbox" checked={allOn} onChange={() => setPicked(allOn ? new Set() : new Set(rows.map((r) => r.id)))} aria-label="Select all records on this page" /></th> : null}
                       <SortTh k="program" sort={sort} onSort={setSort}>PROG. NAME / PROJ. TITLE</SortTh>
@@ -317,11 +320,11 @@ export default function Ingest() {
                           {cell(r, 'episode_break_date_text', <DateChip>{dayText(r.episode_break_date_text || r.episode_date)}</DateChip>, { className: 'nowrap' })}
                           {cell(r, 'source', r.source, { className: 'cell-clip', title: r.source || '' })}
                           {cell(r, 'materials_count', r.materials_count != null ? r.materials_count : '', { className: 'num' })}
-                          <td title="Filled in automatically from the person who created the request">{r.requested_by_psd || r.requested_by_name || ''}</td>
+                          <td data-k="requested_by" data-label="Requested By" title="Filled in automatically from the person who created the request">{r.requested_by_psd || r.requested_by_name || ''}</td>
                           {cell(r, 'destination_folder', r.destination_folder, { className: 'cell-clip mono', title: r.destination_folder || '' })}
-                          <td><ApprovedBy r={r} canApprove={canApprove} /></td>
+                          <td data-k="approved_by" data-label="Approved By"><ApprovedBy r={r} canApprove={canApprove} /></td>
                           {cell(r, 'cm_status', <CmStatus r={r} />)}
-                          <td className="dim nowrap">{ago(r.updated_at)}</td>
+                          <td data-k="updated" data-label="Updated" className="dim nowrap">{ago(r.updated_at)}</td>
                         </tr>
                       ))}
                     </tbody>

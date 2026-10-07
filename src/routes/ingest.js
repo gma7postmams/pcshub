@@ -368,3 +368,4 @@ router.post('/delete', requireAction('ingest.delete'), asyncH(async (req, res) =
 }));
 
 module.exports = router;
+module.exports.episodeRange = episodeRange;   // exported for the tests

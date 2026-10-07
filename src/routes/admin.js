@@ -66,7 +66,7 @@ router.post('/roles', asyncH(async (req, res) => {
     await db.tx(async (c) => {
       await c.query('INSERT INTO roles (name, description, rank, actions_seeded) VALUES ($1,$2,1,true)', [b.name, b.description]);
       await saveRoleActions(c, b.name, b.actions);
-      await audit(req, 'admin.role_create', 'role', b.name, { actions: b.actions }, c);
+      await audit(req, 'admin.role_create', 'role', b.name, { name: b.name, actions: b.actions }, c);
     });
   } catch (e) {
     if (e.code === '23505') throw new HttpError(409, `Role "${b.name}" already exists`);
@@ -83,11 +83,14 @@ router.put('/roles/:name', asyncH(async (req, res) => {
   if (!cur.rows.length) throw new HttpError(404, 'Role not found');
   if (old === 'Admin') throw new HttpError(400, 'The Admin role is fixed and cannot be changed');
   if (cur.rows[0].is_builtin && b.name !== old) throw new HttpError(400, 'Built-in roles cannot be renamed');
+  const before = (await db.query('SELECT action FROM role_actions WHERE role=$1', [old])).rows.map((r) => r.action);
+  const added = b.actions.filter((a) => !before.includes(a));
+  const removed = before.filter((a) => !b.actions.includes(a));
   try {
     await db.tx(async (c) => {
       await c.query('UPDATE roles SET name=$2, description=$3 WHERE name=$1', [old, b.name, b.description]);   // users and role_actions follow a rename (ON UPDATE CASCADE)
       await saveRoleActions(c, b.name, b.actions);
-      await audit(req, 'admin.role_update', 'role', b.name, { from: old, actions: b.actions }, c);
+      await audit(req, 'admin.role_update', 'role', b.name, { name: b.name, renamedFrom: old !== b.name ? old : undefined, added, removed }, c);
     });
   } catch (e) {
     if (e.code === '23505') throw new HttpError(409, `Role "${b.name}" already exists`);
@@ -104,7 +107,7 @@ router.delete('/roles/:name', asyncH(async (req, res) => {
   if (cur.rows[0].is_builtin) throw new HttpError(400, 'Built-in roles cannot be deleted');
   if (cur.rows[0].users) throw new HttpError(409, `${cur.rows[0].users} user(s) have the "${name}" role. Move them to another role first.`);
   await db.query('DELETE FROM roles WHERE name=$1', [name]);
-  await audit(req, 'admin.role_delete', 'role', name, {});
+  await audit(req, 'admin.role_delete', 'role', name, { name });
   await loadRoles(db);
   res.json({ ok: true });
 }));

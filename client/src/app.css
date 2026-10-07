@@ -868,3 +868,26 @@ table.t thead th > input[type="checkbox"] { display: block; margin: 0 auto; }
 th.sortable .sort-btn:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: -2px; }
 th.sortable .sort-ind { font-size: 9px; opacity: .35; }
 th.sortable.sorted .sort-ind { opacity: .9; }
+
+/* ---------- phones: Ingest / Plug List rows become cards (same look as the Workload cards), admin grids fit the screen ---------- */
+table.t.wl.cards td.chk { grid-column: 1 / -1; flex-direction: row; justify-content: flex-start; width: auto; text-align: left; }
+table.t.wl.cards td.chk::before { content: none; }
+table.t.wl.cards td[data-k="program"] { grid-column: 1 / -1; order: -1; font-size: 14px; }
+table.t.wl.cards td[data-k="program"]::before { content: none; }
+table.t.wl.cards td[data-k="source"], table.t.wl.cards td[data-k="destination_folder"] { grid-column: 1 / -1; }
+table.t.wl.cards td.plug-actions { grid-column: 1 / -1; flex-direction: row; justify-content: flex-end; gap: 8px; width: auto; }
+table.t.wl.cards td.plug-actions::before { content: none; }
+table.t.wl.cards td.num { text-align: left; }
+table.t.wl.cards td.cell-clip { max-width: none; white-space: normal; }
+@media (max-width: 680px) {
+  .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); }   /* min-content of a wide table must not stretch the column */
+  .card { min-width: 0; }
+  .perm-matrix td:first-child, .perm-matrix th:first-child { width: 170px; min-width: 170px; max-width: 170px; white-space: normal !important; overflow-wrap: anywhere; position: sticky; left: 0; z-index: 1; background: var(--surface); text-align: left !important; font-size: 12.5px; }
+  .perm-matrix td:first-child .mono { display: block; font-size: 10.5px; }
+  .perm-matrix th:first-child { background: var(--surface-2, var(--surface)); }
+}
+
+table.t.wl.cards td.chk { position: absolute; top: 10px; right: 12px; width: auto; padding: 0; grid-column: auto; order: 0; }
+table.t.wl.cards tr { position: relative; }
+table.t.wl.cards td[data-k="program"], table.t.wl.cards td[data-k="plug_id"] { padding-right: 36px; }
+table.t.wl.cards td .sub, table.t.wl.cards td .cm-meta { white-space: normal; overflow-wrap: anywhere; max-width: 100%; display: block; }
