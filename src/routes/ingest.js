@@ -114,7 +114,9 @@ async function auditBlocked(req, action, id, details) {
   await audit(req, action, 'ingest_record', id, details).catch(() => {});
 }
 
-router.get('/', asyncH(async (req, res) => {
+/** WHERE for the list and the Excel export (same filters, same search). */
+function ingestFilter(q) {
+  const req = { query: q };
   const where = [];
   const params = [];
   const add = (sql, val) => { params.push(val); where.push(sql.replace('?', `$${params.length}`)); };
@@ -136,8 +138,12 @@ router.get('/', asyncH(async (req, res) => {
                  OR i.source ILIKE ${p} OR i.destination_folder ILIKE ${p} OR i.approved_by ILIKE ${p}
                  OR i.remarks ILIKE ${p} OR i.requested_by_psd ILIKE ${p} OR ru.full_name ILIKE ${p})`);
   }
+  return { where, params, whereSql: where.length ? `WHERE ${where.join(' AND ')}` : '' };
+}
+
+router.get('/', asyncH(async (req, res) => {
+  const { params, whereSql } = ingestFilter(req.query);
   const { limit, offset } = v.paging(req.query, { def: 50, max: 200 });
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const countQ = await db.query(
     `SELECT count(*)::int AS n FROM ingest_records i LEFT JOIN users ru ON ru.id=i.requested_by_user_id ${whereSql}`, params
   );
@@ -145,6 +151,46 @@ router.get('/', asyncH(async (req, res) => {
     `${SELECT} ${whereSql} ORDER BY ${orderBy(req.query)} LIMIT ${limit} OFFSET ${offset}`, params
   );
   res.json({ total: countQ.rows[0].n, rows });
+}));
+
+// Excel export of what the list shows: same filters, search and sort. Logged in the audit trail.
+router.get('/export', asyncH(async (req, res) => {
+  const ExcelJS = require('exceljs');
+  const { params, whereSql } = ingestFilter(req.query);
+  const { rows } = await db.query(`${SELECT} ${whereSql} ORDER BY ${orderBy(req.query)} LIMIT 20000`, params);
+  const dayText = (r) => {
+    const t = r.episode_break_date_text || (r.episode_date ? new Date(r.episode_date).toISOString().slice(0, 10) : '');
+    const m = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/.exec(t || '');
+    return m ? `${m[1]} to ${m[2]}` : (t || '');
+  };
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'PromoHub';
+  const ws = wb.addWorksheet('Ingest');
+  ws.columns = [
+    { header: 'PROG. NAME / PROJ. TITLE', key: 'program', width: 34 }, { header: 'Platform', key: 'platform', width: 16 },
+    { header: 'Billable Party', key: 'billable_party', width: 22 }, { header: 'Episode / Breakdate', key: 'ep', width: 24 },
+    { header: 'Source', key: 'source', width: 28 }, { header: 'No. of Materials', key: 'materials_count', width: 12 },
+    { header: 'Requested By', key: 'req', width: 22 }, { header: 'Destination Folder', key: 'destination_folder', width: 36 },
+    { header: 'Approved By', key: 'approved_by', width: 22 }, { header: 'Status (CM)', key: 'cm', width: 16 },
+    { header: 'Non-compliant reason', key: 'reason', width: 30 }, { header: 'Remarks', key: 'remarks', width: 36 },
+    { header: 'Updated', key: 'updated', width: 20 },
+  ];
+  for (const r of rows) {
+    ws.addRow({
+      program: r.program, platform: r.platform, billable_party: r.billable_party, ep: dayText(r), source: r.source,
+      materials_count: r.materials_count, req: r.requested_by_psd || r.requested_by_name || '', destination_folder: r.destination_folder,
+      approved_by: r.approved_by, cm: r.cm_status || 'PENDING', reason: r.cm_non_compliant_reason || '', remarks: r.remarks,
+      updated: r.updated_at ? new Date(r.updated_at).toISOString().replace('T', ' ').slice(0, 16) : '',
+    });
+  }
+  ws.getRow(1).font = { bold: true };
+  ws.views = [{ state: 'frozen', ySplit: 1 }];
+  ws.autoFilter = { from: 'A1', to: { row: 1, column: ws.columns.length } };
+  const buffer = await wb.xlsx.writeBuffer();
+  const filename = `Ingest_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  await audit(req, 'ingest.export', 'ingest_record', null, { rows: rows.length, truncated: rows.length >= 20000, filters: { ...req.query, sort: undefined, dir: undefined }, file: filename });
+  res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="${filename}"` });
+  res.send(Buffer.from(buffer));
 }));
 
 router.get('/:id', asyncH(async (req, res) => {
@@ -176,6 +222,11 @@ router.post('/', requireAction('ingest.write'), asyncH(async (req, res) => {
   });
   res.status(201).json({ ok: true, id: created.id });
 }));
+
+// Who should hear about a change to a record: whoever created it, the person who requested it, and whoever approved it — never the person making the change.
+function interested(r, actorId) {
+  return [r.created_by, r.requested_by_user_id, r.approved_by_user_id].filter((uid) => uid && uid !== actorId);
+}
 
 router.put('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
@@ -276,7 +327,7 @@ router.post('/:id/approve', requireAction('ingest.approve'), asyncH(async (req, 
   const id = v.id(req.params.id);
   await db.tx(async (c) => {
     const cur = await c.query(
-      `SELECT id, program, destination_folder, approved_by, approved_at, created_by, requested_by_user_id
+      `SELECT id, program, platform, destination_folder, approved_by, approved_at, created_by, requested_by_user_id
          FROM ingest_records WHERE id=$1 FOR UPDATE`, [id]
     );
     const r = cur.rows[0];
@@ -288,12 +339,17 @@ router.post('/:id/approve', requireAction('ingest.approve'), asyncH(async (req, 
       [id, req.user.full_name, req.user.id]
     );
     await audit(req, 'ingest.approve', 'ingest_record', id, { approved_by: req.user.full_name }, c);
-    const participants = [r.created_by, r.requested_by_user_id].filter((uid) => uid && uid !== req.user.id);
-    await notifyUsers(participants, {
+    await notifyUsers(interested(r, req.user.id), {
       title: `Ingest approved: ${r.program}`,
       body: `${req.user.full_name} approved this ingest request`,
       link: `/ingest?id=${id}`,
     }, c);
+    // Approval is what puts the request in front of CM, so the people who set the CM Status need to know it is ready.
+    await notifyCapable('ingest.cm_complete', {
+      title: `Ready for CM: ${r.program}`,
+      body: `${req.user.full_name} approved an ingest request${r.platform ? ` (${r.platform})` : ''}. It is waiting for the CM Status.`,
+      link: `/ingest?id=${id}`,
+    }, { excludeUserId: req.user.id }, c);
   });
   res.json({ ok: true });
 }));
@@ -302,12 +358,17 @@ router.post('/:id/approve', requireAction('ingest.approve'), asyncH(async (req, 
 router.post('/:id/unapprove', requireAction('ingest.approve'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   await db.tx(async (c) => {
-    const cur = await c.query('SELECT approved_by, approved_at FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
+    const cur = await c.query('SELECT program, approved_by, approved_by_user_id, approved_at, created_by, requested_by_user_id FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
     const r = cur.rows[0];
     if (!r) throw new HttpError(404, 'Ingest record not found');
     if (!r.approved_at && !(r.approved_by && String(r.approved_by).trim())) return;   // nothing to undo
     await c.query('UPDATE ingest_records SET approved_by=NULL, approved_by_user_id=NULL, approved_at=NULL, updated_by=$2, updated_at=now() WHERE id=$1', [id, req.user.id]);
     await audit(req, 'ingest.unapprove', 'ingest_record', id, { previous: r.approved_by }, c);
+    await notifyUsers(interested(r, req.user.id), {
+      title: `Approval withdrawn: ${r.program}`,
+      body: `${req.user.full_name} withdrew the approval of this ingest request`,
+      link: `/ingest?id=${id}`,
+    }, c);
   });
   res.json({ ok: true });
 }));
@@ -321,7 +382,7 @@ router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(asyn
 
   if (decision === 'Pending') {   // clear the decision: back to Pending, with no decider, time or reason
     await db.tx(async (c) => {
-      const cur = await c.query('SELECT cm_status FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
+      const cur = await c.query('SELECT cm_status, program, created_by, requested_by_user_id, approved_by_user_id FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
       if (!cur.rows.length) throw new HttpError(404, 'Ingest record not found');
       if (!cur.rows[0].cm_status) return;
       await c.query(
@@ -329,13 +390,18 @@ router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(asyn
                 updated_by=$2, updated_at=now() WHERE id=$1`, [id, req.user.id]
       );
       await audit(req, 'ingest.cm_reset', 'ingest_record', id, { previous: cur.rows[0].cm_status }, c);
+      await notifyUsers(interested(cur.rows[0], req.user.id), {
+        title: `Ingest back to Pending: ${cur.rows[0].program}`,
+        body: `${req.user.full_name} cleared the CM Status (was ${cur.rows[0].cm_status})`,
+        link: `/ingest?id=${id}`,
+      }, c);
     });
     return res.json({ ok: true, status: 'Pending' });
   }
 
   await db.tx(async (c) => {
     const cur = await c.query(
-      `SELECT id, cm_status, cm_non_compliant_reason, program, created_by, requested_by_user_id
+      `SELECT id, cm_status, cm_non_compliant_reason, program, created_by, requested_by_user_id, approved_by_user_id
          FROM ingest_records WHERE id=$1 FOR UPDATE`, [id]
     );
     const r = cur.rows[0];
@@ -353,9 +419,8 @@ router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(asyn
     await audit(req, decision === 'DONE' ? 'ingest.cm_done' : 'ingest.cm_non_compliant',
       'ingest_record', id, { decision, reason: newReason, previous: r.cm_status }, c);
 
-    const participants = [r.created_by, r.requested_by_user_id].filter((uid) => uid && uid !== req.user.id);
     const reasonSuffix = decision === 'NON-COMPLIANT' ? ` — ${reason}` : '';
-    await notifyUsers(participants, {
+    await notifyUsers(interested(r, req.user.id), {
       title: `Ingest ${decision}: ${r.program}`,
       body: `${req.user.full_name} marked this ingest request ${decision}${reasonSuffix}`,
       link: `/ingest?id=${id}`,

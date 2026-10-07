@@ -74,7 +74,8 @@ const VIEWS = {
 const TAB_DEFAULT_UNITS = { VGFX: 'VGFX Only', VEDIT: 'VEDIT Only', AUDIO: 'Audio - RADIO' };
 
 // The template's Platform formula: first matching rule wins, tested against the whole Plug ID cell.
-// platform: null means "no automatic value" (PD_ = digital: pick DIGITAL or INTL DIGITAL by hand).
+// platform: null means "no automatic value". A Plug ID that STARTS with PD_ is digital: DIGITAL (change it to INTL DIGITAL by hand where that applies);
+// rules above it (SOCMED, GMUSIC, ...) still win, as in the template's formula.
 const PLATFORM_RULES = [
   { pattern: 'PG_REGION_', platform: 'REG/TDMD (PG_REGIONAL AIRING)' },
   { pattern: 'PV_REGION_|PN_REGION_|MALSHO', platform: 'REG/TDMD (RTV LOCAL AIRING)' },
@@ -87,7 +88,8 @@ const PLATFORM_RULES = [
   { pattern: 'PF_', platform: 'GNTV' },
   { pattern: 'PL_', platform: 'GLTV' },
   { pattern: 'PI_|PU_|PJ_', platform: 'GPTV' },
-  { pattern: 'PD_', platform: null },
+  { pattern: '^PD_', platform: 'DIGITAL' },
+  { pattern: 'PD_', platform: null },   // a PD_ in the middle of an ID (e.g. PVPNPHPWPD_… = all platforms): no automatic value
   { pattern: 'NC101', platform: 'REG/TDMD (SYNERGY)' },
   { pattern: 'PV_', platform: 'GMA' },
   { pattern: 'PN_', platform: 'GTV' },
