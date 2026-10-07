@@ -395,7 +395,7 @@ export default function Workload() {
       window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); window.removeEventListener('mousedown', down);
     };
   }, []);
-  const isGrid = mode === 'excel' && tab !== 'ALL';
+  const isGrid = mode === 'excel';   // on the All tab the Excel grid holds the rows still waiting for a team (see load below); on a team tab, that team's rows
 
   // Rows are one line each (Remarks wraps), so a wide table scrolls sideways inside the card, like Excel.
   // Phones and small tablets show each row as a card instead.
@@ -437,7 +437,8 @@ export default function Workload() {
     loadStats();
     try {
       if (isGrid) {
-        const d = await get(`/api/workload?${query({ limit: GRID_LIMIT })}`);
+        // All tab: the rows nobody has given a team yet — e.g. plugs just copied from the PSD Daily Plug List. A Units filter you choose still wins.
+        const d = await get(`/api/workload?${query({ limit: GRID_LIMIT, ...(tab === 'ALL' ? { units: meta.notSet } : {}) })}`);
         hist.current = { past: [], future: [], tag: null };
         setGrid({ total: d.total, rows: d.rows.map((r) => ({ ...r, _key: `r${r.id}`, _dirty: false })) });
       } else {
@@ -446,7 +447,7 @@ export default function Workload() {
     } catch (e) {
       (isGrid ? setGrid : setData)({ error: e.message, rows: [], total: 0 });
     }
-  }, [meta, isGrid, query, offset, loadStats]);
+  }, [meta, isGrid, tab, query, offset, loadStats]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1281,7 +1282,7 @@ export default function Workload() {
             ) : null}
             {canWrite && isGrid ? (
               <>
-                <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add row</button>
+                {!isAll ? <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add row</button> : null}
                 <button type="button" className="btn primary" id="save-grid" disabled={saving || !dirtyCount} onClick={saveGrid}>
                   {saving ? 'Saving…' : `Save changes${dirtyCount ? ` (${dirtyCount})` : ''}`}
                 </button>
@@ -1303,9 +1304,7 @@ export default function Workload() {
           <DateRange from={filt.from} to={filt.to} onChange={setRange} />
         </div>
 
-        {mode === 'excel' && tab === 'ALL' ? (
-          <Empty>Pick VGFX, VEDIT or Audio above to edit in the Excel grid — each shows its own columns.</Empty>
-        ) : isGrid ? (
+        {isGrid ? (
           <>
             <div className="table-wrap xl-box" id="grid" ref={boxRef} tabIndex={-1} onCopy={gridCopy(tableCols)} onCut={gridCopy(tableCols, true)} onPaste={gridPaste(tableCols)} onKeyDown={gridKey}
               onContextMenu={(e) => { if (!gridSel || !grid || grid.error || !grid.rows.length) return; e.preventDefault(); setCtx({ x: Math.min(e.clientX, window.innerWidth - 210), y: Math.min(e.clientY, window.innerHeight - 150) }); }}>
@@ -1344,7 +1343,9 @@ export default function Workload() {
                             ))}
                             {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removeRow(r)}>{r._new ? 'Remove' : 'Delete'}</button></td> : null}
                           </tr>
-                        )) : <tr><td colSpan={tableCols.length + 2} className="empty">No {meta.tabs.find((t) => t.key === tab).label} rows match these filters.{canWrite ? ' Use “Add row” to start.' : ''}</td></tr>}
+                        )) : <tr><td colSpan={tableCols.length + 2} className="empty">{isAll
+                          ? <>No rows are waiting for a team. Plugs copied from the PSD Daily Plug List show up here until you set their Units Concerned — pick VGFX, VEDIT or Audio to edit a team’s rows.</>
+                          : <>No {meta.tabs.find((t) => t.key === tab).label} rows match these filters.{canWrite ? ' Use “Add row” to start.' : ''}</>}</td></tr>}
                       </tbody>
                     </table>
                   )}
