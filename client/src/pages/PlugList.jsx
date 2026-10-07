@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { fmtDate, isoDate } from '../lib/util.js';
 import { PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
-import { FilterSelect, Pager, SortTh } from '../components/wl.jsx';
+import { FilterSelect, Pager, SortTh, useNarrow } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
 
 // PSD Daily Plug List — the PSD's daily plug list (imported from their workbook: NO / PLUG ID / PROG NAME/PROJ TITLE / PSD / Account By),
@@ -72,6 +72,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
 
   const range = rangeOf(period, anchor, custom);
   const limit = size === 'all' ? ALL_CAP : Number(size);
+  const narrow = useNarrow();
   const [sort, setSort] = useState({ k: '', dir: 'asc' });   // clicked column header
   const viewKey = `${period}|${range.from}|${range.to}|${query}|${size}|${sort.k}|${sort.dir}`;
   const [pageState, setPageState] = useState({ key: '', offset: 0 });   // the page resets to the first whenever the view changes
@@ -209,7 +210,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
         ) : (
           <>
             <div className="table-wrap">
-              <table className="t wl plug-t">
+              <table className={`t wl plug-t${narrow ? ' cards' : ''}`}>
                 <thead>
                   <tr>
                     {canWrite ? <th className="chk"><input type="checkbox" checked={allOn} disabled={!todo.length} onChange={() => setPicked(allOn ? new Set() : new Set(todo.map((r) => r.id)))} title="Select every plug on this page that is not yet in the Workload Tracker" /></th> : null}
@@ -220,12 +221,12 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
                   {rows.length ? rows.map((r, i) => (
                     <tr key={r.id} className={r.in_workload ? 'done' : ''}>
                       {canWrite ? <td className="chk"><input type="checkbox" checked={picked.has(r.id)} disabled={r.in_workload} onChange={() => toggle(r.id)} /></td> : null}
-                      <td className="nowrap">{dateLabel(r.plug_date)}</td>
-                      <td className="mono">{r.plug_id}{r.is_additional ? <span className="chip c-orange plug-add" title="Listed under “Additional for …”">Added</span> : null}</td>
-                      <td>{r.prog_name}</td>
-                      <td>{r.psd}</td>
-                      <td>{r.account_by}</td>
-                      <td>{r.in_workload ? <span className="chip c-green">In workload</span> : <span className="dim">—</span>}</td>
+                      <td data-label="Date" className="nowrap">{dateLabel(r.plug_date)}</td>
+                      <td data-k="plug_id" data-label="Plug ID" className="mono">{r.plug_id}{r.is_additional ? <span className="chip c-orange plug-add" title="Listed under “Additional for …”">Added</span> : null}</td>
+                      <td data-label="PROG. NAME / PROJ. TITLE">{r.prog_name}</td>
+                      <td data-label="PSD">{r.psd}</td>
+                      <td data-label="Account By">{r.account_by}</td>
+                      <td data-label="In Workload">{r.in_workload ? <span className="chip c-green">In workload</span> : <span className="dim">—</span>}</td>
                       {canWrite ? (
                         <td className="plug-actions">
                           <button type="button" className="btn sm ghost" onClick={() => setEditing(r)}>Edit</button>

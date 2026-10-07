@@ -231,3 +231,14 @@ export function SortTh({ k, sort, onSort, children, className, ...rest }) {
     </th>
   );
 }
+
+/** true while the window is narrower than `px` (phones and small tablets): tables then become cards */
+export function useNarrow(px = 900) {
+  const [narrow, setNarrow] = useState(() => window.innerWidth < px);
+  useEffect(() => {
+    const on = () => setNarrow(window.innerWidth < px);
+    window.addEventListener('resize', on);
+    return () => window.removeEventListener('resize', on);
+  }, [px]);
+  return narrow;
+}

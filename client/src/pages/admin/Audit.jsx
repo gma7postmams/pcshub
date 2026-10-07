@@ -34,6 +34,9 @@ const ACTION_LABELS = {
   'admin.group_update': 'Updated Group',
   'admin.group_delete': 'Deleted Group',
 
+  'admin.role_create': 'Created Role',
+  'admin.role_update': 'Updated Role',
+  'admin.role_delete': 'Deleted Role',
   'admin.dropdown_create': 'Created Dropdown',
   'admin.dropdown_update': 'Updated Dropdown',
   'admin.dropdown_delete': 'Deleted Dropdown',
@@ -98,6 +101,8 @@ function formatEntity(row) {
       return 'User';
     case 'group':
       return 'Group';
+    case 'role':
+      return 'Role';
     case 'dropdown_option':
       return 'Dropdown';
     case 'approval_request':
@@ -268,6 +273,20 @@ function formatDetails(row) {
 
     case 'admin.user_reset_2fa':
       return '2FA reset';
+
+    case 'admin.role_create':
+      return `Created role: ${d.name || ''}${d.actions && d.actions.length ? ` (can: ${d.actions.join(', ')})` : ''}`;
+
+    case 'admin.role_update': {
+      const parts = [];
+      if (d.renamedFrom) parts.push(`renamed from ${d.renamedFrom}`);
+      if (d.added && d.added.length) parts.push(`added: ${d.added.join(', ')}`);
+      if (d.removed && d.removed.length) parts.push(`removed: ${d.removed.join(', ')}`);
+      return `Updated role ${d.name || ''}${parts.length ? ` — ${parts.join('; ')}` : ' (no change to actions)'}`;
+    }
+
+    case 'admin.role_delete':
+      return `Deleted role: ${d.name || ''}`;
 
     case 'admin.group_create':
       return `Created group: ${d.name || ''}`;
