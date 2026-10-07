@@ -891,3 +891,9 @@ table.t.wl.cards td.chk { position: absolute; top: 10px; right: 12px; width: aut
 table.t.wl.cards tr { position: relative; }
 table.t.wl.cards td[data-k="program"], table.t.wl.cards td[data-k="plug_id"] { padding-right: 36px; }
 table.t.wl.cards td .sub, table.t.wl.cards td .cm-meta { white-space: normal; overflow-wrap: anywhere; max-width: 100%; display: block; }
+
+/* Workload Table / Excel mode: the table scrolls inside a box that ends near the bottom of the window (height set in Workload.jsx), so the sideways scroll
+   bar is on screen at the top of the page, and the heading row stays put while the rows scroll. */
+.wl-fit { overflow: auto; }
+/* Units Concerned (and any pills in a Workload table cell) are centred in their cell, like every other column */
+table.t.wl .chips { justify-content: center; }

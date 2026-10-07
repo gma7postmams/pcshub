@@ -1086,6 +1086,22 @@ export default function Workload() {
     } finally { setSaving(false); }
   };
 
+  // The table (Table and Excel mode) scrolls inside its own box that ends near the bottom of the window — a tall table used to put its sideways scroll
+  // bar below the last row, out of sight until you scrolled the whole page down. Measured again when the window, the mode, the tab or a filter changes.
+  const hasMeta = !!meta;
+  useLayoutEffect(() => {
+    const fit = () => {
+      const el = document.querySelector('.wl-fit');
+      if (!el) return;
+      el.style.maxHeight = 'none';
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      el.style.maxHeight = `${Math.max(240, Math.round(window.innerHeight - top - 80))}px`;
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [hasMeta, mode, tab, cards, winW, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, !!data, !!grid]);
+
   if (!meta) return <main className="container wide"><Empty>Loading…</Empty></main>;
 
   // Table-mode shortcuts — the same ones Excel mode has: Ctrl/Cmd+A select all, +C copy, +X cut, +V paste, +Z undo, +Y redo, Delete, Esc
@@ -1274,19 +1290,17 @@ export default function Workload() {
             {s.canPage('/admin') ? (
               <>
                 <button type="button" className="btn" id="add-column-btn" onClick={() => setAddingColumn(true)}><ColumnIcon /> Add Column</button>
-                <button type="button" className="btn" id="lock-dates-btn" onClick={() => setManagingLocks(true)}><LockIcon /> Lock Dates</button>
               </>
             ) : null}
+            {canWrite && isGrid && !isAll ? <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add Row</button> : null}
+            {s.canPage('/admin') ? <button type="button" className="btn" id="lock-dates-btn" onClick={() => setManagingLocks(true)}><LockIcon /> Lock Dates</button> : null}
             {canWrite && !isGrid ? (
               <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({ rec: null })}><PlusIcon /> New Workload</button>
             ) : null}
             {canWrite && isGrid ? (
-              <>
-                {!isAll ? <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add row</button> : null}
-                <button type="button" className="btn primary" id="save-grid" disabled={saving || !dirtyCount} onClick={saveGrid}>
-                  {saving ? 'Saving…' : `Save changes${dirtyCount ? ` (${dirtyCount})` : ''}`}
-                </button>
-              </>
+              <button type="button" className="btn primary" id="save-grid" disabled={saving || !dirtyCount} onClick={saveGrid}>
+                {saving ? 'Saving…' : `Save changes${dirtyCount ? ` (${dirtyCount})` : ''}`}
+              </button>
             ) : null}
           </div>
         </div>
@@ -1306,7 +1320,7 @@ export default function Workload() {
 
         {isGrid ? (
           <>
-            <div className="table-wrap xl-box" id="grid" ref={boxRef} tabIndex={-1} onCopy={gridCopy(tableCols)} onCut={gridCopy(tableCols, true)} onPaste={gridPaste(tableCols)} onKeyDown={gridKey}
+            <div className={`table-wrap xl-box${cards ? '' : ' wl-fit'}`} id="grid" ref={boxRef} tabIndex={-1} onCopy={gridCopy(tableCols)} onCut={gridCopy(tableCols, true)} onPaste={gridPaste(tableCols)} onKeyDown={gridKey}
               onContextMenu={(e) => { if (!gridSel || !grid || grid.error || !grid.rows.length) return; e.preventDefault(); setCtx({ x: Math.min(e.clientX, window.innerWidth - 210), y: Math.min(e.clientY, window.innerHeight - 150) }); }}>
               {!grid ? <Empty>Loading…</Empty>
                 : grid.error ? <Empty>{grid.error}</Empty>
@@ -1345,7 +1359,7 @@ export default function Workload() {
                           </tr>
                         )) : <tr><td colSpan={tableCols.length + 2} className="empty">{isAll
                           ? <>No rows are waiting for a team. Plugs copied from the PSD Daily Plug List show up here until you set their Units Concerned — pick VGFX, VEDIT or Audio to edit a team’s rows.</>
-                          : <>No {meta.tabs.find((t) => t.key === tab).label} rows match these filters.{canWrite ? ' Use “Add row” to start.' : ''}</>}</td></tr>}
+                          : <>No {meta.tabs.find((t) => t.key === tab).label} rows match these filters.{canWrite ? ' Use “Add Row” to start.' : ''}</>}</td></tr>}
                       </tbody>
                     </table>
                   )}
@@ -1388,7 +1402,7 @@ export default function Workload() {
                 {isAdminUser ? <button type="button" className="btn danger sm" onClick={() => setDeletingAll(true)} title="Delete every row that matches the current tab and filters">Delete all…</button> : null}
               </div>
             ) : null}
-            <div className="table-wrap" id="tbl" onClickCapture={(e) => {
+            <div className={`table-wrap${cards ? '' : ' wl-fit'}`} id="tbl" onClickCapture={(e) => {
               if (tblSuppress.current) { tblSuppress.current = false; e.stopPropagation(); e.preventDefault(); return; }   // the click that ended a drag / Shift / Ctrl+click
               if (canWrite && (picked.size || allMatching) && !(e.target.closest && e.target.closest('.actions-cell, .chk'))) clearPicks();
             }}>
