@@ -5,6 +5,9 @@ const v = require('../validate');
 const { asyncH, HttpError, requireAction } = require('../middleware');
 const { audit } = require('../audit');
 
+const { logRun } = require('../transferlog');   // action logging (audit entry + server log line) for bulk delete
+const { emitTransfer } = require('../transfer-hook');   // import / export events — the audit log subscribes to these (see src/transfer-hook.js)
+
 // Mounted behind requirePageAccess('/workload'); writes need requireAction('workload.write').
 //
 // ONE table (workload_items). "Units Concerned" says which team(s) a plug is for; the tabs in the UI
@@ -14,20 +17,21 @@ const router = express.Router();
 
 const UNITS = ['VGFX Only', 'VEDIT Only', 'VGFX/VEDIT', 'Audio - RADIO', 'Audio – AUDIO GUIDE', 'VGFX/VEDIT/Audio'];
 // Which teams each Units Concerned option covers (drives the team tabs)
-const UNIT_TEAMS = {
+const UNIT_TEAMS = Object.assign(Object.create(null), {
   'VGFX Only': ['VGFX'],
   'VEDIT Only': ['VEDIT'],
   'VGFX/VEDIT': ['VGFX', 'VEDIT'],
   'Audio - RADIO': ['AUDIO'],
   'Audio – AUDIO GUIDE': ['AUDIO'],
   'VGFX/VEDIT/Audio': ['VGFX', 'VEDIT', 'AUDIO'],
-};
+});
 const TEAMS = ['VGFX', 'VEDIT', 'AUDIO'];
-const TAB_LABEL = { ALL: 'All', VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio' };
+const NOT_SET = '(Not set)';   // Units filter value for rows copied from the PSD Daily Plug List that haven't been assigned a team yet
+const TAB_LABEL = Object.assign(Object.create(null), { ALL: 'All', VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio' });
 
-// Field kinds: date | select | text | audio_guide. `multiline` = textarea. `hint` = placeholder from the red notes.
+// Field kinds: date | select | text | audio_guide | date_or_text (a picked date OR typed text). `multiline` = textarea. `hint` = placeholder from the red notes.
 const OPEN = 'Type or paste anything';
-const FROM_PSD = 'Paste from the PSD daily plug list';
+const FROM_PSD = 'Filled from the PSD Daily Plug List';
 const FIELDS = {
   work_date:      { label: 'Work Date', kind: 'date', required: true },
   platform:       { label: 'Platform', kind: 'select', lookup: 'workload_platform', max: 100 },
@@ -40,11 +44,11 @@ const FIELDS = {
   breakdate_vedit:{ label: 'Breakdate / Time (VEDIT)', kind: 'datetime' },
   vo:             { label: 'VO', kind: 'text', multiline: true, max: 1000, hint: OPEN },
   script:         { label: 'Script', kind: 'date' },
-  art_stb:        { label: 'Artwork / STB', kind: 'date' },
+  art_stb:        { label: 'Artwork / STB', kind: 'date_or_text', max: 200 },
   audio_guide:    { label: 'Audio Guide', kind: 'audio_guide' },
   remarks:        { label: 'Remarks', kind: 'text', multiline: true, max: 4000, hint: OPEN },
   total_mats:     { label: 'Total Mats', kind: 'text', multiline: true, max: 500, hint: OPEN },
-  prog_name:      { label: 'Prog. Name / Project Title', kind: 'text', max: 300, hint: FROM_PSD },
+  prog_name:      { label: 'PROG. NAME / PROJ. TITLE', kind: 'select', lookup: 'program', max: 300, hint: FROM_PSD },
   plug_type:      { label: 'Plug Type', kind: 'select', lookup: 'plug_type', max: 100 },
   // Audio sheet's Assigned / Done / Resched-cancelled tables: open columns you can type or paste into
   length:         { label: 'Length', kind: 'text', max: 100, hint: OPEN },
@@ -147,7 +151,7 @@ router.get('/meta', asyncH(async (req, res) => {
   res.json({
     ready: true, units: UNITS, unitTeams: UNIT_TEAMS, tabs: ['ALL', ...TEAMS].map((key) => ({ key, label: TAB_LABEL[key] })),
     tabDefaultUnits: TAB_DEFAULT_UNITS, audioExtra: AUDIO_EXTRA, fields: extendFields(customCols), views: extendViews(customCols),
-    platformRules: PLATFORM_RULES, customColumns: customCols.map((c) => ({ id: c.id, key: c.col_key, label: c.label })),
+    notSet: NOT_SET, platformRules: PLATFORM_RULES, customColumns: customCols.map((c) => ({ id: c.id, key: c.col_key, label: c.label })),
     locks,
   });
 }));
@@ -184,17 +188,45 @@ function parseDateTime(raw, field) {
 }
 
 /** Validate one row; returns the values to store. `current` = the stored row when updating. `customCols` = result of loadCustomCols. */
-async function parseRow(client, body, current, customCols = []) {
+/** PSD and Prog. Name left blank are copied from the PSD Daily Plug List entry for this Work Date + Plug ID (the first line of the Plug ID cell). */
+async function fillFromPlugList(client, rec) {
+  if (!rec.work_date || !rec.plug_id || (rec.psd && rec.prog_name)) return;
+  const id = String(rec.plug_id).split('\n')[0].trim();
+  if (!id) return;
+  const { rows } = await client.query(
+    'SELECT psd, prog_name FROM workload_plugs WHERE plug_date=$1 AND upper(plug_id)=upper($2) ORDER BY seq, id LIMIT 1', [rec.work_date, id]
+  );
+  if (!rows.length) return;
+  if (!rec.psd) rec.psd = rows[0].psd || null;
+  if (!rec.prog_name) rec.prog_name = rows[0].prog_name || null;
+}
+
+/** Artwork / STB: a date (YYYY-MM-DD, must be a real one) or any single line of text (up to 200 characters). */
+function parseDateOrText(raw, f) {
+  const s = v.str(raw, { field: f.label, max: f.max });
+  if (!s) return s;
+  const one = String(s).replace(/\s*\n\s*/g, ' ').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(one) && !validator.isDate(one, { format: 'YYYY-MM-DD', strictMode: true })) throw new HttpError(400, `${f.label} must be a real date or plain text`);
+  return one;
+}
+
+async function parseRow(client, body, current, customCols = [], opts = {}) {
   const cur = current || {};
+  // Units Concerned is required — except for a row that came in from the PSD Daily Plug List and hasn't been assigned yet
+  // (it stays blank, and appears only under All, until someone sets it). A row that HAS units can't be blanked.
+  const unitsMayBeBlank = !!opts.allowBlankUnits || (!!current && current.id != null && !current.units_concerned);
   const rec = {};
   for (const k of COLS) {
     const f = FIELDS[k];
     if (k === 'audio_guide') rec[k] = parseAudioGuide(body[k], cur[k]);
+    else if (f.kind === 'date_or_text') rec[k] = parseDateOrText(body[k], f);
     else if (f.kind === 'date') rec[k] = v.date(body[k], { field: f.label, required: !!f.required });
     else if (f.kind === 'datetime') rec[k] = parseDateTime(body[k], f.label);
-    else if (k === 'units_concerned') rec[k] = v.oneOf(body[k], UNITS, { field: f.label });
+    else if (k === 'units_concerned') rec[k] = unitsMayBeBlank && !body[k] ? null : v.oneOf(body[k], UNITS, { field: f.label });
     else rec[k] = v.str(body[k], { field: f.label, max: f.max, required: !!f.required });
   }
+  const typedProg = rec.prog_name;   // checked against the dropdown; a title filled in from the PSD Daily Plug List below is taken as it is
+  await fillFromPlugList(client, rec);
   // Platform follows the Plug ID prefix unless one was chosen (only if that option exists and is active)
   if (!rec.platform) {
     const auto = derivePlatform(rec.plug_id);
@@ -206,6 +238,12 @@ async function parseRow(client, body, current, customCols = []) {
     }
   }
   await assertOption(client, 'workload_platform', rec.platform, 'Platform', cur.platform);
+  if (typedProg && rec.work_date) {   // a title that comes from that day's PSD Daily Plug List (picked or auto-filled by the form) is fine too
+    const { rows } = await client.query('SELECT 1 FROM workload_plugs WHERE plug_date=$1 AND prog_name=$2 LIMIT 1', [rec.work_date, typedProg]);
+    if (rows.length) rec._progOk = true;
+  }
+  if (!rec._progOk) await assertOption(client, 'program', typedProg, 'PROG. NAME / PROJ. TITLE', cur.prog_name);
+  delete rec._progOk;
   await assertOption(client, 'plug_type', rec.plug_type, 'Plug Type', cur.plug_type);
   // Priority flag (not a template column, so it lives outside FIELDS): keep the stored value when the request doesn't mention it
   const p = body.is_priority;
@@ -215,7 +253,7 @@ async function parseRow(client, body, current, customCols = []) {
 }
 
 const colList = COLS.map((c) => `"${c}"`);
-const CUR_COLS = 'platform, plug_type, audio_guide, work_date, is_priority';
+const CUR_COLS = 'platform, plug_type, prog_name, audio_guide, work_date, is_priority';
 
 async function insertRow(client, rec, userId) {
   const params = [...COLS.map((c) => rec[c]), !!rec.is_priority, JSON.stringify(rec.custom_fields || {}), userId];
@@ -247,13 +285,14 @@ function buildFilter(query) {
     const team = v.oneOf(String(query.team), TEAMS, { field: 'team' });
     add('w.units_concerned = ANY(?::text[])', UNITS.filter((u) => UNIT_TEAMS[u].includes(team)));
   }
-  if (query.units) add('w.units_concerned = ?', v.oneOf(String(query.units), UNITS, { field: 'units' }));
+  if (query.units === NOT_SET) where.push('w.units_concerned IS NULL');
+  else if (query.units) add('w.units_concerned = ?', v.oneOf(String(query.units), UNITS, { field: 'units' }));
   if (query.platform) add('w.platform = ?', String(query.platform));
   if (query.plug_type) add('w.plug_type = ?', String(query.plug_type));
   if (query.from) add('w.work_date >= ?', v.date(query.from, { field: 'from' }));
   if (query.to) add('w.work_date <= ?', v.date(query.to, { field: 'to' }));
   if (query.q) {
-    params.push(`%${String(query.q).slice(0, 100).replace(/[%_\\]/g, '\\$&')}%`);
+    params.push(v.like(query.q, 100));
     const p = `$${params.length}`;
     where.push(`(${SEARCH_COLS.map((c) => `w.${c} ILIKE ${p}`).join(' OR ')})`);
   }
@@ -277,13 +316,27 @@ router.get('/stats', asyncH(async (req, res) => {
   res.json(rows[0]);
 }));
 
+// Sort by a clicked column (?sort=<column key>&dir=asc|desc). Dates sort as dates, text case-insensitively, empty values last;
+// a key that is not a built-in column is taken as a custom column.
+function orderBy(q, params) {
+  const k = String(q.sort || '');
+  const dir = q.dir === 'desc' ? 'DESC' : 'ASC';
+  let col = null;
+  if (k === 'breakdate_vgfx') col = 'w.breakdate_vgfx, w.breakdate_vedit';   // the merged "Breakdate / Time" column
+  else if (k === 'updated_at') col = 'w.updated_at';
+  else if (COLS.includes(k)) col = ['date', 'datetime'].includes(FIELDS[k].kind) ? `w."${k}"` : `lower(w."${k}"::text)`;
+  else if (/^[A-Za-z0-9_]{1,64}$/.test(k)) { params.push(k); col = `lower(w.custom_fields ->> $${params.length})`; }
+  if (!col) return 'w.work_date DESC NULLS LAST, w.id ASC';
+  return col.split(', ').map((c) => `${c} ${dir} NULLS LAST`).join(', ') + ', w.work_date DESC NULLS LAST, w.id ASC';
+}
+
 router.get('/', asyncH(async (req, res) => {
   const { where, params } = buildFilter(req.query);
-  const limit = Math.min(parseInt(req.query.limit, 10) || 100, MAX_BATCH * 2);
-  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+  const { limit, offset } = v.paging(req.query, { def: 100, max: MAX_BATCH * 2 });
   const total = await db.query(`SELECT count(*)::int AS n FROM workload_items w ${whereSql(where)}`, params);
+  const order = orderBy(req.query, params);   // may add a parameter (custom column key), so it runs after the count
   const { rows } = await db.query(
-    `${SELECT} ${whereSql(where)} ORDER BY w.work_date DESC NULLS LAST, w.id ASC LIMIT ${limit} OFFSET ${offset}`, params
+    `${SELECT} ${whereSql(where)} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params
   );
   res.json({ total: total.rows[0].n, rows: rows.map(flattenCustom) });
 }));
@@ -296,11 +349,11 @@ router.get('/', asyncH(async (req, res) => {
 // ---------- Excel export styling: mirror the web table's colours/pills/grid ----------
 // Category colours are fixed regardless of the admin-selected theme (see client/src/app.css light-mode block);
 // only the neutral tones (header/grid) pick up a touch of the org's theme tint, same as the web app.
-const HUE_HEX = { blue: '1f6fc5', purple: '6d4fd1', teal: '0d8a84', orange: 'b95a12', green: '12805a', pink: 'b8326b', gray: '626b7a', red: 'c93838', amber: 'a4650a' };
+const HUE_HEX = Object.assign(Object.create(null), { blue: '1f6fc5', purple: '6d4fd1', teal: '0d8a84', orange: 'b95a12', green: '12805a', pink: 'b8326b', gray: '626b7a', red: 'c93838', amber: 'a4650a' });
 const EXPORT_PALETTE = ['blue', 'green', 'pink', 'amber', 'red'];   // matches the web app's hash palette (Platform/Plug-Type-fallback/Units-fallback only)
 const hueOf = (s) => EXPORT_PALETTE[[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % EXPORT_PALETTE.length];
-const TEAM_HUE = { VGFX: 'purple', VEDIT: 'orange', AUDIO: 'teal' };
-const TYPE_HUE = { EPISODIC: 'blue', SEASONAL: 'pink', BUMPER: 'red', 'POP-UP/POP LOGO': 'blue', RADIO: 'green' };   // matches the web app; avoids purple/orange/teal (team colours)
+const TEAM_HUE = Object.assign(Object.create(null), { VGFX: 'purple', VEDIT: 'orange', AUDIO: 'teal' });
+const TYPE_HUE = Object.assign(Object.create(null), { EPISODIC: 'blue', SEASONAL: 'pink', BUMPER: 'red', 'POP-UP/POP LOGO': 'blue', RADIO: 'green' });   // matches the web app; avoids purple/orange/teal (team colours)
 const THEME_TINT = { midnight: '4f8cff', sunset: 'ff7a45', purple: '8b5cf6', ocean: '14b8c4', forest: '22c55e', rose: 'f43f5e', graphite: '94a3b8' };
 const hex2rgb = (h) => [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
 const rgb2hex = (rgb) => rgb.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
@@ -340,6 +393,9 @@ async function exportPalette(db_) {
 }
 
 router.get('/export', asyncH(async (req, res) => {
+  const t0 = Date.now();
+  const exportInfo = { format: 'xlsx', team: req.query.team || 'ALL', filters: { ...req.query, team: undefined } };
+  try {
   let ExcelJS;
   try { ExcelJS = require('exceljs'); } catch (e) {
     throw new HttpError(501, 'Excel export needs the "exceljs" package. Run "npm install" on the server, then restart.');
@@ -352,6 +408,8 @@ router.get('/export', asyncH(async (req, res) => {
     `SELECT w.* FROM workload_items w ${whereSql(where)} ORDER BY w.work_date ASC, w.id ASC LIMIT 20000`, params
   );
   const rows = rawRows.map(flattenCustom);
+  exportInfo.matched = rows.length;
+  exportInfo.truncated = rawRows.length >= 20000;   // the export stops at 20,000 rows
   const involves = (r, teams) => teams.some((t) => (UNIT_TEAMS[r.units_concerned] || []).includes(t));
   const team = req.query.team ? v.oneOf(String(req.query.team), TEAMS, { field: 'team' }) : null;
   // Breakdate / Time (VGFX) and (VEDIT) share ONE column, like the web table: 'breakdate_vgfx' keeps that column's
@@ -362,6 +420,8 @@ router.get('/export', asyncH(async (req, res) => {
     : [
       { name: 'MAIN', cols: [...oneBreakdate(MAIN_COLS), ...customKeys], pick: (r) => involves(r, ['VGFX', 'VEDIT']) },
       { name: 'AUDIO', cols: [...AUDIO_COLS, ...customKeys], pick: (r) => involves(r, ['AUDIO']) },
+      // rows copied from the PSD Daily Plug List that have no Units Concerned yet (they'd otherwise be missing from the file)
+      ...(rows.some((r) => !r.units_concerned) ? [{ name: 'UNASSIGNED', cols: [...oneBreakdate(MAIN_COLS), ...customKeys], pick: (r) => !r.units_concerned }] : []),
     ];
 
   const pal = await exportPalette(db);
@@ -377,6 +437,7 @@ router.get('/export', asyncH(async (req, res) => {
     if (v instanceof Date) return '';   // dates are sized by format below, not by scanning the stored Date value
     return String(v);
   };
+  exportInfo.sheets = {};
   for (const sh of sheets) {
     const ws = wb.addWorksheet(sh.name);
     ws.columns = sh.cols.map((k) => {
@@ -394,14 +455,16 @@ router.get('/export', asyncH(async (req, res) => {
     });
     ws.views = [{ state: 'frozen', ySplit: 1 }];
 
-    rows.filter(sh.pick).forEach((r) => {
+    const sheetRows = rows.filter(sh.pick);
+    exportInfo.sheets[sh.name] = sheetRows.length;
+    sheetRows.forEach((r) => {
       const row = ws.addRow(sh.cols.reduce((o, k) => {
         const f = fieldsExt[k];
         let val = r[k];
         if (k === 'breakdate_vgfx') val = null;   // filled in below as two labelled lines (VGFX / VEDIT)
         else if (f.kind === 'date') val = asDate(val);
         else if (f.kind === 'datetime') { const t = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(val || ''); val = t ? new Date(Date.UTC(+t[1], +t[2] - 1, +t[3], +t[4], +t[5])) : null; }
-        else if (k === 'audio_guide' && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = asDate(val);
+        else if ((k === 'audio_guide' || k === 'art_stb') && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = asDate(val);   // a date becomes a real Excel date; text stays text
         else if (k !== 'remarks') val = oneLineText(val);   // every field except Remarks is one line, like the web table
         return { ...o, [k]: val };
       }, {}));
@@ -415,7 +478,7 @@ router.get('/export', asyncH(async (req, res) => {
         if (r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit')) {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8B4B4' } };
         }
-        if (k === 'audio_guide' && r.audio_guide && /^\d{4}-\d{2}-\d{2}$/.test(r.audio_guide)) cell.numFmt = 'mmm d, yyyy';
+        if ((k === 'audio_guide' || k === 'art_stb') && r[k] && /^\d{4}-\d{2}-\d{2}$/.test(r[k])) cell.numFmt = 'mmm d, yyyy';
 
         if (k === 'breakdate_vgfx') {
           // Same as the web table: one labelled line per involved team, VGFX on top, VEDIT below (each only if it has a time)
@@ -431,7 +494,7 @@ router.get('/export', asyncH(async (req, res) => {
             ]) };
           }
           cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
-        } else if (f.kind === 'date' || f.kind === 'datetime' || k === 'audio_guide') {
+        } else if (f.kind === 'date' || f.kind === 'datetime' || k === 'audio_guide' || k === 'art_stb') {
           if (cell.value != null) cell.font = { color: { argb: pal.black } };
         } else if (k === 'platform' && r.platform) {
           cell.font = { bold: true, color: { argb: pal.black } };
@@ -468,7 +531,7 @@ router.get('/export', asyncH(async (req, res) => {
       column.eachCell({ includeEmpty: false }, (cell) => {
         if (column.key === 'breakdate_vgfx') { max = Math.max(max, ...cellText(cell.value).split('\n').map((t) => t.length)); return; }
         if ((f.kind === 'date' || f.kind === 'datetime') && cell.value instanceof Date) return; // already sized above
-        if (column.key === 'audio_guide' && cell.value instanceof Date) { max = Math.max(max, 13); return; }
+        if ((column.key === 'audio_guide' || column.key === 'art_stb') && cell.value instanceof Date) { max = Math.max(max, 13); return; }
         max = Math.max(max, cellText(cell.value).length);
       });
       // +15% then +3: plain character-count math undershoots for this app's content, which is heavy with wide,
@@ -484,10 +547,16 @@ router.get('/export', asyncH(async (req, res) => {
   // transfer encoding straight to res: some reverse proxies (this app is commonly deployed behind one) can
   // truncate or mishandle a chunked response, which shows up as "the file format is invalid" when opened.
   const buffer = await wb.xlsx.writeBuffer();
+  const filename = `Workload_${team || 'ALL'}_${stamp}.xlsx`;
+  await emitTransfer(req, 'workload.export', { ...exportInfo, file: filename, bytes: buffer.length, ms: Date.now() - t0 });
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.set('Content-Disposition', `attachment; filename="Workload_${team || 'ALL'}_${stamp}.xlsx"`);
+  res.set('Content-Disposition', `attachment; filename="${filename}"`);
   res.set('Content-Length', String(buffer.length));
   res.end(buffer);
+  } catch (e) {
+    await emitTransfer(req, 'workload.export_failed', { ...exportInfo, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
+    throw e;
+  }
 }));
 
 router.post('/', requireAction('workload.write'), asyncH(async (req, res) => {
@@ -513,6 +582,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
   const out = await db.tx(async (c) => {
     let created = 0;
     let updated = 0;
+    const createdIds = [];
     for (let i = 0; i < list.length; i++) {
       const row = list[i] || {};
       try {
@@ -531,6 +601,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           assertNotLocked(locks, rec.work_date);
           const id = await insertRow(c, rec, req.user.id);
           await audit(req, 'workload.create', 'workload_item', id, rec, c);
+          createdIds.push(id);
           created++;
         }
       } catch (e) {
@@ -538,7 +609,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
         throw e;
       }
     }
-    return { created, updated };
+    return { created, updated, createdIds };
   });
   res.json({ ok: true, ...out });
 }));
@@ -608,6 +679,41 @@ router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---------- Bulk delete: the rows the user ticked ({ ids }), or — Admin only — every row matching the current filters ({ all: true, filters }) ----------
+// Rows in a locked date range are never deleted (they are counted as skipped). One audit entry + one server-log line per run.
+router.post('/bulk-delete', requireAction('workload.write'), asyncH(async (req, res) => {
+  const body = req.body || {};
+  let where;
+  let params;
+  let mode;
+  let filters = null;
+  if (body.all) {
+    if (!req.user || req.user.role !== 'Admin') throw new HttpError(403, 'Only an Admin can delete all rows');
+    mode = 'all matching';
+    filters = {};
+    ['team', 'units', 'platform', 'plug_type', 'from', 'to', 'q'].forEach((k) => { if (body.filters && body.filters[k]) filters[k] = String(body.filters[k]).slice(0, 200); });
+    ({ where, params } = buildFilter(filters));
+  } else {
+    mode = 'selected';
+    const ids = Array.isArray(body.ids) ? [...new Set(body.ids.map((n) => v.id(n)))].slice(0, 1000) : [];
+    if (!ids.length) throw new HttpError(400, 'Nothing selected');
+    where = ['w.id = ANY($1::bigint[])'];
+    params = [ids];
+  }
+  const unlocked = 'NOT EXISTS (SELECT 1 FROM workload_locks l WHERE w.work_date BETWEEN l.from_date AND l.to_date)';
+  const t0 = Date.now();
+  const matched = (await db.query(`SELECT count(*)::int AS n FROM workload_items w ${whereSql(where)}`, params)).rows[0].n;
+  const { rows } = await db.query(
+    `DELETE FROM workload_items w ${whereSql([...where, unlocked])} RETURNING w.id, w.work_date, w.units_concerned, w.plug_id`, params
+  );
+  const skipped = matched - rows.length;
+  await logRun(req, 'workload.bulk_delete', {
+    mode, filters, matched, deleted: rows.length, skippedLocked: skipped,
+    sample: rows.slice(0, 50).map((r) => `${r.work_date} ${String(r.plug_id || '').split('\n')[0]}`), ms: Date.now() - t0,
+  });
+  res.json({ ok: true, deleted: rows.length, skipped });
+}));
+
 router.delete('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const locks = await loadLocks(db);
@@ -629,14 +735,19 @@ router.delete('/:id', requireAction('workload.write'), asyncH(async (req, res) =
 // A header that doesn't match any known field or existing custom column gets a new custom column created
 // for it automatically, so nothing in the file is silently dropped.
 const multer = require('multer');
+const { assertSafeXlsx, oneImportAtATime } = require('../xlsx-guard');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
 
-router.post('/import', requireAction('workload.write'), upload.single('file'), asyncH(async (req, res) => {
+router.post('/import', requireAction('workload.write'), upload.single('file'), oneImportAtATime, asyncH(async (req, res) => {
+  const t0 = Date.now();
+  const importInfo = { file: req.file ? req.file.originalname : null, bytes: req.file ? req.file.size : 0, sheets: [] };
+  try {
   if (!req.file) throw new HttpError(400, 'No file uploaded');
   let ExcelJS;
   try { ExcelJS = require('exceljs'); } catch (e) {
     throw new HttpError(501, 'Import needs the "exceljs" package. Run "npm install" on the server, then restart.');
   }
+  await assertSafeXlsx(req.file.buffer, req.file.originalname);   // file type + unpacked-size limits, before anything is loaded into memory
   const wb = new ExcelJS.Workbook();
   try { await wb.xlsx.load(req.file.buffer); } catch (e) {
     throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)');
@@ -647,13 +758,20 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
 
   let customCols = await loadCustomCols(db);
   let fieldsExt = extendFields(customCols);
-  const labelToKey = {};
+  const labelToKey = Object.create(null);   // keyed by text from the file: no inherited names such as "constructor"
   Object.entries(fieldsExt).forEach(([k, f]) => { labelToKey[f.label.trim().toLowerCase()] = k; });
+  labelToKey['prog. name / project title'] = 'prog_name';   // the column's old name (files exported before the rename)
+  labelToKey['prog name/proj title'] = 'prog_name';         // as it is written in the PSD Daily Plug List
   const newColumns = [];
 
+  // A header this tracker does not know becomes a new custom column (so nothing in the file is dropped) — within
+  // reason: a file with dozens of unknown headers is the wrong file, not a request for dozens of new columns.
+  const MAX_NEW_COLUMNS = 30;
   async function keyForHeader(label) {
     const norm = label.trim().toLowerCase();
     if (labelToKey[norm]) return labelToKey[norm];
+    if (label.trim().length > 120) throw new HttpError(400, `Column heading "${label.trim().slice(0, 40)}…" is too long (120 characters at most). Is this the right file?`);
+    if (newColumns.length >= MAX_NEW_COLUMNS) throw new HttpError(400, `This file has more than ${MAX_NEW_COLUMNS} column headings the tracker does not know. Is this the right file?`);
     const dupe = await db.query('SELECT col_key FROM workload_custom_columns WHERE lower(label)=$1', [norm]);
     let colKey;
     if (dupe.rows.length) {
@@ -694,9 +812,11 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
   // by (Work Date, Plug ID) — merge instead of inserting it twice.
   const merged = new Map();
   async function readSheet(ws) {
+    const sheetInfo = { name: ws ? ws.name : null, rows: 0 };
+    importInfo.sheets.push(sheetInfo);
     if (!ws || ws.rowCount < 2) return;
     const headerRow = ws.getRow(1);
-    const colKeyAt = {};
+    const colKeyAt = Object.create(null);
     headerRow.eachCell((cell, colNumber) => {
       const label = String(cellText(cell.value) ?? '').trim();
       if (label && label.toLowerCase() !== 'actions') colKeyAt[colNumber] = null; // resolved below, after all headers are read
@@ -722,10 +842,11 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
         else { val = cellText(val);
           if (f.kind === 'date') obj[key] = val instanceof Date ? isoDate(val) : String(val);
           else if (f.kind === 'datetime') obj[key] = val instanceof Date ? isoDateTime(val) : String(val);
-          else if (key === 'audio_guide') obj[key] = val instanceof Date ? isoDate(val) : String(val);
+          else if (key === 'audio_guide' || key === 'art_stb') obj[key] = val instanceof Date ? isoDate(val) : String(val);   // an Excel date or text
           else obj[key] = String(val); }
       }
       if (!hasAny) continue;
+      sheetInfo.rows++;
       if (breakdateRaw != null) {
         // lines like 'VGFX  Sep 28, 2026 10:00 AM' / 'VEDIT  Sep 28, 2026 10:00 PM'; an unlabelled value goes to the
         // row's only VGFX/VEDIT team (a real Excel date/time typed by hand is accepted too)
@@ -757,7 +878,7 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
   await db.tx(async (c) => {
     for (const fields of merged.values()) {
       try {
-        const rec = await parseRow(c, fields, null, customCols);
+        const rec = await parseRow(c, fields, null, customCols, { allowBlankUnits: true });   // a row with no Units Concerned (e.g. the UNASSIGNED sheet) comes in unassigned
         assertNotLocked(locks, rec.work_date);
         const id = await insertRow(c, rec, req.user.id);
         await audit(req, 'workload.create', 'workload_item', id, { imported: true, plug_id: fields.plug_id }, c);
@@ -767,7 +888,17 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), a
       }
     }
   });
+  await emitTransfer(req, 'workload.import', {
+    ...importInfo, rowsRead: importInfo.sheets.reduce((n, sh) => n + sh.rows, 0), uniqueRows: merged.size,
+    created, skipped: errors.length, errors: errors.slice(0, 20), newColumns, ms: Date.now() - t0,
+  });
   res.json({ ok: true, created, skipped: errors.length, errors: errors.slice(0, 20), newColumns });
+  } catch (e) {
+    await emitTransfer(req, 'workload.import_failed', { ...importInfo, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
+    throw e;
+  }
 }));
 
 module.exports = router;
+// shared with the PSD Daily Plug List routes (src/routes/plugs.js), which make Workload rows from plugs
+module.exports.helpers = { UNITS, UNIT_TEAMS, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked };

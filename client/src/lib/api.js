@@ -7,7 +7,10 @@ export class ApiError extends Error {
   }
 }
 
-export async function api(method, url, body) {
+/** `quiet: true` is for background, best-effort calls (the presence heartbeat): a "password change required" / "2FA required" / signed-out answer
+    is just an error for that call and does NOT send the browser anywhere — otherwise such a call made from the very page that handles those
+    states (Profile) would redirect to itself forever. */
+export async function api(method, url, body, { quiet = false } = {}) {
   const opts = { method, headers: { 'X-Requested-With': 'PromoHub' }, credentials: 'same-origin' };
   if (body instanceof FormData) opts.body = body;
   else if (body !== undefined) {
@@ -23,15 +26,19 @@ export async function api(method, url, body) {
   let data = null;
   if ((res.headers.get('content-type') || '').includes('application/json')) data = await res.json();
 
-  if (res.status === 401 && !url.startsWith('/api/auth/')) {
+  if (res.status === 503 && data && data.maintenance) {
+    if (!window.__pcsRestoring) window.location.reload(); // shows the server's maintenance page
+    throw new ApiError(data.error, 503, data);
+  }
+  if (res.status === 401 && !url.startsWith('/api/auth/') && !quiet) {
     window.location.href = '/login';
     throw new ApiError('Session expired', 401, data);
   }
-  if (res.status === 403 && data && data.twofaSetupRequired) {
+  if (res.status === 403 && data && data.twofaSetupRequired && !quiet) {
     window.location.href = '/profile?setup2fa=1';
     throw new ApiError('2FA setup required', 403, data);
   }
-  if (res.status === 403 && data && data.mustChangePassword) {
+  if (res.status === 403 && data && data.mustChangePassword && !quiet) {
     window.location.href = '/profile?force=1';
     throw new ApiError('Password change required', 403, data);
   }
@@ -39,8 +46,8 @@ export async function api(method, url, body) {
   return data;
 }
 
-export const get = (url) => api('GET', url);
-export const post = (url, body) => api('POST', url, body === undefined ? {} : body);
+export const get = (url, options) => api('GET', url, undefined, options);
+export const post = (url, body, options) => api('POST', url, body === undefined ? {} : body, options);
 export const put = (url, body) => api('PUT', url, body);
 export const patch = (url, body) => api('PATCH', url, body);
 export const del = (url) => api('DELETE', url);

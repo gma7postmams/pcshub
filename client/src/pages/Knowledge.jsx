@@ -39,51 +39,47 @@ export default function Knowledge() {
     load();
   }, [load]);
 
-  const upload = useCallback(async (fileList) => {
+  // Upload flow: choose / drop a PDF, then name it. The title is required before anything is sent.
+  const [draft, setDraft] = useState(null);   // { file, title }
+
+  const pick = useCallback((fileList) => {
     const files = [...fileList];
     if (!files.length || busy) return;
-    const bad = [];
-    const good = [];
-    for (const f of files) {
-      if (!looksPdf(f)) bad.push({ filename: f.name, error: 'Not a PDF file' });
-      else if (f.size > meta.maxMb * 1024 * 1024) bad.push({ filename: f.name, error: `Larger than ${meta.maxMb} MB` });
-      else good.push(f);
-    }
-    if (good.length > meta.maxFiles) {
-      bad.push(...good.slice(meta.maxFiles).map((f) => ({ filename: f.name, error: `Only ${meta.maxFiles} files at a time — drop it again` })));
-      good.length = meta.maxFiles;
-    }
-    setReport(bad);
-    if (!good.length) { if (bad.length) toast('No PDF files to upload', 'err'); return; }
+    if (inputRef.current) inputRef.current.value = '';
+    setReport([]);
+    const f = files[0];
+    const err = files.length > 1 ? 'Upload one PDF at a time' : !looksPdf(f) ? 'Not a PDF file' : f.size > meta.maxMb * 1024 * 1024 ? `Larger than ${meta.maxMb} MB` : '';
+    if (err) { setReport([{ filename: f.name, error: err }]); return; }
+    setDraft({ file: f, title: '' });
+  }, [busy, meta]);
 
+  const upload = useCallback(async () => {
+    if (!draft || busy) return;
+    const title = draft.title.trim();
+    if (!title) { toast('Name the document first', 'err'); return; }
     const fd = new FormData();
-    good.forEach((f) => fd.append('files', f));
+    fd.append('title', title);
+    fd.append('files', draft.file);
     setBusy(true);
     try {
-      const res = await post('/api/knowledge', fd);
-      const results = res.results || [];
-      const failed = results.filter((r) => !r.ok).map(({ filename, error }) => ({ filename, error }));
-      setReport([...bad, ...failed]);
-      const ok = results.length - failed.length;
-      if (ok) toast(ok === 1 ? '1 document added' : `${ok} documents added`);
+      await post('/api/knowledge', fd);
+      toast('Document added');
+      setDraft(null);
       await load();
     } catch (e) {
-      // 400 with per-file results (every file rejected) still carries the reasons
-      const results = e.data && e.data.results;
-      if (results) setReport([...bad, ...results.filter((r) => !r.ok).map(({ filename, error }) => ({ filename, error }))]);
-      else toast(e.message, 'err');
+      const r = e.data && e.data.results && e.data.results[0];
+      toast(r ? r.error : e.message, 'err');
     } finally {
       setBusy(false);
-      if (inputRef.current) inputRef.current.value = '';
     }
-  }, [busy, load, meta, toast]);
+  }, [busy, draft, load, toast]);
 
   const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
   const zone = canWrite ? {
     onDragEnter: (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth.current += 1; setOver(true); },
     onDragOver: (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; },
     onDragLeave: (e) => { if (!hasFiles(e)) return; dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setOver(false); },
-    onDrop: (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth.current = 0; setOver(false); upload(e.dataTransfer.files); },
+    onDrop: (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth.current = 0; setOver(false); pick(e.dataTransfer.files); },
   } : {};
 
   // Dropping a file beside the zone must not make the browser navigate away to the PDF
@@ -107,13 +103,13 @@ export default function Knowledge() {
   };
 
   return (
-    <main className="container">
+    <main className="container wide wl-page">
       <div className="page-head">
         <div><h1>Knowledge Base</h1><div className="sub">Reference documents (PDF){docs ? ` · ${docs.length}` : ''}</div></div>
         {canWrite ? (
           <div className="actions">
             <button type="button" className="btn primary" disabled={busy} onClick={() => inputRef.current && inputRef.current.click()}>
-              <UploadIcon /> Upload PDFs
+              <UploadIcon /> Upload PDF
             </button>
           </div>
         ) : null}
@@ -121,20 +117,20 @@ export default function Knowledge() {
 
       {canWrite ? (
         <>
-          <input ref={inputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(e) => upload(e.target.files)} />
+          <input ref={inputRef} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => pick(e.target.files)} />
           <div
             className={`dropzone${over ? ' over' : ''}${busy ? ' busy' : ''}`}
             role="button"
             tabIndex={0}
-            aria-label="Drop PDF files here or press Enter to browse"
+            aria-label="Drop a PDF here or press Enter to browse"
             onClick={() => !busy && inputRef.current && inputRef.current.click()}
             onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !busy) { e.preventDefault(); inputRef.current && inputRef.current.click(); } }}
             {...zone}
           >
             <UploadIcon />
             <div>
-              <strong>{busy ? 'Uploading…' : over ? 'Drop to upload' : 'Drag & drop PDF files here'}</strong>
-              <div className="muted">{busy ? 'Please wait' : `or click to browse · up to ${meta.maxFiles} files, ${meta.maxMb} MB each`}</div>
+              <strong>{busy ? 'Uploading…' : over ? 'Drop to upload' : 'Drag & drop a PDF here'}</strong>
+              <div className="muted">{busy ? 'Please wait' : `or click to browse · one PDF at a time, up to ${meta.maxMb} MB · you will name it next`}</div>
             </div>
           </div>
           {report.length ? (
@@ -151,10 +147,10 @@ export default function Knowledge() {
           <input type="search" placeholder="Search documents" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search documents" />
         </div>
         {docs === null ? <Empty>Loading…</Empty> : !shown.length ? (
-          <Empty>{docs.length ? 'No documents match your search.' : canWrite ? 'No documents yet. Drop a PDF above to add the first one.' : 'No documents have been added yet.'}</Empty>
+          <Empty>{docs.length ? 'No documents match your search.' : canWrite ? 'No documents yet. Add a PDF above to create the first one.' : 'No documents have been added yet.'}</Empty>
         ) : (
           <div className="table-wrap">
-            <table className="t">
+            <table className="t wl">
               <thead><tr><th>Document</th><th>Size</th><th>Added by</th><th>Added</th><th /></tr></thead>
               <tbody>
                 {shown.map((d) => (
@@ -184,6 +180,33 @@ export default function Knowledge() {
           </div>
         )}
       </div>
+
+      {draft ? (
+        <Modal
+          title="Add document"
+          size="sm"
+          onClose={() => { if (!busy) setDraft(null); }}
+          footer={(
+            <>
+              <button type="button" className="btn" disabled={busy} onClick={() => setDraft(null)}>Cancel</button>
+              <button type="button" className="btn primary" disabled={busy || !draft.title.trim()} onClick={upload}>{busy ? 'Uploading…' : 'Upload'}</button>
+            </>
+          )}
+        >
+          <label className="f">
+            <span>Document name <span className="req">*</span></span>
+            <input
+              autoFocus
+              value={draft.title}
+              maxLength={200}
+              placeholder="e.g. Promo ingest guidelines"
+              onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); upload(); } }}
+            />
+          </label>
+          <div className="dim mt-12">File: {draft.file.name} · {size(draft.file.size)}</div>
+        </Modal>
+      ) : null}
 
       {edit ? (
         <Modal

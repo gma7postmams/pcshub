@@ -94,13 +94,35 @@ export default function Branding() {
           <div className="row gap-16">
             <label className="check"><input type="checkbox" id="cust" checked={f.custom} onChange={(e) => set('custom', e.target.checked)} /> Custom accent colour</label>
             <input type="color" id="bc" value={f.accent} disabled={!f.custom} onChange={(e) => set('accent', e.target.value)} />
-            <input id="bh" maxLength={7} className="mono w-auto" defaultValue={f.accent} key={f.accent} disabled={!f.custom}
-              onChange={(e) => { if (/^#[0-9a-f]{6}$/i.test(e.target.value)) set('accent', e.target.value); }} />
+            
+            <input
+              id="bh"
+              maxLength={7}
+              className="mono w-auto"
+              value={f.accent}
+              disabled={!f.custom}
+              onChange={(e) => {
+                set('accent', e.target.value);
+              }}
+            />
+                            
             <span className="dim">Overrides the theme accent in both modes. Button text colour is picked automatically for contrast.</span>
           </div>
           <div className="row">
             <button type="button" className="btn primary" id="save-theme" onClick={save}>Save branding &amp; theme</button>
-            <button type="button" className="btn ghost" id="reset-prev" onClick={load}>Reset preview</button>
+
+            <button
+              type="button"
+              className="btn ghost"
+              id="reset-prev"
+              onClick={async () => {
+                await load();
+                toast('Preview reset');
+              }}
+            >
+              Reset preview
+            </button>
+
           </div>
         </div>
       </div>
