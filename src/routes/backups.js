@@ -4,11 +4,9 @@ const crypto = require('crypto');
 const path = require('path');
 const express = require('express');
 const multer = require('multer');
-const bcrypt = require('bcrypt');
 const rateLimit = require('express-rate-limit');
-const db = require('../db');
 const v = require('../validate');
-const totp = require('../totp');
+const stepUp = require('../reauth');
 const { asyncH, HttpError } = require('../middleware');
 const { audit } = require('../audit');
 const svc = require('../backup/service');
@@ -35,24 +33,13 @@ const createLimiter = limiter(10);
 const sensitiveLimiter = limiter(20);
 const analyzeLimiter = limiter(5);
 
-/** Password (plus the current 2FA code when enabled) must be re-entered for delete and download. */
-async function reauth(req, action, id) {
-  const password = typeof req.body.password === 'string' ? req.body.password : '';
-  const { rows } = await db.query('SELECT password_hash, totp_enabled, totp_secret FROM users WHERE id=$1', [req.user.id]);
-  const u = rows[0];
-  let ok = Boolean(u && password) && await bcrypt.compare(password, u.password_hash);
-  if (ok && u.totp_enabled) ok = await totp.verifyAndConsume(db, req.user.id, u.totp_secret, req.body.code);
-  if (!ok) {
-    await audit(req, action, 'backup', id, { outcome: 'denied', reason: 'reauth_failed' });
-    throw new HttpError(403, u && u.totp_enabled ? 'Password or authentication code is incorrect' : 'Password is incorrect');
-  }
-}
+/** Password (plus the current 2FA code when enabled) must be re-entered every time for restore, delete and download. */
+const reauth = (req, action, id) => stepUp.verify(req, { action, entity: 'backup', id }, req.body);
 
 router.get('/preview', asyncH(async (req, res) => res.json(await svc.preview())));
 
 router.get('/', asyncH(async (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit, 10) || 25, 100);
-  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+  const { limit, offset } = v.paging(req.query, { def: 25, max: 100 });
   const type = ['all', 'backup', 'restore'].includes(req.query.type) ? req.query.type : 'all';
   res.json(await svc.list({ limit, offset, type, deleted: req.query.deleted === '1' }));
 }));

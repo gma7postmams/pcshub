@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { fmtDate, isoDate } from '../lib/util.js';
 import { PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
-import { FilterSelect, Pager } from '../components/wl.jsx';
+import { FilterSelect, Pager, SortTh, useNarrow } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
 
 // PSD Daily Plug List — the PSD's daily plug list (imported from their workbook: NO / PLUG ID / PROG NAME/PROJ TITLE / PSD / Account By),
@@ -72,7 +72,9 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
 
   const range = rangeOf(period, anchor, custom);
   const limit = size === 'all' ? ALL_CAP : Number(size);
-  const viewKey = `${period}|${range.from}|${range.to}|${query}|${size}`;
+  const narrow = useNarrow();
+  const [sort, setSort] = useState({ k: '', dir: 'asc' });   // clicked column header
+  const viewKey = `${period}|${range.from}|${range.to}|${query}|${size}|${sort.k}|${sort.dir}`;
   const [pageState, setPageState] = useState({ key: '', offset: 0 });   // the page resets to the first whenever the view changes
   const offset = pageState.key === viewKey ? pageState.offset : 0;
   const setOffset = (o) => setPageState({ key: viewKey, offset: o });
@@ -100,9 +102,10 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
       if (range.from) p.set('from', range.from);
       if (range.to) p.set('to', range.to);
       if (query) p.set('q', query);
+      if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
       setData(await get(`/api/plugs?${p}`));
     } catch (e) { setData({ rows: [], total: 0 }); toast(e.message, 'err'); }
-  }, [anchor, range.from, range.to, query, limit, offset, period]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [anchor, range.from, range.to, query, limit, offset, period, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setData(null); setPicked(new Set()); loadRows(); }, [loadRows]);
 
   // ---- moving through time ----
@@ -207,32 +210,31 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
         ) : (
           <>
             <div className="table-wrap">
-              <table className="t plug-t">
+              <table className={`t wl plug-t${narrow ? ' cards' : ''}`}>
                 <thead>
                   <tr>
                     {canWrite ? <th className="chk"><input type="checkbox" checked={allOn} disabled={!todo.length} onChange={() => setPicked(allOn ? new Set() : new Set(todo.map((r) => r.id)))} title="Select every plug on this page that is not yet in the Workload Tracker" /></th> : null}
-                    <th>NO</th><th>DATE</th><th>PLUG ID</th><th>PROG. NAME / PROJ. TITLE</th><th>PSD</th><th>ACCOUNT BY</th><th>IN WORKLOAD</th>{canWrite ? <th /> : null}
+                    <SortTh k="plug_date" sort={sort} onSort={setSort}>DATE</SortTh><SortTh k="plug_id" sort={sort} onSort={setSort}>PLUG ID</SortTh><SortTh k="prog_name" sort={sort} onSort={setSort}>PROG. NAME / PROJ. TITLE</SortTh><SortTh k="psd" sort={sort} onSort={setSort}>PSD</SortTh><SortTh k="account_by" sort={sort} onSort={setSort}>ACCOUNT BY</SortTh><SortTh k="in_workload" sort={sort} onSort={setSort}>IN WORKLOAD</SortTh>{canWrite ? <th className="plug-actions">Actions</th> : null}
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length ? rows.map((r, i) => (
                     <tr key={r.id} className={r.in_workload ? 'done' : ''}>
                       {canWrite ? <td className="chk"><input type="checkbox" checked={picked.has(r.id)} disabled={r.in_workload} onChange={() => toggle(r.id)} /></td> : null}
-                      <td>{r.list_no || offset + i + 1}</td>
-                      <td className="nowrap">{dateLabel(r.plug_date)}</td>
-                      <td className="mono">{r.plug_id}{r.is_additional ? <span className="chip c-orange plug-add" title="Listed under “Additional for …”">Added</span> : null}</td>
-                      <td>{r.prog_name}</td>
-                      <td>{r.psd}</td>
-                      <td>{r.account_by}</td>
-                      <td>{r.in_workload ? <span className="chip c-green">In workload</span> : <span className="dim">—</span>}</td>
+                      <td data-label="Date" className="nowrap">{dateLabel(r.plug_date)}</td>
+                      <td data-k="plug_id" data-label="Plug ID" className="mono">{r.plug_id}{r.is_additional ? <span className="chip c-orange plug-add" title="Listed under “Additional for …”">Added</span> : null}</td>
+                      <td data-label="PROG. NAME / PROJ. TITLE">{r.prog_name}</td>
+                      <td data-label="PSD">{r.psd}</td>
+                      <td data-label="Account By">{r.account_by}</td>
+                      <td data-label="In Workload">{r.in_workload ? <span className="chip c-green">In workload</span> : <span className="dim">—</span>}</td>
                       {canWrite ? (
-                        <td className="right nowrap">
+                        <td className="plug-actions">
                           <button type="button" className="btn sm ghost" onClick={() => setEditing(r)}>Edit</button>
                           <button type="button" className="btn sm ghost" onClick={() => removePlug(r)}>Delete</button>
                         </td>
                       ) : null}
                     </tr>
-                  )) : <tr><td colSpan={canWrite ? 9 : 7} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr>}
+                  )) : <tr><td colSpan={canWrite ? 8 : 6} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -321,11 +323,14 @@ function DeleteAllPlugsModal({ viewLabel, viewCount, everything, totals, filters
   );
 }
 
+const withCurrent = (list, v) => (v && !list.includes(v) ? [...list, v] : list);
 function PlugModal({ date, plug, onClose, onSaved }) {
   const toast = useToast();
   const [f, setF] = useState(plug
     ? { plug_date: plug.plug_date, plug_id: plug.plug_id, prog_name: plug.prog_name || '', psd: plug.psd || '', account_by: plug.account_by || '' }
     : { plug_date: date || isoDate(), plug_id: '', prog_name: '', psd: '', account_by: '' });
+  const [progs, setProgs] = useState([]);
+  useEffect(() => { get('/api/dropdowns?categories=program').then((d) => setProgs(d.program || [])).catch(() => {}); }, []);
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const save = async () => {
@@ -342,7 +347,7 @@ function PlugModal({ date, plug, onClose, onSaved }) {
       <form className="form-grid" noValidate onSubmit={(e) => { e.preventDefault(); save(); }}>
         <label className="f"><span>Date <span className="req">*</span></span><input type="date" value={f.plug_date} onChange={set('plug_date')} /></label>
         <label className="f"><span>Plug ID <span className="req">*</span></span><input value={f.plug_id} onChange={set('plug_id')} maxLength={200} autoFocus /></label>
-        <label className="f full"><span>PROG. NAME / PROJ. TITLE</span><input value={f.prog_name} onChange={set('prog_name')} maxLength={300} /></label>
+        <label className="f full"><span>PROG. NAME / PROJ. TITLE</span><select value={f.prog_name} onChange={set('prog_name')}><Options list={withCurrent(progs, plug ? plug.prog_name : '')} blank="—" /></select></label>
         <label className="f"><span>PSD</span><input value={f.psd} onChange={set('psd')} maxLength={200} /></label>
         <label className="f"><span>Account By</span><input value={f.account_by} onChange={set('account_by')} maxLength={100} /></label>
       </form>

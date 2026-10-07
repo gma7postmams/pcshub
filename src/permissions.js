@@ -7,10 +7,10 @@
 //  - Admin role: every page and section, plus the Admin page. Group is ignored.
 //  - Everyone else: only the pages/sections checked on their group. No group => Profile only.
 //  - An action needs BOTH the role AND access to the page it happens on
-//    (e.g. approving requires Manager role + a group with the Approval page).
+//    (e.g. filling Destination Folder / Approved by requires Manager role + a group with the Ingest Tracker page).
 //  - Profile is always available. Admin page is Admin-role only (not group-assignable).
 
-const ROLES = ['Admin', 'Manager', 'Editor', 'Viewer'];
+const ROLES = ['Admin', 'Manager', 'Editor', 'Ingest', 'Viewer'];
 
 // Pages (and their sections) that a group can be granted. Keys are stored in group_permissions.
 // A section is only effective if its page is also granted.
@@ -28,17 +28,6 @@ const CATALOG = [
   { key: 'ingest', label: 'Ingest Tracker', path: '/ingest', sections: [] },
   { key: 'workload', label: 'Workload Tracker', path: '/workload', sections: [] },
   { key: 'plugs', label: 'PSD Daily Plug List', path: '/plug-list', sections: [] },
-  { key: 'approval', label: 'Approval', path: '/approval', sections: [] },
-
-  {
-    key: 'reports',
-    label: 'Reports',
-    path: '/reports',
-    sections: [
-      { key: 'reports.ingest', label: 'Ingest & Approval summary' },
-      { key: 'reports.export', label: 'CSV export' },
-    ],
-  },
 
   {
     key: 'knowledge',
@@ -55,15 +44,18 @@ const FIXED_PAGES = [
 ];
 
 const ALL_KEYS = CATALOG.flatMap((p) => [p.key, ...p.sections.map((s) => s.key)]);
-const PAGE_BY_PATH = Object.fromEntries([...CATALOG, ...FIXED_PAGES].map((p) => [p.path, p]));
-const SECTION_PAGE = Object.fromEntries(CATALOG.flatMap((p) => p.sections.map((s) => [s.key, p.key])));
+// Lookup tables keyed by text that can come from a request are created without a prototype, so a key such as
+// "__proto__" or "constructor" is simply absent instead of resolving to something inherited.
+const dict = (entries) => Object.assign(Object.create(null), Object.fromEntries(entries));
+const PAGE_BY_PATH = dict([...CATALOG, ...FIXED_PAGES].map((p) => [p.path, p]));
+const SECTION_PAGE = dict(CATALOG.flatMap((p) => p.sections.map((s) => [s.key, p.key])));
 
 // Role -> actions
-const ROLE_ACTIONS = {
+const DEFAULT_ROLE_ACTIONS = Object.assign(Object.create(null), {
   Admin: [
     'ingest.write',
     'ingest.delete',
-    'approval.decide',
+    'ingest.approve',
     'ingest.cm_complete',
     'workload.write',
     'knowledge.write',
@@ -73,26 +65,44 @@ const ROLE_ACTIONS = {
 
   Manager: [
     'ingest.write',
-    'approval.decide',
+    'ingest.approve',
     'ingest.cm_complete',
     'workload.write',
     'knowledge.write',
     'plugs.write'
   ],
   Editor:  ['ingest.write'],
+  Ingest:  ['ingest.cm_complete'],   // Ingest Tracker only: Status (CM) and its NON-COMPLIANT reason, nothing else
   Viewer:  [],
-};
+});
+// The live role -> actions map. It starts from the built-in defaults and is replaced from the database (roles / role_actions,
+// managed in Admin > Roles) at startup and after every change, in place, so every module that imported it sees the update.
+const ROLE_ACTIONS = Object.assign(Object.create(null), JSON.parse(JSON.stringify(DEFAULT_ROLE_ACTIONS)));
+
 // Action -> page the action happens on (the user's group must grant it)
-const ACTION_PAGE = {
+const ACTION_PAGE = Object.assign(Object.create(null), {
   'ingest.write': 'ingest',
   'ingest.delete': 'ingest',
   'ingest.cm_complete': 'ingest',
-  'approval.decide': 'approval',
+  'ingest.approve': 'ingest',
   'workload.write': 'workload',
   'knowledge.write': 'knowledge',
   'plugs.write': 'plugs',
   'admin': null,
-};
+});
+
+const ALL_ACTIONS = Object.keys(ACTION_PAGE);
+const BUILTIN_ROLES = ['Admin', 'Manager', 'Editor', 'Ingest', 'Viewer'];
+
+/** rows: [{ name, actions: string[] }]. Admin always holds every action; unknown actions are dropped. */
+function applyRoles(rows) {
+  const names = rows.map((r) => r.name);
+  if (!names.includes('Admin')) names.unshift('Admin');
+  ROLES.splice(0, ROLES.length, ...names);
+  for (const k of Object.keys(ROLE_ACTIONS)) delete ROLE_ACTIONS[k];
+  for (const r of rows) ROLE_ACTIONS[r.name] = r.name === 'Admin' ? [...ALL_ACTIONS] : (r.actions || []).filter((a) => ALL_ACTIONS.includes(a));
+  if (!ROLE_ACTIONS.Admin) ROLE_ACTIONS.Admin = [...ALL_ACTIONS];
+}
 
 function isValidKey(k) { return ALL_KEYS.includes(k); }
 
@@ -170,6 +180,6 @@ function landingPath(user) {
 }
 
 module.exports = {
-  ROLES, CATALOG, FIXED_PAGES, ROLE_ACTIONS, ACTION_PAGE, PAGE_BY_PATH,
+  ROLES, CATALOG, FIXED_PAGES, ROLE_ACTIONS, DEFAULT_ROLE_ACTIONS, ALL_ACTIONS, BUILTIN_ROLES, applyRoles, ACTION_PAGE, PAGE_BY_PATH,
   normalizeKeys, canPage, canSection, can, allowedPages, allowedSections, allowedActions, landingPath,
 };

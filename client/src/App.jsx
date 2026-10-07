@@ -10,8 +10,6 @@ const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
 const Ingest = lazy(() => import('./pages/Ingest.jsx'));
 const Workload = lazy(() => import('./pages/Workload.jsx'));
 const PlugListPage = lazy(() => import('./pages/PlugListPage.jsx'));
-const Approval = lazy(() => import('./pages/Approval.jsx'));
-const Reports = lazy(() => import('./pages/Reports.jsx'));
 const Knowledge = lazy(() => import('./pages/Knowledge.jsx'));
 const Admin = lazy(() => import('./pages/admin/Admin.jsx'));
 const Profile = lazy(() => import('./pages/Profile.jsx'));
@@ -23,8 +21,6 @@ const PAGES = {
   '/ingest': Ingest,
   '/workload': Workload,
   '/plug-list': PlugListPage,
-  '/approval': Approval,
-  '/reports': Reports,
   '/activity-history': ActivityHistory,
   '/knowledge': Knowledge,
   '/admin': Admin,
@@ -74,13 +70,18 @@ function Guarded({ path }) {
     Only counts real use — mouse, keys, touch or scroll in the last two minutes, with the tab visible — so an idle open tab is not "active". */
 function Presence() {
   const { pathname } = useLocation();
+  const sess = useSession();
+  // someone who still has to change their password or set up 2FA isn't "using the app" yet — and the server only lets them reach Profile
+  const gated = !!(sess.user.must_change_password || (sess.user.totp_required && !sess.user.totp_enabled));
+  const gatedRef = useRef(gated);
+  gatedRef.current = gated;
   const lastInput = useRef(Date.now());
   const path = useRef(pathname);
   const beat = useRef(null);
   path.current = pathname;
   beat.current = () => {
-    if (document.visibilityState !== 'visible' || Date.now() - lastInput.current > 120000) return;
-    post('/api/presence', { path: path.current }).catch(() => { /* presence is best-effort */ });
+    if (gatedRef.current || document.visibilityState !== 'visible' || Date.now() - lastInput.current > 120000) return;
+    post('/api/presence', { path: path.current }, { quiet: true }).catch(() => { /* presence is best-effort */ });
   };
   useEffect(() => {
     const mark = () => { lastInput.current = Date.now(); };
@@ -88,8 +89,15 @@ function Presence() {
     events.forEach((e) => window.addEventListener(e, mark, { passive: true }));
     const onVisible = () => { if (document.visibilityState === 'visible') { mark(); beat.current(); } };
     document.addEventListener('visibilitychange', onVisible);
+    // The tab or browser is closing: say so, so this person leaves the Active users list at once. `keepalive` lets the request finish while
+    // the page unloads (and, unlike sendBeacon, can carry the CSRF header). Best-effort: a crash or power cut falls back to the heartbeat window.
+    const onLeave = () => {
+      if (gatedRef.current) return;
+      try { fetch('/api/presence/leave', { method: 'POST', keepalive: true, credentials: 'same-origin', headers: { 'X-Requested-With': 'PromoHub', 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {}); } catch (e) { /* closing anyway */ }
+    };
+    window.addEventListener('pagehide', onLeave);
     const timer = setInterval(() => beat.current(), 60000);
-    return () => { events.forEach((e) => window.removeEventListener(e, mark)); document.removeEventListener('visibilitychange', onVisible); clearInterval(timer); };
+    return () => { events.forEach((e) => window.removeEventListener(e, mark)); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('pagehide', onLeave); clearInterval(timer); };
   }, []);
   useEffect(() => { lastInput.current = Date.now(); beat.current(); }, [pathname]);   // opening a page counts as using the app
   return null;

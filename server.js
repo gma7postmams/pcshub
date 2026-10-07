@@ -14,12 +14,12 @@ const {
 } = require('./src/middleware');
 const { PAGE_BY_PATH, landingPath } = require('./src/permissions');
 const {
-  PROD, cookieSecure, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks,
+  PROD, cookieSecure, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks, SESSION_IDLE_MS, API_RATE_LIMIT,
 } = require('./src/config');
-require('./src/totp'); // validates TOTP_ENC_KEY at boot
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
-startupChecks();
+startupChecks();          // exits when SESSION_SECRET is missing or weak
+require('./src/totp');    // validates TOTP_ENC_KEY at boot
 
 const app = express();
 app.disable('x-powered-by');
@@ -46,6 +46,7 @@ app.use(helmet({
     },
   },
   crossOriginEmbedderPolicy: false,
+  frameguard: { action: 'deny' },   // same answer as frame-ancestors 'none' for browsers that only read the older header
   hsts: cookieSecure ? { maxAge: 31536000, includeSubDomains: true } : false,
 }));
 app.use((req, res, next) => {
@@ -58,15 +59,14 @@ const maintenance = require('./src/backup/maintenance');
 app.use(maintenance.middleware);
 app.get('/api/maintenance/status', maintenance.status);
 
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: false, limit: '100kb' }));
+app.use(express.json({ limit: '1mb' }));   // the app only speaks JSON (and multipart for uploads): no form-encoded parser
 
 // ---------- Sessions (PostgreSQL) ----------
 app.use(session({
   name: COOKIE_NAME,
   // table is created by src/schema.sql, so the runtime DB role needs no DDL rights
   store: new PgStore({ pool: db.pool, tableName: 'user_sessions', createTableIfMissing: false, pruneSessionInterval: 60 * 15 }),
-  secret: process.env.SESSION_SECRET || 'dev-only-insecure-secret-change-me',
+  secret: process.env.SESSION_SECRET,   // startupChecks() has already refused to start without a strong one
   resave: false,
   saveUninitialized: false,
   rolling: true,
@@ -75,7 +75,7 @@ app.use(session({
     sameSite: 'lax',
     secure: cookieSecure,
     path: '/',
-    maxAge: (parseInt(process.env.SESSION_HOURS, 10) || 12) * 3600 * 1000,
+    maxAge: SESSION_IDLE_MS,
   },
 }));
 
@@ -93,7 +93,9 @@ app.get('/sw.js', (req, res) => {
 });
 // Hashed bundles never change → cache for a year
 app.use('/assets', express.static(path.join(CLIENT_DIST, 'assets'), { immutable: true, maxAge: '365d', index: false }));
-app.use(express.static(CLIENT_DIST, { index: false, maxAge: PROD ? '1h' : 0 }));
+// The app shell is only handed out by the access-controlled page routes further down, never as a plain file
+app.get('/index.html', (req, res) => res.redirect('/'));
+app.use(express.static(CLIENT_DIST, { index: false, dotfiles: 'ignore', maxAge: PROD ? '1h' : 0 }));
 app.use('/uploads/branding', express.static(path.join(__dirname, 'uploads', 'branding'), {
   maxAge: '7d',
   setHeaders: (res) => res.set('X-Content-Type-Options', 'nosniff'),
@@ -101,15 +103,23 @@ app.use('/uploads/branding', express.static(path.join(__dirname, 'uploads', 'bra
 
 app.use(loadUser);
 
+// Workload / Plug List imports and exports announce themselves through src/transfer-hook.js; this writes each one
+// (and each failure) to the audit log: who, file name and size, filters, row counts, duration. Never row contents.
+const { audit } = require('./src/audit');
+require('./src/transfer-hook').onTransfer((e) => audit(e.req, e.action, e.entity, e.entityId, e.details));
+
 // ---------- API ----------
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  limit: 300,
+  limit: API_RATE_LIMIT,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many requests, slow down.' },
 });
-app.use('/api', apiLimiter, csrfGuard);
+// API answers are per-user data: neither the browser nor a proxy in between may keep a copy
+// (the few routes that serve files set their own Cache-Control afterwards).
+const noStoreApi = (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); };
+app.use('/api', apiLimiter, csrfGuard, noStoreApi);
 
 // Public
 app.use('/api/branding', require('./src/routes/branding'));
@@ -125,7 +135,7 @@ app.use('/api', (req, res, next) => {
   return res.status(403).json({ error: 'Password change required', mustChangePassword: true });
 });
 
-// Enforced 2FA (REQUIRE_2FA): only profile/notifications APIs until 2FA is set up
+// Enforced 2FA (turned on per user by an Admin): only profile/notifications APIs until 2FA is set up
 app.use('/api', (req, res, next) => {
   if (!twofaRequired(req.user) || req.user.totp_enabled) return next();
   if (/^\/(profile|notifications)(\/|$)/.test(req.path)) return next();
@@ -138,10 +148,8 @@ app.use('/api/presence',      require('./src/routes/presence'));   // who is wor
 app.use('/api',               require('./src/routes/lookups'));
 app.use('/api/dashboard',     requirePageAccess('/dashboard'), require('./src/routes/dashboard'));
 app.use('/api/ingest',        requirePageAccess('/ingest'),    require('./src/routes/ingest'));
-app.use('/api/approvals',     requirePageAccess('/approval'),  require('./src/routes/approvals'));
 app.use('/api/workload',      requirePageAccess('/workload'),  require('./src/routes/workload'));
 app.use('/api/plugs',         require('./src/routes/plugs')(require('./src/routes/workload').helpers));   // PSD Daily Plug List (page + API of its own)
-app.use('/api/reports',       requirePageAccess('/reports'),   require('./src/routes/reports'));
 app.use('/api/knowledge',     requirePageAccess('/knowledge'), require('./src/routes/knowledge'));
 app.use('/api/admin/backups', requirePageAccess('/admin'),     require('./src/routes/backups'));
 app.use('/api/admin',         requirePageAccess('/admin'),     require('./src/routes/admin'));
@@ -160,6 +168,9 @@ app.get('/login', noStore, (req, res) => {
   sendApp(req, res);
 });
 app.get('/', (req, res) => res.redirect(req.user ? landingPath(req.user) : '/login'));
+
+// The Approval page is part of the Ingest Tracker now (old links and notifications still land somewhere useful)
+app.get('/approval', (req, res) => res.redirect('/ingest'));
 
 for (const page of Object.keys(PAGE_BY_PATH)) {
   app.get(page, noStore, requirePageAccess(page), (req, res) => {
@@ -188,6 +199,7 @@ const boot = process.env.MIGRATE_ON_START === 'false'
   : migrate(db);
 
 boot
+  .then(() => require('./src/roles').loadRoles(db))
   .then(() => require('./src/backup/service').recoverStale())
   .then(() => require('./src/backup/analysis').startupCleanup())
   .then(async () => {

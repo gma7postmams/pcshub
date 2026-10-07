@@ -5,6 +5,7 @@
 // Import reads every sheet, works out each sheet's date, and adds the plugs (re-importing an updated file only adds what is new).
 // The Workload Tracker copies Plug ID, PSD and Prog. Name from this list (see fillFromPlugList in workload.js and the tab in the UI).
 const multer = require('multer');
+const { assertSafeXlsx, oneImportAtATime } = require('../xlsx-guard');
 const db = require('../db');
 const v = require('../validate');
 const express = require('express');
@@ -15,7 +16,7 @@ const { emitTransfer } = require('../transfer-hook');   // import events — the
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
 
-const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+const MONTHS = Object.assign(Object.create(null), { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 });
 const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -149,8 +150,7 @@ function plugFilter(query) {
   if (query.from) add('p.plug_date >= ?', v.date(query.from, { field: 'From' }));
   if (query.to) add('p.plug_date <= ?', v.date(query.to, { field: 'To' }));
   if (query.q) {
-    const like = `%${String(query.q).slice(0, 80).replace(/[%_\\]/g, '\\$&')}%`;
-    params.push(like);
+    params.push(v.like(query.q, 80));
     where.push(`(p.plug_id ILIKE $${params.length} OR p.prog_name ILIKE $${params.length} OR p.psd ILIKE $${params.length})`);
   }
   return { where, params };
@@ -163,6 +163,11 @@ module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, lo
   // uses it to fill PSD / PROG. NAME); changing it needs the plugs.write action (Manager / Admin + the Plug List page), and the two
   // operations that create or change Workload rows (copy, fill) also need workload.write.
   router.use(requireAnyPage(['/plug-list', '/workload']));
+  // Ids are 32-bit in the database: an out-of-range number is simply a plug that does not exist.
+  router.param('id', (req, res, next, raw) => {
+    try { req.params.id = v.id(raw); } catch (e) { return res.status(404).json({ error: 'Plug not found' }); }
+    return next();
+  });
   // ---- which days have a list ----
   router.get('/dates', asyncH(async (req, res) => {
     const { rows } = await db.query('SELECT plug_date AS date, count(*)::int AS n FROM workload_plugs GROUP BY plug_date ORDER BY plug_date DESC LIMIT 366');
@@ -177,9 +182,14 @@ module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, lo
       ? `, EXISTS (SELECT 1 FROM workload_items w WHERE w.work_date = p.plug_date
            AND upper(p.plug_id) IN (SELECT upper(btrim(x)) FROM unnest(string_to_array(w.plug_id, E'\\n')) AS x)) AS in_workload`
       : '';
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 3000, 1), 5000);
-    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-    const order = req.query.order === 'desc' ? 'p.plug_date DESC, p.seq, p.id' : 'p.plug_date, p.seq, p.id';   // newest day first, or oldest first; list order within a day
+    const { limit, offset } = v.paging(req.query, { def: 3000, max: 5000 });
+    let order = req.query.order === 'desc' ? 'p.plug_date DESC, p.seq, p.id' : 'p.plug_date, p.seq, p.id';   // newest day first, or oldest first; list order within a day
+    // a clicked column header (?sort=&dir=) sorts the whole result, text case-insensitively, empty values last
+    const SORTS = { plug_date: 'p.plug_date', plug_id: 'lower(p.plug_id)', prog_name: 'lower(p.prog_name)', psd: 'lower(p.psd)', account_by: 'lower(p.account_by)' };
+    if (used) SORTS.in_workload = 'in_workload';
+    if (Object.prototype.hasOwnProperty.call(SORTS, req.query.sort)) {
+      order = `${SORTS[req.query.sort]} ${req.query.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, p.plug_date, p.seq, p.id`;
+    }
     const total = (await db.query(`SELECT count(*)::int AS n FROM workload_plugs p ${whereSql(where)}`, params)).rows[0].n;
     const { rows } = await db.query(
       `SELECT p.id, p.plug_date, p.seq, p.list_no, p.plug_id, p.prog_name, p.psd, p.account_by, p.is_additional${used}
@@ -189,7 +199,7 @@ module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, lo
   }));
 
   // ---- import the PSD's daily plug list workbook ----
-  router.post('/import', requireAction('plugs.write'), upload.single('file'), asyncH(async (req, res) => {
+  router.post('/import', requireAction('plugs.write'), upload.single('file'), oneImportAtATime, asyncH(async (req, res) => {
     const t0 = Date.now();
     const info = { target: 'plug list', file: req.file ? req.file.originalname : null, bytes: req.file ? req.file.size : 0 };
     try {
@@ -198,6 +208,7 @@ module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, lo
       try { ExcelJS = require('exceljs'); } catch (e) {
         throw new HttpError(501, 'Import needs the "exceljs" package. Run "npm install" on the server, then restart.');
       }
+      await assertSafeXlsx(req.file.buffer, req.file.originalname);   // file type + unpacked-size limits, before anything is loaded into memory
       const wb = new ExcelJS.Workbook();
       try { await wb.xlsx.load(req.file.buffer); } catch (e) { throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)'); }
       // the list has no year in it: use the one typed in, else a year in the file name ("September_2026_Plug_List"), else this year
@@ -251,8 +262,15 @@ module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, lo
   });
   const dupe = (e) => { if (e && e.code === '23505') throw new HttpError(409, 'That plug (same Plug ID, program and PSD) is already on this day\'s list'); throw e; };
 
+  const checkProg = async (name, current) => {
+    if (!name || name === current) return;
+    const { rows } = await db.query("SELECT 1 FROM dropdown_options WHERE category='program' AND value=$1 AND is_active", [name]);
+    if (!rows.length) throw new HttpError(400, `PROG. NAME / PROJ. TITLE "${name}" is not a valid option`);
+  };
+
   router.post('/', requireAction('plugs.write'), asyncH(async (req, res) => {
     const b = plugBody(req.body || {});
+    await checkProg(b.prog_name, null);
     let row;
     try {
       ({ rows: [row] } = await db.query(
@@ -268,6 +286,8 @@ module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, lo
 
   router.put('/:id(\\d+)', requireAction('plugs.write'), asyncH(async (req, res) => {
     const b = plugBody(req.body || {});
+    const cur = await db.query('SELECT prog_name FROM workload_plugs WHERE id=$1', [req.params.id]);
+    await checkProg(b.prog_name, cur.rows[0] && cur.rows[0].prog_name);
     try {
       const r = await db.query(
         `UPDATE workload_plugs SET plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=$6, updated_at=now() WHERE id=$1`,
@@ -323,7 +343,7 @@ module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, lo
     // A value may still be passed in (optional).
     const units = body.units_concerned ? v.oneOf(body.units_concerned, UNITS, { field: 'Units Concerned' }) : null;
     // which plugs: the chosen ones ({ ids }, from any days), or everything in a view ({ from, to, q } — or one { date })
-    const ids = Array.isArray(body.ids) ? body.ids.map((n) => parseInt(n, 10)).filter(Number.isInteger).slice(0, 5000) : null;
+    const ids = Array.isArray(body.ids) ? body.ids.slice(0, 5000).map((n) => { try { return v.id(n); } catch (e) { return null; } }).filter(Boolean) : null;
     const LIMIT = 5000;
     let found;
     if (ids) {

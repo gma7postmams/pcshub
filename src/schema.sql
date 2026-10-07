@@ -46,10 +46,24 @@ INSERT INTO roles (name, description, rank) VALUES
    'Create and update content on pages granted by group permissions',
    2),
 
+  ('Ingest',
+   'Ingest Tracker only: can set Status (CM) and its NON-COMPLIANT reason; nothing else',
+   1),
+
   ('Viewer',
    'Read-only access to pages granted by group permissions',
-   1)
+   0)
 ON CONFLICT (name) DO NOTHING;
+
+-- Actions each role may perform (managed in Admin > Roles). Built-in roles are seeded from src/permissions.js once (see migrate.js).
+ALTER TABLE roles ADD COLUMN IF NOT EXISTS is_builtin BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE roles ADD COLUMN IF NOT EXISTS actions_seeded BOOLEAN NOT NULL DEFAULT false;
+UPDATE roles SET is_builtin = true WHERE name IN ('Admin','Manager','Editor','Ingest','Viewer');
+CREATE TABLE IF NOT EXISTS role_actions (
+  role    TEXT NOT NULL REFERENCES roles(name) ON UPDATE CASCADE ON DELETE CASCADE,
+  action  TEXT NOT NULL,
+  PRIMARY KEY (role, action)
+);
 
 -- GROUPS: where a user is enrolled. Admin-defined. Decide which pages/sections members can open.
 CREATE TABLE IF NOT EXISTS groups (
@@ -88,6 +102,9 @@ CREATE TABLE IF NOT EXISTS users (
 );
 -- upgrade paths for older databases
 ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_step BIGINT;
+-- 2FA is off for everyone until an Admin turns it on for that user (the user then enrols from Profile)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS twofa_required BOOLEAN NOT NULL DEFAULT FALSE;
+UPDATE users SET twofa_required = TRUE WHERE totp_enabled AND NOT twofa_required;
 -- per-user appearance: system | dark | light
 ALTER TABLE users ADD COLUMN IF NOT EXISTS appearance TEXT NOT NULL DEFAULT 'system' CHECK (appearance IN ('system','dark','light'));  -- last TOTP time-step used (replay protection)
 ALTER TABLE users ADD COLUMN IF NOT EXISTS group_id INT REFERENCES groups(id) ON DELETE RESTRICT;
@@ -147,6 +164,9 @@ CREATE TABLE IF NOT EXISTS ingest_records (
   materials_count       INTEGER,
   source                TEXT,
   destination_folder    TEXT,
+  approved_by           TEXT,
+  approved_by_user_id   INT REFERENCES users(id) ON DELETE SET NULL,
+  approved_at           TIMESTAMPTZ,
   requested_by_user_id  INT REFERENCES users(id) ON DELETE SET NULL,
   requested_by_psd      TEXT,
   remarks               TEXT,
@@ -162,8 +182,8 @@ CREATE TABLE IF NOT EXISTS ingest_records (
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT ingest_cm_decision_consistent CHECK (
     (cm_status IS NULL AND cm_decided_by IS NULL AND cm_decided_at IS NULL AND cm_non_compliant_reason IS NULL)
-    OR (cm_status = 'DONE' AND status = 'Approved' AND cm_decided_at IS NOT NULL AND cm_non_compliant_reason IS NULL)
-    OR (cm_status = 'NON-COMPLIANT' AND status = 'Approved' AND cm_decided_at IS NOT NULL
+    OR (cm_status = 'DONE' AND cm_decided_at IS NOT NULL AND cm_non_compliant_reason IS NULL)
+    OR (cm_status = 'NON-COMPLIANT' AND cm_decided_at IS NOT NULL
         AND cm_non_compliant_reason IS NOT NULL AND length(btrim(cm_non_compliant_reason)) > 0)
   )
 );
@@ -491,11 +511,8 @@ DO $$ BEGIN
   END IF;
 END $$;
 
--- User Presence Tracking.
--- Active sessions periodically send heartbeats while using the system.
--- Used by Dashboard Active Users and collaboration awareness features.
+-- Who is working in the app right now: the signed-in app sends a small heartbeat (about once a minute, only while the person is actually
 -- using the page) and the Dashboard's "Active users" block reads it. One row per user.
-
 CREATE TABLE IF NOT EXISTS user_presence (
   user_id         INT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   last_active_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -511,3 +528,6 @@ SELECT group_id, 'dashboard.users' FROM group_permissions
 ON CONFLICT DO NOTHING;
 INSERT INTO app_settings (key, value) VALUES ('dashboard_users_granted', '1') ON CONFLICT (key) DO NOTHING;
 DELETE FROM group_permissions WHERE perm_key = 'dashboard.recent';
+
+-- The Reports page (and its CSV export) was removed. Drop its retired permission keys from every group.
+DELETE FROM group_permissions WHERE perm_key IN ('reports', 'reports.ingest', 'reports.export');

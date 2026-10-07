@@ -1,10 +1,10 @@
 // Import / export hook — the integration point for the audit log.
 //
-// The Import and Export buttons (Workload Tracker import / export, PSD Daily Plug List import) do NOT write to the audit log themselves.
-// Each time one runs — or fails — it announces it here, and whoever owns the audit log subscribes once:
+// The Import and Export buttons (Workload Tracker import / export, PSD Daily Plug List import) do not call the audit log directly.
+// Each time one runs — or fails — it announces it here, and server.js subscribes the audit log once:
 //
 //   const { onTransfer } = require('./src/transfer-hook');
-//   onTransfer((e) => audit(e.req, e.action, e.entity, e.entityId, e.details));   // e.g. in server.js, after the audit module is loaded
+//   onTransfer((e) => audit(e.req, e.action, e.entity, e.entityId, e.details));
 //
 // The event (`e`):
 //   action    'workload.export' | 'workload.export_failed' | 'workload.import' | 'workload.import_failed'

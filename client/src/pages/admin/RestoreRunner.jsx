@@ -75,7 +75,7 @@ export function RestoreResult({ job, onClose, onRollback }) {
       )}
       {s.preRestoreFilename ? <p className="muted">Pre-restore backup kept: <span className="mono">{s.preRestoreFilename}</span></p> : null}
       {s.validation ? (
-        <table className="t">
+        <table className="t wl">
           <tbody>
             {s.validation.map((c) => (
               <tr key={c.check}>

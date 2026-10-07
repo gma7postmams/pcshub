@@ -8,6 +8,7 @@ async function migrate(db, { seed = true } = {}) {
   const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   await db.query(sql);
   await db.query('INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING', [require('./version').SCHEMA_VERSION]);
+  await seedRoleActions(db);
   await upgradeIngestRecords(db);
   await require('./totp').migrateSecrets(db);
   if (seed) await seedAdmin(db);
@@ -18,6 +19,16 @@ async function upgradeIngestRecords(db) {
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS billable_party TEXT`);
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS episode_break_date_text TEXT`);
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS materials_count INTEGER`);
+    await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS approved_by TEXT`);
+    // Approval is recorded like the CM decision: who (the signed-in approver) and when. approved_by keeps the name for older records.
+    await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS approved_by_user_id INT`);
+    await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ`);
+    await client.query(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ingest_records_approved_by_user_id_fkey') THEN
+        ALTER TABLE ingest_records ADD CONSTRAINT ingest_records_approved_by_user_id_fkey
+          FOREIGN KEY (approved_by_user_id) REFERENCES users(id) ON DELETE SET NULL;
+      END IF;
+    END $$`);
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS cm_status TEXT`);
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS cm_decided_by INT`);
     await client.query(`ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS cm_decided_at TIMESTAMPTZ`);
@@ -30,11 +41,20 @@ async function upgradeIngestRecords(db) {
       ALTER TABLE ingest_records DROP CONSTRAINT IF EXISTS ingest_cm_decision_consistent;
       ALTER TABLE ingest_records ADD CONSTRAINT ingest_cm_decision_consistent CHECK (
         (cm_status IS NULL AND cm_decided_by IS NULL AND cm_decided_at IS NULL AND cm_non_compliant_reason IS NULL)
-        OR (cm_status = 'DONE' AND status = 'Approved' AND cm_decided_at IS NOT NULL AND cm_non_compliant_reason IS NULL)
-        OR (cm_status = 'NON-COMPLIANT' AND status = 'Approved' AND cm_decided_at IS NOT NULL
+        OR (cm_status = 'DONE' AND cm_decided_at IS NOT NULL AND cm_non_compliant_reason IS NULL)
+        OR (cm_status = 'NON-COMPLIANT' AND cm_decided_at IS NOT NULL
             AND cm_non_compliant_reason IS NOT NULL AND length(btrim(cm_non_compliant_reason)) > 0)
       );
     END $$`);
+    // The Approval page was merged into the Ingest Tracker: carry the approver's name onto the record, and drop the old page grant.
+    await client.query(
+      `UPDATE ingest_records i SET approved_by = u.full_name
+         FROM (SELECT DISTINCT ON (ingest_record_id) ingest_record_id, decided_by FROM approval_requests
+                WHERE status = 'Approved' ORDER BY ingest_record_id, decided_at DESC NULLS LAST, id DESC) ar
+         JOIN users u ON u.id = ar.decided_by
+        WHERE ar.ingest_record_id = i.id AND i.approved_by IS NULL`
+    );
+    await client.query(`DELETE FROM group_permissions WHERE perm_key = 'approval'`);
     // Preserve episode_date for existing consumers while backfilling its text form once.
     await client.query(
       `UPDATE ingest_records
@@ -74,6 +94,17 @@ async function upgradeV1(db) {
   }
 }
 
+// Built-in roles get their default actions once; after that Admin > Roles owns them (an emptied role stays empty).
+async function seedRoleActions(db) {
+  const { DEFAULT_ROLE_ACTIONS } = require('./permissions');
+  const { rows } = await db.query('SELECT name FROM roles WHERE is_builtin AND NOT actions_seeded');
+  for (const { name } of rows) {
+    const acts = DEFAULT_ROLE_ACTIONS[name] || [];
+    if (acts.length) await db.query('INSERT INTO role_actions (role, action) SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING', [name, acts]);
+    await db.query('UPDATE roles SET actions_seeded = true WHERE name=$1', [name]);
+  }
+}
+
 async function seedAdmin(db) {
   const username = (process.env.ADMIN_USERNAME || '').trim();
   const password = process.env.ADMIN_PASSWORD || '';
@@ -84,7 +115,9 @@ async function seedAdmin(db) {
   }
   const { rows } = await db.query('SELECT id FROM users WHERE lower(username)=lower($1)', [username]);
   if (rows.length) return;
-  if (password.length < 8) throw new Error('ADMIN_PASSWORD must be at least 8 characters');
+  // The first Admin is created with this password, so it has to meet the same policy as any other (and not be the placeholder)
+  if (/change[-_ ]?me/i.test(password)) throw new Error('ADMIN_PASSWORD is still the placeholder from .env.example. Set a real one before the first start.');
+  try { require('./validate').password(password, { username }); } catch (e) { throw new Error(`ADMIN_PASSWORD: ${e.message}`); }
   const email = process.env.ADMIN_EMAIL && validator.isEmail(process.env.ADMIN_EMAIL) ? process.env.ADMIN_EMAIL : null;
   const hash = await bcrypt.hash(password, 12);
   await db.query(

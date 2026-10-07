@@ -14,7 +14,7 @@ export const Chip = ({ hue, dot, small, children }) => (
 );
 
 const TYPE_HUE = { EPISODIC: 'blue', SEASONAL: 'pink', BUMPER: 'red', 'POP-UP/POP LOGO': 'blue', RADIO: 'green' };   // avoids purple/orange/teal (the team colours)
-export const TypePill = ({ value }) => (value ? <Chip hue={TYPE_HUE[value] || hueOf(value)}>{value}</Chip> : null);
+export const TypePill = ({ value }) => (value ? <Chip hue={Object.prototype.hasOwnProperty.call(TYPE_HUE, value) ? TYPE_HUE[value] : hueOf(value)}>{value}</Chip> : null);
 
 const TEAM_HUE = { VGFX: 'purple', VEDIT: 'orange', AUDIO: 'teal' };   // reserved: never appear in PALETTE above
 const TEAM_LABEL = { VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio' };
@@ -108,7 +108,7 @@ export function FilterSelect({ label, value, onChange, blank = 'All', children }
 
 const shift = (iso, days) => { const d = new Date(dayNum(iso) * 86400000 + days * 86400000); return d.toISOString().slice(0, 10); };
 /** Single control showing the date range; opens a small panel with presets and From / To */
-export function DateRange({ from, to, onChange }) {
+export function DateRange({ from, to, onChange, title = 'Work date range' }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -131,7 +131,7 @@ export function DateRange({ from, to, onChange }) {
   const label = from || to ? `${from ? fmtDate(from) : 'Any'} – ${to ? fmtDate(to) : 'Any'}` : 'All dates';
   return (
     <div className="daterange" ref={ref}>
-      <button type="button" className="daterange-btn" title="Work date range" onClick={() => setOpen((o) => !o)}><CalendarIcon /><span>{label}</span></button>
+      <button type="button" className="daterange-btn" title={title} onClick={() => setOpen((o) => !o)}><CalendarIcon /><span>{label}</span></button>
       {open ? (
         <div className="popover daterange-pop">
           <div className="presets">
@@ -217,4 +217,28 @@ export function Pager({ total, offset, size, onOffset }) {
       <button type="button" className="btn sm" disabled={cur >= pages} onClick={() => onOffset(cur * size)}>Next</button>
     </div>
   );
+}
+
+// Sortable column headers: click once for A→Z (oldest first), again for Z→A, a third time to go back to the default order.
+export const nextSort = (cur, k) => (cur.k !== k ? { k, dir: 'asc' } : cur.dir === 'asc' ? { k, dir: 'desc' } : { k: '', dir: 'asc' });
+export function SortTh({ k, sort, onSort, children, className, ...rest }) {
+  const on = sort.k === k;
+  return (
+    <th className={`sortable${on ? ' sorted' : ''}${className ? ` ${className}` : ''}`} aria-sort={on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'} {...rest}>
+      <button type="button" className="sort-btn" onClick={() => onSort(nextSort(sort, k))} title="Click to sort">
+        {children}<span className="sort-ind" aria-hidden="true">{on ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+      </button>
+    </th>
+  );
+}
+
+/** true while the window is narrower than `px` (phones and small tablets): tables then become cards */
+export function useNarrow(px = 900) {
+  const [narrow, setNarrow] = useState(() => window.innerWidth < px);
+  useEffect(() => {
+    const on = () => setNarrow(window.innerWidth < px);
+    window.addEventListener('resize', on);
+    return () => window.removeEventListener('resize', on);
+  }, [px]);
+  return narrow;
 }

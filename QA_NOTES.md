@@ -50,7 +50,6 @@
 - Ingest Tracker
 - Workload Tracker
 - Approval
-- Reports
 - Knowledge Base
 - Admin
 - Activity History
@@ -90,18 +89,6 @@
 ✅ Rejection process is working correctly.
 
 ✅ End-to-end approval workflow is functioning as expected.
-
----
-
-## Reports
-
-✅ Reports module loads successfully.
-
-✅ Report generation is functioning correctly.
-
-✅ Report data is displayed correctly.
-
-✅ Reports access is correctly enforced through Group Permissions.
 
 ---
 

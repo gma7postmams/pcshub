@@ -41,7 +41,7 @@ export default function Groups({ model }) {
         </div>
         <div className="table-wrap">
           {!list.length ? <Empty>No groups yet. Add one, tick the pages it can open, then enroll users in it.</Empty> : (
-            <table className="t">
+            <table className="t wl">
               <thead>
                 <tr>
                   <th style={{ width: '22%' }}>Group</th>

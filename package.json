@@ -1,18 +1,19 @@
 {
   "name": "promotional-content-hub",
   "version": "2.0.0",
-  "description": "Promotional Content Hub — multi-user ingest / approval / workload tracker",
+  "description": "Promotional Content Hub \u2014 multi-user ingest / approval / workload tracker",
   "main": "server.js",
   "private": true,
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
     "migrate": "node src/migrate.js",
+    "test": "node --test test/*.test.js",
     "build": "npm --prefix client ci && npm --prefix client run build",
     "dev:client": "npm --prefix client run dev"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
     "archiver": "^7.0.1",
@@ -30,5 +31,8 @@
     "qrcode": "^1.5.4",
     "validator": "^13.12.0",
     "yauzl": "^3.4.0"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

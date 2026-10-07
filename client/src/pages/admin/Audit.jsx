@@ -14,6 +14,9 @@ const ACTION_LABELS = {
 
   'ingest.create': 'Created Ingest Record',
   'ingest.send_for_approval': 'Submitted For Approval',
+  'ingest.approve': 'Approved Ingest Record',
+  'ingest.unapprove': 'Removed Ingest Approval',
+  'ingest.cm_reset': 'CM Status Set To Pending',
   'ingest.cm_done': 'CM Completed',
   'ingest.cm_non_compliant': 'CM Marked Non-Compliant',
 
@@ -31,9 +34,15 @@ const ACTION_LABELS = {
   'admin.group_update': 'Updated Group',
   'admin.group_delete': 'Deleted Group',
 
+  'admin.role_create': 'Created Role',
+  'admin.role_update': 'Updated Role',
+  'admin.role_delete': 'Deleted Role',
   'admin.dropdown_create': 'Created Dropdown',
   'admin.dropdown_update': 'Updated Dropdown',
   'admin.dropdown_delete': 'Deleted Dropdown',
+  'admin.user_delete': 'Deleted User',
+  'admin.dropdown_export': 'Exported Dropdowns',
+  'admin.dropdown_import': 'Imported Dropdowns',
 
   'admin.branding_update': 'Updated Branding',
   'admin.branding_logo': 'Uploaded Logo',
@@ -42,11 +51,25 @@ const ACTION_LABELS = {
   'workload.create': 'Created Workload Item',
   'workload.update': 'Updated Workload Item',
   'workload.delete': 'Deleted Workload Item',
+  'workload.export': 'Exported Workload',
+  'workload.export_failed': 'Workload Export Failed',
+  'workload.import': 'Imported Workload',
+  'workload.import_failed': 'Workload Import Failed',
+  'workload.bulk_delete': 'Bulk-Deleted Workload Items',
+  'workload.plugs_import': 'Imported Plug List',
+  'workload.plugs_import_failed': 'Plug List Import Failed',
+  'workload.plugs_copy': 'Copied Plugs to Workload',
+  'workload.plugs_fill': 'Filled Workload from Plug List',
+  'workload.plugs_delete_all': 'Deleted Plug List Entries',
+  'workload.plug_add': 'Added Plug',
+  'workload.plug_edit': 'Edited Plug',
+  'workload.plug_delete': 'Deleted Plug',
 
   'profile.update': 'Updated Profile',  
   'profile.password_change': 'Password Changed',
 
   'auth.2fa_failed': '2FA Verification Failed',
+  'auth.reauth_failed': 'Identity Confirmation Failed',
   'profile.2fa_enable': 'Enabled 2FA',
   'profile.2fa_disable': 'Disabled 2FA',
   
@@ -78,6 +101,8 @@ function formatEntity(row) {
       return 'User';
     case 'group':
       return 'Group';
+    case 'role':
+      return 'Role';
     case 'dropdown_option':
       return 'Dropdown';
     case 'approval_request':
@@ -89,7 +114,11 @@ function formatEntity(row) {
     case 'report':
       return 'Report';
     case 'workload_item':
-      return 'Workload Item';  
+      return 'Workload Item';
+    case 'workload_transfer':
+      return 'Workload / Plug List';
+    case 'workload_plug':
+      return 'Plug List Entry';  
     case 'knowledge_document':
     case 'knowledge_docs':  
       return 'Knowledge Document';
@@ -177,6 +206,16 @@ function describeBackup(action, d) {
   }
 }
 
+// Small helpers for the import / export lines
+const n = (count, one, many) => `${count || 0} ${(count || 0) === 1 ? one : (many || `${one}s`)}`;
+const fileOf = (d) => (d.file ? ` "${d.file}"` : '');
+const teamOf = (d) => (d.team && d.team !== 'ALL' ? ` (${d.team})` : '');
+const rangeOf = (d) => (d.from ? ` (${String(d.from).slice(0, 10)}${d.to && String(d.to).slice(0, 10) !== String(d.from).slice(0, 10) ? ` to ${String(d.to).slice(0, 10)}` : ''})` : '');
+const filtersOf = (f) => {
+  const parts = Object.entries(f || {}).filter(([k, val]) => val != null && val !== '' && !['limit', 'offset', 'today'].includes(k)).map(([k, val]) => `${k}: ${val}`);
+  return parts.length ? `, filtered by ${parts.join(', ')}` : '';
+};
+
 function formatDetails(row) {
   const d = row.details || {};
 
@@ -208,6 +247,12 @@ function formatDetails(row) {
     case 'admin.dropdown_delete':
       return `Deleted ${d.category}: ${d.value}`;
 
+    case 'admin.dropdown_export':
+      return `Exported ${d.options} dropdown option(s) to JSON`;
+
+    case 'admin.dropdown_import':
+      return `Imported dropdowns from JSON: ${d.added} added, ${d.updated} updated, ${d.unchanged} unchanged`;
+
     case 'admin.branding_update':
       return describeBrandingUpdate(d);
 
@@ -228,6 +273,20 @@ function formatDetails(row) {
 
     case 'admin.user_reset_2fa':
       return '2FA reset';
+
+    case 'admin.role_create':
+      return `Created role: ${d.name || ''}${d.actions && d.actions.length ? ` (can: ${d.actions.join(', ')})` : ''}`;
+
+    case 'admin.role_update': {
+      const parts = [];
+      if (d.renamedFrom) parts.push(`renamed from ${d.renamedFrom}`);
+      if (d.added && d.added.length) parts.push(`added: ${d.added.join(', ')}`);
+      if (d.removed && d.removed.length) parts.push(`removed: ${d.removed.join(', ')}`);
+      return `Updated role ${d.name || ''}${parts.length ? ` — ${parts.join('; ')}` : ' (no change to actions)'}`;
+    }
+
+    case 'admin.role_delete':
+      return `Deleted role: ${d.name || ''}`;
 
     case 'admin.group_create':
       return `Created group: ${d.name || ''}`;
@@ -307,6 +366,9 @@ function formatDetails(row) {
     case 'auth.2fa_failed':
       return 'Invalid 2FA authentication code';
 
+    case 'auth.reauth_failed':
+      return `Wrong password or code when confirming: ${formatAction(d.for || '') || 'a sensitive action'}`;
+
     case 'profile.2fa_enable':
       return 'Two-factor authentication enabled';
 
@@ -324,6 +386,15 @@ function formatDetails(row) {
 
     case 'knowledge.delete':
       return `Deleted knowledge document: ${d.title || d.filename || ''}`;
+
+    case 'ingest.approve':
+      return 'Approved ingest request';
+
+    case 'ingest.unapprove':
+      return 'Removed the approval on an ingest request';
+
+    case 'ingest.cm_reset':
+      return 'Set ingest request status back to Pending';
 
     case 'ingest.cm_done':
       return 'CM completed ingest request';
@@ -352,6 +423,45 @@ function formatDetails(row) {
     case 'admin.backup_analyze':
     case 'admin.backup_restore':
       return describeBackup(row.action, d);
+
+    case 'workload.export':
+      return `Exported ${n(d.matched, 'row')}${teamOf(d)}${fileOf(d)}${d.truncated ? ' (stopped at the 20,000-row limit)' : ''}${filtersOf(d.filters)}`;
+
+    case 'workload.export_failed':
+      return `Workload export failed${teamOf(d)}: ${d.error || 'unknown error'}`;
+
+    case 'workload.import':
+      return `Imported${fileOf(d)}: ${n(d.created, 'row')} added, ${d.skipped || 0} skipped`
+        + `${Array.isArray(d.newColumns) && d.newColumns.length ? `; new columns: ${d.newColumns.join(', ')}` : ''}`
+        + `${Array.isArray(d.errors) && d.errors.length ? `; first problem: ${d.errors[0]}` : ''}`;
+
+    case 'workload.import_failed':
+      return `Workload import failed${fileOf(d)}: ${d.error || 'unknown error'}`;
+
+    case 'workload.bulk_delete':
+      return `Deleted ${n(d.deleted, 'workload row')}${d.skippedLocked ? `, ${d.skippedLocked} locked and kept` : ''}${filtersOf(d.filters)}`;
+
+    case 'workload.plugs_import':
+      return `Imported plug list${fileOf(d)}: ${n(d.plugs, 'plug')} over ${n(d.days, 'day')}${rangeOf(d)}, ${d.added || 0} new`
+        + `${d.skipped ? `, ${d.skipped} skipped` : ''}${d.workloadRowsFilled ? `; filled ${n(d.workloadRowsFilled, 'workload row')}` : ''}`;
+
+    case 'workload.plugs_import_failed':
+      return `Plug list import failed${fileOf(d)}: ${d.error || 'unknown error'}`;
+
+    case 'workload.plugs_copy':
+      return `Copied ${n(d.created, 'plug')} to the Workload Tracker${rangeOf(d)}`
+        + `${d.alreadyInWorkload ? `, ${d.alreadyInWorkload} already there` : ''}${d.skippedLocked ? `, ${d.skippedLocked} on locked days` : ''}`;
+
+    case 'workload.plugs_fill':
+      return `Filled PSD / Prog. Name on ${n(d.rowsFilled, 'workload row')}${rangeOf(d)}`;
+
+    case 'workload.plugs_delete_all':
+      return `Deleted ${n(d.deleted, 'plug list entry', 'plug list entries')}${d.scope === 'all' ? ' (the whole list)' : filtersOf(d.filters)}`;
+
+    case 'workload.plug_add':
+    case 'workload.plug_edit':
+    case 'workload.plug_delete':
+      return `${{ 'workload.plug_add': 'Added', 'workload.plug_edit': 'Edited', 'workload.plug_delete': 'Deleted' }[row.action]} plug ${d.plug_id || ''}${d.plug_date ? ` (${String(d.plug_date).slice(0, 10)})` : ''}`;
 
     case 'auth.locked':
       return 'Account locked due to multiple failed login attempts';
@@ -437,7 +547,7 @@ export default function Audit() {
 
       <div className="table-wrap">
         {!d ? <Empty>Loading…</Empty> : !d.rows.length ? <Empty>No audit entries.</Empty> : (
-          <table className="t">
+          <table className="t wl">
             <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Entity</th><th>Details</th><th>IP</th></tr></thead>
             <tbody>
               {d.rows.map((r) => {

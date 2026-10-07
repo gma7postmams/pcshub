@@ -2,7 +2,7 @@ import Audit from './admin/Audit.jsx';
 
 export default function ActivityHistory() {
   return (
-    <main className="container">
+    <main className="container wide wl-page">
       <div className="page-head">
         <div>
           <h1>Activity History</h1>

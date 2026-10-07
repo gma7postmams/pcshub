@@ -18,7 +18,10 @@ function assess({ verifyFailed, signature, compat, mode, tables, files, admins, 
   if (admins && admins.backup === 0) blockers.push('The backup contains no active Admin account; restoring it would lock everyone out of administration.');
 
   if (compat && compat.schema.status === 'older') add('MEDIUM', `Backup schema v${compat.schema.backup} is older than v${compat.schema.current}; migrations would run after a restore.`);
-  if (signature === 'unsigned') add('MEDIUM', 'The backup is unsigned, so its manifest cannot be proven authentic.');
+  if (signature === 'unsigned') {
+    if (cfg.SIGNING_KEY) add('HIGH', 'The backup is unsigned although this server signs its backups: it was made before signing was switched on, or it did not come from this server unmodified.');
+    else add('MEDIUM', 'The backup is unsigned, so its manifest cannot be proven authentic.');
+  }
   if (signature === 'no_key') add('MEDIUM', 'The backup is signed but BACKUP_SIGNING_KEY is not configured here, so authenticity could not be checked.');
   if (mode === 'counts-only') add('MEDIUM', 'Row-level comparison was unavailable; only record counts were compared.');
   if (pgMajorMismatch) add('MEDIUM', 'The backup was created on a different PostgreSQL major version.');
