@@ -211,14 +211,13 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
                 <thead>
                   <tr>
                     {canWrite ? <th className="chk"><input type="checkbox" checked={allOn} disabled={!todo.length} onChange={() => setPicked(allOn ? new Set() : new Set(todo.map((r) => r.id)))} title="Select every plug on this page that is not yet in the Workload Tracker" /></th> : null}
-                    <th>NO.</th><th>DATE</th><th>PLUG ID</th><th>PROG. NAME / PROJ. TITLE</th><th>PSD</th><th>ACCOUNT BY</th><th>IN WORKLOAD</th>{canWrite ? <th className="plug-actions">Actions</th> : null}
+                    <th>DATE</th><th>PLUG ID</th><th>PROG. NAME / PROJ. TITLE</th><th>PSD</th><th>ACCOUNT BY</th><th>IN WORKLOAD</th>{canWrite ? <th className="plug-actions">Actions</th> : null}
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length ? rows.map((r, i) => (
                     <tr key={r.id} className={r.in_workload ? 'done' : ''}>
                       {canWrite ? <td className="chk"><input type="checkbox" checked={picked.has(r.id)} disabled={r.in_workload} onChange={() => toggle(r.id)} /></td> : null}
-                      <td>{r.list_no || offset + i + 1}</td>
                       <td className="nowrap">{dateLabel(r.plug_date)}</td>
                       <td className="mono">{r.plug_id}{r.is_additional ? <span className="chip c-orange plug-add" title="Listed under “Additional for …”">Added</span> : null}</td>
                       <td>{r.prog_name}</td>
@@ -232,7 +231,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
                         </td>
                       ) : null}
                     </tr>
-                  )) : <tr><td colSpan={canWrite ? 9 : 7} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr>}
+                  )) : <tr><td colSpan={canWrite ? 8 : 6} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr>}
                 </tbody>
               </table>
             </div>

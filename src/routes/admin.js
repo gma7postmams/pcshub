@@ -203,6 +203,29 @@ router.put('/users/:id', asyncH(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// Delete one or several users. Their records stay (created-by / requested-by links are cleared), their sessions end,
+// and the audit log keeps their user name. You cannot delete yourself or the last active Admin.
+router.post('/users/delete', asyncH(async (req, res) => {
+  const raw = req.body && req.body.ids;
+  if (!Array.isArray(raw) || !raw.length) throw new HttpError(400, 'Choose at least one user');
+  if (raw.length > 200) throw new HttpError(400, 'Delete at most 200 users at a time');
+  const ids = [...new Set(raw.map((x) => v.id(x)))];
+  if (ids.includes(req.user.id)) throw new HttpError(400, 'You cannot delete your own account');
+  const gone = await db.tx(async (c) => {
+    const { rows } = await c.query('SELECT id, username, full_name, role, is_active FROM users WHERE id = ANY($1::int[]) FOR UPDATE', [ids]);
+    if (!rows.length) throw new HttpError(404, 'User not found');
+    if (rows.some((u) => u.role === 'Admin' && u.is_active)) {
+      const left = await c.query(`SELECT count(*)::int AS n FROM users WHERE role='Admin' AND is_active AND id <> ALL($1::int[])`, [rows.map((u) => u.id)]);
+      if (left.rows[0].n === 0) throw new HttpError(400, 'At least one active Admin must remain');
+    }
+    await c.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = ANY($1::int[])`, [rows.map((u) => u.id)]);
+    await c.query('DELETE FROM users WHERE id = ANY($1::int[])', [rows.map((u) => u.id)]);
+    for (const u of rows) await audit(req, 'admin.user_delete', 'user', u.id, { username: u.username, full_name: u.full_name, role: u.role }, c);
+    return rows.length;
+  });
+  res.json({ ok: true, deleted: gone });
+}));
+
 router.post('/users/:id/reset-password', asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const target = (await db.query('SELECT username, full_name FROM users WHERE id=$1', [id])).rows[0];

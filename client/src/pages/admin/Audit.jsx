@@ -37,6 +37,7 @@ const ACTION_LABELS = {
   'admin.dropdown_create': 'Created Dropdown',
   'admin.dropdown_update': 'Updated Dropdown',
   'admin.dropdown_delete': 'Deleted Dropdown',
+  'admin.user_delete': 'Deleted User',
   'admin.dropdown_export': 'Exported Dropdowns',
   'admin.dropdown_import': 'Imported Dropdowns',
 

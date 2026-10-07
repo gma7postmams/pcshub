@@ -7,10 +7,14 @@ import { Empty, Modal, Options, RoleBadge, useConfirm, useForm, useToast } from 
 import { keyLabels } from './labels.js';
 
 export default function Users({ model }) {
+  const s = useSession();
+  const toast = useToast();
+  const confirm = useConfirm();
   const [list, setList] = useState(null);
   const [groups, setGroups] = useState([]);
   const [editing, setEditing] = useState(null); // null | {} new | user
   const [q, setQ] = useState('');
+  const [picked, setPicked] = useState(() => new Set());
 
   const load = useCallback(async () => {
     const [u, g] = await Promise.all([get('/api/admin/users'), get('/api/admin/groups')]);
@@ -23,24 +27,43 @@ export default function Users({ model }) {
   const shown = term
     ? list.filter((u) => [u.full_name, u.username, u.email, u.role, u.group_name].some((x) => (x || '').toLowerCase().includes(term)))
     : list;
+  const selectable = shown.filter((u) => u.id !== s.user.id);
+  const allOn = selectable.length > 0 && selectable.every((u) => picked.has(u.id));
+  const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const removePicked = async () => {
+    const ids = [...picked];
+    const names = list.filter((u) => picked.has(u.id)).map((u) => u.full_name);
+    const what = ids.length === 1 ? names[0] : `${ids.length} users`;
+    if (!(await confirm('Delete users', `Permanently delete ${what}? Their records stay, but they can no longer sign in. This cannot be undone.`, { okText: 'Delete', danger: true }))) return;
+    try {
+      const r = await post('/api/admin/users/delete', { ids });
+      toast(r.deleted === 1 ? 'User deleted' : `${r.deleted} users deleted`);
+      setPicked(new Set());
+      load();
+    } catch (e) { toast(e.message, 'err'); }
+  };
   const locked = (u) => u.locked_until && new Date(u.locked_until) > new Date();
 
   return (
     <div className="card">
       <div className="card-head">
         <h2>Users <span className="dim">{term ? `${shown.length} of ${list.length}` : list.length}</span></h2>
-        <button type="button" className="btn primary sm" id="add" onClick={() => setEditing({})}><PlusIcon /> Add user</button>
+        <div className="row">
+          {picked.size ? <button type="button" className="btn danger sm" id="del-sel" onClick={removePicked}>Delete selected ({picked.size})</button> : null}
+          <button type="button" className="btn primary sm" id="add" onClick={() => setEditing({})}><PlusIcon /> Add user</button>
+        </div>
       </div>
       <div className="filters">
         <input type="search" placeholder="Search name, username, email, role or group…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search users" />
       </div>
       <div className="table-wrap">
         <table className="t wl">
-          <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Group</th><th>Status</th><th>2FA</th><th>Last login</th><th /></tr></thead>
+          <thead><tr><th className="chk"><input type="checkbox" checked={allOn} disabled={!selectable.length} onChange={() => setPicked(allOn ? new Set() : new Set(selectable.map((u) => u.id)))} aria-label="Select all users" /></th><th>Name</th><th>Username</th><th>Role</th><th>Group</th><th>Status</th><th>2FA</th><th>Last login</th><th /></tr></thead>
           <tbody>
-            {!shown.length ? <tr><td colSpan={8} className="empty">No users match your search.</td></tr> : null}
+            {!shown.length ? <tr><td colSpan={9} className="empty">No users match your search.</td></tr> : null}
             {shown.map((u) => (
               <tr key={u.id}>
+                <td className="chk"><input type="checkbox" checked={picked.has(u.id)} disabled={u.id === s.user.id} title={u.id === s.user.id ? 'You cannot delete yourself' : undefined} onChange={() => toggle(u.id)} aria-label={`Select ${u.full_name}`} /></td>
                 <td><strong>{u.full_name}</strong>{u.email ? <div className="dim">{u.email}</div> : null}</td>
                 <td className="mono">{u.username}</td>
                 <td><RoleBadge role={u.role} /></td>
@@ -142,6 +165,10 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
               <button type="button" className="btn sm" id="r2fa" disabled={!u.totp_enabled}
                 onClick={() => action('reset-2fa', '2FA reset', ['Reset 2FA', `Remove 2FA from ${u.full_name}? They can set it up again from Profile.`, { okText: 'Reset 2FA', danger: true }])}>Reset 2FA</button>
               <button type="button" className="btn sm" id="unlock" onClick={() => action('unlock', 'Account unlocked')}>Unlock</button>
+              {!self ? <button type="button" className="btn sm danger" id="del-user" onClick={async () => {
+                if (!(await confirm('Delete user', `Permanently delete ${u.full_name}? Their records stay, but they can no longer sign in. This cannot be undone.`, { okText: 'Delete', danger: true }))) return;
+                try { await post('/api/admin/users/delete', { ids: [u.id] }); toast('User deleted'); onSaved(); } catch (e) { toast(e.message, 'err'); }
+              }}>Delete user</button> : null}
             </div>
           </>
         ) : null}

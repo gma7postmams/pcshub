@@ -255,13 +255,12 @@ export default function Ingest() {
                 : (
                   <table className="t wl">
                     <thead><tr>
-                      <th>NO.</th><th>Program / Project</th><th>Platform</th><th>Billable Party</th><th className="tight">Episode / Breakdate</th><th>Source</th>
+                      <th>Program / Project</th><th>Platform</th><th>Billable Party</th><th className="tight">Episode / Breakdate</th><th>Source</th>
                       <th className="narrow">No. of Materials</th><th>Requested By</th><th>Destination Folder</th><th>Approved By</th><th>Status (CM)</th><th>Updated</th>
                     </tr></thead>
                     <tbody>
                       {data.rows.map((r) => (
                         <tr key={r.id} className="clickable" onClick={() => openDetail(r.id)}>
-                          <td className="dim mono">{r.no ?? r.id}</td>
                           {cell(r, 'program', <strong>{r.program}</strong>)}
                           {cell(r, 'platform', <PlatformCell value={r.platform} />)}
                           {cell(r, 'billable_party', r.billable_party)}

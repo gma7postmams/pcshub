@@ -854,3 +854,5 @@ table.t.wl th.tight { letter-spacing: .02em; padding-left: 6px; padding-right: 6
 /* editing a date in the narrow Episode / Breakdate column: the date box fits the column (no 170 px jump) */
 .cell-editor.date { min-width: 0; }
 .cell-editor.date input { min-width: 0; width: 100%; max-width: 140px; padding: 4px 3px 4px 6px; font-size: 12.5px; }
+
+table.t th.chk, table.t td.chk { width: 34px; text-align: center; }
