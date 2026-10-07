@@ -198,6 +198,41 @@ module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, lo
     res.json({ rows, total });
   }));
 
+  // ---- Excel export of what the list shows (same filters, search and sort); logged in the audit trail ----
+  router.get('/export', asyncH(async (req, res) => {
+    const ExcelJS = require('exceljs');
+    const { where, params } = plugFilter(req.query);
+    const SORTS = { plug_date: 'p.plug_date', plug_id: 'lower(p.plug_id)', prog_name: 'lower(p.prog_name)', psd: 'lower(p.psd)', account_by: 'lower(p.account_by)' };
+    const order = Object.prototype.hasOwnProperty.call(SORTS, req.query.sort)
+      ? `${SORTS[req.query.sort]} ${req.query.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, p.plug_date, p.seq, p.id`
+      : (req.query.order === 'desc' ? 'p.plug_date DESC, p.seq, p.id' : 'p.plug_date, p.seq, p.id');
+    const { rows } = await db.query(
+      `SELECT p.plug_date, p.plug_id, p.prog_name, p.psd, p.account_by, p.is_additional,
+              EXISTS (SELECT 1 FROM workload_items w WHERE w.work_date = p.plug_date
+                 AND upper(p.plug_id) IN (SELECT upper(btrim(x)) FROM unnest(string_to_array(w.plug_id, E'\n')) AS x)) AS in_workload
+         FROM workload_plugs p ${whereSql(where)} ORDER BY ${order} LIMIT 20000`, params
+    );
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'PromoHub';
+    const ws = wb.addWorksheet('PSD Daily Plug List');
+    ws.columns = [
+      { header: 'DATE', key: 'd', width: 14 }, { header: 'PLUG ID', key: 'plug_id', width: 18 },
+      { header: 'PROG. NAME / PROJ. TITLE', key: 'prog_name', width: 40 }, { header: 'PSD', key: 'psd', width: 20 },
+      { header: 'ACCOUNT BY', key: 'account_by', width: 16 }, { header: 'IN WORKLOAD', key: 'in_workload', width: 14 },
+    ];
+    for (const r of rows) {
+      ws.addRow({ d: r.plug_date instanceof Date ? r.plug_date.toISOString().slice(0, 10) : String(r.plug_date).slice(0, 10), plug_id: r.plug_id + (r.is_additional ? ' (additional)' : ''), prog_name: r.prog_name, psd: r.psd, account_by: r.account_by, in_workload: r.in_workload ? 'Yes' : 'No' });
+    }
+    ws.getRow(1).font = { bold: true };
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+    ws.autoFilter = { from: 'A1', to: { row: 1, column: ws.columns.length } };
+    const buffer = await wb.xlsx.writeBuffer();
+    const filename = `PSD_Plug_List_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    await audit(req, 'workload.plugs_export', 'workload_plug', null, { rows: rows.length, truncated: rows.length >= 20000, filters: { date: req.query.date, from: req.query.from, to: req.query.to, q: req.query.q }, file: filename });
+    res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="${filename}"` });
+    res.send(Buffer.from(buffer));
+  }));
+
   // ---- import the PSD's daily plug list workbook ----
   router.post('/import', requireAction('plugs.write'), upload.single('file'), oneImportAtATime, asyncH(async (req, res) => {
     const t0 = Date.now();

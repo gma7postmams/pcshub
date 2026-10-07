@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
-import { ago, fmtDate, fmtDateTime } from '../lib/util.js';
+import { ago, downloadFile, fmtDate, fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { PlusIcon, SearchIcon } from '../components/Icons.jsx';
+import { PlusIcon, SearchIcon, DownloadIcon } from '../components/Icons.jsx';
 import { Chip, DateChip, DateRange, FilterSelect, Pager, PlatformCell, SortTh, useNarrow } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
@@ -170,6 +170,13 @@ export default function Ingest() {
 
   useEffect(() => { load(); }, [load]);
 
+  const exportXlsx = async () => {   // what the table shows: same filters, search and sort
+    const p = new URLSearchParams();
+    Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
+    if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
+    try { await downloadFile(`/api/ingest/export?${p}`, 'Ingest.xlsx'); } catch (e) { toast(e.message, 'err'); }
+  };
+
   const openDetail = useCallback(async (id) => {
     try { setDetail(await get(`/api/ingest/${id}`)); } catch (e) { toast(e.message, 'err'); }
   }, [toast]);
@@ -270,6 +277,7 @@ export default function Ingest() {
         <div><h1>Ingest Tracker</h1><div className="sub">Log ingest requests, set their destination and approval, and track the CM status.</div></div>
         <div className="actions">
           {canDelete && picked.size ? <button type="button" className="btn danger" id="del-sel" onClick={removePicked}>Delete selected ({picked.size})</button> : null}
+          <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
           {canWrite ? <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({})}><PlusIcon /> New Ingest</button> : null}
         </div>
       </div>
