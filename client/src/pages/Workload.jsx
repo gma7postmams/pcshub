@@ -220,6 +220,22 @@ function FieldInput({ def, value, onChange, disabled, lookups, auto }) {
 // to how an actual spreadsheet cell behaves. Validation (a real date, a valid Platform, etc.) still happens
 // when you hit Save, same as any other grid error. `onKeyDown`/`onFocus` are wired in by the grid for range
 // selection and copy/paste; they pass straight through.
+// A right-click menu that always fits in the window: it opens where you clicked, then moves up / left just enough that none of it is cut off
+// (the menus are taller than the old fixed allowance, so the bottom items disappeared when you right-clicked near the bottom of the window).
+function FitMenu({ x, y, children, ...rest }) {
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.maxHeight = `${window.innerHeight - 16}px`;
+    el.style.overflowY = 'auto';
+    const r = el.getBoundingClientRect();
+    el.style.left = `${Math.max(8, Math.min(x, window.innerWidth - r.width - 8))}px`;
+    el.style.top = `${Math.max(8, Math.min(y, window.innerHeight - r.height - 8))}px`;
+  }, [x, y]);
+  return <div ref={ref} className="xl-menu" style={{ left: x, top: y }} {...rest}>{children}</div>;
+}
+
 function GridCellInput({ def, value, onChange, disabled, ...rest }) {
   const v = value ?? '';
   // The wrapper's hidden ::after copies the text (data-value) so the cell is exactly as wide (and, for multi-line
@@ -766,18 +782,27 @@ export default function Workload() {
     // text as a spreadsheet sends it for ONE cell (no quotes or trailing line break added around it) can simply be pasted by the browser
     const plain = block.every((row) => row.length === 1) && block.map((row) => row[0]).join('\n') === rawText.replace(/\r\n?/g, '\n');
     if (!force && bR === 1 && bC === 1 && !multi && plain && !(sel0 && cols[sel0.cLo] === 'breakdate_vgfx')) return false;   // a single value into one ordinary cell: normal paste
-    // ONE cell selected and the text is a single column with line breaks in it: every line stays inside THAT cell (a multi-line cell) instead of
-    // spilling into the cells below. To fill several rows, select that many cells first (the lines then go one per selected cell, as before).
+    // Text from OUTSIDE the grid that is one column with line breaks in it (a 2-line note, a pasted paragraph) is ONE value: all its lines go into
+    // every selected cell (a multi-line cell keeps the line breaks; a one-line cell such as PSD gets the lines side by side) — it is never dealt out
+    // one line per cell or spilled into the rows below. Text copied inside the grid, and anything with tabs (a real table), still goes cell by cell.
     // (Also a single cell copied from Excel / Sheets, which wraps it in quotes and adds a final line break: those are removed here.)
-    if (n && !multi && bC === 1 && cols[c0]) {
-      if (plain && el && el.tagName === 'TEXTAREA') return false;   // a multi-line cell with the cursor in it: the browser inserts the whole text at the cursor
+    const inGrid = internalClip.current != null && String(internalClip.current).replace(/\r\n?/g, '\n') === rawText.replace(/\r\n?/g, '\n');
+    if (n && bC === 1 && cols[c0] && ((bR > 1 && !inGrid) || (!multi && bR === 1 && !plain))) {
+      if (!multi && plain && el && el.tagName === 'TEXTAREA') return false;   // one multi-line cell with the cursor in it: the browser inserts the whole text at the cursor
       if (!canWrite) return true;
-      const col = cols[c0];
-      const text = block.map((row) => row[0]).join(meta.fields[col] && meta.fields[col].multiline ? '\n' : ' ');   // a one-line cell gets the lines side by side
+      const textFor = (col) => block.map((row) => row[0]).join(meta.fields[col] && meta.fields[col].multiline ? '\n' : ' ');
       pushHistory(null);
       setEpoch((v) => v + 1);
-      setGrid((g) => ({ ...g, rows: g.rows.map((row, ri) => (ri === r0 ? { ...setCellValue(row, col, text, true), _dirty: true } : row)) }));
-      setGridSel({ r0, c0, r1: r0, c1: c0 });
+      setGrid((g) => ({
+        ...g,
+        rows: g.rows.map((row, ri) => {
+          if (ri < n.rLo || ri > n.rHi) return row;
+          let changed = row;
+          for (let ci = n.cLo; ci <= n.cHi; ci++) { const col = cols[ci]; if (col) changed = setCellValue(changed, col, textFor(col), true); }
+          return { ...changed, _dirty: true };
+        }),
+      }));
+      setGridSel({ r0: n.rLo, c0: n.cLo, r1: n.rHi, c1: n.cHi });
       focusBox();
       return true;
     }
@@ -895,10 +920,21 @@ export default function Workload() {
   };
   const isEmptyRow = (r) => meta.views[tab].filter((k) => k !== 'work_date' && k !== 'units_concerned').every((k) => !String(r[k] ?? '').trim());
   const addRow = () => { pushHistory(null); addRowNow(); };
-  const addRowNow = () => setGrid((g) => {
-    const last = g.rows.length ? g.rows[g.rows.length - 1].work_date : '';
-    return { ...g, rows: [...g.rows, { _key: newKey(), _new: true, _dirty: false, work_date: last || filt.from || isoDate(), units_concerned: filt.units || meta.tabDefaultUnits[tab] }] };
-  });
+  // A new row goes to the TOP of the grid (row 1), with the cursor in its first cell and the grid scrolled up to it — not at the bottom, out of sight.
+  const addRowNow = () => {
+    setGrid((g) => {
+      const top = g.rows.length ? g.rows[0].work_date : '';
+      return { ...g, rows: [{ _key: newKey(), _new: true, _dirty: false, work_date: top || filt.from || isoDate(), units_concerned: filt.units || meta.tabDefaultUnits[tab] }, ...g.rows] };
+    });
+    setGridSel({ r0: 0, c0: 0, r1: 0, c1: 0 });
+    requestAnimationFrame(() => {
+      const box = boxRef.current;
+      if (!box) return;
+      box.scrollTop = 0;
+      const first = box.querySelector('tbody tr:first-child td[data-c="0"] input, tbody tr:first-child td[data-c="0"] textarea');
+      if (first) first.focus({ preventScroll: true });
+    });
+  };
   const removeRow = async (r) => {
     if (!r._new) {
       if (!(await confirm('Delete row', `Permanently delete "${firstLine(r.plug_id)}"?`, { okText: 'Delete', danger: true }))) return;
@@ -1023,7 +1059,7 @@ export default function Workload() {
     if (t.closest && t.closest('.editing, .cell-editor-inline, input, select, textarea')) return;   // inside an open editor keep the browser's own menu
     e.preventDefault();
     if (!rowLocked(r) && !(allMatching || picked.has(r.id))) { setAllMatching(false); setPicked(new Set([r.id])); lastPick.current = r.id; }
-    setTctx({ x: Math.min(e.clientX, window.innerWidth - 210), y: Math.min(e.clientY, window.innerHeight - 190) });
+    setTctx({ x: e.clientX, y: e.clientY });
   };
   const menuPasteRows = async () => {
     setTctx(null);
@@ -1338,7 +1374,7 @@ export default function Workload() {
         {isGrid ? (
           <>
             <div className={`table-wrap xl-box${cards ? '' : ' wl-fit'}`} id="grid" ref={boxRef} tabIndex={-1} onCopy={gridCopy(tableCols)} onCut={gridCopy(tableCols, true)} onPaste={gridPaste(tableCols)} onKeyDown={gridKey}
-              onContextMenu={(e) => { if (!gridSel || !grid || grid.error || !grid.rows.length) return; e.preventDefault(); setCtx({ x: Math.min(e.clientX, window.innerWidth - 210), y: Math.min(e.clientY, window.innerHeight - 150) }); }}>
+              onContextMenu={(e) => { if (!gridSel || !grid || grid.error || !grid.rows.length) return; e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY }); }}>
               {!grid ? <Empty>Loading…</Empty>
                 : grid.error ? <Empty>{grid.error}</Empty>
                   : (
@@ -1385,7 +1421,7 @@ export default function Workload() {
               const nSel = normSel();
               const wholeRows = !!nSel && nSel.cLo === 0 && nSel.cHi === tableCols.length - 1;
               return (
-                <div className="xl-menu" style={{ left: ctx.x, top: ctx.y }} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
+                <FitMenu x={ctx.x} y={ctx.y} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
                   <button type="button" disabled={!canWrite || !hist.current.past.length} onClick={() => { setCtx(null); undo(); }}>Undo<span>Ctrl+Z</span></button>
                   <button type="button" disabled={!canWrite || !hist.current.future.length} onClick={() => { setCtx(null); redo(); }}>Redo<span>Ctrl+Y</span></button>
                   <hr />
@@ -1396,7 +1432,7 @@ export default function Workload() {
                   <hr />
                   <button type="button" disabled={!canWrite} onClick={() => { setCtx(null); clearSel(); }}>Delete<span>Del</span></button>
                   {wholeRows ? <button type="button" disabled={!canWrite} onClick={deleteSelectedRows}>Delete row{nSel.rHi > nSel.rLo ? 's' : ''}</button> : null}
-                </div>
+                </FitMenu>
               );
             })() : null}
             {grid && grid.total > GRID_LIMIT ? (
@@ -1460,7 +1496,7 @@ export default function Workload() {
             </div>
             <Pager total={total} offset={offset} size={PAGE} onOffset={setOffset} />
             {tctx ? (
-              <div className="xl-menu" style={{ left: tctx.x, top: tctx.y }} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
+              <FitMenu x={tctx.x} y={tctx.y} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
                 <button type="button" disabled={!tblHist.current.past.length} onClick={() => { setTctx(null); undoTbl(); }}>Undo<span>Ctrl+Z</span></button>
                 <button type="button" disabled={!tblHist.current.future.length} onClick={() => { setTctx(null); redoTbl(); }}>Redo<span>Ctrl+Y</span></button>
                 <hr />
@@ -1469,7 +1505,7 @@ export default function Workload() {
                 <button type="button" onClick={menuPasteRows}>Paste<span>Ctrl+V</span></button>
                 <hr />
                 <button type="button" disabled={!pickedCount} onClick={() => { setTctx(null); deleteSelected(); }}>Delete {pickedCount > 1 ? `${pickedCount} rows` : 'row'}<span>Del</span></button>
-              </div>
+              </FitMenu>
             ) : null}
           </>
         )}
