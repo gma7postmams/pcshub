@@ -10,7 +10,15 @@ const PILL = {
 };
 export const Pill = ({ s, children }) => <span className={`pill ${PILL[s] || 's-normal'}`}>{children || s}</span>;
 
-export const RoleBadge = ({ role }) => <span className={`role-badge r-${role}`}>{role}</span>;
+// Admin / Manager / Editor / Viewer / Ingest have their own colours (app.css, .r-<name>); a role created later in Admin → Roles gets a colour of its own
+// from this palette, always the same one for the same name, so no role ever shows as a plain, colourless label.
+const ROLE_PALETTE = ['#0ea5e9', '#ec4899', '#f59e0b', '#6366f1', '#84cc16', '#14b8a6', '#f97316', '#a855f7'];
+const BUILT_IN_ROLES = ['Admin', 'Manager', 'Editor', 'Viewer', 'Ingest'];
+export const RoleBadge = ({ role }) => {
+  if (BUILT_IN_ROLES.includes(role)) return <span className={`role-badge r-${role}`}>{role}</span>;
+  const hue = ROLE_PALETTE[[...String(role)].reduce((a, c) => a + c.charCodeAt(0), 0) % ROLE_PALETTE.length];
+  return <span className="role-badge r-custom" style={{ '--rc': hue }}>{role}</span>;
+};
 
 export const Empty = ({ children }) => <div className="empty">{children}</div>;
 
