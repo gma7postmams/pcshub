@@ -316,12 +316,27 @@ router.get('/stats', asyncH(async (req, res) => {
   res.json(rows[0]);
 }));
 
+// Sort by a clicked column (?sort=<column key>&dir=asc|desc). Dates sort as dates, text case-insensitively, empty values last;
+// a key that is not a built-in column is taken as a custom column.
+function orderBy(q, params) {
+  const k = String(q.sort || '');
+  const dir = q.dir === 'desc' ? 'DESC' : 'ASC';
+  let col = null;
+  if (k === 'breakdate_vgfx') col = 'w.breakdate_vgfx, w.breakdate_vedit';   // the merged "Breakdate / Time" column
+  else if (k === 'updated_at') col = 'w.updated_at';
+  else if (COLS.includes(k)) col = ['date', 'datetime'].includes(FIELDS[k].kind) ? `w."${k}"` : `lower(w."${k}"::text)`;
+  else if (/^[A-Za-z0-9_]{1,64}$/.test(k)) { params.push(k); col = `lower(w.custom_fields ->> $${params.length})`; }
+  if (!col) return 'w.work_date DESC NULLS LAST, w.id ASC';
+  return col.split(', ').map((c) => `${c} ${dir} NULLS LAST`).join(', ') + ', w.work_date DESC NULLS LAST, w.id ASC';
+}
+
 router.get('/', asyncH(async (req, res) => {
   const { where, params } = buildFilter(req.query);
   const { limit, offset } = v.paging(req.query, { def: 100, max: MAX_BATCH * 2 });
   const total = await db.query(`SELECT count(*)::int AS n FROM workload_items w ${whereSql(where)}`, params);
+  const order = orderBy(req.query, params);   // may add a parameter (custom column key), so it runs after the count
   const { rows } = await db.query(
-    `${SELECT} ${whereSql(where)} ORDER BY w.work_date DESC NULLS LAST, w.id ASC LIMIT ${limit} OFFSET ${offset}`, params
+    `${SELECT} ${whereSql(where)} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params
   );
   res.json({ total: total.rows[0].n, rows: rows.map(flattenCustom) });
 }));

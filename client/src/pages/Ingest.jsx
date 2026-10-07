@@ -4,7 +4,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { ago, fmtDate, fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { PlusIcon, SearchIcon } from '../components/Icons.jsx';
-import { Chip, DateChip, DateRange, FilterSelect, Pager, PlatformCell } from '../components/wl.jsx';
+import { Chip, DateChip, DateRange, FilterSelect, Pager, PlatformCell, SortTh } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
 // Status (CM) is blank (Pending) until CM picks one of these
@@ -145,6 +145,8 @@ export default function Ingest() {
   const [lookups, setLookups] = useState(null);
   const [filt, setFilt] = useState({ q: '', status: /^pending$/i.test(params.get('status') || '') ? 'PENDING' : (params.get('status') || ''), program: '', platform: '', from: '', to: '', approval: /^pending$/i.test(params.get('approval') || '') ? 'pending' : '' });
   const [offset, setOffset] = useState(0);
+  const [sort, setSortState] = useState({ k: '', dir: 'asc' });   // clicked column header
+  const setSort = (s2) => { setSortState(s2); setOffset(0); };
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);     // null | {} (new) | record (edit)
   const [detail, setDetail] = useState(null);
@@ -160,9 +162,10 @@ export default function Ingest() {
   const load = useCallback(async () => {
     const p = new URLSearchParams({ limit: PAGE, offset });
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
+    if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
     setPicked(new Set());
     try { setData(await get(`/api/ingest?${p}`)); } catch (e) { setData({ error: e.message, rows: [], total: 0 }); }
-  }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, [load]);
 
@@ -292,8 +295,17 @@ export default function Ingest() {
                   <table className="t wl">
                     <thead><tr>
                       {canDelete ? <th className="chk"><input type="checkbox" checked={allOn} onChange={() => setPicked(allOn ? new Set() : new Set(rows.map((r) => r.id)))} aria-label="Select all records on this page" /></th> : null}
-                      <th>PROG. NAME / PROJ. TITLE</th><th>Platform</th><th>Billable Party</th><th className="tight">Episode / Breakdate</th><th>Source</th>
-                      <th className="narrow">No. of Materials</th><th>Requested By</th><th>Destination Folder</th><th>Approved By</th><th>Status (CM)</th><th>Updated</th>
+                      <SortTh k="program" sort={sort} onSort={setSort}>PROG. NAME / PROJ. TITLE</SortTh>
+                      <SortTh k="platform" sort={sort} onSort={setSort}>Platform</SortTh>
+                      <SortTh k="billable_party" sort={sort} onSort={setSort}>Billable Party</SortTh>
+                      <SortTh k="episode_break_date_text" sort={sort} onSort={setSort} className="tight">Episode / Breakdate</SortTh>
+                      <SortTh k="source" sort={sort} onSort={setSort}>Source</SortTh>
+                      <SortTh k="materials_count" sort={sort} onSort={setSort} className="narrow">No. of Materials</SortTh>
+                      <SortTh k="requested_by" sort={sort} onSort={setSort}>Requested By</SortTh>
+                      <SortTh k="destination_folder" sort={sort} onSort={setSort}>Destination Folder</SortTh>
+                      <SortTh k="approved_by" sort={sort} onSort={setSort}>Approved By</SortTh>
+                      <SortTh k="cm_status" sort={sort} onSort={setSort}>Status (CM)</SortTh>
+                      <SortTh k="updated" sort={sort} onSort={setSort}>Updated</SortTh>
                     </tr></thead>
                     <tbody>
                       {data.rows.map((r) => (

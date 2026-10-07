@@ -218,3 +218,16 @@ export function Pager({ total, offset, size, onOffset }) {
     </div>
   );
 }
+
+// Sortable column headers: click once for A→Z (oldest first), again for Z→A, a third time to go back to the default order.
+export const nextSort = (cur, k) => (cur.k !== k ? { k, dir: 'asc' } : cur.dir === 'asc' ? { k, dir: 'desc' } : { k: '', dir: 'asc' });
+export function SortTh({ k, sort, onSort, children, className, ...rest }) {
+  const on = sort.k === k;
+  return (
+    <th className={`sortable${on ? ' sorted' : ''}${className ? ` ${className}` : ''}`} aria-sort={on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'} {...rest}>
+      <button type="button" className="sort-btn" onClick={() => onSort(nextSort(sort, k))} title="Click to sort">
+        {children}<span className="sort-ind" aria-hidden="true">{on ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+      </button>
+    </th>
+  );
+}

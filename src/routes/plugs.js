@@ -183,7 +183,13 @@ module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, lo
            AND upper(p.plug_id) IN (SELECT upper(btrim(x)) FROM unnest(string_to_array(w.plug_id, E'\\n')) AS x)) AS in_workload`
       : '';
     const { limit, offset } = v.paging(req.query, { def: 3000, max: 5000 });
-    const order = req.query.order === 'desc' ? 'p.plug_date DESC, p.seq, p.id' : 'p.plug_date, p.seq, p.id';   // newest day first, or oldest first; list order within a day
+    let order = req.query.order === 'desc' ? 'p.plug_date DESC, p.seq, p.id' : 'p.plug_date, p.seq, p.id';   // newest day first, or oldest first; list order within a day
+    // a clicked column header (?sort=&dir=) sorts the whole result, text case-insensitively, empty values last
+    const SORTS = { plug_date: 'p.plug_date', plug_id: 'lower(p.plug_id)', prog_name: 'lower(p.prog_name)', psd: 'lower(p.psd)', account_by: 'lower(p.account_by)' };
+    if (used) SORTS.in_workload = 'in_workload';
+    if (Object.prototype.hasOwnProperty.call(SORTS, req.query.sort)) {
+      order = `${SORTS[req.query.sort]} ${req.query.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, p.plug_date, p.seq, p.id`;
+    }
     const total = (await db.query(`SELECT count(*)::int AS n FROM workload_plugs p ${whereSql(where)}`, params)).rows[0].n;
     const { rows } = await db.query(
       `SELECT p.id, p.plug_date, p.seq, p.list_no, p.plug_id, p.prog_name, p.psd, p.account_by, p.is_additional${used}

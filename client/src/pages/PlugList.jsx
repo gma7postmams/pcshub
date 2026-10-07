@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { fmtDate, isoDate } from '../lib/util.js';
 import { PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
-import { FilterSelect, Pager } from '../components/wl.jsx';
+import { FilterSelect, Pager, SortTh } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
 
 // PSD Daily Plug List — the PSD's daily plug list (imported from their workbook: NO / PLUG ID / PROG NAME/PROJ TITLE / PSD / Account By),
@@ -72,7 +72,8 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
 
   const range = rangeOf(period, anchor, custom);
   const limit = size === 'all' ? ALL_CAP : Number(size);
-  const viewKey = `${period}|${range.from}|${range.to}|${query}|${size}`;
+  const [sort, setSort] = useState({ k: '', dir: 'asc' });   // clicked column header
+  const viewKey = `${period}|${range.from}|${range.to}|${query}|${size}|${sort.k}|${sort.dir}`;
   const [pageState, setPageState] = useState({ key: '', offset: 0 });   // the page resets to the first whenever the view changes
   const offset = pageState.key === viewKey ? pageState.offset : 0;
   const setOffset = (o) => setPageState({ key: viewKey, offset: o });
@@ -100,9 +101,10 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
       if (range.from) p.set('from', range.from);
       if (range.to) p.set('to', range.to);
       if (query) p.set('q', query);
+      if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
       setData(await get(`/api/plugs?${p}`));
     } catch (e) { setData({ rows: [], total: 0 }); toast(e.message, 'err'); }
-  }, [anchor, range.from, range.to, query, limit, offset, period]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [anchor, range.from, range.to, query, limit, offset, period, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setData(null); setPicked(new Set()); loadRows(); }, [loadRows]);
 
   // ---- moving through time ----
@@ -211,7 +213,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
                 <thead>
                   <tr>
                     {canWrite ? <th className="chk"><input type="checkbox" checked={allOn} disabled={!todo.length} onChange={() => setPicked(allOn ? new Set() : new Set(todo.map((r) => r.id)))} title="Select every plug on this page that is not yet in the Workload Tracker" /></th> : null}
-                    <th>DATE</th><th>PLUG ID</th><th>PROG. NAME / PROJ. TITLE</th><th>PSD</th><th>ACCOUNT BY</th><th>IN WORKLOAD</th>{canWrite ? <th className="plug-actions">Actions</th> : null}
+                    <SortTh k="plug_date" sort={sort} onSort={setSort}>DATE</SortTh><SortTh k="plug_id" sort={sort} onSort={setSort}>PLUG ID</SortTh><SortTh k="prog_name" sort={sort} onSort={setSort}>PROG. NAME / PROJ. TITLE</SortTh><SortTh k="psd" sort={sort} onSort={setSort}>PSD</SortTh><SortTh k="account_by" sort={sort} onSort={setSort}>ACCOUNT BY</SortTh><SortTh k="in_workload" sort={sort} onSort={setSort}>IN WORKLOAD</SortTh>{canWrite ? <th className="plug-actions">Actions</th> : null}
                   </tr>
                 </thead>
                 <tbody>

@@ -87,6 +87,19 @@ async function parseBody(client, body, user, current = null) {
   return rec;
 }
 
+// Sortable columns (query ?sort=<key>&dir=asc|desc). Text sorts case-insensitively; empty values always go last.
+const SORTS = {
+  program: 'lower(i.program)', platform: 'lower(i.platform)', billable_party: 'lower(i.billable_party)',
+  episode_break_date_text: 'i.episode_date', source: 'lower(i.source)', materials_count: 'i.materials_count',
+  requested_by: "lower(COALESCE(NULLIF(i.requested_by_psd, ''), ru.full_name))", destination_folder: 'lower(i.destination_folder)',
+  approved_by: 'lower(i.approved_by)', cm_status: 'i.cm_status', updated: 'i.updated_at',
+};
+function orderBy(q) {
+  const col = Object.prototype.hasOwnProperty.call(SORTS, q.sort) ? SORTS[q.sort] : null;
+  if (!col) return 'i.created_at DESC, i.id DESC';
+  return `${col} ${q.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, i.created_at DESC, i.id DESC`;
+}
+
 router.get('/', asyncH(async (req, res) => {
   const where = [];
   const params = [];
@@ -115,7 +128,7 @@ router.get('/', asyncH(async (req, res) => {
     `SELECT count(*)::int AS n FROM ingest_records i LEFT JOIN users ru ON ru.id=i.requested_by_user_id ${whereSql}`, params
   );
   const { rows } = await db.query(
-    `${SELECT} ${whereSql} ORDER BY i.created_at DESC, i.id DESC LIMIT ${limit} OFFSET ${offset}`, params
+    `${SELECT} ${whereSql} ORDER BY ${orderBy(req.query)} LIMIT ${limit} OFFSET ${offset}`, params
   );
   res.json({ total: countQ.rows[0].n, rows });
 }));

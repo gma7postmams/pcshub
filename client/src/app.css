@@ -856,3 +856,10 @@ table.t.wl th.tight { letter-spacing: .02em; padding-left: 6px; padding-right: 6
 .cell-editor.date input { min-width: 0; width: 100%; max-width: 140px; padding: 4px 3px 4px 6px; font-size: 12.5px; }
 
 table.t th.chk, table.t td.chk { width: 34px; text-align: center; }
+
+/* sortable table headers */
+th.sortable { padding: 0; }
+th.sortable .sort-btn { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 4px; width: 100%; padding: inherit; cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; }
+th.sortable .sort-btn:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: -2px; }
+th.sortable .sort-ind { font-size: 9px; opacity: .35; }
+th.sortable.sorted .sort-ind { opacity: .9; }

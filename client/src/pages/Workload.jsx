@@ -4,7 +4,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, LockIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
+import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, SortTh, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 
@@ -290,6 +290,8 @@ export default function Workload() {
   const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', from: '', to: '' });
   const [stats, setStats] = useState(null);   // summary cards + tab badges
   const [offset, setOffset] = useState(0);
+  const [sort, setSortState] = useState({ k: '', dir: 'asc' });   // clicked column header (Table mode)
+  const setSort = (s2) => { setSortState(s2); setOffset(0); };
   const [data, setData] = useState(null);   // table mode: { total, rows } | { error }
   const [grid, setGrid] = useState(null);   // excel mode: { total, rows } | { error }
   const [gridSel, setGridSel] = useState(null);   // { r0, c0, r1, c1 } — row/col INDICES into (grid.rows, cols); null = nothing selected
@@ -417,8 +419,9 @@ export default function Workload() {
     if (tab !== 'ALL') p.set('team', tab);
     ['units', 'platform', 'plug_type', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
     if (!isGrid && q) p.set('q', q);
+    if (!isGrid && sort.k && extra.limit !== undefined) { p.set('sort', sort.k); p.set('dir', sort.dir); }   // only the table's own list; counts and exports ignore it
     return p;
-  }, [tab, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q, isGrid]);
+  }, [tab, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q, isGrid, sort.k, sort.dir]);
 
   // Tab badges (the counts next to All / VGFX / VEDIT / Audio) follow every filter except the team tab
   const loadStats = useCallback(async () => {
@@ -1393,7 +1396,7 @@ export default function Workload() {
                   : !data.rows.length ? <Empty>No workload items match these filters.</Empty>
                     : (
                       <table className={`t wl${cards ? ' cards' : ''}`}>
-                        <thead><tr>{tableCols.map((k) => <th key={k}>{head(k)}</th>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
+                        <thead><tr>{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {data.rows.map((r, idx) => (
                             <tr key={r.id} data-id={r.id}
