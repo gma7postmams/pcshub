@@ -302,6 +302,8 @@ table.t td.num, table.t th.num { text-align: right; font-variant-numeric: tabula
 .r-Manager { background: color-mix(in srgb, var(--purple) 16%, transparent); color: var(--purple); }
 .r-Editor { background: color-mix(in srgb, var(--blue) 16%, transparent); color: var(--blue); }
 .r-Viewer { background: color-mix(in srgb, var(--gray) 18%, transparent); color: var(--text-2); }
+.r-Ingest { background: color-mix(in srgb, #14b8a6 18%, transparent); color: color-mix(in srgb, #14b8a6 78%, var(--text)); }
+.r-custom { background: color-mix(in srgb, var(--rc) 16%, transparent); color: color-mix(in srgb, var(--rc) 78%, var(--text)); }
 
 /* ---------- Modal ---------- */
 .modal-backdrop { position: fixed; inset: 0; background: var(--backdrop); z-index: 100; display: grid; place-items: center; padding: 16px; animation: fade .12s ease; }
