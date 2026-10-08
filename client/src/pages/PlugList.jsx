@@ -213,11 +213,12 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
             <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
           </div>
         ) : null}
-        <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button>
+        {!canWrite ? <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button> : null}
         {canWrite ? (
           <>
             <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files[0])} />
             <button type="button" className="btn" disabled={importing} onClick={() => fileRef.current.click()}><UploadIcon /> {importing ? 'Importing…' : 'Import plug list'}</button>
+            <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button>
             {isGrid ? (
               <>
                 <button type="button" className="btn" id="add-row" onClick={() => tbRef.current && tbRef.current.addRow()}><PlusIcon /> Add Row</button>
@@ -328,9 +329,10 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
         <PlugModal date={period === 'day' ? anchor : ''} plug={editing} onClose={() => { setAdding(false); setEditing(null); }}
           onSaved={async (d, out) => {
             setAdding(false); setEditing(null);
-            if (out && out.copied && out.copied.created) toast(`Plug added and copied to the Workload Tracker${out.copied.errors && out.copied.errors.length ? '' : ' (set its Units Concerned there)'}`);
+            if (editing) { if (out && out.workloadRowsFilled) toast(`${out.workloadRowsFilled} Workload row${out.workloadRowsFilled === 1 ? '' : 's'} filled in from this plug`); }
+            else if (out && out.copied && out.copied.created) toast('Plug added and copied to the Workload Tracker (set its Units Concerned there)');
             else if (out && out.copied && out.copied.locked) toast('Plug added — not copied to the Workload Tracker because that day is locked', 'err');
-            else if (out && out.workloadRowsFilled) toast(`${out.workloadRowsFilled} Workload row${out.workloadRowsFilled === 1 ? '' : 's'} filled in from this plug`);
+            else toast(out && out.workloadRowsFilled ? `Plug added — ${out.workloadRowsFilled} Workload row${out.workloadRowsFilled === 1 ? '' : 's'} filled in from it` : 'Plug added');
             await loadDays();
             if (d && period !== 'all' && period !== 'custom' && (d < range.from || d > range.to)) setAnchor(d);   // a plug on another day: go there
             loadRows();
@@ -370,7 +372,6 @@ function DeleteAllPlugsModal({ viewLabel, viewCount, everything, totals, filters
   );
 }
 
-const withCurrent = (list, v) => (v && !list.includes(v) ? [...list, v] : list);
 function PlugModal({ date, plug, onClose, onSaved }) {
   const toast = useToast();
   const [f, setF] = useState(plug
@@ -385,7 +386,7 @@ function PlugModal({ date, plug, onClose, onSaved }) {
     setBusy(true);
     try {
       const out = plug ? await put(`/api/plugs/${plug.id}`, f) : await post('/api/plugs', f);
-      toast(plug ? 'Plug updated' : 'Plug added');
+      if (plug) toast('Plug updated');   // a new plug's message (added / copied to the Workload Tracker) comes from onSaved, so there is only one
       onSaved(f.plug_date, out);
     } catch (e) { toast(e.message, 'err'); setBusy(false); }
   };
@@ -394,7 +395,7 @@ function PlugModal({ date, plug, onClose, onSaved }) {
       <form className="form-grid" noValidate onSubmit={(e) => { e.preventDefault(); save(); }}>
         <label className="f"><span>Date <span className="req">*</span></span><input type="date" value={f.plug_date} onChange={set('plug_date')} /></label>
         <label className="f"><span>Plug ID <span className="req">*</span></span><input value={f.plug_id} onChange={set('plug_id')} maxLength={200} autoFocus /></label>
-        <label className="f full"><span>PROG. NAME / PROJ. TITLE</span><select value={f.prog_name} onChange={set('prog_name')}><Options list={withCurrent(progs, plug ? plug.prog_name : '')} blank="—" /></select></label>
+        <label className="f full"><span>PROG. NAME / PROJ. TITLE</span><input value={f.prog_name} onChange={set('prog_name')} maxLength={300} list="plug-prog-options" autoComplete="off" /><datalist id="plug-prog-options">{progs.map((o) => <option key={o.value ?? o} value={o.value ?? o} />)}</datalist></label>
         <label className="f"><span>PSD</span><input value={f.psd} onChange={set('psd')} maxLength={200} /></label>
         <label className="f"><span>Account By</span><input value={f.account_by} onChange={set('account_by')} maxLength={100} /></label>
       </form>
