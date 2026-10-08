@@ -644,6 +644,7 @@ export default function Workload() {
   };
   // one place that knows how to put a value into a grid cell (the merged Breakdate / Time cell is text for both teams' times)
   const setCellValue = (row, k, val, replace) => {
+    if (xlLocked(row)) return row;   // a locked row never changes
     if (k === 'breakdate_vgfx') return { ...row, ...bdApply(row, val, meta.unitTeams, replace) };
     if (replace && k === 'units_concerned') val = canonUnit(meta, val);
     const next = withAutoPlatform(meta.platformRules, row, k, val);
@@ -652,7 +653,7 @@ export default function Workload() {
   const setCell = (key, k, val) => {
     if (!canWrite) return;
     pushHistory(`${key}:${k}`);
-    setGrid((g) => ({ ...g, rows: g.rows.map((r) => (r._key === key ? { ...setCellValue(r, k, val, false), _dirty: true } : r)) }));
+    setGrid((g) => ({ ...g, rows: g.rows.map((r) => (r._key === key && !xlLocked(r) ? { ...setCellValue(r, k, val, false), _dirty: true } : r)) }));
   };
   const xlKeys = () => meta.views[viewKey].filter((k) => k !== 'breakdate_vedit');   // the grid's columns: VGFX + VEDIT times share one
 
@@ -666,6 +667,9 @@ export default function Workload() {
     rLo: Math.min(gridSel.r0, gridSel.r1), rHi: Math.max(gridSel.r0, gridSel.r1),
     cLo: Math.min(gridSel.c0, gridSel.c1), cHi: Math.max(gridSel.c0, gridSel.c1),
   } : null);
+  // A SAVED row dated inside a locked period can't be edited or deleted by anyone; Excel mode shows a lock and leaves it alone. (A new, unsaved row is never treated as locked,
+  // so its Work Date can still be changed — the server refuses to save one dated inside a lock.)
+  const xlLocked = (r) => !!r && !r._new && isLocked(r.work_date, meta.locks);
   const isTextTarget = (el) => !!el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
   const focusBox = () => { if (boxRef.current) boxRef.current.focus({ preventScroll: true }); try { window.getSelection().removeAllRanges(); } catch (err) { /* nothing to clear */ } };
   const startSel = (kind, r, c, e) => {
@@ -761,7 +765,7 @@ export default function Workload() {
     setGrid((g) => ({
       ...g,
       rows: g.rows.map((row, ri) => {
-        if (ri < n.rLo || ri > n.rHi) return row;
+        if (ri < n.rLo || ri > n.rHi || xlLocked(row)) return row;
         let changed = row;
         for (let ci = n.cLo; ci <= n.cHi; ci++) changed = setCellValue(changed, keys[ci], '', true);
         return { ...changed, _dirty: true };
@@ -834,7 +838,7 @@ export default function Workload() {
       if (!canWrite) return true;
       pushHistory(null);
       setEpoch((v) => v + 1);
-      setGrid((g) => ({ ...g, rows: g.rows.map((row, ri) => (ri >= sel0.rLo && ri <= sel0.rHi ? { ...row, ...bdApply(row, rawText, meta.unitTeams, true), _dirty: true } : row)) }));
+      setGrid((g) => ({ ...g, rows: g.rows.map((row, ri) => (ri >= sel0.rLo && ri <= sel0.rHi && !xlLocked(row) ? { ...row, ...bdApply(row, rawText, meta.unitTeams, true), _dirty: true } : row)) }));
       return true;
     }
     const block = parseTsvBlock(rawText);
@@ -861,7 +865,7 @@ export default function Workload() {
       setGrid((g) => ({
         ...g,
         rows: g.rows.map((row, ri) => {
-          if (ri < n.rLo || ri > n.rHi) return row;
+          if (ri < n.rLo || ri > n.rHi || xlLocked(row)) return row;
           let changed = row;
           for (let ci = n.cLo; ci <= n.cHi; ci++) { const col = cols[ci]; if (col) changed = setCellValue(changed, col, textFor(col), true); }
           return { ...changed, _dirty: true };
@@ -887,7 +891,7 @@ export default function Workload() {
         ...g,
         rows: rows.map((row, ri) => {
           const bi = ri - r0;
-          if (bi < 0 || bi >= tileR) return row;
+          if (bi < 0 || bi >= tileR || xlLocked(row)) return row;
           let changed = row;
           for (let ci = 0; ci < tileC; ci++) {
             const col = cols[c0 + ci];
@@ -935,13 +939,15 @@ export default function Workload() {
     const make = !grid.rows.slice(n.rLo, n.rHi + 1).every((r) => r.is_priority);
     setCtx(null);
     pushHistory(null);
-    setGrid((g) => ({ ...g, rows: g.rows.map((r, i) => (i >= n.rLo && i <= n.rHi ? { ...r, is_priority: make, _dirty: true } : r)) }));
+    setGrid((g) => ({ ...g, rows: g.rows.map((r, i) => (i >= n.rLo && i <= n.rHi && !xlLocked(r) ? { ...r, is_priority: make, _dirty: true } : r)) }));
   };
   const deleteSelectedRows = async () => {
     setCtx(null);
     const n = normSel();
     if (!n || !canWrite) return;
-    const target = grid.rows.slice(n.rLo, n.rHi + 1);
+    const lockedN = grid.rows.slice(n.rLo, n.rHi + 1).filter(xlLocked).length;   // rows in a locked period are left alone
+    const target = grid.rows.slice(n.rLo, n.rHi + 1).filter((r) => !xlLocked(r));
+    if (!target.length) { toast(`Locked: ${lockNote(grid.rows[n.rLo].work_date, meta.locks)}. An Admin must unlock it first.`, 'err'); return; }
     const saved = target.filter((r) => !r._new);
     if (saved.length && !(await confirm(`Delete ${saved.length} row${saved.length === 1 ? '' : 's'}`, `Permanently delete ${saved.length === 1 ? `"${firstLine(saved[0].plug_id)}"` : `these ${saved.length} rows`}? This cannot be undone.`, { okText: 'Delete', danger: true }))) return;
     const gone = new Set(target.filter((r) => r._new).map((r) => r._key));
@@ -954,7 +960,7 @@ export default function Workload() {
     hist.current = { past: [], future: [], tag: null };   // a deleted saved row can't be brought back by undo
     setGridSel(null);
     if (deletedSaved) loadStats();
-    if (failure) toast(failure.message, 'err'); else toast(`Deleted ${target.length} row${target.length === 1 ? '' : 's'}`);
+    if (failure) toast(failure.message, 'err'); else toast(`Deleted ${target.length} row${target.length === 1 ? '' : 's'}${lockedN ? ` — ${lockedN} locked row${lockedN === 1 ? '' : 's'} skipped` : ''}`);
   };
   const gridPaste = (cols) => (e) => {
     pasteSeen.current = true;
@@ -1039,6 +1045,7 @@ export default function Workload() {
     });
   };
   const removeRow = async (r) => {
+    if (xlLocked(r)) { toast(`Locked: ${lockNote(r.work_date, meta.locks)}. An Admin must unlock it first.`, 'err'); return; }
     if (!r._new) {
       if (!(await confirm('Delete row', `Permanently delete "${firstLine(r.plug_id)}"?`, { okText: 'Delete', danger: true }))) return;
       try { await del(`/api/workload/${r.id}`); toast('Deleted'); } catch (e) { toast(e.message, 'err'); return; }
@@ -1462,7 +1469,7 @@ export default function Workload() {
             ) : null}
             {canWrite && isGrid && !isAll ? <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add Row</button> : null}
             {canWrite && isGrid && selRows.length ? <button type="button" className="btn" id="priority-btn" data-keep-sel onClick={togglePriority} title="Highlights the Breakdate / Time of the selected row(s)">{allPrio ? 'Remove Priority' : 'Set Priority'}</button> : null}
-            {canWrite && isGrid && wholeRowsSel ? <button type="button" className="btn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}>Delete {selRows.length > 1 ? `${selRows.length} Rows` : 'Row'}</button> : null}
+            {canWrite && isGrid && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? <button type="button" className="btn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}>Delete {selRows.filter((r) => !xlLocked(r)).length > 1 ? `${selRows.filter((r) => !xlLocked(r)).length} Rows` : 'Row'}</button> : null}
             {s.canPage('/admin') ? <button type="button" className="btn" id="lock-dates-btn" onClick={() => setManagingLocks(true)}><LockIcon /> Lock Dates</button> : null}
             {canWrite && !isGrid ? (
               <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({ rec: null })}><PlusIcon /> New Workload</button>
@@ -1508,26 +1515,26 @@ export default function Workload() {
                       </thead>
                       <tbody>
                         {grid.rows.length ? grid.rows.map((r, ri) => (
-                          <tr key={r._key} data-ri={ri} className={`${r._dirty ? 'dirty' : ''}${r.is_priority ? ' prio-row' : ''}`.trim()}>
-                            <td className={`rn${rowInSel(ri) ? ' hl' : ''}`} title="Click to select the whole row (Ctrl+C to copy)"
-                              onMouseDown={(e) => startSel('row', ri, 0, e)}>{ri + 1}{r.is_priority ? <i className="prio-dot" title="Priority" /> : null}</td>
+                          <tr key={r._key} data-ri={ri} className={`${r._dirty ? 'dirty' : ''}${r.is_priority ? ' prio-row' : ''}${xlLocked(r) ? ' locked-row' : ''}`.trim()}>
+                            <td className={`rn${rowInSel(ri) ? ' hl' : ''}`} title={xlLocked(r) ? `Locked: ${lockNote(r.work_date, meta.locks)} — an Admin must unlock it first` : 'Click to select the whole row (Ctrl+C to copy)'}
+                              onMouseDown={(e) => startSel('row', ri, 0, e)}>{ri + 1}{r.is_priority ? <i className="prio-dot" title="Priority" /> : null}{xlLocked(r) ? <span className="row-lock"><LockIcon /></span> : null}</td>
                             {tableCols.map((k, ci) => (
                               <td key={k} data-k={k} data-r={ri} data-c={ci} onMouseDown={cellMouseDown(ri, ci)} onBlur={() => { hist.current.tag = null; }}
                                 onFocus={(e) => { if (isTextTarget(e.target)) setGridSel((sel) => (sel && sel.r0 === ri && sel.r1 === ri && sel.c0 === ci && sel.c1 === ci ? sel : { r0: ri, c0: ci, r1: ri, c1: ci })); }}
                                 className={`${selClass(ri, ci)}${r.is_priority && k === 'breakdate_vgfx' ? ' prio' : ''}`.trim()}>
                                 {k === 'breakdate_vgfx' ? (
-                                  <BreakdateCellInput text={bdText(r, meta.unitTeams)} epoch={epoch} disabled={!canWrite} onText={(t) => setCell(r._key, k, t)}
+                                  <BreakdateCellInput text={bdText(r, meta.unitTeams)} epoch={epoch} disabled={!canWrite || xlLocked(r)} onText={(t) => setCell(r._key, k, t)}
                                     placeholder={!r.units_concerned || (meta.unitTeams[r.units_concerned] || []).some((t) => t === 'VGFX' || t === 'VEDIT') ? 'PENDING' : undefined} />
                                 ) : (
                                   <GridCellInput
-                                    def={meta.fields[k]} value={r[k]} disabled={!canWrite}
+                                    def={meta.fields[k]} value={r[k]} disabled={!canWrite || xlLocked(r)}
                                     onChange={(e) => setCell(r._key, k, e.target.value)}
                                     onBlur={k === 'units_concerned' ? (e) => { const fixed = canonUnit(meta, e.target.value); if (fixed !== e.target.value) setCell(r._key, k, fixed); } : undefined}
                                   />
                                 )}
                               </td>
                             ))}
-                            {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removeRow(r)}>{r._new ? 'Remove' : 'Delete'}</button></td> : null}
+                            {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removeRow(r)} disabled={xlLocked(r)} title={xlLocked(r) ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}>{r._new ? 'Remove' : 'Delete'}</button></td> : null}
                           </tr>
                         )) : (() => {
                           const text = isAll

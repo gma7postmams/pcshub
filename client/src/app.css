@@ -928,3 +928,10 @@ table.t.xl .xl-empty-msg { position: sticky; left: 0; box-sizing: border-box; wi
 
 /* Excel mode: the VO column is exactly as wide as its longest line of text (an empty one is as small as Length), up to 380 px, then it wraps */
 table.t.xl td[data-k="vo"] .xl-cell.multi::after { width: max-content; max-width: 380px; overflow-wrap: break-word; }
+
+/* Excel mode: a row in a LOCKED period (Admin → Lock Dates) shows a padlock in its row-number cell, a faint diagonal hatch and muted text, and its cells can't be edited */
+table.t.xl tr.locked-row td { background-image: repeating-linear-gradient(135deg, transparent 0 7px, color-mix(in srgb, var(--text-3) 12%, transparent) 7px 14px); }
+table.t.xl tr.locked-row td.rn { color: var(--text-3); }
+table.t.xl tr.locked-row input, table.t.xl tr.locked-row textarea { color: var(--text-3); cursor: not-allowed; }
+table.t.xl td.rn .row-lock { margin-left: 3px; color: var(--amber, #b9770e); }
+table.t.xl td.rn .row-lock svg { width: 12px; height: 12px; }
