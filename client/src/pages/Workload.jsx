@@ -675,6 +675,13 @@ export default function Workload() {
   const startSel = (kind, r, c, e) => {
     const nR = grid.rows.length; const nC = xlKeys().length;
     if (!nR || !nC) return;
+    // Like Table mode, a row in a locked period can't be selected: say why and leave the selection as it was
+    if ((kind === 'row' || kind === 'cell') && xlLocked(grid.rows[r])) {
+      drag.current = null;
+      e.preventDefault();
+      if (e.button !== 2) toast(`Locked: ${lockNote(grid.rows[r].work_date, meta.locks)}. An Admin must unlock it first.`, 'err');
+      return;
+    }
     if (e.button === 2) {
       // right-click: keep a selection that already covers this spot, otherwise select just this cell / row / column
       const n = normSel();
@@ -697,6 +704,7 @@ export default function Workload() {
   };
   const extendSel = (kind, r, c) => {
     if (drag.current !== kind || !gridSel) return;
+    if ((kind === 'row' || kind === 'cell') && xlLocked(grid.rows[r])) return;   // a drag stops at a locked row
     const nR = grid.rows.length; const nC = xlKeys().length;
     const next = kind === 'row' ? { ...gridSel, r1: r, c0: 0, c1: nC - 1 }
       : kind === 'col' ? { ...gridSel, r0: 0, r1: nR - 1, c1: c }
@@ -722,6 +730,7 @@ export default function Workload() {
   // Mouse down anywhere in a cell (its padding included, not just the text box) selects it and puts the cursor in it
   const cellMouseDown = (ri, ci) => (e) => {
     startSel('cell', ri, ci, e);
+    if (xlLocked(grid.rows[ri])) return;
     if (e.button === 2 || e.shiftKey || isTextTarget(e.target)) return;
     e.preventDefault();
     const f = e.currentTarget.querySelector('input, textarea');
@@ -750,11 +759,11 @@ export default function Workload() {
   // 'xl-sel' plus which edges of the range this cell sits on (so only the OUTLINE of a range is drawn, like Excel)
   const selClass = (r, c) => {
     const n = normSel();
-    if (!n || r < n.rLo || r > n.rHi || c < n.cLo || c > n.cHi) return '';
+    if (!n || r < n.rLo || r > n.rHi || c < n.cLo || c > n.cHi || xlLocked(grid && grid.rows[r])) return '';
     const single = n.rLo === n.rHi && n.cLo === n.cHi;
     return `xl-sel${single ? ' xl-single' : ''}${gridSel && r === gridSel.r0 && c === gridSel.c0 ? ' xl-active' : ''}${r === n.rLo ? ' xl-t' : ''}${r === n.rHi ? ' xl-b' : ''}${c === n.cLo ? ' xl-l' : ''}${c === n.cHi ? ' xl-r' : ''}`;
   };
-  const rowInSel = (r) => { const n = normSel(); return !!n && r >= n.rLo && r <= n.rHi; };
+  const rowInSel = (r) => { const n = normSel(); return !!n && r >= n.rLo && r <= n.rHi && !xlLocked(grid && grid.rows[r]); };
   const colInSel = (c) => { const n = normSel(); return !!n && c >= n.cLo && c <= n.cHi; };
   // Rows in a locked period are never changed; say so instead of silently doing nothing. Returns true when every row in the range is locked.
   const lockNotice = (lo, hi, doing) => {
