@@ -260,7 +260,7 @@ ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS total_mats      TEXT;   -- o
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS prog_name       TEXT;   -- copied from the PSD daily plug list
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS plug_type       TEXT;   -- dropdown (admin-managed)
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS length          TEXT;   -- Audio: open (older installs already have this column)
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS others          TEXT;   -- Audio: open
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS others          TEXT;   -- (no longer used: folded into remarks, see below)
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS audio_status    TEXT;   -- Audio: open (the Audio sheet's STATUS column)
 -- (Older installs may still have an unused status column from the first build; it is left untouched.)
 
@@ -319,6 +319,12 @@ ALTER TABLE workload_items DROP CONSTRAINT IF EXISTS workload_items_units_check;
 ALTER TABLE workload_items ADD CONSTRAINT workload_items_units_check CHECK (units_concerned IN
   ('VGFX Only', 'VEDIT Only', 'VGFX/VEDIT', 'Audio - RADIO', 'Audio - TV', 'Audio – AUDIO GUIDE', 'VGFX/VEDIT/Audio'));
 CREATE INDEX IF NOT EXISTS workload_items_date_units_idx ON workload_items (work_date DESC, units_concerned);
+
+-- Audio used to have its own "Others" column next to Remarks. There is now ONE Remarks column everywhere: whatever was typed in Others moves to the
+-- front of Remarks (Others first, then the old Remarks). Idempotent: Others is emptied, so a second run finds nothing to move.
+UPDATE workload_items
+   SET remarks = CASE WHEN COALESCE(btrim(remarks), '') = '' THEN others ELSE others || E'\n' || remarks END, others = NULL
+ WHERE COALESCE(btrim(others), '') <> '';
 
 CREATE TABLE IF NOT EXISTS app_settings (
   key         TEXT PRIMARY KEY,

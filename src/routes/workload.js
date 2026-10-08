@@ -53,7 +53,6 @@ const FIELDS = {
   plug_type:      { label: 'Plug Type', kind: 'select', lookup: 'plug_type', max: 100 },
   // Audio sheet's Assigned / Done / Resched-cancelled tables: open columns you can type or paste into
   length:         { label: 'Length', kind: 'text', max: 100, hint: OPEN },
-  others:         { label: 'Others', kind: 'text', multiline: true, max: 2000, hint: OPEN },
   audio_status:   { label: 'Status', kind: 'text', max: 200, hint: OPEN },   // Audio only (the Audio sheet's STATUS: SENT FOR APPROVAL, LOGGED SEP 9, ...)
 };
 const COLS = Object.keys(FIELDS);
@@ -62,12 +61,12 @@ const COLS = Object.keys(FIELDS);
 const MAIN_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd',
   'breakdate_vgfx', 'breakdate_vedit',
   'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats', 'prog_name', 'plug_type'];
-const AUDIO_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'vo', 'script', 'remarks', 'length', 'others', 'audio_status', 'plug_type'];
+const AUDIO_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'vo', 'script', 'length', 'remarks', 'audio_status', 'plug_type'];   // Audio: ONE Remarks column (the old Others, folded into Remarks)
 // Audio-only columns; any row that involves Audio (e.g. VGFX/VEDIT/Audio) also gets these in the form
-const AUDIO_EXTRA = ['length', 'others', 'audio_status'];
+const AUDIO_EXTRA = ['length', 'audio_status'];
 const VIEWS = {
   // All tab = every column (the template's main columns plus Length and Others), each in its own column
-  ALL: [...MAIN_COLS.slice(0, -1), 'length', 'others', 'audio_status', 'plug_type'],
+  ALL: [...MAIN_COLS.slice(0, -1), 'length', 'audio_status', 'plug_type'],
   VGFX: MAIN_COLS,
   VEDIT: MAIN_COLS,
   AUDIO: AUDIO_COLS,
@@ -106,7 +105,7 @@ function derivePlatform(plugId) {
 }
 
 const MAX_BATCH = 200;
-const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'billable_party', 'remarks', 'vo', 'total_mats', 'audio_guide', 'length', 'others', 'audio_status'];
+const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'billable_party', 'remarks', 'vo', 'total_mats', 'audio_guide', 'length', 'audio_status'];
 
 // ---------- Custom columns ("Add Column"): stored in workload_custom_columns, values in workload_items.custom_fields ----------
 // col_key is always 'custom_<id>' (not the label), so adding/removing/renaming a column never needs a schema change.
@@ -757,6 +756,7 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
   Object.entries(fieldsExt).forEach(([k, f]) => { labelToKey[f.label.trim().toLowerCase()] = k; });
   labelToKey['prog. name / project title'] = 'prog_name';   // the column's old name (files exported before the rename)
   labelToKey['prog name/proj title'] = 'prog_name';         // as it is written in the PSD Daily Plug List
+  labelToKey['others'] = 'remarks';                         // the Audio "Others" column was folded into Remarks (files exported before that)
   const newColumns = [];
 
   // A header this tracker does not know becomes a new custom column (so nothing in the file is dropped) — within
@@ -838,7 +838,7 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
           if (f.kind === 'date') obj[key] = val instanceof Date ? isoDate(val) : String(val);
           else if (f.kind === 'datetime') obj[key] = val instanceof Date ? isoDateTime(val) : String(val);
           else if (key === 'audio_guide' || key === 'art_stb' || key === 'script') obj[key] = val instanceof Date ? isoDate(val) : String(val);   // an Excel date or text
-          else obj[key] = String(val); }
+          else obj[key] = key === 'remarks' && obj[key] ? `${obj[key]}\n${String(val)}` : String(val); }   // an old file may have both a Remarks and an Others column: keep both texts
       }
       if (!hasAny) continue;
       sheetInfo.rows++;
