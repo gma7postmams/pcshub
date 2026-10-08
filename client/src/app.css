@@ -921,3 +921,7 @@ table.t.wl.cards td .rem.st { min-width: 0; max-width: none; }
 table.t.wl:not(.cards) td[data-k="remarks"] .rem, table.t.wl:not(.cards) td[data-k="others"] .rem { box-sizing: border-box; width: 300px; min-width: 300px; max-width: 300px; margin: 0 auto; }
 table.t.wl:not(.cards) td[data-k="vo"] .rem { width: max-content; min-width: 0; max-width: 300px; margin: 0 auto; overflow-wrap: break-word; }   /* as wide as its text, no wider than 300 px, wrapping at spaces */
 table.t.wl:not(.cards) th[data-k="vo"] { width: 1%; }   /* the column hugs its text; spare room on a wide screen goes to the other columns */
+
+/* Excel mode: the "No rows ..." message is a roomy, larger block that stays in view (it sticks to the left edge while a wide grid is scrolled sideways) */
+table.t.xl td.xl-empty { padding: 0; text-align: left; }
+table.t.xl .xl-empty-msg { position: sticky; left: 0; box-sizing: border-box; width: calc(100vw - 72px); padding: 64px max(28px, calc((100vw - 72px - 760px) / 2)); text-align: center; font-size: 16px; line-height: 1.55; color: var(--text-2); white-space: normal; }   /* as wide as the visible grid; the text itself is a centred column of at most 760 px */

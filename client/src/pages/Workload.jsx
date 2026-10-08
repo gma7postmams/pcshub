@@ -1512,9 +1512,9 @@ export default function Workload() {
                             ))}
                             {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removeRow(r)}>{r._new ? 'Remove' : 'Delete'}</button></td> : null}
                           </tr>
-                        )) : <tr><td colSpan={tableCols.length + 2} className="empty">{isAll
+                        )) : <tr><td colSpan={tableCols.length + 2} className="empty xl-empty"><div className="xl-empty-msg">{isAll
                           ? <>No rows are waiting for a team. Plugs copied from the PSD Daily Plug List show up here until you set their Units Concerned — pick VGFX, VEDIT or Audio to edit a team’s rows.</>
-                          : <>No {meta.tabs.find((t) => t.key === tab).label} rows match these filters.{canWrite ? ' Use “Add Row” to start.' : ''}</>}</td></tr>}
+                          : <>No {meta.tabs.find((t) => t.key === tab).label} rows match these filters.{canWrite ? ' Use “Add Row” to start.' : ''}</>}</div></td></tr>}
                       </tbody>
                     </table>
                   )}
