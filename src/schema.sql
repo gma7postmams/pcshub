@@ -252,7 +252,7 @@ ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS plug_id         TEXT;   -- c
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS psd             TEXT;   -- copied from the PSD daily plug list
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate       TIMESTAMP;   -- Breakdate/Time: date and time picked together (wall-clock, no time zone)
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS vo              TEXT;   -- open
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS script          DATE;   -- date
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS script          DATE;   -- (converted to TEXT further down: a date YYYY-MM-DD OR free text)
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS art_stb         TEXT;   -- a date (YYYY-MM-DD) OR free text
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS audio_guide     TEXT;   -- 'N/A', a date (YYYY-MM-DD) or free text
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS remarks         TEXT;   -- open
@@ -502,6 +502,14 @@ SELECT group_id, 'plugs' FROM group_permissions
  WHERE perm_key = 'workload' AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'plugs_page_granted')
 ON CONFLICT DO NOTHING;
 INSERT INTO app_settings (key, value) VALUES ('plugs_page_granted', '1') ON CONFLICT (key) DO NOTHING;
+
+-- Script takes a date or plain text too (FFUP, ...), like Artwork / STB: it used to be a DATE column — convert it in place, keeping every date as 'YYYY-MM-DD'.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+              AND table_name = 'workload_items' AND column_name = 'script' AND data_type = 'date') THEN
+    ALTER TABLE workload_items ALTER COLUMN script TYPE TEXT USING to_char(script, 'YYYY-MM-DD');
+  END IF;
+END $$;
 
 -- Artwork / STB takes either a date (picked) or plain text (typed). It used to be a DATE column: convert it in place, keeping every date
 -- as 'YYYY-MM-DD'. (Runs only while the column is still a DATE, so free text entered afterwards is never touched.)

@@ -204,14 +204,14 @@ function AudioGuideInput({ value, onChange, disabled }) {
 
 // Artwork / STB: either a DATE (date picker) or plain TEXT (open text box) — pick which with the little dropdown. Stored as one value:
 // 'YYYY-MM-DD' for a date, anything else for text. Switching the kind clears the box, since the two don't convert into each other.
-function DateOrTextInput({ value, onChange, disabled, max }) {
+function DateOrTextInput({ value, onChange, disabled, max, label = 'Artwork / STB' }) {
   const v = value || '';
   const [mode, setMode] = useState(!v || ISO.test(v) ? 'date' : 'text');   // an empty one starts as a date, like the column always did
   useEffect(() => { if (v) setMode(ISO.test(v) ? 'date' : 'text'); }, [v]);   // follows the value (e.g. a full date typed as text becomes a date)
   const emit = (x) => onChange({ target: { value: x } });
   return (
     <div className="ag">
-      <select value={mode} disabled={disabled} aria-label="Artwork / STB: date or text" onChange={(e) => { setMode(e.target.value); emit(''); }}>
+      <select value={mode} disabled={disabled} aria-label={`${label}: date or text`} onChange={(e) => { setMode(e.target.value); emit(''); }}>
         <option value="date">Date</option>
         <option value="text">Text</option>
       </select>
@@ -241,7 +241,7 @@ function FieldInput({ def, value, onChange, disabled, lookups, auto }) {
   // date and time picked together (the browser's own calendar + time picker); 15-minute steps
   if (def.kind === 'datetime') return <input type="datetime-local" step={900} value={v} disabled={disabled} onChange={onChange} />;
   if (def.kind === 'audio_guide') return <AudioGuideInput value={v} onChange={onChange} disabled={disabled} />;
-  if (def.kind === 'date_or_text') return <DateOrTextInput value={v} onChange={onChange} disabled={disabled} max={def.max} />;
+  if (def.kind === 'date_or_text') return <DateOrTextInput value={v} onChange={onChange} disabled={disabled} max={def.max} label={def.label} />;
   if (def.kind === 'date') return <input type="date" value={v} disabled={disabled} onChange={onChange} />;
   if (def.kind === 'select') {
     const list = def.lookup ? withCurrent(lookups[def.lookup] || [], v) : def.options;
@@ -620,11 +620,6 @@ export default function Workload() {
   // one place that knows how to put a value into a grid cell (the merged Breakdate / Time cell is text for both teams' times)
   const setCellValue = (row, k, val, replace) => {
     if (k === 'breakdate_vgfx') return { ...row, ...bdApply(row, val, meta.unitTeams, replace) };
-    // the template writes these as "available (082826)" (MMDDYY): that is a date — 2026-08-28
-    if (replace && (k === 'script' || k === 'art_stb' || k === 'audio_guide')) {
-      const dm = /^\s*(?:available\s*(?:approved\s*)?)?\(?(\d{2})(\d{2})(\d{2})\)?\s*$/i.exec(String(val ?? ''));
-      if (dm && +dm[1] >= 1 && +dm[1] <= 12 && +dm[2] >= 1 && +dm[2] <= 31) val = `20${dm[3]}-${dm[1]}-${dm[2]}`;
-    }
     const next = withAutoPlatform(meta.platformRules, row, k, val);
     return k === 'plug_id' || k === 'work_date' ? fillFromPlug(next, row, findPlug) : next;
   };
@@ -1298,6 +1293,7 @@ export default function Workload() {
             {val ? <span className="strong">{oneLine(val)}</span> : null}
           </td>
         );
+      case 'script':
       case 'art_stb': return <td {...common}>{val ? (ISO.test(val) ? <DateChip>{fmtDate(val)}</DateChip> : oneLine(val)) : null}</td>;   // a date shows as a chip, text as text
       case 'audio_guide': return <td {...common}><DateChip hue="fuchsia">{val ? (ISO.test(val) ? fmtDate(val) : oneLine(val)) : null}</DateChip></td>;
       case 'breakdate_vgfx': return <td {...common}><DateChip hue="purple">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VGFX in Units Concerned
