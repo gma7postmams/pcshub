@@ -460,7 +460,7 @@ table.t.wl td.actions-cell .btn { display: block; width: 100%; margin: 0 0 4px; 
 table.t.wl td.actions-cell .btn:last-child { margin-bottom: 0; }
 /* Excel grid: wider columns for the long-text fields (textareas grow with their content) */
 table.t.xl td[data-k="plug_id"] textarea, table.t.xl td[data-k="remarks"] textarea, table.t.xl td[data-k="others"] textarea,
-table.t.xl td[data-k="vo"] textarea, table.t.xl td[data-k="total_mats"] textarea { min-width: 190px; }
+table.t.xl td[data-k="vo"] textarea, table.t.xl td[data-k="total_mats"] textarea, table.t.xl td[data-k="audio_status"] textarea { min-width: 190px; }
 table.t.xl td[data-k="units_concerned"] select, table.t.xl td[data-k="platform"] select { min-width: 150px; }
 table.t.xl textarea { overflow: hidden; resize: none; }
 
@@ -911,3 +911,7 @@ table.t.xl td[data-k="audio_status"] .xl-cell { min-width: 200px; }
 table.t.xl td[data-k="breakdate_vgfx"] textarea::placeholder { color: var(--text-3); font-weight: 700; letter-spacing: .04em; opacity: 1; }
 /* Table mode, Audio view: Remarks is short status-like text, centred like every other Audio column (VGFX / VEDIT keep their left-aligned long notes) */
 table.t.wl.v-audio:not(.cards) td[data-k="others"] { text-align: center; }
+
+/* Audio Status can hold several lines: a narrower wrapped box than Remarks */
+table.t.wl td .rem.st { min-width: 160px; max-width: 320px; }
+table.t.wl.cards td .rem.st { min-width: 0; max-width: none; }

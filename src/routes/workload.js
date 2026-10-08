@@ -54,7 +54,7 @@ const FIELDS = {
   // Audio sheet's Assigned / Done / Resched-cancelled tables: open columns you can type or paste into
   length:         { label: 'Length', kind: 'text', max: 100, hint: OPEN },
   others:         { label: 'Remarks', kind: 'text', multiline: true, max: 2000, hint: OPEN },   // Audio only: this IS the Audio Remarks column (it used to be called Others); the main Remarks column is not part of the Audio view
-  audio_status:   { label: 'Status', kind: 'text', max: 200, hint: OPEN },   // Audio only (the Audio sheet's STATUS: SENT FOR APPROVAL, LOGGED SEP 9, ...)
+  audio_status:   { label: 'Status', kind: 'text', multiline: true, max: 500, hint: OPEN },   // Audio only (the Audio sheet's STATUS: SENT FOR APPROVAL, LOGGED SEP 9, ...)
 };
 const COLS = Object.keys(FIELDS);
 
@@ -460,7 +460,7 @@ router.get('/export', asyncH(async (req, res) => {
         else if (f.kind === 'date') val = asDate(val);
         else if (f.kind === 'datetime') { const t = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(val || ''); val = t ? new Date(Date.UTC(+t[1], +t[2] - 1, +t[3], +t[4], +t[5])) : null; }
         else if ((k === 'audio_guide' || k === 'art_stb' || k === 'script') && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = asDate(val);   // a date becomes a real Excel date; text stays text
-        else if (k !== 'remarks') val = oneLineText(val);   // every field except Remarks is one line, like the web table
+        else if (k !== 'remarks' && k !== 'others' && k !== 'audio_status') val = oneLineText(val);   // every field except the Remarks columns and Audio Status is one line, like the web table
         return { ...o, [k]: val };
       }, {}));
       row.alignment = { wrapText: false, vertical: 'middle', horizontal: 'center' };
@@ -510,7 +510,7 @@ router.get('/export', asyncH(async (req, res) => {
           }
         } else if (k === 'plug_id' || k === 'prog_name') {
           cell.font = { bold: true };
-        } else if (k === 'remarks') {
+        } else if (k === 'remarks' || k === 'others' || k === 'audio_status') {
           cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
         }
       });
@@ -518,7 +518,7 @@ router.get('/export', asyncH(async (req, res) => {
 
     // Auto-size every column except Remarks (which wraps instead) so single-line values are never cropped.
     ws.columns.forEach((column) => {
-      if (column.key === 'remarks') return;
+      if (column.key === 'remarks' || column.key === 'others' || column.key === 'audio_status') return;
       const f = fieldsExt[column.key];
       let max = String(f.label).length;
       if (f.kind === 'date') max = Math.max(max, 13);           // 'Sep 28, 2026'

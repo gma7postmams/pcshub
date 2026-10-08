@@ -1313,6 +1313,7 @@ export default function Workload() {
       case 'breakdate_vedit': return <td {...common}><DateChip hue="orange">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VEDIT in Units Concerned
       case 'others':
       case 'remarks': return <td {...common}>{val ? <div className="rem">{val}</div> : null}</td>;
+      case 'audio_status': return <td {...common}>{val ? <div className="rem st">{val}</div> : null}</td>;   // Status can have several lines too
       default:
         return <td {...common}>{meta.fields[k].kind === 'date' ? <DateChip>{fmtDate(val)}</DateChip> : oneLine(val)}</td>;
     }
