@@ -593,7 +593,8 @@ table.t.wl.cards td .rem { min-width: 0; max-width: none; }
 
 /* Centre every cell's content except Remarks, which stays left-aligned (it's the one column meant to be read as text) */
 table.t.wl:not(.cards) td { text-align: center; }
-table.t.wl:not(.cards) td[data-k="remarks"], table.t.wl:not(.cards) td[data-k="others"] { text-align: left; }
+/* Remarks (and the Audio Remarks) is centred like every other column in Table mode — it used to be left-aligned */
+table.t.wl:not(.cards) td[data-k="remarks"], table.t.wl:not(.cards) td[data-k="others"] { text-align: center; }
 table.t.wl:not(.cards) td .stack { align-items: center; }
 
 /* cards: long pills (e.g. "REG/TDMD (GMA MUSIC)") get the whole card width and may wrap rather than spill into the next column */
@@ -910,13 +911,13 @@ table.t.xl td[data-k="audio_status"] .xl-cell { min-width: 200px; }
 /* a PENDING (no time yet) Breakdate / Time placeholder: grey and bold like a pill, not like typed text */
 table.t.xl td[data-k="breakdate_vgfx"] textarea::placeholder { color: var(--text-3); font-weight: 700; letter-spacing: .04em; opacity: 1; }
 /* Table mode, Audio view: Remarks is short status-like text, centred like every other Audio column (VGFX / VEDIT keep their left-aligned long notes) */
-table.t.wl.v-audio:not(.cards) td[data-k="others"] { text-align: center; }
+
 
 /* Audio Status can hold several lines: a narrower wrapped box than Remarks */
 table.t.wl td .rem.st { min-width: 160px; max-width: 320px; }
 table.t.wl.cards td .rem.st { min-width: 0; max-width: none; }
 
 /* Table mode: Remarks (the Audio Remarks too) is a fixed 300 px of wrapped text; VO is only as wide as its own text, up to the same 300 px, then it wraps (it used to stretch to the full length of its text) */
-table.t.wl:not(.cards) td[data-k="remarks"] .rem, table.t.wl:not(.cards) td[data-k="others"] .rem { box-sizing: border-box; width: 300px; min-width: 300px; max-width: 300px; }
+table.t.wl:not(.cards) td[data-k="remarks"] .rem, table.t.wl:not(.cards) td[data-k="others"] .rem { box-sizing: border-box; width: 300px; min-width: 300px; max-width: 300px; margin: 0 auto; }
 table.t.wl:not(.cards) td[data-k="vo"] .rem { width: max-content; min-width: 0; max-width: 300px; margin: 0 auto; overflow-wrap: break-word; }   /* as wide as its text, no wider than 300 px, wrapping at spaces */
 table.t.wl:not(.cards) th[data-k="vo"] { width: 1%; }   /* the column hugs its text; spare room on a wide screen goes to the other columns */
