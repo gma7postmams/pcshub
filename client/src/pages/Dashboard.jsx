@@ -282,6 +282,30 @@ export default function Dashboard() {
     return () => { live = false; close(); clearInterval(t); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible); };
   }, [showUsers]);
 
+  // Recent Activity is live too: a stream pushes the list when a new line is written to the audit log; a poll covers a stream that can't stay open.
+  const showAct = !!(d && d.activity);
+  useEffect(() => {
+    if (!showAct) return undefined;
+    let es = null;
+    let live = true;
+    const apply = (activity) => setD((cur) => (cur ? { ...cur, activity } : cur));
+    const poll = () => { if (document.visibilityState === 'visible') get('/api/dashboard/activity', { quiet: true }).then((r) => { if (live && r.activity) apply(r.activity); }).catch(() => { /* next time */ }); };
+    const close = () => { if (es) { es.close(); es = null; } };
+    const open = () => {
+      if (es || typeof EventSource === 'undefined') return;
+      es = new EventSource('/api/dashboard/activity/stream');
+      es.onmessage = (e) => { try { const m = JSON.parse(e.data); if (live && m.activity) apply(m.activity); } catch (err) { /* ignore */ } };
+      es.onerror = () => { if (es && es.readyState === 2) close(); };
+    };
+    open();
+    let n = 0;
+    const t = setInterval(() => { n += 1; if (!es || es.readyState !== 1 || n % 3 === 0) poll(); }, 10000);
+    const onVisible = () => { if (document.visibilityState === 'visible') { poll(); open(); } else close(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => { live = false; close(); clearInterval(t); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible); };
+  }, [showAct]);
+
   const changeRange = (key) => {
     setRangeState(key);
     saveRange(s.session_key, key);
