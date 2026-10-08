@@ -756,9 +756,22 @@ export default function Workload() {
   };
   const rowInSel = (r) => { const n = normSel(); return !!n && r >= n.rLo && r <= n.rHi; };
   const colInSel = (c) => { const n = normSel(); return !!n && c >= n.cLo && c <= n.cHi; };
+  // Rows in a locked period are never changed; say so instead of silently doing nothing. Returns true when every row in the range is locked.
+  const lockNotice = (lo, hi, doing) => {
+    const rows = grid ? grid.rows.slice(lo, hi + 1) : [];
+    const lockedN = rows.filter(xlLocked).length;
+    if (!lockedN) return false;
+    if (lockedN === rows.length) {
+      toast(`Locked: ${lockNote(rows[0].work_date, meta.locks)}. An Admin must unlock ${rows.length === 1 ? 'it' : 'them'} first.`, 'err');
+      return true;
+    }
+    toast(`${doing} — ${lockedN} locked row${lockedN === 1 ? '' : 's'} skipped`, 'err');
+    return false;
+  };
   const clearSel = () => {
     const n = normSel();
     if (!n || !canWrite) return;
+    if (lockNotice(n.rLo, n.rHi, 'Cleared')) return;
     const keys = xlKeys();
     pushHistory(null);
     setEpoch((v) => v + 1);
@@ -836,6 +849,7 @@ export default function Workload() {
     const bdText0 = normBreakdate(rawText, new Date().getFullYear());
     if (sel0 && Object.keys(parseBreakdatePairs(bdText0)).length && bdText0.replace(BD_PAIR, '').replace(/["\s]+/g, '') === '') {
       if (!canWrite) return true;
+      if (lockNotice(sel0.rLo, sel0.rHi, 'Pasted')) return true;
       pushHistory(null);
       setEpoch((v) => v + 1);
       setGrid((g) => ({ ...g, rows: g.rows.map((row, ri) => (ri >= sel0.rLo && ri <= sel0.rHi && !xlLocked(row) ? { ...row, ...bdApply(row, rawText, meta.unitTeams, true), _dirty: true } : row)) }));
@@ -859,6 +873,7 @@ export default function Workload() {
     if (n && bC === 1 && cols[c0] && ((bR > 1 && !inGrid) || (!multi && bR === 1 && !plain))) {
       if (!multi && plain && el && el.tagName === 'TEXTAREA') return false;   // one multi-line cell with the cursor in it: the browser inserts the whole text at the cursor
       if (!canWrite) return true;
+      if (lockNotice(n.rLo, n.rHi, 'Pasted')) return true;
       const textFor = (col) => block.map((row) => row[0]).join(meta.fields[col] && meta.fields[col].multiline ? '\n' : ' ');
       pushHistory(null);
       setEpoch((v) => v + 1);
@@ -882,6 +897,7 @@ export default function Workload() {
     const tileC = multi && selC > bC && selC % bC === 0 ? selC : bC;
     const roomLeft = Math.max(1, GRID_LIMIT - r0);   // the server saves at most 200 changed rows at a time
     if (tileR > roomLeft) { toast(`Only the first ${roomLeft} rows were pasted (200 rows per save)`, 'err'); tileR = roomLeft; }
+    if (lockNotice(r0, Math.min(r0 + tileR - 1, grid.rows.length - 1), 'Pasted')) return true;
     pushHistory(null);
     setEpoch((v) => v + 1);
     setGrid((g) => {
@@ -936,8 +952,9 @@ export default function Workload() {
   const togglePriority = () => {
     const n = normSel();
     if (!n || !canWrite || !grid) return;
-    const make = !grid.rows.slice(n.rLo, n.rHi + 1).every((r) => r.is_priority);
     setCtx(null);
+    if (lockNotice(n.rLo, n.rHi, 'Priority updated')) return;
+    const make = !grid.rows.slice(n.rLo, n.rHi + 1).filter((r) => !xlLocked(r)).every((r) => r.is_priority);
     pushHistory(null);
     setGrid((g) => ({ ...g, rows: g.rows.map((r, i) => (i >= n.rLo && i <= n.rHi && !xlLocked(r) ? { ...r, is_priority: make, _dirty: true } : r)) }));
   };
