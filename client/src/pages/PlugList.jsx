@@ -3,6 +3,7 @@ import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
 import { DownloadIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
 import { FilterSelect, Pager, SortTh, useNarrow } from '../components/wl.jsx';
+import PlugGrid from '../components/PlugGrid.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
 
 // PSD Daily Plug List — the PSD's daily plug list (imported from their workbook: NO / PLUG ID / PROG NAME/PROJ TITLE / PSD / Account By),
@@ -44,6 +45,7 @@ const rangeLabel = (period, r, anchor) => {
   return 'All days';
 };
 const stored = (k, fallback, allowed) => { try { const v = localStorage.getItem(`plugs:${k}`); return allowed.includes(v) ? v : fallback; } catch (e) { return fallback; } };
+const MODES = ['table', 'excel'];
 const remember = (k, v) => { try { localStorage.setItem(`plugs:${k}`, v); } catch (e) { /* storage unavailable */ } };
 
 export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
@@ -69,6 +71,15 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
   const [copying, setCopying] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [filling, setFilling] = useState(false);
+  const [mode, setModeState] = useState(() => (canWrite ? stored('mode', 'table', MODES) : 'table'));   // Table or Excel (Excel is for people who can edit)
+  const isGrid = mode === 'excel' && canWrite;
+  const [gridDirty, setGridDirty] = useState(0);        // unsaved rows in the Excel grid
+  const tbRef = useRef(null);                            // the grid's Add Row / Save / Delete actions
+  const [, setTbSig] = useState('');
+  const registerToolbar = useCallback((tb) => { tbRef.current = tb; setTbSig(tb ? `${tb.dirtyCount}|${tb.saving}|${tb.selCount}|${tb.wholeRows}` : ''); }, []);
+  const okToLeave = async () => gridDirty === 0
+    || !!(await confirm('Discard unsaved changes?', `${gridDirty} row${gridDirty === 1 ? '' : 's'} in the grid ${gridDirty === 1 ? 'has' : 'have'} unsaved changes. Leave without saving?`, { okText: 'Discard', danger: true }));
+  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setModeState(m); remember('mode', m); setPicked(new Set()); };
 
   const range = rangeOf(period, anchor, custom);
   const limit = size === 'all' ? ALL_CAP : Number(size);
@@ -77,9 +88,9 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
   const viewKey = `${period}|${range.from}|${range.to}|${query}|${size}|${sort.k}|${sort.dir}`;
   const [pageState, setPageState] = useState({ key: '', offset: 0 });   // the page resets to the first whenever the view changes
   const offset = pageState.key === viewKey ? pageState.offset : 0;
-  const setOffset = (o) => setPageState({ key: viewKey, offset: o });
-  const setPeriod = (p) => { setPeriodState(p); remember('period', p); };
-  const setSize = (s) => { setSizeState(s); remember('size', s); };
+  const setOffset = async (o) => { if (!(await okToLeave())) return; setPageState({ key: viewKey, offset: o }); };
+  const setPeriod = async (p) => { if (!(await okToLeave())) return; setPeriodState(p); remember('period', p); };
+  const setSize = async (s) => { if (!(await okToLeave())) return; setSizeState(s); remember('size', s); };
 
   const loadDays = useCallback(async () => {
     try {
@@ -122,7 +133,8 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
   const nextDay = [...dayList].reverse().find((d) => d.date > anchor);
   const canPrev = period === 'day' ? !!prevDay : !!totals.first && range.from > totals.first;
   const canNext = period === 'day' ? !!nextDay : !!totals.last && range.to < totals.last;
-  const go = (dir) => {
+  const go = async (dir) => {
+    if (!(await okToLeave())) return;
     if (period === 'day') setAnchor((dir < 0 ? prevDay : nextDay).date);   // the previous / next day that has a list
     else if (period === 'week') setAnchor(addDays(anchor, dir * 7));
     else if (period === 'month') setAnchor(addMonths(anchor, dir));
@@ -141,8 +153,9 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
       loadRows();
     } catch (e) { toast(e.message, 'err'); } finally { setImporting(false); if (fileRef.current) fileRef.current.value = ''; }
   };
-  const pickFile = (file) => {
+  const pickFile = async (file) => {
     if (!file) return;
+    if (!(await okToLeave())) { if (fileRef.current) fileRef.current.value = ''; return; }
     if (/(?<!\d)20\d{2}(?!\d)/.test(file.name)) upload(file, null);   // "September_2026_Plug_List…" — the server reads the year from the name
     else setNeedYear(file);                                           // the list has no year in it: ask
   };
@@ -187,21 +200,38 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
             <label className="plug-from">To <input type="date" value={custom.to} min={custom.from || undefined} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} /></label>
           </div>
         ) : null}
-        <label className="wl-search">
-          <SearchIcon />
-          <input type="search" placeholder="Search plug ID, program, PSD…" value={q} onChange={(e) => setQ(e.target.value)} />
-        </label>
+        {!isGrid ? (
+          <label className="wl-search">
+            <SearchIcon />
+            <input type="search" placeholder="Search plug ID, program, PSD…" value={q} onChange={(e) => setQ(e.target.value)} />
+          </label>
+        ) : null}
         <span className="grow" />
+        {canWrite ? (
+          <div className="segmented" id="mode-seg">
+            <button type="button" className={mode === 'table' ? 'on' : ''} onClick={() => changeMode('table')}>Table</button>
+            <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
+          </div>
+        ) : null}
         <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button>
         {canWrite ? (
           <>
             <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files[0])} />
             <button type="button" className="btn" disabled={importing} onClick={() => fileRef.current.click()}><UploadIcon /> {importing ? 'Importing…' : 'Import plug list'}</button>
-            <button type="button" className="btn" onClick={() => setAdding(true)}><PlusIcon /> Add plug</button>
+            {isGrid ? (
+              <>
+                <button type="button" className="btn" id="add-row" onClick={() => tbRef.current && tbRef.current.addRow()}><PlusIcon /> Add Row</button>
+                {tbRef.current && tbRef.current.selCount && tbRef.current.wholeRows ? <button type="button" className="btn danger" data-keep-sel onClick={() => tbRef.current.deleteRows()}>Delete {tbRef.current.selCount > 1 ? `${tbRef.current.selCount} Rows` : 'Row'}</button> : null}
+              </>
+            ) : <button type="button" className="btn" onClick={() => setAdding(true)}><PlusIcon /> Add plug</button>}
             {canWorkload ? <button type="button" className="btn" disabled={filling} onClick={fillExisting}
               title="Rows already in the Workload Tracker that have a Plug ID but a blank PSD or PROG. NAME / PROJ. TITLE get them from this list (anything typed is kept)">{filling ? 'Filling…' : 'Fill blank rows'}</button> : null}
             {isAdmin ? <button type="button" className="btn danger" disabled={!totals.plugs} onClick={() => setDeleting(true)} title="Delete what this view shows, or every day's plugs">Delete all…</button> : null}
-            {canWorkload ? (
+            {isGrid ? (
+              <button type="button" className="btn primary" id="save-grid" disabled={!tbRef.current || tbRef.current.saving || !gridDirty} onClick={() => tbRef.current && tbRef.current.save()}>
+                {tbRef.current && tbRef.current.saving ? 'Saving…' : `Save changes${gridDirty ? ` (${gridDirty})` : ''}`}
+              </button>
+            ) : canWorkload ? (
               <button type="button" className="btn primary" disabled={!total} onClick={() => setCopying(true)}
                 title={chosen.length ? 'Copy the selected plugs' : 'Copy every plug in this view that is not in the Workload Tracker yet'}>
                 {chosen.length ? `Copy ${chosen.length} to Workload` : 'Copy to Workload'}
@@ -212,12 +242,16 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
       </div>
 
       {data === null || days === null ? <Empty>Loading…</Empty>
-        : !totals.plugs ? (
+        : !totals.plugs && !isGrid ? (
           <Empty>
             No PSD Daily Plug List yet.{canWrite ? ' Use “Import plug list” and pick the PSD’s daily plug list workbook (one sheet per day).' : ' Ask someone who can edit the Workload Tracker to import it.'}
           </Empty>
         ) : (
           <>
+            {isGrid && data ? (
+              <PlugGrid source={data} canWrite={canWrite} defaultDate={period === 'day' ? anchor : ''} limit={limit} onDirty={setGridDirty} registerToolbar={registerToolbar}
+                onSaved={async () => { await loadDays(); loadRows(); }} />
+            ) : (
             <div className="table-wrap">
               <table className={`t wl plug-t${narrow ? ' cards' : ''}`}>
                 <thead>
@@ -247,6 +281,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
                 </tbody>
               </table>
             </div>
+            )}
             <div className="plug-foot">
               <FilterSelect label="Rows" value={size} onChange={(e) => setSize(e.target.value)}><Options list={SIZES} /></FilterSelect>
               <div className="grow">

@@ -935,3 +935,9 @@ table.t.xl tr.locked-row td.rn { box-shadow: inset 4px 0 0 #d89614; color: var(-
 table.t.xl tr.locked-row input, table.t.xl tr.locked-row textarea { color: var(--text-3); cursor: not-allowed; }
 table.t.xl td.rn .row-lock { margin-left: 3px; color: #b9770e; }
 table.t.xl td.rn .row-lock svg { width: 13px; height: 13px; }
+
+/* PSD Daily Plug List — Excel mode */
+table.t.xl.plug-xl td[data-k="plug_date"] input { min-width: 120px; text-align: center; }
+table.t.xl.plug-xl td[data-k="plug_id"] input { min-width: 150px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+table.t.xl.plug-xl td[data-k="prog_name"] input { min-width: 260px; }
+table.t.xl.plug-xl td[data-k="psd"] input, table.t.xl.plug-xl td[data-k="account_by"] input { min-width: 150px; }

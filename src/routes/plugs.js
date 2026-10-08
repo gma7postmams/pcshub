@@ -322,6 +322,52 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     res.status(201).json({ id: row.id, workloadRowsFilled: filled, copied });
   }));
 
+  // Excel mode: save a whole grid at once — rows with an id are updated, rows without are added; all or nothing (an error names the grid row).
+  const MAX_BATCH = 500;
+  router.post('/batch', requireAction('plugs.write'), asyncH(async (req, res) => {
+    const list = req.body && req.body.rows;
+    if (!Array.isArray(list) || !list.length) throw new HttpError(400, 'No rows to save');
+    if (list.length > MAX_BATCH) throw new HttpError(400, `Save at most ${MAX_BATCH} rows at a time`);
+    const out = await db.tx(async (c) => {
+      const addedIds = [];
+      const days = new Set();
+      let updated = 0;
+      for (let i = 0; i < list.length; i++) {
+        const row = list[i] || {};
+        try {
+          const b = plugBody(row);
+          days.add(b.plug_date);
+          if (row.id) {
+            const id = v.id(row.id);
+            const cur = await c.query('SELECT prog_name FROM workload_plugs WHERE id=$1 FOR UPDATE', [id]);
+            if (!cur.rows.length) throw new HttpError(404, 'Plug no longer exists (deleted by someone else?)');
+            await checkProg(b.prog_name, cur.rows[0].prog_name);
+            await c.query('UPDATE workload_plugs SET plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=$6, updated_at=now() WHERE id=$1',
+              [id, b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by]);
+            await audit(req, 'workload.plug_edit', 'workload_plug', id, { plug_date: b.plug_date, plug_id: b.plug_id }, c);
+            updated++;
+          } else {
+            await checkProg(b.prog_name, null);
+            const ins = await c.query(
+              `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by)
+               VALUES ($1, (SELECT COALESCE(MAX(seq), 0) + 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6) RETURNING id`,
+              [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by, req.user.id]);
+            await audit(req, 'workload.plug_add', 'workload_plug', ins.rows[0].id, { plug_date: b.plug_date, plug_id: b.plug_id }, c);
+            addedIds.push(ins.rows[0].id);
+          }
+        } catch (e) {
+          if (e && e.code === '23505') throw new HttpError(409, `Row ${i + 1}: that plug (same Plug ID, program and PSD) is already on this day's list`);
+          if (e instanceof HttpError) throw new HttpError(e.status, `Row ${i + 1}: ${e.message}`);
+          throw e;
+        }
+      }
+      return { added: addedIds.length, updated, addedIds, days: [...days].sort() };
+    });
+    const filled = await backfillWorkload(db, { from: out.days[0], to: out.days[out.days.length - 1], userId: req.user.id });
+    const copied = out.addedIds.length ? await autoCopy(req, 'p.id = ANY($1::bigint[])', [out.addedIds]) : null;
+    res.json({ ok: true, added: out.added, updated: out.updated, workloadRowsFilled: filled, copied });
+  }));
+
   router.put('/:id(\\d+)', requireAction('plugs.write'), asyncH(async (req, res) => {
     const b = plugBody(req.body || {});
     const cur = await db.query('SELECT prog_name FROM workload_plugs WHERE id=$1', [req.params.id]);
