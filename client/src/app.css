@@ -460,7 +460,7 @@ table.t.wl td.actions-cell .btn { display: block; width: 100%; margin: 0 0 4px; 
 table.t.wl td.actions-cell .btn:last-child { margin-bottom: 0; }
 /* Excel grid: wider columns for the long-text fields (textareas grow with their content) */
 table.t.xl td[data-k="plug_id"] textarea, table.t.xl td[data-k="remarks"] textarea, table.t.xl td[data-k="others"] textarea,
-table.t.xl td[data-k="vo"] textarea, table.t.xl td[data-k="total_mats"] textarea, table.t.xl td[data-k="audio_status"] textarea { min-width: 190px; }
+table.t.xl td[data-k="total_mats"] textarea, table.t.xl td[data-k="audio_status"] textarea { min-width: 190px; }
 table.t.xl td[data-k="units_concerned"] select, table.t.xl td[data-k="platform"] select { min-width: 150px; }
 table.t.xl textarea { overflow: hidden; resize: none; }
 
@@ -725,7 +725,7 @@ table.t.xl .xl-cell > textarea { border: 0; border-radius: 0; background: transp
 table.t.xl .xl-cell > textarea:focus { box-shadow: inset 0 0 0 2px var(--accent); background: var(--surface); }
 
 /* Excel grid: Plug ID, VO and Remarks get long columns, like in Table mode */
-table.t.xl td[data-k="plug_id"] .xl-cell, table.t.xl td[data-k="vo"] .xl-cell, table.t.xl td[data-k="remarks"] .xl-cell { min-width: 380px; }
+table.t.xl td[data-k="plug_id"] .xl-cell, table.t.xl td[data-k="remarks"] .xl-cell { min-width: 380px; }   /* (VO is not in this list: it is only as wide as its text, like Length) */
 table.t.xl td, table.t.xl .xl-cell, table.t.xl .xl-cell > input, table.t.xl .xl-cell > textarea { cursor: default; }   /* a normal pointer, not the text I-beam (the caret still shows while typing) */
 
 /* Excel look: no separate white edit box — the cell itself is the editor, marked by the selection outline */
@@ -922,6 +922,9 @@ table.t.wl:not(.cards) td[data-k="remarks"] .rem, table.t.wl:not(.cards) td[data
 table.t.wl:not(.cards) td[data-k="vo"] .rem { width: max-content; min-width: 0; max-width: 300px; margin: 0 auto; overflow-wrap: break-word; }   /* as wide as its text, no wider than 300 px, wrapping at spaces */
 table.t.wl:not(.cards) th[data-k="vo"] { width: 1%; }   /* the column hugs its text; spare room on a wide screen goes to the other columns */
 
-/* Excel mode: the "No rows ..." message is a roomy, larger block that stays in view (it sticks to the left edge while a wide grid is scrolled sideways) */
+/* Excel mode: the "No rows ..." message stays ONE line, in a taller row; it sticks to the left edge while a wide grid is scrolled sideways, and is centred in the visible grid */
 table.t.xl td.xl-empty { padding: 0; text-align: left; }
-table.t.xl .xl-empty-msg { position: sticky; left: 0; box-sizing: border-box; width: calc(100vw - 72px); padding: 64px max(28px, calc((100vw - 72px - 760px) / 2)); text-align: center; font-size: 16px; line-height: 1.55; color: var(--text-2); white-space: normal; }   /* as wide as the visible grid; the text itself is a centred column of at most 760 px */
+table.t.xl .xl-empty-msg { position: sticky; left: 0; box-sizing: border-box; width: calc(100vw - 72px); padding: 22px 16px; text-align: center; font-size: 14px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Excel mode: the VO column is exactly as wide as its longest line of text (an empty one is as small as Length), up to 380 px, then it wraps */
+table.t.xl td[data-k="vo"] .xl-cell.multi::after { width: max-content; max-width: 380px; overflow-wrap: break-word; }

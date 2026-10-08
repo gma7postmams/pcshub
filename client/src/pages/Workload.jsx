@@ -177,6 +177,13 @@ function canonUnit(meta, text) {
   const hit = k ? meta.units.find((u) => unitKey(u) === k) : null;
   return hit || text;
 }
+// Table / Excel is remembered across a refresh, for the current sign-in only (it starts as Table again after signing out and in) — the same rule as the Dashboard's period menu.
+const MODE_KEY = 'wl:mode';
+const readMode = (sessionKey) => {
+  if (!sessionKey) return 'table';
+  try { const v = JSON.parse(localStorage.getItem(MODE_KEY)); return v && v.k === sessionKey && v.m === 'excel' ? 'excel' : 'table'; } catch (e) { return 'table'; }
+};
+const saveMode = (sessionKey, m) => { if (!sessionKey) return; try { localStorage.setItem(MODE_KEY, JSON.stringify({ k: sessionKey, m })); } catch (e) { /* storage unavailable */ } };
 function viewForUnits(meta, units) {
   const teams = units ? meta.unitTeams[units] : null;
   if (!teams) return 'ALL';
@@ -346,7 +353,7 @@ export default function Workload() {
   const [meta, setMeta] = useState(null);
   const [lookups, setLookups] = useState({ workload_platform: [], plug_type: [], program: [] });
   const [tab, setTab] = useState('ALL');
-  const [mode, setMode] = useState('table');
+  const [mode, setMode] = useState(() => readMode(s.session_key));   // Table or Excel: kept across a refresh while you stay signed in
   const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', from: '', to: '' });
   const [stats, setStats] = useState(null);   // summary cards + tab badges
   const [offset, setOffset] = useState(0);
@@ -525,7 +532,7 @@ export default function Workload() {
     || !!(await confirm('Discard unsaved changes?', `${dirtyCount} row(s) in the grid have unsaved changes. Leave without saving?`, { okText: 'Discard', danger: true }));
 
   const changeTab = async (t) => { if (t === tab || !(await okToLeave())) return; setTab(t); setOffset(0); };
-  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setMode(m); setOffset(0); };
+  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setMode(m); saveMode(s.session_key, m); setOffset(0); };
   const setF = (k) => async (e) => {
     const val = e.target.value;
     if (k !== 'q' && !(await okToLeave())) return;
@@ -1512,9 +1519,12 @@ export default function Workload() {
                             ))}
                             {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removeRow(r)}>{r._new ? 'Remove' : 'Delete'}</button></td> : null}
                           </tr>
-                        )) : <tr><td colSpan={tableCols.length + 2} className="empty xl-empty"><div className="xl-empty-msg">{isAll
-                          ? <>No rows are waiting for a team. Plugs copied from the PSD Daily Plug List show up here until you set their Units Concerned — pick VGFX, VEDIT or Audio to edit a team’s rows.</>
-                          : <>No {meta.tabs.find((t) => t.key === tab).label} rows match these filters.{canWrite ? ' Use “Add Row” to start.' : ''}</>}</div></td></tr>}
+                        )) : (() => {
+                          const text = isAll
+                            ? 'No rows are waiting for a team. Plugs copied from the PSD Daily Plug List show up here until you set their Units Concerned — pick VGFX, VEDIT or Audio to edit a team’s rows.'
+                            : `No ${meta.tabs.find((t) => t.key === tab).label} rows match these filters.${canWrite ? ' Use “Add Row” to start.' : ''}`;
+                          return <tr><td colSpan={tableCols.length + 2} className="empty xl-empty"><div className="xl-empty-msg" title={text}>{text}</div></td></tr>;
+                        })()}
                       </tbody>
                     </table>
                   )}
