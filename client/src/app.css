@@ -915,3 +915,6 @@ table.t.wl.v-audio:not(.cards) td[data-k="others"] { text-align: center; }
 /* Audio Status can hold several lines: a narrower wrapped box than Remarks */
 table.t.wl td .rem.st { min-width: 160px; max-width: 320px; }
 table.t.wl.cards td .rem.st { min-width: 0; max-width: none; }
+
+/* Table mode: VO and Remarks (the Audio Remarks too) are the same width, and long text wraps inside it — VO used to stretch to the full length of its text */
+table.t.wl:not(.cards) td[data-k="vo"] .rem, table.t.wl:not(.cards) td[data-k="remarks"] .rem, table.t.wl:not(.cards) td[data-k="others"] .rem { box-sizing: border-box; width: 300px; min-width: 300px; max-width: 300px; }

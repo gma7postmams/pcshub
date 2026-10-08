@@ -1311,6 +1311,7 @@ export default function Workload() {
       case 'audio_guide': return <td {...common}><DateChip hue="fuchsia">{val ? (ISO.test(val) ? fmtDate(val) : oneLine(val)) : null}</DateChip></td>;
       case 'breakdate_vgfx': return <td {...common}><DateChip hue="purple">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VGFX in Units Concerned
       case 'breakdate_vedit': return <td {...common}><DateChip hue="orange">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VEDIT in Units Concerned
+      case 'vo': return <td {...common}>{val ? <div className="rem">{oneLine(val)}</div> : null}</td>;   // wraps in the same box as Remarks, so the column is no wider than Remarks
       case 'others':
       case 'remarks': return <td {...common}>{val ? <div className="rem">{val}</div> : null}</td>;
       case 'audio_status': return <td {...common}>{val ? <div className="rem st">{val}</div> : null}</td>;   // Status can have several lines too
