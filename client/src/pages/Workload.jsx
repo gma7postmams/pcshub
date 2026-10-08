@@ -169,6 +169,14 @@ function withAutoPlatform(rules, row, k, val) {
 // Audio Guide: dropdown "N/A" or "Date" (then pick the date). Stored as 'N/A' or YYYY-MM-DD.
 // On the All tab, filtering Units to ONE kind of work shows that team's columns: Audio only -> the Audio columns (Length, Others, Status ...), VGFX / VEDIT only
 // -> the main columns (without the Audio-only ones); a mix, or no filter -> everything.
+// Units Concerned typed into an Excel-mode cell matches an option without regard to capitals, spaces or the kind of dash ("vgfx only", "audio-radio") and is
+// stored as the option's own spelling ("VGFX Only", "Audio - RADIO"). The server does the same, so a save never fails on capitals.
+const unitKey = (t) => String(t ?? '').toLowerCase().replace(/[\u2013\u2014\u2212]/g, '-').replace(/\s+/g, '');
+function canonUnit(meta, text) {
+  const k = unitKey(text);
+  const hit = k ? meta.units.find((u) => unitKey(u) === k) : null;
+  return hit || text;
+}
 function viewForUnits(meta, units) {
   const teams = units ? meta.unitTeams[units] : null;
   if (!teams) return 'ALL';
@@ -620,6 +628,7 @@ export default function Workload() {
   // one place that knows how to put a value into a grid cell (the merged Breakdate / Time cell is text for both teams' times)
   const setCellValue = (row, k, val, replace) => {
     if (k === 'breakdate_vgfx') return { ...row, ...bdApply(row, val, meta.unitTeams, replace) };
+    if (replace && k === 'units_concerned') val = canonUnit(meta, val);
     const next = withAutoPlatform(meta.platformRules, row, k, val);
     return k === 'plug_id' || k === 'work_date' ? fillFromPlug(next, row, findPlug) : next;
   };
@@ -1201,6 +1210,7 @@ export default function Workload() {
     grid.rows.forEach((r, i) => {
       if (!r._dirty || (r._new && isEmptyRow(r))) return;
       const { _key, _dirty, _new, _autoPsd, _autoProg, ...rest } = r; // eslint-disable-line no-unused-vars
+      if (rest.units_concerned) rest.units_concerned = canonUnit(meta, rest.units_concerned);
       idx.push(i);
       rows.push(rest);
     });
@@ -1495,6 +1505,7 @@ export default function Workload() {
                                   <GridCellInput
                                     def={meta.fields[k]} value={r[k]} disabled={!canWrite}
                                     onChange={(e) => setCell(r._key, k, e.target.value)}
+                                    onBlur={k === 'units_concerned' ? (e) => { const fixed = canonUnit(meta, e.target.value); if (fixed !== e.target.value) setCell(r._key, k, fixed); } : undefined}
                                   />
                                 )}
                               </td>

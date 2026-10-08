@@ -27,6 +27,10 @@ const UNIT_TEAMS = Object.assign(Object.create(null), {
   'VGFX/VEDIT/Audio': ['VGFX', 'VEDIT', 'AUDIO'],
 });
 const TEAMS = ['VGFX', 'VEDIT', 'AUDIO'];
+// Units Concerned is matched without regard to capitals, spaces or the kind of dash ("vgfx only", "AUDIO-radio", "audio – tv") and stored as the option's own spelling
+const unitKey = (t) => String(t ?? '').toLowerCase().replace(/[\u2013\u2014\u2212]/g, '-').replace(/\s+/g, '');
+const UNIT_BY_KEY = Object.assign(Object.create(null), Object.fromEntries(UNITS.map((u) => [unitKey(u), u])));
+const canonUnit = (raw) => { const t = String(raw ?? '').trim(); return UNIT_BY_KEY[unitKey(t)] || t; };
 const NOT_SET = '(Not set)';   // Units filter value for rows copied from the PSD Daily Plug List that haven't been assigned a team yet
 const TAB_LABEL = Object.assign(Object.create(null), { ALL: 'All', VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio' });
 
@@ -221,7 +225,7 @@ async function parseRow(client, body, current, customCols = [], opts = {}) {
     else if (f.kind === 'date_or_text') rec[k] = parseDateOrText(body[k], f);
     else if (f.kind === 'date') rec[k] = v.date(body[k], { field: f.label, required: !!f.required });
     else if (f.kind === 'datetime') rec[k] = parseDateTime(body[k], f.label);
-    else if (k === 'units_concerned') rec[k] = unitsMayBeBlank && !body[k] ? null : v.oneOf(body[k], UNITS, { field: f.label });
+    else if (k === 'units_concerned') rec[k] = unitsMayBeBlank && !body[k] ? null : v.oneOf(canonUnit(body[k]), UNITS, { field: f.label });
     else rec[k] = v.str(body[k], { field: f.label, max: f.max, required: !!f.required });
   }
   { const t = UNIT_TEAMS[rec.units_concerned] || []; if (t.length === 1 && t[0] === 'AUDIO' && rec.remarks && body.others === undefined) { rec.others = rec.remarks; rec.remarks = null; } }   // (only when the sender did not give an Audio Remarks value at all)   // an Audio-only row's remarks live in the Audio Remarks field
@@ -281,7 +285,7 @@ function buildFilter(query) {
     add('w.units_concerned = ANY(?::text[])', UNITS.filter((u) => UNIT_TEAMS[u].includes(team)));
   }
   if (query.units === NOT_SET) where.push('w.units_concerned IS NULL');
-  else if (query.units) add('w.units_concerned = ?', v.oneOf(String(query.units), UNITS, { field: 'units' }));
+  else if (query.units) add('w.units_concerned = ?', v.oneOf(canonUnit(query.units), UNITS, { field: 'units' }));
   if (query.platform) add('w.platform = ?', String(query.platform));
   if (query.plug_type) add('w.plug_type = ?', String(query.plug_type));
   if (query.from) add('w.work_date >= ?', v.date(query.from, { field: 'from' }));
@@ -902,4 +906,4 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
 
 module.exports = router;
 // shared with the PSD Daily Plug List routes (src/routes/plugs.js), which make Workload rows from plugs
-module.exports.helpers = { UNITS, UNIT_TEAMS, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked };
+module.exports.helpers = { UNITS, UNIT_TEAMS, canonUnit, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked };
