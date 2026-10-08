@@ -298,8 +298,8 @@ export default function Dashboard() {
       es.onerror = () => { if (es && es.readyState === 2) close(); };
     };
     open();
-    let n = 0;
-    const t = setInterval(() => { n += 1; if (!es || es.readyState !== 1 || n % 3 === 0) poll(); }, 10000);
+    // always poll too (every 10 s): a proxy that holds event-stream data back leaves the stream "open" but silent, and the list must still move
+    const t = setInterval(poll, 10000);
     const onVisible = () => { if (document.visibilityState === 'visible') { poll(); open(); } else close(); };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onVisible);
