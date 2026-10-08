@@ -3,6 +3,7 @@ import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
 import { DownloadIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
 import { FilterSelect, Pager, SortTh, useNarrow } from '../components/wl.jsx';
+import { useSession } from '../context.jsx';
 import PlugGrid from '../components/PlugGrid.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
 
@@ -45,12 +46,17 @@ const rangeLabel = (period, r, anchor) => {
   return 'All days';
 };
 const stored = (k, fallback, allowed) => { try { const v = localStorage.getItem(`plugs:${k}`); return allowed.includes(v) ? v : fallback; } catch (e) { return fallback; } };
-const MODES = ['table', 'excel'];
+// Table / Excel is kept across a refresh only while you stay signed in (the same rule as the Workload Tracker): it is stored with the sign-in's key,
+// removed at logout, and a different sign-in finds nothing and opens in Table mode.
+const MODE_KEY = 'plugs:mode';
+const readMode = (key) => { try { const v = JSON.parse(localStorage.getItem(MODE_KEY)); return key && v && v.k === key && v.m === 'excel' ? 'excel' : 'table'; } catch (e) { return 'table'; } };
+const saveMode = (key, m) => { if (!key) return; try { localStorage.setItem(MODE_KEY, JSON.stringify({ k: key, m })); } catch (e) { /* storage unavailable */ } };
 const remember = (k, v) => { try { localStorage.setItem(`plugs:${k}`, v); } catch (e) { /* storage unavailable */ } };
 
 export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
   const toast = useToast();
   const confirm = useConfirm();
+  const session = useSession();
   const fileRef = useRef(null);
   const [days, setDays] = useState(null);            // [{ date, n }] newest first (the latest 366 days with a list); null = loading
   const [totals, setTotals] = useState({ plugs: 0, days: 0, first: '', last: '' });   // across every day
@@ -71,7 +77,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
   const [copying, setCopying] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [filling, setFilling] = useState(false);
-  const [mode, setModeState] = useState(() => (canWrite ? stored('mode', 'table', MODES) : 'table'));   // Table or Excel (Excel is for people who can edit)
+  const [mode, setModeState] = useState(() => (canWrite ? readMode(session.session_key) : 'table'));   // Table or Excel (Excel is for people who can edit)
   const isGrid = mode === 'excel' && canWrite;
   const [gridDirty, setGridDirty] = useState(0);        // unsaved rows in the Excel grid
   const tbRef = useRef(null);                            // the grid's Add Row / Save / Delete actions
@@ -79,7 +85,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
   const registerToolbar = useCallback((tb) => { tbRef.current = tb; setTbSig(tb ? `${tb.dirtyCount}|${tb.saving}|${tb.selCount}|${tb.wholeRows}` : ''); }, []);
   const okToLeave = async () => gridDirty === 0
     || !!(await confirm('Discard unsaved changes?', `${gridDirty} row${gridDirty === 1 ? '' : 's'} in the grid ${gridDirty === 1 ? 'has' : 'have'} unsaved changes. Leave without saving?`, { okText: 'Discard', danger: true }));
-  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setModeState(m); remember('mode', m); setPicked(new Set()); };
+  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setModeState(m); saveMode(session.session_key, m); setPicked(new Set()); };
 
   const range = rangeOf(period, anchor, custom);
   const limit = size === 'all' ? ALL_CAP : Number(size);

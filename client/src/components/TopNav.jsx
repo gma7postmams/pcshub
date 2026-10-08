@@ -82,7 +82,7 @@ export default function TopNav() {
 
   const logout = async () => {
     try { await post('/api/auth/logout'); } catch (_) { /* ignore */ }
-    try { localStorage.removeItem('dash:range'); localStorage.removeItem('wl:mode'); } catch (_) { /* nothing stored */ }   // the Dashboard's period choice does not outlive the sign-in
+    try { localStorage.removeItem('dash:range'); localStorage.removeItem('wl:mode'); localStorage.removeItem('plugs:mode'); } catch (_) { /* nothing stored */ }   // the Dashboard's period choice does not outlive the sign-in
     window.location.href = '/login';
   };
 
