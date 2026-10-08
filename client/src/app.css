@@ -919,8 +919,8 @@ table.t.wl.cards td .rem.st { min-width: 0; max-width: none; }
 
 /* Table mode: Remarks (the Audio Remarks too) is a fixed 300 px of wrapped text; VO is only as wide as its own text, up to the same 300 px, then it wraps (it used to stretch to the full length of its text) */
 table.t.wl:not(.cards) td[data-k="remarks"] .rem, table.t.wl:not(.cards) td[data-k="others"] .rem { box-sizing: border-box; width: 300px; min-width: 300px; max-width: 300px; margin: 0 auto; }
-table.t.wl:not(.cards) td[data-k="vo"] .rem { width: max-content; min-width: 0; max-width: 300px; margin: 0 auto; overflow-wrap: break-word; }   /* as wide as its text, no wider than 300 px, wrapping at spaces */
-table.t.wl:not(.cards) th[data-k="vo"], table.t.wl:not(.cards) th[data-k="length"] { width: 1%; min-width: 90px; }   /* VO and Length hug their text, and an empty one is the same size for both (not just the heading); spare room on a wide screen goes to the other columns */
+table.t.wl:not(.cards) td[data-k="vo"] .rem, table.t.wl:not(.cards) td[data-k="script"] .rem { width: max-content; min-width: 0; max-width: 300px; margin: 0 auto; overflow-wrap: break-word; }   /* as wide as its text, no wider than 300 px, wrapping at spaces */
+table.t.wl:not(.cards) th[data-k="vo"], table.t.wl:not(.cards) th[data-k="length"], table.t.wl:not(.cards) th[data-k="script"] { width: 1%; min-width: 90px; }   /* VO, Script and Length hug their text, and an empty one is the same size for all three (not just the heading); spare room on a wide screen goes to the other columns */
 
 /* Excel mode: the "No rows ..." message stays ONE line, in a taller row; it sticks to the left edge while a wide grid is scrolled sideways, and is centred in the visible grid */
 table.t.xl td.xl-empty { padding: 0; text-align: left; }

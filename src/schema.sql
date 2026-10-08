@@ -236,12 +236,8 @@ BEGIN
               AND table_name = 'workload_items' AND column_name = 'breakdate_time') THEN
     ALTER TABLE workload_items RENAME COLUMN breakdate TO breakdate_time;
   END IF;
-  -- Script becomes a real date (only values that are already ISO dates are kept; Artwork / STB is not converted: it holds a date OR free text, see the end of this file)
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
-              AND table_name = 'workload_items' AND column_name = 'script' AND data_type = 'text') THEN
-    ALTER TABLE workload_items ALTER COLUMN script TYPE DATE
-      USING (CASE WHEN script ~ '^\d{4}-\d{2}-\d{2}$' THEN script::date END);
-  END IF;
+  -- (Script used to be turned into a DATE column here, keeping only ISO dates. It now holds a date OR free text, like Artwork / STB — see the end of this file — so that
+  -- conversion is gone: it would have wiped every text Script value each time the server started.)
 END $$;
 
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS work_date       DATE;
@@ -320,18 +316,23 @@ ALTER TABLE workload_items ADD CONSTRAINT workload_items_units_check CHECK (unit
   ('VGFX Only', 'VEDIT Only', 'VGFX/VEDIT', 'Audio - RADIO', 'Audio - TV', 'Audio – AUDIO GUIDE', 'VGFX/VEDIT/Audio'));
 CREATE INDEX IF NOT EXISTS workload_items_date_units_idx ON workload_items (work_date DESC, units_concerned);
 
--- Audio's "Others" column is now called Remarks (the Audio view has no other remarks column), so an Audio-only row keeps its remark text in `others`.
--- An earlier build folded `others` into `remarks`; move such text back for Audio-only rows whose `others` is empty. Idempotent (after one run `remarks` is empty).
-UPDATE workload_items
-   SET others = remarks, remarks = NULL
- WHERE units_concerned IN ('Audio - RADIO', 'Audio - TV', 'Audio – AUDIO GUIDE')
-   AND COALESCE(btrim(remarks), '') <> '' AND COALESCE(btrim(others), '') = '';
+
 
 CREATE TABLE IF NOT EXISTS app_settings (
   key         TEXT PRIMARY KEY,
   value       TEXT,
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Audio's "Others" column is now called Remarks (the Audio view has no other remarks column), so an Audio-only row keeps its remark text in `others`.
+-- An earlier build folded `others` into `remarks`; ONCE (flag in app_settings, so a remark an Admin clears later is never brought back on restart) move such
+-- text back for Audio-only rows whose `others` is empty. Nothing is deleted: a row that has both texts keeps the other one in the database.
+UPDATE workload_items
+   SET others = remarks, remarks = NULL
+ WHERE units_concerned IN ('Audio - RADIO', 'Audio - TV', 'Audio – AUDIO GUIDE')
+   AND COALESCE(btrim(remarks), '') <> '' AND COALESCE(btrim(others), '') = ''
+   AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'audio_remarks_moved_v1');
+INSERT INTO app_settings (key, value) VALUES ('audio_remarks_moved_v1', '1') ON CONFLICT (key) DO NOTHING;
 
 -- Knowledge Base.
 -- Reference documents stored on disk under uploads/knowledge/.

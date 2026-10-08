@@ -1333,7 +1333,7 @@ export default function Workload() {
             {val ? <span className="strong">{oneLine(val)}</span> : null}
           </td>
         );
-      case 'script':
+      case 'script': return <td {...common}>{val ? (ISO.test(val) ? <DateChip>{fmtDate(val)}</DateChip> : <div className="rem">{oneLine(val)}</div>) : null}</td>;   // a date is a chip; text wraps in a box no wider than 300 px, like VO
       case 'art_stb': return <td {...common}>{val ? (ISO.test(val) ? <DateChip>{fmtDate(val)}</DateChip> : oneLine(val)) : null}</td>;   // a date shows as a chip, text as text
       case 'audio_guide': return <td {...common}><DateChip hue="fuchsia">{val ? (ISO.test(val) ? fmtDate(val) : oneLine(val)) : null}</DateChip></td>;
       case 'breakdate_vgfx': return <td {...common}><DateChip hue="purple">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VGFX in Units Concerned
