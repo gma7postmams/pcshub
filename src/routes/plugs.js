@@ -10,6 +10,7 @@ const db = require('../db');
 const v = require('../validate');
 const express = require('express');
 const { asyncH, HttpError, requireAction, requireAnyPage } = require('../middleware');
+const { can } = require('../permissions');
 const { audit } = require('../audit');
 const { logRun } = require('../transferlog');
 const { emitTransfer } = require('../transfer-hook');   // import events — the audit log subscribes to these (see src/transfer-hook.js)
@@ -278,9 +279,10 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
         }
       });
       const filled = await backfillWorkload(db, { from: result[0].date, to: result[result.length - 1].date, userId: req.user.id });   // rows already in the tracker with blank PSD / Prog. Name
+      const copied = await autoCopy(req, 'p.plug_date = ANY($1::date[])', [result.map((r) => r.date)]);   // new plugs go straight into the Workload Tracker
       const total = result.reduce((o, s) => ({ plugs: o.plugs + s.plugs, added: o.added + s.added, skipped: o.skipped + s.skipped }), { plugs: 0, added: 0, skipped: 0 });
-      await emitTransfer(req, 'workload.plugs_import', { ...info, days: result.length, from: result[0].date, to: result[result.length - 1].date, ...total, workloadRowsFilled: filled, warnings: warnings.slice(0, 20), ms: Date.now() - t0 });
-      res.json({ ok: true, year, days: result.length, workloadRowsFilled: filled, ...total, existing: total.plugs - total.added, sheets: result, warnings: warnings.slice(0, 20) });
+      await emitTransfer(req, 'workload.plugs_import', { ...info, days: result.length, from: result[0].date, to: result[result.length - 1].date, ...total, workloadRowsFilled: filled, copiedToWorkload: copied ? copied.created : null, warnings: warnings.slice(0, 20), ms: Date.now() - t0 });
+      res.json({ ok: true, year, days: result.length, workloadRowsFilled: filled, copied, ...total, existing: total.plugs - total.added, sheets: result, warnings: warnings.slice(0, 20) });
     } catch (e) {
       await emitTransfer(req, 'workload.plugs_import_failed', { ...info, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
       throw e;
@@ -316,7 +318,8 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     } catch (e) { dupe(e); }
     await audit(req, 'workload.plug_add', 'workload_plug', row.id, { plug_date: b.plug_date, plug_id: b.plug_id });
     const filled = await backfillWorkload(db, { from: b.plug_date, to: b.plug_date, userId: req.user.id });
-    res.status(201).json({ id: row.id, workloadRowsFilled: filled });
+    const copied = await autoCopy(req, 'p.id = $1', [row.id]);
+    res.status(201).json({ id: row.id, workloadRowsFilled: filled, copied });
   }));
 
   router.put('/:id(\\d+)', requireAction('plugs.write'), asyncH(async (req, res) => {
@@ -371,25 +374,9 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
   }));
 
   // ---- copy a day's plugs (or the chosen ones) into the Workload Tracker: one new row per plug not already there ----
-  router.post('/copy', requireAction('workload.write'), asyncH(async (req, res) => {
-    const t0 = Date.now();
-    const body = req.body || {};
-    // Units Concerned is NOT known from the plug list: rows are made with it blank (they show under All until someone sets it).
-    // A value may still be passed in (optional).
-    const units = body.units_concerned ? v.oneOf(canonUnit(body.units_concerned), UNITS, { field: 'Units Concerned' }) : null;
-    // which plugs: the chosen ones ({ ids }, from any days), or everything in a view ({ from, to, q } — or one { date })
-    const ids = Array.isArray(body.ids) ? body.ids.slice(0, 5000).map((n) => { try { return v.id(n); } catch (e) { return null; } }).filter(Boolean) : null;
-    const LIMIT = 5000;
-    let found;
-    if (ids) {
-      found = await db.query('SELECT p.id, p.plug_date, p.plug_id, p.prog_name, p.psd FROM workload_plugs p WHERE p.id = ANY($1::bigint[]) ORDER BY p.plug_date, p.seq, p.id', [ids]);
-    } else {
-      const { where, params } = plugFilter({ from: body.from || body.date || undefined, to: body.to || body.date || undefined, q: body.q || undefined });
-      found = await db.query(`SELECT p.id, p.plug_date, p.plug_id, p.prog_name, p.psd FROM workload_plugs p ${whereSql(where)} ORDER BY p.plug_date, p.seq, p.id LIMIT ${LIMIT + 1}`, params);
-    }
-    const truncated = found.rows.length > LIMIT;
-    const plugs = found.rows.slice(0, LIMIT);
-    if (!plugs.length) return res.json({ ok: true, created: 0, already: 0, locked: 0, errors: [], truncated: false });
+  // The shared core of "Copy to Workload": one new Workload row per plug that isn't there yet for that day (Plug ID matched in any letter case, also
+  // inside a multi-line Plug ID cell). Days in a locked period are skipped. Used by the Copy button and, automatically, after an import or a new plug.
+  const copyPlugs = async (req, plugs, units) => {
     const locks = await loadLocks(db);
     const dates = [...new Set(plugs.map((p) => p.plug_date))];
     const { rows: have } = await db.query(
@@ -417,6 +404,42 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
         }
       }
     });
+    return { created, already, locked, errors, dates };
+  };
+  // After an import or a hand-added plug: the same copy, done for you. Quiet on failure (the plug list change itself already succeeded) and skipped
+  // for someone who may not write to the Workload Tracker.
+  const autoCopy = async (req, where, params) => {
+    if (!can(req.user, 'workload.write')) return null;
+    try {
+      const { rows } = await db.query(`SELECT p.id, p.plug_date, p.plug_id, p.prog_name, p.psd FROM workload_plugs p WHERE ${where} ORDER BY p.plug_date, p.seq, p.id LIMIT 5000`, params);
+      if (!rows.length) return { created: 0, already: 0, locked: 0, errors: [] };
+      const out = await copyPlugs(req, rows, null);
+      await logRun(req, 'workload.plugs_copy', { mode: 'automatic', days: out.dates.length, from: out.dates[0], to: out.dates[out.dates.length - 1], units: '(blank)', requested: rows.length,
+        created: out.created, alreadyInWorkload: out.already, skippedLocked: out.locked, errors: out.errors.slice(0, 20) });
+      return { created: out.created, already: out.already, locked: out.locked, errors: out.errors.slice(0, 5) };
+    } catch (e) { console.error('[plugs] automatic copy failed', e.message); return null; }
+  };
+
+  router.post('/copy', requireAction('workload.write'), asyncH(async (req, res) => {
+    const t0 = Date.now();
+    const body = req.body || {};
+    // Units Concerned is NOT known from the plug list: rows are made with it blank (they show under All until someone sets it).
+    // A value may still be passed in (optional).
+    const units = body.units_concerned ? v.oneOf(canonUnit(body.units_concerned), UNITS, { field: 'Units Concerned' }) : null;
+    // which plugs: the chosen ones ({ ids }, from any days), or everything in a view ({ from, to, q } — or one { date })
+    const ids = Array.isArray(body.ids) ? body.ids.slice(0, 5000).map((n) => { try { return v.id(n); } catch (e) { return null; } }).filter(Boolean) : null;
+    const LIMIT = 5000;
+    let found;
+    if (ids) {
+      found = await db.query('SELECT p.id, p.plug_date, p.plug_id, p.prog_name, p.psd FROM workload_plugs p WHERE p.id = ANY($1::bigint[]) ORDER BY p.plug_date, p.seq, p.id', [ids]);
+    } else {
+      const { where, params } = plugFilter({ from: body.from || body.date || undefined, to: body.to || body.date || undefined, q: body.q || undefined });
+      found = await db.query(`SELECT p.id, p.plug_date, p.plug_id, p.prog_name, p.psd FROM workload_plugs p ${whereSql(where)} ORDER BY p.plug_date, p.seq, p.id LIMIT ${LIMIT + 1}`, params);
+    }
+    const truncated = found.rows.length > LIMIT;
+    const plugs = found.rows.slice(0, LIMIT);
+    if (!plugs.length) return res.json({ ok: true, created: 0, already: 0, locked: 0, errors: [], truncated: false });
+    const { created, already, locked, errors, dates } = await copyPlugs(req, plugs, units);
     await logRun(req, 'workload.plugs_copy', {
       mode: ids ? 'selected' : 'view', days: dates.length, from: dates[0], to: dates[dates.length - 1], units: units || '(blank)', requested: plugs.length,
       created, alreadyInWorkload: already, skippedLocked: locked, truncated, errors: errors.slice(0, 20), ms: Date.now() - t0,
