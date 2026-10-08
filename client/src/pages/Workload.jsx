@@ -167,35 +167,76 @@ function withAutoPlatform(rules, row, k, val) {
 }
 
 // Audio Guide: dropdown "N/A" or "Date" (then pick the date). Stored as 'N/A' or YYYY-MM-DD.
+// On the All tab, filtering Units to ONE kind of work shows that team's columns: Audio only -> the Audio columns (Length, Others, Status ...), VGFX / VEDIT only
+// -> the main columns (without the Audio-only ones); a mix, or no filter -> everything.
+// Units Concerned typed into an Excel-mode cell matches an option without regard to capitals, spaces or the kind of dash ("vgfx only", "audio-radio") and is
+// stored as the option's own spelling ("VGFX Only", "Audio - RADIO"). The server does the same, so a save never fails on capitals.
+const unitKey = (t) => String(t ?? '').toLowerCase().replace(/[\u2013\u2014\u2212]/g, '-').replace(/\s+/g, '');
+function canonUnit(meta, text) {
+  const k = unitKey(text);
+  const hit = k ? meta.units.find((u) => unitKey(u) === k) : null;
+  return hit || text;
+}
+// Table / Excel AND the tab (All, VGFX, VEDIT, Audio) are remembered across a refresh, for the current sign-in only (they start as Table / All again after signing out and
+// in) — the same rule as the Dashboard's period menu. Stored together with that sign-in's key (session_key from /api/auth/me).
+const VIEW_KEY = 'wl:mode';
+const TAB_KEYS = ['ALL', 'VGFX', 'VEDIT', 'AUDIO'];
+const readView = (sessionKey) => {
+  const fresh = { mode: 'table', tab: 'ALL' };
+  if (!sessionKey) return fresh;
+  try {
+    const v = JSON.parse(localStorage.getItem(VIEW_KEY));
+    if (!v || v.k !== sessionKey) return fresh;
+    return { mode: v.m === 'excel' ? 'excel' : 'table', tab: TAB_KEYS.includes(v.t) ? v.t : 'ALL' };
+  } catch (e) { return fresh; }
+};
+const saveView = (sessionKey, patch) => {
+  if (!sessionKey) return;
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify({ k: sessionKey, ...(() => { const cur = readView(sessionKey); return { m: cur.mode, t: cur.tab }; })(), ...patch })); } catch (e) { /* storage unavailable */ }
+};
+function viewForUnits(meta, units) {
+  const teams = units ? meta.unitTeams[units] : null;
+  if (!teams) return 'ALL';
+  if (teams.length === 1 && teams[0] === 'AUDIO') return 'AUDIO';
+  if (!teams.includes('AUDIO')) return 'VGFX';
+  return 'ALL';
+}
 function AudioGuideInput({ value, onChange, disabled }) {
   const v = value || '';
   const isDate = ISO.test(v);
-  const legacy = v && !isDate && v !== 'N/A';
-  const mode = isDate ? 'DATE' : v;
+  const isText = !!v && !isDate && v !== 'N/A';
+  const [textMode, setTextMode] = useState(isText);   // "Text" stays chosen while the box is still empty
+  useEffect(() => { if (v) setTextMode(isText); }, [v, isText]);
+  const mode = isDate ? 'DATE' : (textMode || isText) ? 'TEXT' : v;
   const emit = (x) => onChange({ target: { value: x } });
+  const pick = (m) => {
+    setTextMode(m === 'TEXT');
+    emit(m === 'DATE' ? isoDate() : m === 'TEXT' ? (isText ? v : '') : m);
+  };
   return (
     <div className="ag">
-      <select value={mode} disabled={disabled} onChange={(e) => emit(e.target.value === 'DATE' ? isoDate() : e.target.value)}>
+      <select value={mode} disabled={disabled} aria-label="Audio Guide: N/A, date or text" onChange={(e) => pick(e.target.value)}>
         <option value="">—</option>
         <option value="N/A">N/A</option>
         <option value="DATE">Date</option>
-        {legacy ? <option value={v}>{firstLine(v)} (old)</option> : null}
+        <option value="TEXT">Text</option>
       </select>
       {isDate ? <input type="date" value={v} disabled={disabled} onChange={(e) => emit(e.target.value)} /> : null}
+      {mode === 'TEXT' ? <input type="text" maxLength={200} value={isText ? v : ''} disabled={disabled} onChange={(e) => emit(e.target.value)} /> : null}
     </div>
   );
 }
 
 // Artwork / STB: either a DATE (date picker) or plain TEXT (open text box) — pick which with the little dropdown. Stored as one value:
 // 'YYYY-MM-DD' for a date, anything else for text. Switching the kind clears the box, since the two don't convert into each other.
-function DateOrTextInput({ value, onChange, disabled, max }) {
+function DateOrTextInput({ value, onChange, disabled, max, label = 'Artwork / STB' }) {
   const v = value || '';
   const [mode, setMode] = useState(!v || ISO.test(v) ? 'date' : 'text');   // an empty one starts as a date, like the column always did
   useEffect(() => { if (v) setMode(ISO.test(v) ? 'date' : 'text'); }, [v]);   // follows the value (e.g. a full date typed as text becomes a date)
   const emit = (x) => onChange({ target: { value: x } });
   return (
     <div className="ag">
-      <select value={mode} disabled={disabled} aria-label="Artwork / STB: date or text" onChange={(e) => { setMode(e.target.value); emit(''); }}>
+      <select value={mode} disabled={disabled} aria-label={`${label}: date or text`} onChange={(e) => { setMode(e.target.value); emit(''); }}>
         <option value="date">Date</option>
         <option value="text">Text</option>
       </select>
@@ -225,7 +266,7 @@ function FieldInput({ def, value, onChange, disabled, lookups, auto }) {
   // date and time picked together (the browser's own calendar + time picker); 15-minute steps
   if (def.kind === 'datetime') return <input type="datetime-local" step={900} value={v} disabled={disabled} onChange={onChange} />;
   if (def.kind === 'audio_guide') return <AudioGuideInput value={v} onChange={onChange} disabled={disabled} />;
-  if (def.kind === 'date_or_text') return <DateOrTextInput value={v} onChange={onChange} disabled={disabled} max={def.max} />;
+  if (def.kind === 'date_or_text') return <DateOrTextInput value={v} onChange={onChange} disabled={disabled} max={def.max} label={def.label} />;
   if (def.kind === 'date') return <input type="date" value={v} disabled={disabled} onChange={onChange} />;
   if (def.kind === 'select') {
     const list = def.lookup ? withCurrent(lookups[def.lookup] || [], v) : def.options;
@@ -321,8 +362,8 @@ export default function Workload() {
 
   const [meta, setMeta] = useState(null);
   const [lookups, setLookups] = useState({ workload_platform: [], plug_type: [], program: [] });
-  const [tab, setTab] = useState('ALL');
-  const [mode, setMode] = useState('table');
+  const [tab, setTab] = useState(() => readView(s.session_key).tab);   // kept across a refresh while you stay signed in
+  const [mode, setMode] = useState(() => readView(s.session_key).mode);   // Table or Excel: kept across a refresh while you stay signed in
   const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', from: '', to: '' });
   const [stats, setStats] = useState(null);   // summary cards + tab badges
   const [offset, setOffset] = useState(0);
@@ -432,6 +473,7 @@ export default function Workload() {
       window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); window.removeEventListener('mousedown', down);
     };
   }, []);
+  const viewKey = meta && tab === 'ALL' ? viewForUnits(meta, filt.units) : tab;   // which column set to show (see viewForUnits)
   const isGrid = mode === 'excel';   // on the All tab the Excel grid holds the rows still waiting for a team (see load below); on a team tab, that team's rows
 
   // Rows are one line each (Remarks wraps), so a wide table scrolls sideways inside the card, like Excel.
@@ -499,8 +541,8 @@ export default function Workload() {
   const okToLeave = async () => dirtyCount === 0
     || !!(await confirm('Discard unsaved changes?', `${dirtyCount} row(s) in the grid have unsaved changes. Leave without saving?`, { okText: 'Discard', danger: true }));
 
-  const changeTab = async (t) => { if (t === tab || !(await okToLeave())) return; setTab(t); setOffset(0); };
-  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setMode(m); setOffset(0); };
+  const changeTab = async (t) => { if (t === tab || !(await okToLeave())) return; setTab(t); saveView(s.session_key, { t }); setOffset(0); };
+  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setMode(m); saveView(s.session_key, { m }); setOffset(0); };
   const setF = (k) => async (e) => {
     const val = e.target.value;
     if (k !== 'q' && !(await okToLeave())) return;
@@ -602,21 +644,18 @@ export default function Workload() {
   };
   // one place that knows how to put a value into a grid cell (the merged Breakdate / Time cell is text for both teams' times)
   const setCellValue = (row, k, val, replace) => {
+    if (xlLocked(row)) return row;   // a locked row never changes
     if (k === 'breakdate_vgfx') return { ...row, ...bdApply(row, val, meta.unitTeams, replace) };
-    // the template writes these as "available (082826)" (MMDDYY): that is a date — 2026-08-28
-    if (replace && (k === 'script' || k === 'art_stb' || k === 'audio_guide')) {
-      const dm = /^\s*(?:available\s*(?:approved\s*)?)?\(?(\d{2})(\d{2})(\d{2})\)?\s*$/i.exec(String(val ?? ''));
-      if (dm && +dm[1] >= 1 && +dm[1] <= 12 && +dm[2] >= 1 && +dm[2] <= 31) val = `20${dm[3]}-${dm[1]}-${dm[2]}`;
-    }
+    if (replace && k === 'units_concerned') val = canonUnit(meta, val);
     const next = withAutoPlatform(meta.platformRules, row, k, val);
     return k === 'plug_id' || k === 'work_date' ? fillFromPlug(next, row, findPlug) : next;
   };
   const setCell = (key, k, val) => {
     if (!canWrite) return;
     pushHistory(`${key}:${k}`);
-    setGrid((g) => ({ ...g, rows: g.rows.map((r) => (r._key === key ? { ...setCellValue(r, k, val, false), _dirty: true } : r)) }));
+    setGrid((g) => ({ ...g, rows: g.rows.map((r) => (r._key === key && !xlLocked(r) ? { ...setCellValue(r, k, val, false), _dirty: true } : r)) }));
   };
-  const xlKeys = () => meta.views[tab].filter((k) => k !== 'breakdate_vedit');   // the grid's columns: VGFX + VEDIT times share one
+  const xlKeys = () => meta.views[viewKey].filter((k) => k !== 'breakdate_vedit');   // the grid's columns: VGFX + VEDIT times share one
 
   // ---- Excel mode: works like a spreadsheet ----
   // Click a cell, drag or Shift+click for a range; click a ROW NUMBER to select the whole row (drag / Shift+click for
@@ -628,6 +667,9 @@ export default function Workload() {
     rLo: Math.min(gridSel.r0, gridSel.r1), rHi: Math.max(gridSel.r0, gridSel.r1),
     cLo: Math.min(gridSel.c0, gridSel.c1), cHi: Math.max(gridSel.c0, gridSel.c1),
   } : null);
+  // A SAVED row dated inside a locked period can't be edited or deleted by anyone; Excel mode shows a lock and leaves it alone. (A new, unsaved row is never treated as locked,
+  // so its Work Date can still be changed — the server refuses to save one dated inside a lock.)
+  const xlLocked = (r) => !!r && !r._new && isLocked(r.work_date, meta.locks);
   const isTextTarget = (el) => !!el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
   const focusBox = () => { if (boxRef.current) boxRef.current.focus({ preventScroll: true }); try { window.getSelection().removeAllRanges(); } catch (err) { /* nothing to clear */ } };
   const startSel = (kind, r, c, e) => {
@@ -723,7 +765,7 @@ export default function Workload() {
     setGrid((g) => ({
       ...g,
       rows: g.rows.map((row, ri) => {
-        if (ri < n.rLo || ri > n.rHi) return row;
+        if (ri < n.rLo || ri > n.rHi || xlLocked(row)) return row;
         let changed = row;
         for (let ci = n.cLo; ci <= n.cHi; ci++) changed = setCellValue(changed, keys[ci], '', true);
         return { ...changed, _dirty: true };
@@ -796,7 +838,7 @@ export default function Workload() {
       if (!canWrite) return true;
       pushHistory(null);
       setEpoch((v) => v + 1);
-      setGrid((g) => ({ ...g, rows: g.rows.map((row, ri) => (ri >= sel0.rLo && ri <= sel0.rHi ? { ...row, ...bdApply(row, rawText, meta.unitTeams, true), _dirty: true } : row)) }));
+      setGrid((g) => ({ ...g, rows: g.rows.map((row, ri) => (ri >= sel0.rLo && ri <= sel0.rHi && !xlLocked(row) ? { ...row, ...bdApply(row, rawText, meta.unitTeams, true), _dirty: true } : row)) }));
       return true;
     }
     const block = parseTsvBlock(rawText);
@@ -823,7 +865,7 @@ export default function Workload() {
       setGrid((g) => ({
         ...g,
         rows: g.rows.map((row, ri) => {
-          if (ri < n.rLo || ri > n.rHi) return row;
+          if (ri < n.rLo || ri > n.rHi || xlLocked(row)) return row;
           let changed = row;
           for (let ci = n.cLo; ci <= n.cHi; ci++) { const col = cols[ci]; if (col) changed = setCellValue(changed, col, textFor(col), true); }
           return { ...changed, _dirty: true };
@@ -849,7 +891,7 @@ export default function Workload() {
         ...g,
         rows: rows.map((row, ri) => {
           const bi = ri - r0;
-          if (bi < 0 || bi >= tileR) return row;
+          if (bi < 0 || bi >= tileR || xlLocked(row)) return row;
           let changed = row;
           for (let ci = 0; ci < tileC; ci++) {
             const col = cols[c0 + ci];
@@ -897,13 +939,15 @@ export default function Workload() {
     const make = !grid.rows.slice(n.rLo, n.rHi + 1).every((r) => r.is_priority);
     setCtx(null);
     pushHistory(null);
-    setGrid((g) => ({ ...g, rows: g.rows.map((r, i) => (i >= n.rLo && i <= n.rHi ? { ...r, is_priority: make, _dirty: true } : r)) }));
+    setGrid((g) => ({ ...g, rows: g.rows.map((r, i) => (i >= n.rLo && i <= n.rHi && !xlLocked(r) ? { ...r, is_priority: make, _dirty: true } : r)) }));
   };
   const deleteSelectedRows = async () => {
     setCtx(null);
     const n = normSel();
     if (!n || !canWrite) return;
-    const target = grid.rows.slice(n.rLo, n.rHi + 1);
+    const lockedN = grid.rows.slice(n.rLo, n.rHi + 1).filter(xlLocked).length;   // rows in a locked period are left alone
+    const target = grid.rows.slice(n.rLo, n.rHi + 1).filter((r) => !xlLocked(r));
+    if (!target.length) { toast(`Locked: ${lockNote(grid.rows[n.rLo].work_date, meta.locks)}. An Admin must unlock it first.`, 'err'); return; }
     const saved = target.filter((r) => !r._new);
     if (saved.length && !(await confirm(`Delete ${saved.length} row${saved.length === 1 ? '' : 's'}`, `Permanently delete ${saved.length === 1 ? `"${firstLine(saved[0].plug_id)}"` : `these ${saved.length} rows`}? This cannot be undone.`, { okText: 'Delete', danger: true }))) return;
     const gone = new Set(target.filter((r) => r._new).map((r) => r._key));
@@ -916,7 +960,7 @@ export default function Workload() {
     hist.current = { past: [], future: [], tag: null };   // a deleted saved row can't be brought back by undo
     setGridSel(null);
     if (deletedSaved) loadStats();
-    if (failure) toast(failure.message, 'err'); else toast(`Deleted ${target.length} row${target.length === 1 ? '' : 's'}`);
+    if (failure) toast(failure.message, 'err'); else toast(`Deleted ${target.length} row${target.length === 1 ? '' : 's'}${lockedN ? ` — ${lockedN} locked row${lockedN === 1 ? '' : 's'} skipped` : ''}`);
   };
   const gridPaste = (cols) => (e) => {
     pasteSeen.current = true;
@@ -938,6 +982,19 @@ export default function Workload() {
       if (!several && isTextTarget(t) && t.tagName !== 'SELECT' && typeof t.value === 'string' && t.value.length && !(t.selectionStart === 0 && t.selectionEnd === t.value.length)) return;
       e.preventDefault();
       if (grid && grid.rows.length) { setGridSel({ r0: 0, c0: 0, r1: grid.rows.length - 1, c1: xlKeys().length - 1 }); focusBox(); }
+      return;
+    }
+    // Alt+Enter (Option+Return on a Mac) puts a line break inside a multi-line cell (Plug ID, VO, Remarks, Total Mats, Breakdate / Time), like a spreadsheet.
+    // (Plain Enter in those cells is a line break too; in a one-line cell — PSD, Length, Status ... — Enter moves down and the cell holds one line only.)
+    if (e.key === 'Enter' && e.altKey && e.target.tagName === 'TEXTAREA') {
+      e.preventDefault();
+      const t = e.target;
+      if (!document.execCommand('insertText', false, '\n')) {
+        const a = t.selectionStart; const z = t.selectionEnd;
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(t, `${t.value.slice(0, a)}\n${t.value.slice(z)}`);
+        t.setSelectionRange(a + 1, a + 1);
+        t.dispatchEvent(new Event('input', { bubbles: true }));
+      }
       return;
     }
     if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
@@ -970,7 +1027,7 @@ export default function Workload() {
       clearSel();
     } else if (e.key === 'Escape') setGridSel(null);
   };
-  const isEmptyRow = (r) => meta.views[tab].filter((k) => k !== 'work_date' && k !== 'units_concerned').every((k) => !String(r[k] ?? '').trim());
+  const isEmptyRow = (r) => meta.views[viewKey].filter((k) => k !== 'work_date' && k !== 'units_concerned').every((k) => !String(r[k] ?? '').trim());
   const addRow = () => { pushHistory(null); addRowNow(); };
   // A new row goes to the TOP of the grid (row 1), with the cursor in its first cell and the grid scrolled up to it — not at the bottom, out of sight.
   const addRowNow = () => {
@@ -988,6 +1045,7 @@ export default function Workload() {
     });
   };
   const removeRow = async (r) => {
+    if (xlLocked(r)) { toast(`Locked: ${lockNote(r.work_date, meta.locks)}. An Admin must unlock it first.`, 'err'); return; }
     if (!r._new) {
       if (!(await confirm('Delete row', `Permanently delete "${firstLine(r.plug_id)}"?`, { okText: 'Delete', danger: true }))) return;
       try { await del(`/api/workload/${r.id}`); toast('Deleted'); } catch (e) { toast(e.message, 'err'); return; }
@@ -1176,6 +1234,7 @@ export default function Workload() {
     grid.rows.forEach((r, i) => {
       if (!r._dirty || (r._new && isEmptyRow(r))) return;
       const { _key, _dirty, _new, _autoPsd, _autoProg, ...rest } = r; // eslint-disable-line no-unused-vars
+      if (rest.units_concerned) rest.units_concerned = canonUnit(meta, rest.units_concerned);
       idx.push(i);
       rows.push(rest);
     });
@@ -1244,7 +1303,7 @@ export default function Workload() {
   };
 
   const isAll = tab === 'ALL';
-  const cols = meta.views[tab];   // raw column list (Table mode's tableCols below merges the two Breakdate / Time columns; Excel mode does the same)
+  const cols = meta.views[viewKey];   // raw column list (Table mode's tableCols below merges the two Breakdate / Time columns; Excel mode does the same)
   // Table mode only: Breakdate/Time (VGFX) and (VEDIT) merge into ONE column/cell, holding one or two pills —
   // 'breakdate_vgfx' is kept as that column's position; breakdateCell() below decides what actually shows in it.
   const tableCols = cols.filter((k) => k !== 'breakdate_vedit');
@@ -1252,7 +1311,7 @@ export default function Workload() {
   const selRows = selNow && grid && grid.rows ? grid.rows.slice(selNow.rLo, selNow.rHi + 1) : [];
   const allPrio = selRows.length > 0 && selRows.every((r) => r.is_priority);
   const wholeRowsSel = !!selNow && selNow.cLo === 0 && selNow.cHi === tableCols.length - 1 && selRows.length > 0;   // a row number was clicked
-  const head = (k) => (k === 'breakdate_vgfx' ? 'Breakdate / Time' : meta.fields[k].label);   // table header only; Excel mode reads meta.fields directly and keeps the (VGFX)/(VEDIT) labels
+  const head = (k) => (k === 'breakdate_vgfx' ? 'Breakdate / Time' : k === 'others' && viewKey === 'ALL' ? 'Remarks (Audio)' : meta.fields[k].label);   // table header only; Excel mode reads meta.fields directly and keeps the (VGFX)/(VEDIT) labels
   const firstLineOf = (t) => String(t || '').split('\n');
   // every cell except Remarks stays on one line: line breaks in pasted text are shown as " · "
   const oneLine = (t) => String(t ?? '').replace(/\s*\n+\s*/g, ' · ');
@@ -1281,11 +1340,15 @@ export default function Workload() {
             {val ? <span className="strong">{oneLine(val)}</span> : null}
           </td>
         );
+      case 'script': return <td {...common}>{val ? (ISO.test(val) ? <DateChip>{fmtDate(val)}</DateChip> : <div className="rem">{oneLine(val)}</div>) : null}</td>;   // a date is a chip; text wraps in a box no wider than 300 px, like VO
       case 'art_stb': return <td {...common}>{val ? (ISO.test(val) ? <DateChip>{fmtDate(val)}</DateChip> : oneLine(val)) : null}</td>;   // a date shows as a chip, text as text
       case 'audio_guide': return <td {...common}><DateChip hue="fuchsia">{val ? (ISO.test(val) ? fmtDate(val) : oneLine(val)) : null}</DateChip></td>;
       case 'breakdate_vgfx': return <td {...common}><DateChip hue="purple">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VGFX in Units Concerned
       case 'breakdate_vedit': return <td {...common}><DateChip hue="orange">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VEDIT in Units Concerned
+      case 'vo': return <td {...common}>{val ? <div className="rem">{oneLine(val)}</div> : null}</td>;   // wraps in the same box as Remarks, so the column is no wider than Remarks
+      case 'others':
       case 'remarks': return <td {...common}>{val ? <div className="rem">{val}</div> : null}</td>;
+      case 'audio_status': return <td {...common}>{val ? <div className="rem st">{val}</div> : null}</td>;   // Status can have several lines too
       default:
         return <td {...common}>{meta.fields[k].kind === 'date' ? <DateChip>{fmtDate(val)}</DateChip> : oneLine(val)}</td>;
     }
@@ -1332,6 +1395,7 @@ export default function Workload() {
     return (
       <td key="breakdate_vgfx" data-k="breakdate_vgfx" className={r.is_priority ? 'prio' : undefined} title={locked ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}>
         <span className="chips bd-chips">
+          {!parts.length && !r.units_concerned ? <DateChip hue="gray">PENDING</DateChip> : null}
           {parts.map(({ k, hue, tag }) => {
             if (editing && editing.id === r.id && editing.k === k) {
               return (
@@ -1347,7 +1411,9 @@ export default function Workload() {
                 onClick={clickable ? (e) => { e.stopPropagation(); setEditing({ id: r.id, k }); } : undefined}
                 onKeyDown={clickable ? (e) => { if (e.key === 'Enter') { e.preventDefault(); setEditing({ id: r.id, k }); } } : undefined}
               >
-                <DateChip hue={hue}>{r[k] ? <><span className="chip-tag">{tag}</span>{fmtBreakdate(r[k])}</> : null}</DateChip>
+                {r[k]
+                  ? <DateChip hue={hue}><span className="chip-tag">{tag}</span>{fmtBreakdate(r[k])}</DateChip>
+                  : <DateChip hue="gray"><span className="chip-tag">{tag}</span>PENDING</DateChip>}
               </span>
             );
           })}
@@ -1403,7 +1469,7 @@ export default function Workload() {
             ) : null}
             {canWrite && isGrid && !isAll ? <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add Row</button> : null}
             {canWrite && isGrid && selRows.length ? <button type="button" className="btn" id="priority-btn" data-keep-sel onClick={togglePriority} title="Highlights the Breakdate / Time of the selected row(s)">{allPrio ? 'Remove Priority' : 'Set Priority'}</button> : null}
-            {canWrite && isGrid && wholeRowsSel ? <button type="button" className="btn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}>Delete {selRows.length > 1 ? `${selRows.length} Rows` : 'Row'}</button> : null}
+            {canWrite && isGrid && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? <button type="button" className="btn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}>Delete {selRows.filter((r) => !xlLocked(r)).length > 1 ? `${selRows.filter((r) => !xlLocked(r)).length} Rows` : 'Row'}</button> : null}
             {s.canPage('/admin') ? <button type="button" className="btn" id="lock-dates-btn" onClick={() => setManagingLocks(true)}><LockIcon /> Lock Dates</button> : null}
             {canWrite && !isGrid ? (
               <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({ rec: null })}><PlusIcon /> New Workload</button>
@@ -1436,7 +1502,7 @@ export default function Workload() {
               {!grid ? <Empty>Loading…</Empty>
                 : grid.error ? <Empty>{grid.error}</Empty>
                   : (
-                    <table className="t xl">
+                    <table className={`t xl v-${viewKey.toLowerCase()}`}>
                       <thead>
                         <tr>
                           <th className="rn" title="Select all" onMouseDown={(e) => startSel('all', 0, 0, e)} />
@@ -1449,28 +1515,33 @@ export default function Workload() {
                       </thead>
                       <tbody>
                         {grid.rows.length ? grid.rows.map((r, ri) => (
-                          <tr key={r._key} data-ri={ri} className={`${r._dirty ? 'dirty' : ''}${r.is_priority ? ' prio-row' : ''}`.trim()}>
-                            <td className={`rn${rowInSel(ri) ? ' hl' : ''}`} title="Click to select the whole row (Ctrl+C to copy)"
-                              onMouseDown={(e) => startSel('row', ri, 0, e)}>{ri + 1}{r.is_priority ? <i className="prio-dot" title="Priority" /> : null}</td>
+                          <tr key={r._key} data-ri={ri} className={`${r._dirty ? 'dirty' : ''}${r.is_priority ? ' prio-row' : ''}${xlLocked(r) ? ' locked-row' : ''}`.trim()}>
+                            <td className={`rn${rowInSel(ri) ? ' hl' : ''}`} title={xlLocked(r) ? `Locked: ${lockNote(r.work_date, meta.locks)} — an Admin must unlock it first` : 'Click to select the whole row (Ctrl+C to copy)'}
+                              onMouseDown={(e) => startSel('row', ri, 0, e)}>{ri + 1}{r.is_priority ? <i className="prio-dot" title="Priority" /> : null}{xlLocked(r) ? <span className="row-lock"><LockIcon /></span> : null}</td>
                             {tableCols.map((k, ci) => (
                               <td key={k} data-k={k} data-r={ri} data-c={ci} onMouseDown={cellMouseDown(ri, ci)} onBlur={() => { hist.current.tag = null; }}
                                 onFocus={(e) => { if (isTextTarget(e.target)) setGridSel((sel) => (sel && sel.r0 === ri && sel.r1 === ri && sel.c0 === ci && sel.c1 === ci ? sel : { r0: ri, c0: ci, r1: ri, c1: ci })); }}
                                 className={`${selClass(ri, ci)}${r.is_priority && k === 'breakdate_vgfx' ? ' prio' : ''}`.trim()}>
                                 {k === 'breakdate_vgfx' ? (
-                                  <BreakdateCellInput text={bdText(r, meta.unitTeams)} epoch={epoch} disabled={!canWrite} onText={(t) => setCell(r._key, k, t)} />
+                                  <BreakdateCellInput text={bdText(r, meta.unitTeams)} epoch={epoch} disabled={!canWrite || xlLocked(r)} onText={(t) => setCell(r._key, k, t)}
+                                    placeholder={!r.units_concerned || (meta.unitTeams[r.units_concerned] || []).some((t) => t === 'VGFX' || t === 'VEDIT') ? 'PENDING' : undefined} />
                                 ) : (
                                   <GridCellInput
-                                    def={meta.fields[k]} value={r[k]} disabled={!canWrite}
+                                    def={meta.fields[k]} value={r[k]} disabled={!canWrite || xlLocked(r)}
                                     onChange={(e) => setCell(r._key, k, e.target.value)}
+                                    onBlur={k === 'units_concerned' ? (e) => { const fixed = canonUnit(meta, e.target.value); if (fixed !== e.target.value) setCell(r._key, k, fixed); } : undefined}
                                   />
                                 )}
                               </td>
                             ))}
-                            {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removeRow(r)}>{r._new ? 'Remove' : 'Delete'}</button></td> : null}
+                            {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removeRow(r)} disabled={xlLocked(r)} title={xlLocked(r) ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}>{r._new ? 'Remove' : 'Delete'}</button></td> : null}
                           </tr>
-                        )) : <tr><td colSpan={tableCols.length + 2} className="empty">{isAll
-                          ? <>No rows are waiting for a team. Plugs copied from the PSD Daily Plug List show up here until you set their Units Concerned — pick VGFX, VEDIT or Audio to edit a team’s rows.</>
-                          : <>No {meta.tabs.find((t) => t.key === tab).label} rows match these filters.{canWrite ? ' Use “Add Row” to start.' : ''}</>}</td></tr>}
+                        )) : (() => {
+                          const text = isAll
+                            ? 'No rows are waiting for a team. Plugs copied from the PSD Daily Plug List show up here until you set their Units Concerned — pick VGFX, VEDIT or Audio to edit a team’s rows.'
+                            : `No ${meta.tabs.find((t) => t.key === tab).label} rows match these filters.${canWrite ? ' Use “Add Row” to start.' : ''}`;
+                          return <tr><td colSpan={tableCols.length + 2} className="empty xl-empty"><div className="xl-empty-msg" title={text}>{text}</div></td></tr>;
+                        })()}
                       </tbody>
                     </table>
                   )}
@@ -1523,8 +1594,8 @@ export default function Workload() {
                 : data.error ? <Empty>{data.error}</Empty>
                   : !data.rows.length ? <Empty>No workload items match these filters.</Empty>
                     : (
-                      <table className={`t wl${cards ? ' cards' : ''}`}>
-                        <thead><tr>{canWrite ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
+                      <table className={`t wl v-${viewKey.toLowerCase()}${cards ? ' cards' : ''}`}>
+                        <thead><tr>{canWrite ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {data.rows.map((r, idx) => (
                             <tr key={r.id} data-id={r.id}
@@ -1793,7 +1864,7 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
     : [];
   const bothVgfxVedit = teams.includes('VGFX') && teams.includes('VEDIT');
   // Only one of the two teams involved: drop the "(VGFX)"/"(VEDIT)" suffix since there's no ambiguity to resolve
-  const fieldLabel = (k, def) => (!bothVgfxVedit && (k === 'breakdate_vgfx' || k === 'breakdate_vedit') ? 'Breakdate / Time' : def.label);
+  const fieldLabel = (k, def) => (!bothVgfxVedit && (k === 'breakdate_vgfx' || k === 'breakdate_vedit') ? 'Breakdate / Time' : k === 'others' && !audioOnly ? 'Remarks (Audio)' : def.label);
   const plugText = String(f.plug_id || '').trim();
 
   const submit = async () => {

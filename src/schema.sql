@@ -236,12 +236,8 @@ BEGIN
               AND table_name = 'workload_items' AND column_name = 'breakdate_time') THEN
     ALTER TABLE workload_items RENAME COLUMN breakdate TO breakdate_time;
   END IF;
-  -- Script becomes a real date (only values that are already ISO dates are kept; Artwork / STB is not converted: it holds a date OR free text, see the end of this file)
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
-              AND table_name = 'workload_items' AND column_name = 'script' AND data_type = 'text') THEN
-    ALTER TABLE workload_items ALTER COLUMN script TYPE DATE
-      USING (CASE WHEN script ~ '^\d{4}-\d{2}-\d{2}$' THEN script::date END);
-  END IF;
+  -- (Script used to be turned into a DATE column here, keeping only ISO dates. It now holds a date OR free text, like Artwork / STB — see the end of this file — so that
+  -- conversion is gone: it would have wiped every text Script value each time the server started.)
 END $$;
 
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS work_date       DATE;
@@ -252,15 +248,16 @@ ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS plug_id         TEXT;   -- c
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS psd             TEXT;   -- copied from the PSD daily plug list
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate       TIMESTAMP;   -- Breakdate/Time: date and time picked together (wall-clock, no time zone)
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS vo              TEXT;   -- open
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS script          DATE;   -- date
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS script          DATE;   -- (converted to TEXT further down: a date YYYY-MM-DD OR free text)
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS art_stb         TEXT;   -- a date (YYYY-MM-DD) OR free text
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS audio_guide     TEXT;   -- dropdown: 'N/A' or a date (YYYY-MM-DD)
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS audio_guide     TEXT;   -- 'N/A', a date (YYYY-MM-DD) or free text
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS remarks         TEXT;   -- open
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS total_mats      TEXT;   -- open
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS prog_name       TEXT;   -- copied from the PSD daily plug list
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS plug_type       TEXT;   -- dropdown (admin-managed)
 ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS length          TEXT;   -- Audio: open (older installs already have this column)
-ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS others          TEXT;   -- Audio: open
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS others          TEXT;   -- Audio: shown as "Remarks" (see the note below)
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS audio_status    TEXT;   -- Audio: open (the Audio sheet's STATUS column)
 -- (Older installs may still have an unused status column from the first build; it is left untouched.)
 
 -- Breakdate and Time used to be two fields (a date, and a time that was free text and then a picked HH:MM). They are now one
@@ -316,14 +313,26 @@ ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS breakdate_note  TEXT;       
 ALTER TABLE workload_items DROP COLUMN IF EXISTS work_status;
 ALTER TABLE workload_items DROP CONSTRAINT IF EXISTS workload_items_units_check;
 ALTER TABLE workload_items ADD CONSTRAINT workload_items_units_check CHECK (units_concerned IN
-  ('VGFX Only', 'VEDIT Only', 'VGFX/VEDIT', 'Audio - RADIO', 'Audio – AUDIO GUIDE', 'VGFX/VEDIT/Audio'));
+  ('VGFX Only', 'VEDIT Only', 'VGFX/VEDIT', 'Audio - RADIO', 'Audio - TV', 'Audio – AUDIO GUIDE', 'VGFX/VEDIT/Audio'));
 CREATE INDEX IF NOT EXISTS workload_items_date_units_idx ON workload_items (work_date DESC, units_concerned);
+
+
 
 CREATE TABLE IF NOT EXISTS app_settings (
   key         TEXT PRIMARY KEY,
   value       TEXT,
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Audio's "Others" column is now called Remarks (the Audio view has no other remarks column), so an Audio-only row keeps its remark text in `others`.
+-- An earlier build folded `others` into `remarks`; ONCE (flag in app_settings, so a remark an Admin clears later is never brought back on restart) move such
+-- text back for Audio-only rows whose `others` is empty. Nothing is deleted: a row that has both texts keeps the other one in the database.
+UPDATE workload_items
+   SET others = remarks, remarks = NULL
+ WHERE units_concerned IN ('Audio - RADIO', 'Audio - TV', 'Audio – AUDIO GUIDE')
+   AND COALESCE(btrim(remarks), '') <> '' AND COALESCE(btrim(others), '') = ''
+   AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'audio_remarks_moved_v1');
+INSERT INTO app_settings (key, value) VALUES ('audio_remarks_moved_v1', '1') ON CONFLICT (key) DO NOTHING;
 
 -- Knowledge Base.
 -- Reference documents stored on disk under uploads/knowledge/.
@@ -501,6 +510,14 @@ SELECT group_id, 'plugs' FROM group_permissions
  WHERE perm_key = 'workload' AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'plugs_page_granted')
 ON CONFLICT DO NOTHING;
 INSERT INTO app_settings (key, value) VALUES ('plugs_page_granted', '1') ON CONFLICT (key) DO NOTHING;
+
+-- Script takes a date or plain text too (FFUP, ...), like Artwork / STB: it used to be a DATE column — convert it in place, keeping every date as 'YYYY-MM-DD'.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+              AND table_name = 'workload_items' AND column_name = 'script' AND data_type = 'date') THEN
+    ALTER TABLE workload_items ALTER COLUMN script TYPE TEXT USING to_char(script, 'YYYY-MM-DD');
+  END IF;
+END $$;
 
 -- Artwork / STB takes either a date (picked) or plain text (typed). It used to be a DATE column: convert it in place, keeping every date
 -- as 'YYYY-MM-DD'. (Runs only while the column is still a DATE, so free text entered afterwards is never touched.)

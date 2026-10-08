@@ -157,7 +157,7 @@ function plugFilter(query) {
 }
 const whereSql = (where) => (where.length ? `WHERE ${where.join(' AND ')}` : '');
 
-module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked }) {
+module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked }) {
   const router = express.Router();
   // Mounted at /api/plugs. Anyone who can open the PSD Daily Plug List page OR the Workload Tracker may read the list (the tracker
   // uses it to fill PSD / PROG. NAME); changing it needs the plugs.write action (Manager / Admin + the Plug List page), and the two
@@ -376,7 +376,7 @@ module.exports = function build({ UNITS, parseRow, insertRow, loadCustomCols, lo
     const body = req.body || {};
     // Units Concerned is NOT known from the plug list: rows are made with it blank (they show under All until someone sets it).
     // A value may still be passed in (optional).
-    const units = body.units_concerned ? v.oneOf(body.units_concerned, UNITS, { field: 'Units Concerned' }) : null;
+    const units = body.units_concerned ? v.oneOf(canonUnit(body.units_concerned), UNITS, { field: 'Units Concerned' }) : null;
     // which plugs: the chosen ones ({ ids }, from any days), or everything in a view ({ from, to, q } — or one { date })
     const ids = Array.isArray(body.ids) ? body.ids.slice(0, 5000).map((n) => { try { return v.id(n); } catch (e) { return null; } }).filter(Boolean) : null;
     const LIMIT = 5000;

@@ -15,17 +15,22 @@ const { emitTransfer } = require('../transfer-hook');   // import / export event
 // Sept 2026 PCS Workload template: "dropdown", "Date" and "Open" (free text you can type or paste).
 const router = express.Router();
 
-const UNITS = ['VGFX Only', 'VEDIT Only', 'VGFX/VEDIT', 'Audio - RADIO', 'Audio – AUDIO GUIDE', 'VGFX/VEDIT/Audio'];
+const UNITS = ['VGFX Only', 'VEDIT Only', 'VGFX/VEDIT', 'Audio - RADIO', 'Audio - TV', 'Audio – AUDIO GUIDE', 'VGFX/VEDIT/Audio'];
 // Which teams each Units Concerned option covers (drives the team tabs)
 const UNIT_TEAMS = Object.assign(Object.create(null), {
   'VGFX Only': ['VGFX'],
   'VEDIT Only': ['VEDIT'],
   'VGFX/VEDIT': ['VGFX', 'VEDIT'],
   'Audio - RADIO': ['AUDIO'],
+  'Audio - TV': ['AUDIO'],
   'Audio – AUDIO GUIDE': ['AUDIO'],
   'VGFX/VEDIT/Audio': ['VGFX', 'VEDIT', 'AUDIO'],
 });
 const TEAMS = ['VGFX', 'VEDIT', 'AUDIO'];
+// Units Concerned is matched without regard to capitals, spaces or the kind of dash ("vgfx only", "AUDIO-radio", "audio – tv") and stored as the option's own spelling
+const unitKey = (t) => String(t ?? '').toLowerCase().replace(/[\u2013\u2014\u2212]/g, '-').replace(/\s+/g, '');
+const UNIT_BY_KEY = Object.assign(Object.create(null), Object.fromEntries(UNITS.map((u) => [unitKey(u), u])));
+const canonUnit = (raw) => { const t = String(raw ?? '').trim(); return UNIT_BY_KEY[unitKey(t)] || t; };
 const NOT_SET = '(Not set)';   // Units filter value for rows copied from the PSD Daily Plug List that haven't been assigned a team yet
 const TAB_LABEL = Object.assign(Object.create(null), { ALL: 'All', VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio' });
 
@@ -43,7 +48,7 @@ const FIELDS = {
   breakdate_vgfx: { label: 'Breakdate / Time (VGFX)', kind: 'datetime' },
   breakdate_vedit:{ label: 'Breakdate / Time (VEDIT)', kind: 'datetime' },
   vo:             { label: 'VO', kind: 'text', multiline: true, max: 1000, hint: OPEN },
-  script:         { label: 'Script', kind: 'date' },
+  script:         { label: 'Script', kind: 'date_or_text', max: 200 },   // a date or free text (FFUP, ...), like Artwork / STB
   art_stb:        { label: 'Artwork / STB', kind: 'date_or_text', max: 200 },
   audio_guide:    { label: 'Audio Guide', kind: 'audio_guide' },
   remarks:        { label: 'Remarks', kind: 'text', multiline: true, max: 4000, hint: OPEN },
@@ -52,7 +57,8 @@ const FIELDS = {
   plug_type:      { label: 'Plug Type', kind: 'select', lookup: 'plug_type', max: 100 },
   // Audio sheet's Assigned / Done / Resched-cancelled tables: open columns you can type or paste into
   length:         { label: 'Length', kind: 'text', max: 100, hint: OPEN },
-  others:         { label: 'Others', kind: 'text', multiline: true, max: 2000, hint: OPEN },
+  others:         { label: 'Remarks', kind: 'text', multiline: true, max: 2000, hint: OPEN },   // Audio only: this IS the Audio Remarks column (it used to be called Others); the main Remarks column is not part of the Audio view
+  audio_status:   { label: 'Status', kind: 'text', multiline: true, max: 500, hint: OPEN },   // Audio only (the Audio sheet's STATUS: SENT FOR APPROVAL, LOGGED SEP 9, ...)
 };
 const COLS = Object.keys(FIELDS);
 
@@ -60,12 +66,12 @@ const COLS = Object.keys(FIELDS);
 const MAIN_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd',
   'breakdate_vgfx', 'breakdate_vedit',
   'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats', 'prog_name', 'plug_type'];
-const AUDIO_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'vo', 'script', 'remarks', 'length', 'others', 'plug_type'];
+const AUDIO_COLS = ['work_date', 'platform', 'billable_party', 'units_concerned', 'plug_id', 'psd', 'vo', 'script', 'length', 'others', 'audio_status', 'plug_type'];   // Audio: Length, then Remarks (the former Others), then Status — the main Remarks column is left out
 // Audio-only columns; any row that involves Audio (e.g. VGFX/VEDIT/Audio) also gets these in the form
-const AUDIO_EXTRA = ['length', 'others'];
+const AUDIO_EXTRA = ['length', 'others', 'audio_status'];
 const VIEWS = {
   // All tab = every column (the template's main columns plus Length and Others), each in its own column
-  ALL: [...MAIN_COLS.slice(0, -1), 'length', 'others', 'plug_type'],
+  ALL: [...MAIN_COLS.slice(0, -1), 'length', 'others', 'audio_status', 'plug_type'],
   VGFX: MAIN_COLS,
   VEDIT: MAIN_COLS,
   AUDIO: AUDIO_COLS,
@@ -104,7 +110,7 @@ function derivePlatform(plugId) {
 }
 
 const MAX_BATCH = 200;
-const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'billable_party', 'remarks', 'vo', 'total_mats', 'audio_guide', 'length', 'others'];
+const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'billable_party', 'remarks', 'vo', 'total_mats', 'audio_guide', 'length', 'others', 'audio_status'];
 
 // ---------- Custom columns ("Add Column"): stored in workload_custom_columns, values in workload_items.custom_fields ----------
 // col_key is always 'custom_<id>' (not the label), so adding/removing/renaming a column never needs a schema change.
@@ -168,14 +174,9 @@ async function assertOption(client, category, value, field, current) {
 }
 
 /** Audio Guide dropdown: "N/A" or a date (YYYY-MM-DD). A value already stored on the row is left alone. */
-function parseAudioGuide(raw, current) {
-  const s = v.str(raw, { field: 'Audio Guide', max: 100 });
-  if (!s || s === 'N/A') return s;
-  if (current && s === current) return s;
-  if (!validator.isDate(s, { format: 'YYYY-MM-DD', strictMode: true })) {
-    throw new HttpError(400, 'Audio Guide must be N/A or a date');
-  }
-  return s;
+function parseAudioGuide(raw) {
+  // N/A, a date (YYYY-MM-DD) or any text — "available, approved 090726", "music only", "FOR AUDIO GUIDE - sent for oks"
+  return v.str(raw, { field: 'Audio Guide', max: 200 });
 }
 
 /** Date and time picked together: 'YYYY-MM-DDTHH:MM' (a bare date means 12:00 AM). Returns 'YYYY-MM-DD HH:MM:00' or null. */
@@ -220,14 +221,16 @@ async function parseRow(client, body, current, customCols = [], opts = {}) {
   const rec = {};
   for (const k of COLS) {
     const f = FIELDS[k];
-    if (k === 'audio_guide') rec[k] = parseAudioGuide(body[k], cur[k]);
+    if (k === 'audio_guide') rec[k] = parseAudioGuide(body[k]);
     else if (f.kind === 'date_or_text') rec[k] = parseDateOrText(body[k], f);
     else if (f.kind === 'date') rec[k] = v.date(body[k], { field: f.label, required: !!f.required });
     else if (f.kind === 'datetime') rec[k] = parseDateTime(body[k], f.label);
-    else if (k === 'units_concerned') rec[k] = unitsMayBeBlank && !body[k] ? null : v.oneOf(body[k], UNITS, { field: f.label });
+    else if (k === 'units_concerned') rec[k] = unitsMayBeBlank && !body[k] ? null : v.oneOf(canonUnit(body[k]), UNITS, { field: f.label });
     else rec[k] = v.str(body[k], { field: f.label, max: f.max, required: !!f.required });
   }
-  const typedProg = rec.prog_name;   // checked against the dropdown; a title filled in from the PSD Daily Plug List below is taken as it is
+  { const t = UNIT_TEAMS[rec.units_concerned] || []; if (t.length === 1 && t[0] === 'AUDIO' && rec.remarks && body.others === undefined) { rec.others = rec.remarks; rec.remarks = null; } }   // (only when the sender did not give an Audio Remarks value at all)   // an Audio-only row's remarks live in the Audio Remarks field
+  // PROG. NAME / PROJ. TITLE is open text: a title typed by hand (Excel mode, Import, the form) is saved as it is — it does not have to be in the dropdown
+  // list or on that day's PSD Daily Plug List (picking from them is still the quick way, and a plug's own title is filled in below).
   await fillFromPlugList(client, rec);
   // Platform follows the Plug ID prefix unless one was chosen (only if that option exists and is active)
   if (!rec.platform) {
@@ -240,12 +243,6 @@ async function parseRow(client, body, current, customCols = [], opts = {}) {
     }
   }
   await assertOption(client, 'workload_platform', rec.platform, 'Platform', cur.platform);
-  if (typedProg && rec.work_date) {   // a title that comes from that day's PSD Daily Plug List (picked or auto-filled by the form) is fine too
-    const { rows } = await client.query('SELECT 1 FROM workload_plugs WHERE plug_date=$1 AND prog_name=$2 LIMIT 1', [rec.work_date, typedProg]);
-    if (rows.length) rec._progOk = true;
-  }
-  if (!rec._progOk) await assertOption(client, 'program', typedProg, 'PROG. NAME / PROJ. TITLE', cur.prog_name);
-  delete rec._progOk;
   await assertOption(client, 'plug_type', rec.plug_type, 'Plug Type', cur.plug_type);
   // Priority flag (not a template column, so it lives outside FIELDS): keep the stored value when the request doesn't mention it
   const p = body.is_priority;
@@ -288,7 +285,7 @@ function buildFilter(query) {
     add('w.units_concerned = ANY(?::text[])', UNITS.filter((u) => UNIT_TEAMS[u].includes(team)));
   }
   if (query.units === NOT_SET) where.push('w.units_concerned IS NULL');
-  else if (query.units) add('w.units_concerned = ?', v.oneOf(String(query.units), UNITS, { field: 'units' }));
+  else if (query.units) add('w.units_concerned = ?', v.oneOf(canonUnit(query.units), UNITS, { field: 'units' }));
   if (query.platform) add('w.platform = ?', String(query.platform));
   if (query.plug_type) add('w.plug_type = ?', String(query.plug_type));
   if (query.from) add('w.work_date >= ?', v.date(query.from, { field: 'from' }));
@@ -466,8 +463,8 @@ router.get('/export', asyncH(async (req, res) => {
         if (k === 'breakdate_vgfx') val = null;   // filled in below as two labelled lines (VGFX / VEDIT)
         else if (f.kind === 'date') val = asDate(val);
         else if (f.kind === 'datetime') { const t = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(val || ''); val = t ? new Date(Date.UTC(+t[1], +t[2] - 1, +t[3], +t[4], +t[5])) : null; }
-        else if ((k === 'audio_guide' || k === 'art_stb') && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = asDate(val);   // a date becomes a real Excel date; text stays text
-        else if (k !== 'remarks') val = oneLineText(val);   // every field except Remarks is one line, like the web table
+        else if ((k === 'audio_guide' || k === 'art_stb' || k === 'script') && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = asDate(val);   // a date becomes a real Excel date; text stays text
+        else if (k !== 'remarks' && k !== 'others' && k !== 'audio_status') val = oneLineText(val);   // every field except the Remarks columns and Audio Status is one line, like the web table
         return { ...o, [k]: val };
       }, {}));
       row.alignment = { wrapText: false, vertical: 'middle', horizontal: 'center' };
@@ -480,7 +477,7 @@ router.get('/export', asyncH(async (req, res) => {
         if (r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit')) {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8B4B4' } };
         }
-        if ((k === 'audio_guide' || k === 'art_stb') && r[k] && /^\d{4}-\d{2}-\d{2}$/.test(r[k])) cell.numFmt = 'mmm d, yyyy';
+        if ((k === 'audio_guide' || k === 'art_stb' || k === 'script') && r[k] && /^\d{4}-\d{2}-\d{2}$/.test(r[k])) cell.numFmt = 'mmm d, yyyy';
 
         if (k === 'breakdate_vgfx') {
           // Same as the web table: one labelled line per involved team, VGFX on top, VEDIT below (each only if it has a time)
@@ -495,8 +492,9 @@ router.get('/export', asyncH(async (req, res) => {
               { text: l.text, font: { color: { argb: pal.black } } },
             ]) };
           }
+          else if (!r.units_concerned || teams.includes('VGFX') || teams.includes('VEDIT')) { cell.value = 'PENDING'; cell.font = { bold: true, color: { argb: pal.pillFg('gray') } }; }   // no time yet
           cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
-        } else if (f.kind === 'date' || f.kind === 'datetime' || k === 'audio_guide' || k === 'art_stb') {
+        } else if (f.kind === 'date' || f.kind === 'datetime' || k === 'audio_guide' || k === 'art_stb' || k === 'script') {
           if (cell.value != null) cell.font = { color: { argb: pal.black } };
         } else if (k === 'platform' && r.platform) {
           cell.font = { bold: true, color: { argb: pal.black } };
@@ -516,7 +514,7 @@ router.get('/export', asyncH(async (req, res) => {
           }
         } else if (k === 'plug_id' || k === 'prog_name') {
           cell.font = { bold: true };
-        } else if (k === 'remarks') {
+        } else if (k === 'remarks' || k === 'others' || k === 'audio_status') {
           cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
         }
       });
@@ -524,7 +522,7 @@ router.get('/export', asyncH(async (req, res) => {
 
     // Auto-size every column except Remarks (which wraps instead) so single-line values are never cropped.
     ws.columns.forEach((column) => {
-      if (column.key === 'remarks') return;
+      if (column.key === 'remarks' || column.key === 'others' || column.key === 'audio_status') return;
       const f = fieldsExt[column.key];
       let max = String(f.label).length;
       if (f.kind === 'date') max = Math.max(max, 13);           // 'Sep 28, 2026'
@@ -533,7 +531,7 @@ router.get('/export', asyncH(async (req, res) => {
       column.eachCell({ includeEmpty: false }, (cell) => {
         if (column.key === 'breakdate_vgfx') { max = Math.max(max, ...cellText(cell.value).split('\n').map((t) => t.length)); return; }
         if ((f.kind === 'date' || f.kind === 'datetime') && cell.value instanceof Date) return; // already sized above
-        if ((column.key === 'audio_guide' || column.key === 'art_stb') && cell.value instanceof Date) { max = Math.max(max, 13); return; }
+        if ((column.key === 'audio_guide' || column.key === 'art_stb' || column.key === 'script') && cell.value instanceof Date) { max = Math.max(max, 13); return; }
         max = Math.max(max, cellText(cell.value).length);
       });
       // +15% then +3: plain character-count math undershoots for this app's content, which is heavy with wide,
@@ -764,6 +762,9 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
   Object.entries(fieldsExt).forEach(([k, f]) => { labelToKey[f.label.trim().toLowerCase()] = k; });
   labelToKey['prog. name / project title'] = 'prog_name';   // the column's old name (files exported before the rename)
   labelToKey['prog name/proj title'] = 'prog_name';         // as it is written in the PSD Daily Plug List
+  labelToKey['remarks'] = 'remarks';                        // two fields are called Remarks (main, and Audio's): the plain heading means the main one ...
+  labelToKey['others'] = 'others';                          // ... except on the AUDIO sheet (below), and in files exported when the Audio column was still called Others
+  labelToKey['remarks (audio)'] = 'others';
   const newColumns = [];
 
   // A header this tracker does not know becomes a new custom column (so nothing in the file is dropped) — within
@@ -826,7 +827,9 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
     for (const colNumber of Object.keys(colKeyAt)) {
       const label = String(cellText(headerRow.getCell(Number(colNumber)).value) ?? '').trim();
       // this app's export puts VGFX + VEDIT times in one 'Breakdate / Time' column (one labelled line per team)
-      colKeyAt[colNumber] = label.toLowerCase() === 'breakdate / time' ? '__breakdate' : await keyForHeader(label);
+      colKeyAt[colNumber] = label.toLowerCase() === 'breakdate / time' ? '__breakdate'
+        : label.toLowerCase() === 'remarks' && ws.name && /^audio$/i.test(String(ws.name).trim()) ? 'others'   // on the AUDIO sheet, Remarks is the Audio Remarks column
+        : await keyForHeader(label);
     }
     for (let r = 2; r <= ws.rowCount; r++) {
       const row = ws.getRow(r);
@@ -844,8 +847,8 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
         else { val = cellText(val);
           if (f.kind === 'date') obj[key] = val instanceof Date ? isoDate(val) : String(val);
           else if (f.kind === 'datetime') obj[key] = val instanceof Date ? isoDateTime(val) : String(val);
-          else if (key === 'audio_guide' || key === 'art_stb') obj[key] = val instanceof Date ? isoDate(val) : String(val);   // an Excel date or text
-          else obj[key] = String(val); }
+          else if (key === 'audio_guide' || key === 'art_stb' || key === 'script') obj[key] = val instanceof Date ? isoDate(val) : String(val);   // an Excel date or text
+          else obj[key] = (key === 'remarks' || key === 'others') && obj[key] ? `${obj[key]}\n${String(val)}` : String(val); }   // an old file may have two columns for the same remarks: keep both texts
       }
       if (!hasAny) continue;
       sheetInfo.rows++;
@@ -903,4 +906,4 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
 
 module.exports = router;
 // shared with the PSD Daily Plug List routes (src/routes/plugs.js), which make Workload rows from plugs
-module.exports.helpers = { UNITS, UNIT_TEAMS, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked };
+module.exports.helpers = { UNITS, UNIT_TEAMS, canonUnit, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked };
