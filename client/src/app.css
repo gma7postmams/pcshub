@@ -459,7 +459,7 @@ table.t.wl td.actions-cell { white-space: normal; width: 1%; }
 table.t.wl td.actions-cell .btn { display: block; width: 100%; margin: 0 0 4px; }
 table.t.wl td.actions-cell .btn:last-child { margin-bottom: 0; }
 /* Excel grid: wider columns for the long-text fields (textareas grow with their content) */
-table.t.xl td[data-k="plug_id"] textarea, table.t.xl td[data-k="remarks"] textarea,
+table.t.xl td[data-k="plug_id"] textarea, table.t.xl td[data-k="remarks"] textarea, table.t.xl td[data-k="others"] textarea,
 table.t.xl td[data-k="vo"] textarea, table.t.xl td[data-k="total_mats"] textarea { min-width: 190px; }
 table.t.xl td[data-k="units_concerned"] select, table.t.xl td[data-k="platform"] select { min-width: 150px; }
 table.t.xl textarea { overflow: hidden; resize: none; }
@@ -479,7 +479,7 @@ table.t.wl.cards td:empty { display: none; }
 table.t.wl.cards td[data-k="plug_id"] { grid-column: 1 / -1; order: -1; font-size: 14px; }
 table.t.wl.cards td[data-k="plug_id"]::before { content: none; }
 table.t.wl.cards td[data-k="remarks"], table.t.wl.cards td[data-k="vo"],
-table.t.wl.cards td[data-k="total_mats"], table.t.wl.cards td[data-k="prog_name"] { grid-column: span 2; }
+table.t.wl.cards td[data-k="others"], table.t.wl.cards td[data-k="total_mats"], table.t.wl.cards td[data-k="prog_name"] { grid-column: span 2; }
 table.t.wl.cards td.actions-cell { grid-column: 1 / -1; order: 99; flex-direction: row; justify-content: flex-end; gap: 8px; padding-top: 4px; width: auto; }
 table.t.wl.cards td.actions-cell::before { content: none; }
 table.t.wl.cards td.actions-cell .btn { display: inline-flex; width: auto; margin: 0; }
@@ -593,7 +593,7 @@ table.t.wl.cards td .rem { min-width: 0; max-width: none; }
 
 /* Centre every cell's content except Remarks, which stays left-aligned (it's the one column meant to be read as text) */
 table.t.wl:not(.cards) td { text-align: center; }
-table.t.wl:not(.cards) td[data-k="remarks"] { text-align: left; }
+table.t.wl:not(.cards) td[data-k="remarks"], table.t.wl:not(.cards) td[data-k="others"] { text-align: left; }
 table.t.wl:not(.cards) td .stack { align-items: center; }
 
 /* cards: long pills (e.g. "REG/TDMD (GMA MUSIC)") get the whole card width and may wrap rather than spill into the next column */
@@ -904,9 +904,10 @@ table.t.xl tr.prio-row td:not(.rn) { background-image: linear-gradient(color-mix
 table.t.xl tr.prio-row td.prio { background-color: color-mix(in srgb, #ef4444 26%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, #ef4444 50%, transparent); }
 .prio-dot { display: inline-block; width: 7px; height: 7px; margin-left: 4px; border-radius: 50%; background: #ef4444; vertical-align: middle; }
 
-/* Excel mode: Status (Audio) has room for its text (Remarks is already 380 px wide) */
+/* Excel mode: the Audio Remarks column is as wide as Remarks / VO / Plug ID, and Status has room for its text */
+table.t.xl td[data-k="others"] .xl-cell { min-width: 380px; }
 table.t.xl td[data-k="audio_status"] .xl-cell { min-width: 200px; }
 /* a PENDING (no time yet) Breakdate / Time placeholder: grey and bold like a pill, not like typed text */
 table.t.xl td[data-k="breakdate_vgfx"] textarea::placeholder { color: var(--text-3); font-weight: 700; letter-spacing: .04em; opacity: 1; }
 /* Table mode, Audio view: Remarks is short status-like text, centred like every other Audio column (VGFX / VEDIT keep their left-aligned long notes) */
-table.t.wl.v-audio:not(.cards) td[data-k="remarks"] { text-align: center; }
+table.t.wl.v-audio:not(.cards) td[data-k="others"] { text-align: center; }

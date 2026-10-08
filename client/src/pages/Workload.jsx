@@ -952,6 +952,19 @@ export default function Workload() {
       if (grid && grid.rows.length) { setGridSel({ r0: 0, c0: 0, r1: grid.rows.length - 1, c1: xlKeys().length - 1 }); focusBox(); }
       return;
     }
+    // Alt+Enter (Option+Return on a Mac) puts a line break inside a multi-line cell (Plug ID, VO, Remarks, Total Mats, Breakdate / Time), like a spreadsheet.
+    // (Plain Enter in those cells is a line break too; in a one-line cell — PSD, Length, Status ... — Enter moves down and the cell holds one line only.)
+    if (e.key === 'Enter' && e.altKey && e.target.tagName === 'TEXTAREA') {
+      e.preventDefault();
+      const t = e.target;
+      if (!document.execCommand('insertText', false, '\n')) {
+        const a = t.selectionStart; const z = t.selectionEnd;
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(t, `${t.value.slice(0, a)}\n${t.value.slice(z)}`);
+        t.setSelectionRange(a + 1, a + 1);
+        t.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      return;
+    }
     if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
       // like a spreadsheet: Enter moves to the cell below (Shift+Enter: above); Tab / Shift+Tab move sideways natively
       const td = e.target.closest('td[data-r]');
@@ -1264,7 +1277,7 @@ export default function Workload() {
   const selRows = selNow && grid && grid.rows ? grid.rows.slice(selNow.rLo, selNow.rHi + 1) : [];
   const allPrio = selRows.length > 0 && selRows.every((r) => r.is_priority);
   const wholeRowsSel = !!selNow && selNow.cLo === 0 && selNow.cHi === tableCols.length - 1 && selRows.length > 0;   // a row number was clicked
-  const head = (k) => (k === 'breakdate_vgfx' ? 'Breakdate / Time' : meta.fields[k].label);   // table header only; Excel mode reads meta.fields directly and keeps the (VGFX)/(VEDIT) labels
+  const head = (k) => (k === 'breakdate_vgfx' ? 'Breakdate / Time' : k === 'others' && viewKey === 'ALL' ? 'Remarks (Audio)' : meta.fields[k].label);   // table header only; Excel mode reads meta.fields directly and keeps the (VGFX)/(VEDIT) labels
   const firstLineOf = (t) => String(t || '').split('\n');
   // every cell except Remarks stays on one line: line breaks in pasted text are shown as " · "
   const oneLine = (t) => String(t ?? '').replace(/\s*\n+\s*/g, ' · ');
@@ -1298,6 +1311,7 @@ export default function Workload() {
       case 'audio_guide': return <td {...common}><DateChip hue="fuchsia">{val ? (ISO.test(val) ? fmtDate(val) : oneLine(val)) : null}</DateChip></td>;
       case 'breakdate_vgfx': return <td {...common}><DateChip hue="purple">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VGFX in Units Concerned
       case 'breakdate_vedit': return <td {...common}><DateChip hue="orange">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VEDIT in Units Concerned
+      case 'others':
       case 'remarks': return <td {...common}>{val ? <div className="rem">{val}</div> : null}</td>;
       default:
         return <td {...common}>{meta.fields[k].kind === 'date' ? <DateChip>{fmtDate(val)}</DateChip> : oneLine(val)}</td>;
@@ -1810,7 +1824,7 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
     : [];
   const bothVgfxVedit = teams.includes('VGFX') && teams.includes('VEDIT');
   // Only one of the two teams involved: drop the "(VGFX)"/"(VEDIT)" suffix since there's no ambiguity to resolve
-  const fieldLabel = (k, def) => (!bothVgfxVedit && (k === 'breakdate_vgfx' || k === 'breakdate_vedit') ? 'Breakdate / Time' : def.label);
+  const fieldLabel = (k, def) => (!bothVgfxVedit && (k === 'breakdate_vgfx' || k === 'breakdate_vedit') ? 'Breakdate / Time' : k === 'others' && !audioOnly ? 'Remarks (Audio)' : def.label);
   const plugText = String(f.plug_id || '').trim();
 
   const submit = async () => {
