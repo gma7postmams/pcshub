@@ -226,7 +226,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
             ) : <button type="button" className="btn" onClick={() => setAdding(true)}><PlusIcon /> Add Plug</button>}
             <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button>
             {canWorkload ? <button type="button" className="btn" disabled={filling} onClick={fillExisting}
-              title="Rows already in the Workload Tracker that have a Plug ID but a blank PSD or PROG. NAME / PROJ. TITLE get them from this list (anything typed is kept)">{filling ? 'Filling…' : 'Fill blank rows'}</button> : null}
+              title="Rows already in the Workload Tracker that have a Plug ID but a blank PSD or PROG. NAME / PROJ. TITLE get them from this list (anything typed is kept)">{filling ? 'Filling…' : 'Fill Blank Rows'}</button> : null}
             {isAdmin ? <button type="button" className="btn danger" disabled={!totals.plugs} onClick={() => setDeleting(true)} title="Delete what this view shows, or every day's plugs">Delete all…</button> : null}
             {isGrid ? (
               <button type="button" className="btn primary" id="save-grid" disabled={!tbRef.current || tbRef.current.saving || !gridDirty} onClick={() => tbRef.current && tbRef.current.save()}>
