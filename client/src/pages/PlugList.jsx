@@ -217,14 +217,14 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
         {canWrite ? (
           <>
             <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files[0])} />
-            <button type="button" className="btn" disabled={importing} onClick={() => fileRef.current.click()}><UploadIcon /> {importing ? 'Importing…' : 'Import plug list'}</button>
-            <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button>
+            <button type="button" className="btn" disabled={importing} onClick={() => fileRef.current.click()}><UploadIcon /> {importing ? 'Importing…' : 'Import Plug List'}</button>
             {isGrid ? (
               <>
                 <button type="button" className="btn" id="add-row" onClick={() => tbRef.current && tbRef.current.addRow()}><PlusIcon /> Add Row</button>
                 {tbRef.current && tbRef.current.selCount && tbRef.current.wholeRows ? <button type="button" className="btn danger" data-keep-sel onClick={() => tbRef.current.deleteRows()}>Delete {tbRef.current.selCount > 1 ? `${tbRef.current.selCount} Rows` : 'Row'}</button> : null}
               </>
-            ) : <button type="button" className="btn" onClick={() => setAdding(true)}><PlusIcon /> Add plug</button>}
+            ) : <button type="button" className="btn" onClick={() => setAdding(true)}><PlusIcon /> Add Plug</button>}
+            <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button>
             {canWorkload ? <button type="button" className="btn" disabled={filling} onClick={fillExisting}
               title="Rows already in the Workload Tracker that have a Plug ID but a blank PSD or PROG. NAME / PROJ. TITLE get them from this list (anything typed is kept)">{filling ? 'Filling…' : 'Fill blank rows'}</button> : null}
             {isAdmin ? <button type="button" className="btn danger" disabled={!totals.plugs} onClick={() => setDeleting(true)} title="Delete what this view shows, or every day's plugs">Delete all…</button> : null}
@@ -245,7 +245,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
       {data === null || days === null ? <Empty>Loading…</Empty>
         : !totals.plugs && !isGrid ? (
           <Empty>
-            No PSD Daily Plug List yet.{canWrite ? ' Use “Import plug list” and pick the PSD’s daily plug list workbook (one sheet per day).' : ' Ask someone who can edit the Workload Tracker to import it.'}
+            No PSD Daily Plug List yet.{canWrite ? ' Use “Import Plug List” and pick the PSD’s daily plug list workbook (one sheet per day).' : ' Ask someone who can edit the Workload Tracker to import it.'}
           </Empty>
         ) : (
           <>
@@ -391,7 +391,7 @@ function PlugModal({ date, plug, onClose, onSaved }) {
     } catch (e) { toast(e.message, 'err'); setBusy(false); }
   };
   return (
-    <Modal title={plug ? 'Edit plug' : 'Add plug'} onClose={onClose} footer={(<><span className="grow" /><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className="btn primary" disabled={busy} onClick={save}>{plug ? 'Save' : 'Add'}</button></>)}>
+    <Modal title={plug ? 'Edit plug' : 'Add Plug'} onClose={onClose} footer={(<><span className="grow" /><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className="btn primary" disabled={busy} onClick={save}>{plug ? 'Save' : 'Add'}</button></>)}>
       <form className="form-grid" noValidate onSubmit={(e) => { e.preventDefault(); save(); }}>
         <label className="f"><span>Date <span className="req">*</span></span><input type="date" value={f.plug_date} onChange={set('plug_date')} /></label>
         <label className="f"><span>Plug ID <span className="req">*</span></span><input value={f.plug_id} onChange={set('plug_id')} maxLength={200} autoFocus /></label>
