@@ -10,6 +10,7 @@ const router = express.Router();
 //   kpis               -> the Dashboard section "Ingest KPIs" granted to their group
 //   users              -> the Dashboard section "Active users" granted to their group
 //   workload           -> they can open the Workload Tracker
+const { auditBus } = require('../audit');
 const { ACTIVE_MINUTES, presenceBus } = require('./presence');   // "active now" = used the app within this many minutes
 // The window the "Workload by day" chart covers (the dropdown at the top right of the Workload Tracker block).
 const RANGES = Object.assign(Object.create(null), {   // the order here is the order of the menu (All time first); the default is DEFAULT_RANGE below
@@ -129,6 +130,44 @@ async function recentActivity(u) {
   }
   return items;
 }
+
+// Recent Activity on its own, and as a live stream: a new line is pushed within a moment of it being written to the audit log.
+router.get('/activity', asyncH(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ activity: await recentActivity(req.user) });
+}));
+router.get('/activity/stream', (req, res) => {
+  res.status(200).set({
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-store, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders();
+  res.write('retry: 3000\n\n');
+  let last = '';
+  let closed = false;
+  let busy = false;
+  let again = false;
+  const push = async () => {
+    if (closed) return;
+    if (busy) { again = true; return; }
+    busy = true;
+    try {
+      const activity = await recentActivity(req.user);
+      const key = JSON.stringify((activity || []).map((a) => a.id));
+      if (!closed && key !== last) { last = key; res.write(`data: ${JSON.stringify({ activity })}\n\n`); } else if (!closed) res.write(': ping\n\n');
+    } catch (e) { /* the next change or tick tries again */ }
+    busy = false;
+    if (again) { again = false; push(); }
+  };
+  let timer = null;
+  const onChange = () => { clearTimeout(timer); timer = setTimeout(push, 150); };
+  auditBus.on('change', onChange);
+  const tick = setInterval(push, 20000);
+  req.on('close', () => { closed = true; clearTimeout(timer); clearInterval(tick); auditBus.off('change', onChange); });
+  push();
+});
 
 // Just the chart's days for another range (the dropdown), without recomputing the whole dashboard.
 router.get('/days', asyncH(async (req, res) => {
