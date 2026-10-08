@@ -177,13 +177,23 @@ function canonUnit(meta, text) {
   const hit = k ? meta.units.find((u) => unitKey(u) === k) : null;
   return hit || text;
 }
-// Table / Excel is remembered across a refresh, for the current sign-in only (it starts as Table again after signing out and in) — the same rule as the Dashboard's period menu.
-const MODE_KEY = 'wl:mode';
-const readMode = (sessionKey) => {
-  if (!sessionKey) return 'table';
-  try { const v = JSON.parse(localStorage.getItem(MODE_KEY)); return v && v.k === sessionKey && v.m === 'excel' ? 'excel' : 'table'; } catch (e) { return 'table'; }
+// Table / Excel AND the tab (All, VGFX, VEDIT, Audio) are remembered across a refresh, for the current sign-in only (they start as Table / All again after signing out and
+// in) — the same rule as the Dashboard's period menu. Stored together with that sign-in's key (session_key from /api/auth/me).
+const VIEW_KEY = 'wl:mode';
+const TAB_KEYS = ['ALL', 'VGFX', 'VEDIT', 'AUDIO'];
+const readView = (sessionKey) => {
+  const fresh = { mode: 'table', tab: 'ALL' };
+  if (!sessionKey) return fresh;
+  try {
+    const v = JSON.parse(localStorage.getItem(VIEW_KEY));
+    if (!v || v.k !== sessionKey) return fresh;
+    return { mode: v.m === 'excel' ? 'excel' : 'table', tab: TAB_KEYS.includes(v.t) ? v.t : 'ALL' };
+  } catch (e) { return fresh; }
 };
-const saveMode = (sessionKey, m) => { if (!sessionKey) return; try { localStorage.setItem(MODE_KEY, JSON.stringify({ k: sessionKey, m })); } catch (e) { /* storage unavailable */ } };
+const saveView = (sessionKey, patch) => {
+  if (!sessionKey) return;
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify({ k: sessionKey, ...(() => { const cur = readView(sessionKey); return { m: cur.mode, t: cur.tab }; })(), ...patch })); } catch (e) { /* storage unavailable */ }
+};
 function viewForUnits(meta, units) {
   const teams = units ? meta.unitTeams[units] : null;
   if (!teams) return 'ALL';
@@ -352,8 +362,8 @@ export default function Workload() {
 
   const [meta, setMeta] = useState(null);
   const [lookups, setLookups] = useState({ workload_platform: [], plug_type: [], program: [] });
-  const [tab, setTab] = useState('ALL');
-  const [mode, setMode] = useState(() => readMode(s.session_key));   // Table or Excel: kept across a refresh while you stay signed in
+  const [tab, setTab] = useState(() => readView(s.session_key).tab);   // kept across a refresh while you stay signed in
+  const [mode, setMode] = useState(() => readView(s.session_key).mode);   // Table or Excel: kept across a refresh while you stay signed in
   const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', from: '', to: '' });
   const [stats, setStats] = useState(null);   // summary cards + tab badges
   const [offset, setOffset] = useState(0);
@@ -531,8 +541,8 @@ export default function Workload() {
   const okToLeave = async () => dirtyCount === 0
     || !!(await confirm('Discard unsaved changes?', `${dirtyCount} row(s) in the grid have unsaved changes. Leave without saving?`, { okText: 'Discard', danger: true }));
 
-  const changeTab = async (t) => { if (t === tab || !(await okToLeave())) return; setTab(t); setOffset(0); };
-  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setMode(m); saveMode(s.session_key, m); setOffset(0); };
+  const changeTab = async (t) => { if (t === tab || !(await okToLeave())) return; setTab(t); saveView(s.session_key, { t }); setOffset(0); };
+  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setMode(m); saveView(s.session_key, { m }); setOffset(0); };
   const setF = (k) => async (e) => {
     const val = e.target.value;
     if (k !== 'q' && !(await okToLeave())) return;
