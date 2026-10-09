@@ -158,7 +158,7 @@ function plugFilter(query) {
 }
 const whereSql = (where) => (where.length ? `WHERE ${where.join(' AND ')}` : '');
 
-module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked }) {
+module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked, exportPalette }) {
   const router = express.Router();
   // Mounted at /api/plugs. Anyone who can open the PSD Daily Plug List page OR the Workload Tracker may read the list (the tracker
   // uses it to fill PSD / PROG. NAME); changing it needs the plugs.write action (Manager / Admin + the Plug List page), and the two
@@ -213,20 +213,45 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
                  AND upper(p.plug_id) IN (SELECT upper(btrim(x)) FROM unnest(string_to_array(w.plug_id, E'\n')) AS x)) AS in_workload
          FROM workload_plugs p ${whereSql(where)} ORDER BY ${order} LIMIT 20000`, params
     );
+    // Same look as the Workload Tracker's export: the web table's tinted header, thin vertical grid lines, centred cells, bold Plug ID / program,
+    // real Excel dates, coloured "In workload" text, columns sized to their content.
+    const pal = await exportPalette(db);
+    const thin = { style: 'thin', color: { argb: pal.gridBorder } };
     const wb = new ExcelJS.Workbook();
     wb.creator = 'PromoHub';
     const ws = wb.addWorksheet('PSD Daily Plug List');
-    ws.columns = [
-      { header: 'DATE', key: 'd', width: 14 }, { header: 'PLUG ID', key: 'plug_id', width: 18 },
-      { header: 'PROG. NAME / PROJ. TITLE', key: 'prog_name', width: 40 }, { header: 'PSD', key: 'psd', width: 20 },
-      { header: 'ACCOUNT BY', key: 'account_by', width: 16 }, { header: 'IN WORKLOAD', key: 'in_workload', width: 14 },
+    const COLS = [
+      { header: 'DATE', key: 'd' }, { header: 'PLUG ID', key: 'plug_id' }, { header: 'PROG. NAME / PROJ. TITLE', key: 'prog_name' },
+      { header: 'PSD', key: 'psd' }, { header: 'ACCOUNT BY', key: 'account_by' }, { header: 'IN WORKLOAD', key: 'in_workload' },
     ];
-    for (const r of rows) {
-      ws.addRow({ d: r.plug_date instanceof Date ? r.plug_date.toISOString().slice(0, 10) : String(r.plug_date).slice(0, 10), plug_id: r.plug_id + (r.is_additional ? ' (additional)' : ''), prog_name: r.prog_name, psd: r.psd, account_by: r.account_by, in_workload: r.in_workload ? 'Yes' : 'No' });
-    }
-    ws.getRow(1).font = { bold: true };
+    ws.columns = COLS.map((c) => ({ ...c, width: 16, style: c.key === 'd' ? { numFmt: 'ddd, mmm d, yyyy' } : {} }));
+    ws.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: pal.black }, size: 11 };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pal.headerFill } };
+      cell.border = { bottom: thin, right: thin };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
     ws.views = [{ state: 'frozen', ySplit: 1 }];
-    ws.autoFilter = { from: 'A1', to: { row: 1, column: ws.columns.length } };
+    const asDate = (v) => { const t = v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10); return new Date(`${t}T00:00:00Z`); };
+    for (const r of rows) {
+      const row = ws.addRow({ d: asDate(r.plug_date), plug_id: r.plug_id, prog_name: r.prog_name || '', psd: r.psd || '', account_by: r.account_by || '', in_workload: r.in_workload ? 'In workload' : '—' });
+      row.alignment = { wrapText: false, vertical: 'middle', horizontal: 'center' };
+      row.eachCell({ includeEmpty: true }, (cell) => { cell.border = { right: thin }; });
+      const pid = row.getCell('plug_id');
+      pid.font = { bold: true };
+      if (r.is_additional) pid.value = { richText: [{ text: `${r.plug_id}  `, font: { bold: true, color: { argb: pal.black } } }, { text: 'Added', font: { bold: true, color: { argb: pal.pillFg('orange') } } }] };   // the “Added” chip: listed under “Additional for …”
+      row.getCell('prog_name').font = { bold: true };
+      if (r.in_workload) row.getCell('in_workload').font = { bold: true, color: { argb: pal.pillFg('green') } };
+      else row.getCell('in_workload').font = { color: { argb: pal.pillFg('gray') } };
+    }
+    // size every column to its longest value (plus a margin for wide capitals), so nothing is cropped
+    const textLen = (v) => (v == null ? 0 : v.richText ? v.richText.map((t) => t.text).join('').length : v instanceof Date ? 18 : String(v).length);
+    ws.columns.forEach((column) => {
+      let max = String(column.header).length;
+      column.eachCell({ includeEmpty: false }, (cell) => { if (cell.fullAddress.row > 1) max = Math.max(max, textLen(cell.value)); });
+      column.width = Math.ceil(max * 1.15) + 3;
+    });
+    ws.autoFilter = { from: 'A1', to: { row: 1, column: COLS.length } };
     const buffer = await wb.xlsx.writeBuffer();
     const filename = `PSD_Plug_List_${new Date().toISOString().slice(0, 10)}.xlsx`;
     await audit(req, 'workload.plugs_export', 'workload_plug', null, { rows: rows.length, truncated: rows.length >= 20000, filters: { date: req.query.date, from: req.query.from, to: req.query.to, q: req.query.q }, file: filename });
