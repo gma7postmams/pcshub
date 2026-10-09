@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
 import { DownloadIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
-import { FilterSelect, Pager, SortTh, useNarrow } from '../components/wl.jsx';
+import { FilterSelect, MoreMenu, Pager, SortTh, useNarrow } from '../components/wl.jsx';
 import { useSession } from '../context.jsx';
 import PlugGrid from '../components/PlugGrid.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
@@ -240,10 +240,11 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
             {canWorkload ? <button type="button" className="btn" disabled={filling} onClick={fillExisting}
               title="Rows already in the Workload Tracker that have a Plug ID but a blank PSD or PROG. NAME / PROJ. TITLE get them from this list (anything typed is kept)">{filling ? 'Filling…' : 'Fill Blank Rows'}</button> : null}
             {(canWrite && !isGrid) || isAdmin ? (
-              <span className="plug-delgroup">
-              {canWrite && !isGrid ? <button type="button" className="btn danger" disabled={!chosen.length} onClick={removeChosen} title="Delete the plugs ticked in the table">{chosen.length ? `Delete Selected (${chosen.length})` : 'Delete Selected'}</button> : null}
-              {isAdmin ? <button type="button" className="btn danger" disabled={!totals.plugs} onClick={() => setDeleting(true)} title="Delete what this view shows, or every day's plugs">Delete all…</button> : null}
-              </span>
+              <MoreMenu id="plug-more" label="More actions" items={[
+                canWrite && !isGrid && { label: `Delete Selected${chosen.length ? ` (${chosen.length})` : ''}`, danger: true, disabled: !chosen.length, title: 'Delete the plugs ticked in the table', onClick: removeChosen },
+                canWrite && !isGrid && chosen.length ? { label: 'Clear selection', onClick: () => setPicked(new Set()) } : null,
+                isAdmin && { label: 'Delete all…', danger: true, disabled: !totals.plugs, title: "Delete what this view shows, or every day's plugs", onClick: () => setDeleting(true) },
+              ]} />
             ) : null}
             {isGrid ? (
               <button type="button" className="btn primary" id="save-grid" disabled={!tbRef.current || tbRef.current.saving || !gridDirty} onClick={() => tbRef.current && tbRef.current.save()}>
