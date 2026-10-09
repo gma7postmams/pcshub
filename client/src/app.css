@@ -960,3 +960,5 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 .wl-search.short input { text-overflow: ellipsis; }
 .wl-presence { margin-left: auto; display: flex; align-items: center; }
 .kb-count { margin-left: auto; white-space: nowrap; font-size: 13px; }   /* Knowledge Base: the PDF count sits at the right end of the search row, so it needs no row of its own */
+/* PSD Daily Plug List toolbar: Delete Selected and Delete all… stay side by side — and wrap together, to the right, when the window is too narrow for one line */
+.plug-delgroup { display: inline-flex; gap: 8px; margin-left: auto; }

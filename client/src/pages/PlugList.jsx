@@ -67,6 +67,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
   const [q, setQ] = useState('');
   const query = useDebounced(q, 250);
   const [data, setData] = useState(null);            // { rows, total }; null = loading
+  const [picked, setPicked] = useState(() => new Set());   // ticked rows (Table mode) for Delete selected
   const [importing, setImporting] = useState(false);
   const [needYear, setNeedYear] = useState(null);    // file waiting for a year (its name has none)
   const [year, setYear] = useState(new Date().getFullYear());
@@ -83,7 +84,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
   const registerToolbar = useCallback((tb) => { tbRef.current = tb; setTbSig(tb ? `${tb.dirtyCount}|${tb.saving}|${tb.selCount}|${tb.wholeRows}` : ''); }, []);
   const okToLeave = async () => gridDirty === 0
     || !!(await confirm('Discard unsaved changes?', `${gridDirty} row${gridDirty === 1 ? '' : 's'} in the grid ${gridDirty === 1 ? 'has' : 'have'} unsaved changes. Leave without saving?`, { okText: 'Discard', danger: true }));
-  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setModeState(m); saveMode(session.session_key, m); };
+  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setModeState(m); saveMode(session.session_key, m); setPicked(new Set()); };
 
   const range = rangeOf(period, anchor, custom);
   const limit = size === 'all' ? ALL_CAP : Number(size);
@@ -121,7 +122,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
       setData(await get(`/api/plugs?${p}`));
     } catch (e) { setData({ rows: [], total: 0 }); toast(e.message, 'err'); }
   }, [anchor, range.from, range.to, query, limit, offset, period, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setData(null); loadRows(); }, [loadRows]);
+  useEffect(() => { setData(null); setPicked(new Set()); loadRows(); }, [loadRows]);
   const exportXlsx = async () => {   // the days and search on screen, in the sort on screen
     const p = new URLSearchParams({ order: period === 'all' ? 'desc' : 'asc' });
     if (range.from) p.set('from', range.from);
@@ -179,6 +180,17 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
   };
 
   const rows = data ? data.rows : [];
+  const chosen = rows.filter((r) => picked.has(r.id));
+  const allOn = !!rows.length && rows.every((r) => picked.has(r.id));
+  const toggle = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const removeChosen = async () => {
+    if (!chosen.length) return;
+    if (!(await confirm('Delete plugs', `Remove the ${chosen.length} selected plug${chosen.length === 1 ? '' : 's'} from the list? Workload rows already made from them are not touched.`, { okText: 'Delete', danger: true }))) return;
+    try {
+      const out = await post('/api/plugs/delete-selected', { ids: chosen.map((r) => r.id) });
+      toast(`${out.deleted} plug${out.deleted === 1 ? '' : 's'} deleted`); setPicked(new Set()); await loadDays(); loadRows();
+    } catch (e) { toast(e.message, 'err'); }
+  };
   const total = data ? data.total : 0;
   const viewLabel = `${rangeLabel(period, range, anchor)}${query ? ` · “${query}”` : ''}`;
   const everything = period === 'all' && !query;   // the view is the whole list
@@ -227,7 +239,12 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
             <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button>
             {canWorkload ? <button type="button" className="btn" disabled={filling} onClick={fillExisting}
               title="Rows already in the Workload Tracker that have a Plug ID but a blank PSD or PROG. NAME / PROJ. TITLE get them from this list (anything typed is kept)">{filling ? 'Filling…' : 'Fill Blank Rows'}</button> : null}
-            {isAdmin ? <button type="button" className="btn danger" disabled={!totals.plugs} onClick={() => setDeleting(true)} title="Delete what this view shows, or every day's plugs">Delete all…</button> : null}
+            {(canWrite && !isGrid) || isAdmin ? (
+              <span className="plug-delgroup">
+              {canWrite && !isGrid ? <button type="button" className="btn danger" disabled={!chosen.length} onClick={removeChosen} title="Delete the plugs ticked in the table">{chosen.length ? `Delete Selected (${chosen.length})` : 'Delete Selected'}</button> : null}
+              {isAdmin ? <button type="button" className="btn danger" disabled={!totals.plugs} onClick={() => setDeleting(true)} title="Delete what this view shows, or every day's plugs">Delete all…</button> : null}
+              </span>
+            ) : null}
             {isGrid ? (
               <button type="button" className="btn primary" id="save-grid" disabled={!tbRef.current || tbRef.current.saving || !gridDirty} onClick={() => tbRef.current && tbRef.current.save()}>
                 {tbRef.current && tbRef.current.saving ? 'Saving…' : `Save changes${gridDirty ? ` (${gridDirty})` : ''}`}
@@ -252,12 +269,14 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
               <table className={`t wl plug-t${narrow ? ' cards' : ''}`}>
                 <thead>
                   <tr>
+                    {canWrite ? <th className="chk"><input type="checkbox" checked={allOn} disabled={!rows.length} onChange={() => setPicked(allOn ? new Set() : new Set(rows.map((r) => r.id)))} title="Select every plug on this page" /></th> : null}
                     <SortTh k="plug_date" sort={sort} onSort={setSort}>DATE</SortTh><SortTh k="plug_id" sort={sort} onSort={setSort}>PLUG ID</SortTh><SortTh k="prog_name" sort={sort} onSort={setSort}>PROG. NAME / PROJ. TITLE</SortTh><SortTh k="psd" sort={sort} onSort={setSort}>PSD</SortTh><SortTh k="account_by" sort={sort} onSort={setSort}>ACCOUNT BY</SortTh><SortTh k="requested_by" sort={sort} onSort={setSort}>REQUESTED BY</SortTh><SortTh k="in_workload" sort={sort} onSort={setSort} className="plug-inwl">IN WORKLOAD</SortTh>{canWrite ? <th className="plug-actions">Actions</th> : null}
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length ? rows.map((r, i) => (
                     <tr key={r.id} className={r.in_workload ? 'done' : ''}>
+                      {canWrite ? <td className="chk"><input type="checkbox" checked={picked.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${r.plug_id}`} /></td> : null}
                       <td data-label="Date" className="nowrap">{dateLabel(r.plug_date)}</td>
                       <td data-k="plug_id" data-label="Plug ID" className="mono">{r.plug_id}{r.is_additional ? <span className="chip c-orange plug-add" title="Listed under “Additional for …”">Added</span> : null}</td>
                       <td data-label="PROG. NAME / PROJ. TITLE">{r.prog_name}</td>
@@ -272,7 +291,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
                         </td>
                       ) : null}
                     </tr>
-                  )) : <tr><td colSpan={canWrite ? 8 : 7} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr>}
+                  )) : <tr><td colSpan={canWrite ? 9 : 7} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr>}
                 </tbody>
               </table>
             </div>

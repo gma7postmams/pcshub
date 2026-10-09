@@ -438,6 +438,20 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     res.json({ ok: true, deleted: result.rowCount });
   }));
 
+  // Delete the plugs ticked in the table (Table mode "Delete Selected"). Workload rows already made from them are not touched.
+  router.post('/delete-selected', requireAction('plugs.write'), asyncH(async (req, res) => {
+    const list = req.body && req.body.ids;
+    if (!Array.isArray(list) || !list.length) throw new HttpError(400, 'No plugs selected');
+    if (list.length > 1000) throw new HttpError(400, 'Select at most 1000 plugs at a time');
+    const ids = [...new Set(list.map((x) => v.id(x)))];
+    const out = await db.tx(async (c) => {
+      const { rows } = await c.query('DELETE FROM workload_plugs WHERE id = ANY($1::bigint[]) RETURNING id, plug_date, plug_id', [ids]);
+      for (const r of rows) await audit(req, 'workload.plug_delete', 'workload_plug', r.id, { plug_date: r.plug_date, plug_id: r.plug_id, batch: true }, c);
+      return rows.length;
+    });
+    res.json({ ok: true, deleted: out });
+  }));
+
   // ---- copy a day's plugs (or the chosen ones) into the Workload Tracker: one new row per plug not already there ----
   // The shared core of "Copy to Workload": one new Workload row per plug that isn't there yet for that day (Plug ID matched in any letter case, also
   // inside a multi-line Plug ID cell). Days in a locked period are skipped. Used by the Copy button and, automatically, after an import or a new plug.
