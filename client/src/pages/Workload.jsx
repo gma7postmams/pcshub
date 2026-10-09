@@ -1494,9 +1494,9 @@ export default function Workload() {
             {canWrite && isGrid && selRows.length ? <button type="button" className="btn" id="priority-btn" data-keep-sel onClick={togglePriority} title="Highlights the Breakdate / Time of the selected row(s)">{allPrio ? 'Remove Priority' : 'Set Priority'}</button> : null}
             {canWrite && isGrid && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? <button type="button" className="btn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}>Delete {selRows.filter((r) => !xlLocked(r)).length > 1 ? `${selRows.filter((r) => !xlLocked(r)).length} Rows` : 'Row'}</button> : null}
             {s.canPage('/admin') ? <button type="button" className="btn" id="lock-dates-btn" onClick={() => setManagingLocks(true)}><LockIcon /> Lock Dates</button> : null}
-            {canWrite && !isGrid ? (
-              <button type="button" className="btn danger" id="delete-selected-btn" disabled={!pickedCount} onClick={() => deleteSelected()} title="Delete the rows ticked in the table">
-                Delete Selected{pickedCount ? ` (${pickedCount})` : ''}
+            {canWrite && !isGrid && pickedCount ? (
+              <button type="button" className="btn danger" id="delete-selected-btn" onClick={() => deleteSelected()} title="Delete the rows ticked in the table">
+                Delete Selected ({pickedCount})
               </button>
             ) : null}
             {canWrite && !isGrid ? (

@@ -237,9 +237,9 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
             <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button>
             {canWorkload ? <button type="button" className="btn" disabled={filling} onClick={fillExisting}
               title="Rows already in the Workload Tracker that have a Plug ID but a blank PSD or PROG. NAME / PROJ. TITLE get them from this list (anything typed is kept)">{filling ? 'Filling…' : 'Fill Blank Rows'}</button> : null}
-            {canWrite && !isGrid ? (
-              <button type="button" className="btn danger" id="delete-selected-btn" disabled={!chosen.length} onClick={removeChosen} title="Delete the plugs ticked in the table">
-                {chosen.length ? `Delete Selected (${chosen.length})` : 'Delete Selected'}
+            {canWrite && !isGrid && chosen.length ? (
+              <button type="button" className="btn danger" id="delete-selected-btn" onClick={removeChosen} title="Delete the plugs ticked in the table">
+                Delete Selected ({chosen.length})
               </button>
             ) : null}
             {isGrid ? (
