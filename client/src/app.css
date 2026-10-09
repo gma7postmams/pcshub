@@ -557,6 +557,7 @@ table.t.wl .stack .sub { margin: 0; }
 .rowmenu button { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font: 550 13.5px var(--font); text-align: left; cursor: pointer; }
 .rowmenu button:hover { background: var(--surface-3); }
 .rowmenu button.danger { color: var(--red); }
+.rowmenu button:disabled, .rowmenu button.danger:disabled { color: var(--text-3, #9aa3b2); opacity: .55; cursor: not-allowed; background: transparent; }   /* greyed out: e.g. Delete Selected while nothing is ticked */
 .rowmenu svg { width: 16px; height: 16px; flex: none; }
 
 .wl-card .pager { padding: 12px 16px; border-top: 1px solid var(--border); }

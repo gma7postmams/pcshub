@@ -243,7 +243,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
               <MoreMenu id="plug-more" label="More actions" items={[
                 canWrite && !isGrid && { label: `Delete Selected${chosen.length ? ` (${chosen.length})` : ''}`, danger: true, disabled: !chosen.length, title: 'Delete the plugs ticked in the table', onClick: removeChosen },
                 canWrite && !isGrid && chosen.length ? { label: 'Clear selection', onClick: () => setPicked(new Set()) } : null,
-                isAdmin && { label: 'Delete all…', danger: true, disabled: !totals.plugs, title: "Delete what this view shows, or every day's plugs", onClick: () => setDeleting(true) },
+                isAdmin && { label: 'Delete All', danger: true, disabled: !totals.plugs, title: "Delete what this view shows, or every day's plugs", onClick: () => setDeleting(true) },
               ]} />
             ) : null}
             {isGrid ? (

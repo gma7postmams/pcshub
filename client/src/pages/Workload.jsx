@@ -1496,9 +1496,9 @@ export default function Workload() {
             {s.canPage('/admin') ? <button type="button" className="btn" id="lock-dates-btn" onClick={() => setManagingLocks(true)}><LockIcon /> Lock Dates</button> : null}
             {canWrite && !isGrid ? (
               <MoreMenu id="more-btn" label="More actions" items={[
-                { label: `Delete selected${pickedCount ? ` (${pickedCount})` : ''}`, danger: true, disabled: !pickedCount, onClick: () => deleteSelected() },
+                { label: `Delete Selected${pickedCount ? ` (${pickedCount})` : ''}`, danger: true, disabled: !pickedCount, onClick: () => deleteSelected() },
                 pickedCount ? { label: 'Clear selection', onClick: clearPicks } : null,
-                isAdminUser && { label: 'Delete all…', danger: true, title: 'Delete every row that matches the current tab and filters', onClick: () => setDeletingAll(true) },
+                isAdminUser && { label: 'Delete All', danger: true, title: 'Delete every row that matches the current tab and filters', onClick: () => setDeletingAll(true) },
               ]} />
             ) : null}
             {canWrite && !isGrid ? (
