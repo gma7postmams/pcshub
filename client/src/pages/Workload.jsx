@@ -4,7 +4,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, LockIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, SortTh, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
+import { DateChip, DateRange, FilterSelect, MoreMenu, PlatformCell, Pager, RowMenu, SortTh, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 
@@ -1252,7 +1252,7 @@ export default function Workload() {
   tblMouse.current.down = (e) => {   // a click anywhere outside the table (and its bar / dialogs) drops the selection
     if (!(picked.size || allMatching)) return;
     const t = e.target;
-    if (t && t.closest && !t.closest('#tbl, .sel-bar, .modal-backdrop, .xl-menu')) clearPicks();
+    if (t && t.closest && !t.closest('#tbl, #more-btn, .rowmenu, .modal-backdrop, .xl-menu')) clearPicks();
   };
   const saveGrid = async () => {
     const idx = [];
@@ -1498,6 +1498,13 @@ export default function Workload() {
             {canWrite && isGrid && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? <button type="button" className="btn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}>Delete {selRows.filter((r) => !xlLocked(r)).length > 1 ? `${selRows.filter((r) => !xlLocked(r)).length} Rows` : 'Row'}</button> : null}
             {s.canPage('/admin') ? <button type="button" className="btn" id="lock-dates-btn" onClick={() => setManagingLocks(true)}><LockIcon /> Lock Dates</button> : null}
             {canWrite && !isGrid ? (
+              <MoreMenu id="more-btn" label="More actions" items={[
+                { label: `Delete selected${pickedCount ? ` (${pickedCount})` : ''}`, danger: true, disabled: !pickedCount, onClick: () => deleteSelected() },
+                pickedCount ? { label: 'Clear selection', onClick: clearPicks } : null,
+                isAdminUser && { label: 'Delete all…', danger: true, title: 'Delete every row that matches the current tab and filters', onClick: () => setDeletingAll(true) },
+              ]} />
+            ) : null}
+            {canWrite && !isGrid ? (
               <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({ rec: null })}><PlusIcon /> New Workload</button>
             ) : null}
             {canWrite && isGrid ? (
@@ -1598,20 +1605,6 @@ export default function Workload() {
           </>
         ) : (
           <>
-            {canWrite && data && data.rows && data.rows.length ? (
-              <div className="sel-bar">
-                {pickedCount ? (
-                  <span className="sel-count">
-                    {allMatching ? <>All <strong>{total}</strong> matching rows selected</> : <><strong>{pickedCount}</strong> selected</>}
-                    {!allMatching && pageAllPicked && isAdminUser && total > pageRows.length ? <span className="dim">Press Ctrl+A again to select all {total} matching rows</span> : null}
-                    <button type="button" className="linkbtn" onClick={clearPicks}>Clear</button>
-                  </span>
-                ) : <span className="dim sel-count">Tick the boxes (or drag across rows; Shift / Ctrl+click to extend) · Ctrl+A selects all</span>}
-                <span className="grow" />
-                <button type="button" className="btn danger sm" disabled={!pickedCount} onClick={() => deleteSelected()}>Delete selected{pickedCount ? ` (${pickedCount})` : ''}</button>
-                {isAdminUser ? <button type="button" className="btn danger sm" onClick={() => setDeletingAll(true)} title="Delete every row that matches the current tab and filters">Delete all…</button> : null}
-              </div>
-            ) : null}
             <div className={`table-wrap${cards ? '' : ' wl-fit'}`} id="tbl" onClickCapture={(e) => {
               if (tblSuppress.current) { tblSuppress.current = false; e.stopPropagation(); e.preventDefault(); return; }   // the click that ended a drag / Shift / Ctrl+click
               if (canWrite && (picked.size || allMatching) && !(e.target.closest && e.target.closest('.actions-cell, .chk'))) clearPicks();

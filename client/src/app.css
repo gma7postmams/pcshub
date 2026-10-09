@@ -951,3 +951,7 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 .plug-t:not(.cards) { width: 100%; min-width: 0; }
 .plug-t:not(.cards) th, .plug-t:not(.cards) td { white-space: nowrap; }
 .plug-t:not(.cards) td[data-label="PROG. NAME / PROJ. TITLE"] { white-space: normal; min-width: 260px; }
+
+/* Workload Tracker toolbar: "⋯" menu (Delete selected / Delete all…) that replaced the strip above the table */
+.btn.icon-only { padding-left: 8px; padding-right: 8px; min-width: 36px; justify-content: center; }
+.btn.icon-only svg { width: 20px; height: 20px; }

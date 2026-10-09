@@ -1,6 +1,6 @@
 import { Children, useCallback, useEffect, useRef, useState } from 'react';
 import { fmtDate, isoDate } from '../lib/util.js';
-import { CalendarIcon, ChevronDownIcon, CopyIcon, KebabIcon, PencilIcon, TrashIcon } from './Icons.jsx';
+import { CalendarIcon, ChevronDownIcon, CopyIcon, KebabIcon, MoreIcon, PencilIcon, TrashIcon } from './Icons.jsx';
 
 // Presentational pieces for the Workload Tracker (pills, summary cards, filters, row menu, pager).
 // Colours come from the app's theme variables (see .c-* in app.css), so they follow every theme and light/dark mode.
@@ -185,6 +185,43 @@ export function RowMenu({ onEdit, onDuplicate, onDelete }) {
           <button type="button" role="menuitem" onClick={() => { close(); onEdit(); }}><PencilIcon /> Edit</button>
           <button type="button" role="menuitem" onClick={() => { close(); onDuplicate(); }}><CopyIcon /> Duplicate</button>
           <button type="button" role="menuitem" className="danger row-del" onClick={() => { close(); onDelete(); }}><TrashIcon /> Delete</button>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/** Toolbar "⋯" button with a drop-down list: items = [{ label, onClick, danger, disabled, title }] (a falsy entry is skipped). Fixed-position like RowMenu. */
+export function MoreMenu({ items, label = 'More actions', id }) {
+  const [pos, setPos] = useState(null);
+  const btn = useRef(null);
+  const menu = useRef(null);
+  const close = useCallback(() => setPos(null), []);
+  useEffect(() => {
+    if (!pos) return undefined;
+    const away = (e) => { if (menu.current && !menu.current.contains(e.target) && !btn.current.contains(e.target)) close(); };
+    const esc = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    window.addEventListener('resize', close);
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); window.removeEventListener('resize', close); };
+  }, [pos, close]);
+  const toggle = () => {
+    if (pos) { close(); return; }
+    const r = btn.current.getBoundingClientRect();
+    setPos({ right: Math.max(8, window.innerWidth - r.right), top: r.bottom + 4 });
+  };
+  const list = (items || []).filter(Boolean);
+  if (!list.length) return null;
+  return (
+    <>
+      <button type="button" className="btn icon-only" id={id} aria-label={label} title={label} aria-haspopup="menu" aria-expanded={!!pos} ref={btn} onClick={toggle}><MoreIcon /></button>
+      {pos ? (
+        <div className="rowmenu" role="menu" style={pos} ref={menu}>
+          {list.map((it) => (
+            <button key={it.label} type="button" role="menuitem" className={it.danger ? 'danger row-del' : undefined} disabled={it.disabled} title={it.title}
+              onClick={() => { close(); it.onClick(); }}>{it.label}</button>
+          ))}
         </div>
       ) : null}
     </>
