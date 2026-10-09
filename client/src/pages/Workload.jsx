@@ -1453,7 +1453,7 @@ export default function Workload() {
   return (
     <main className="container wide wl-page">
       <div className="page-head">
-        <div><h1>Workload Tracker</h1><div className="sub">Track and monitor promotional plug workloads across VGFX, VEDIT and Audio.</div></div>
+        <h1 className="sr-only">Workload Tracker</h1>
         <div className="actions"><PresenceAvatars path="/workload" /></div>
       </div>
 

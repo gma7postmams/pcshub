@@ -1,4 +1,3 @@
-import { Link } from 'react-router-dom';
 import { useSession } from '../context.jsx';
 import PlugList from './PlugList.jsx';
 
@@ -12,16 +11,7 @@ export default function PlugListPage() {
 
   return (
     <main className="container wide wl-page">
-      <div className="page-head">
-        <div>
-          <h1>PSD Daily Plug List</h1>
-          <div className="sub">
-            The PSD’s daily plug list, one list per day. The{' '}
-            <Link to="/workload">Workload Tracker</Link>
-            {' '}copies Plug ID, PSD and PROG. NAME / PROJ. TITLE from here.
-          </div>
-        </div>
-      </div>
+      <h1 className="sr-only">PSD Daily Plug List</h1>
 
       <div className="card">
         <PlugList

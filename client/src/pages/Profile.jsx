@@ -45,7 +45,7 @@ export default function Profile() {
 
   return (
     <main className="container">
-      <div className="page-head"><div><h1>Profile</h1><div className="sub">Your account, password and two-factor authentication.</div></div></div>
+      <h1 className="sr-only">Profile</h1>
       {forced ? <div className="alert warn mb-12"><strong>Password change required.</strong> Set a new password to continue using the app.</div> : null}
       {!forced && needs2fa ? <div className="alert warn mb-12"><strong>Two-factor authentication is required for your account.</strong> Set it up below to continue using the app.</div> : null}
 

@@ -104,16 +104,16 @@ export default function Knowledge() {
 
   return (
     <main className="container wide wl-page">
-      <div className="page-head">
-        <div><h1>Knowledge Base</h1><div className="sub">Reference documents (PDF){docs ? ` · ${docs.length}` : ''}</div></div>
-        {canWrite ? (
+      <h1 className="sr-only">Knowledge Base</h1>
+      {canWrite ? (
+        <div className="page-head">
           <div className="actions">
             <button type="button" className="btn primary" disabled={busy} onClick={() => inputRef.current && inputRef.current.click()}>
               <UploadIcon /> Upload PDF
             </button>
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       {canWrite ? (
         <>

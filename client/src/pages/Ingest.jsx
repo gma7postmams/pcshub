@@ -274,7 +274,7 @@ export default function Ingest() {
   return (
     <main className="container wide wl-page">
       <div className="page-head">
-        <div><h1>Ingest Tracker</h1><div className="sub">Log ingest requests, set their destination and approval, and track the CM status.</div></div>
+        <h1 className="sr-only">Ingest Tracker</h1>
         <div className="actions">
           {canDelete && picked.size ? <button type="button" className="btn danger" id="del-sel" onClick={removePicked}>Delete selected ({picked.size})</button> : null}
           <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
