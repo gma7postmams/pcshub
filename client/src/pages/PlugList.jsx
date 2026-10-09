@@ -293,14 +293,16 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
               </table>
             </div>
             )}
-            <div className="plug-foot">
-              <FilterSelect label="Rows" value={size} onChange={(e) => setSize(e.target.value)}><Options list={SIZES} /></FilterSelect>
-              <div className="grow">
-                {size === 'all' || total <= limit
-                  ? <div className="pager"><span>{total ? `${total} plug${total === 1 ? '' : 's'}${size === 'all' && total > ALL_CAP ? ` (showing the first ${ALL_CAP})` : ''}` : ''}</span></div>
-                  : <Pager total={total} offset={offset} size={limit} onOffset={setOffset} />}
-              </div>
-            </div>
+            {(() => {
+              const rowsSel = (
+                <label className="rows-sel"><span>Rows</span>
+                  <select value={size} onChange={(e) => setSize(e.target.value)} aria-label="Rows per page"><Options list={SIZES} /></select>
+                </label>
+              );
+              return size === 'all' || total <= limit
+                ? <div className="pager"><span>{total ? `${total} plug${total === 1 ? '' : 's'}${size === 'all' && total > ALL_CAP ? ` (showing the first ${ALL_CAP})` : ''}` : ''}</span>{rowsSel}</div>
+                : <Pager total={total} offset={offset} size={limit} onOffset={setOffset} lead={rowsSel} />;
+            })()}
           </>
         )}
 

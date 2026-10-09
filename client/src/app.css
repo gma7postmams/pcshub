@@ -974,3 +974,8 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 
 /* Workload Tracker, Ingest Tracker, PSD Daily Plug List: the table's box reaches nearly to the bottom of the window (less padding under the card) */
 .container.wl-page { padding: 10px; }
+
+/* PSD Daily Plug List footer: one slim row like the Workload Tracker's — the count, a compact Rows picker, then the page buttons */
+.rows-sel { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 13px; color: var(--text-2); }
+.rows-sel select { height: 30px; padding: 0 22px 0 8px; font-size: 13px; width: auto; min-width: 0; }
+.plug-list .pager { padding: 12px 16px; border-top: 1px solid var(--border); }
