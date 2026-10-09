@@ -956,6 +956,6 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 .btn.icon-only { padding-left: 8px; padding-right: 8px; min-width: 36px; justify-content: center; }
 .btn.icon-only svg { width: 20px; height: 20px; }
 /* Workload Tracker: a shorter search box, with the people on the page at the right end of the same row (no separate strip above the card) */
-.wl-search.short { flex: 0 1 520px; min-width: 200px; }
+.wl-search.short { flex: 0 1 640px; min-width: 200px; }
 .wl-search.short input { text-overflow: ellipsis; }
 .wl-presence { margin-left: auto; display: flex; align-items: center; }
