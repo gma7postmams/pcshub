@@ -977,5 +977,5 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 
 /* PSD Daily Plug List footer: one slim row like the Workload Tracker's — the count, a compact Rows picker, then the page buttons */
 .rows-sel { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 13px; color: var(--text-2); }
-.rows-sel select { height: 30px; padding: 0 22px 0 8px; font-size: 13px; width: auto; min-width: 0; }
-.plug-list .pager { padding: 12px 0; border-top: 1px solid var(--border); }
+.rows-sel select { box-sizing: border-box; height: 30px; margin: 0; padding: 0 22px 0 8px; font-size: 13px; width: auto; min-width: 0; }
+.plug-list .pager { box-sizing: border-box; height: 54px; padding: 0; border-top: 1px solid var(--border); }
