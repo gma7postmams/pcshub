@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
 import { DownloadIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
-import { FilterSelect, Pager, RowMenu, SortTh, useFitBox, useNarrow } from '../components/wl.jsx';
+import { FilterSelect, FullscreenButton, MoreMenu, Pager, RowMenu, SortTh, useFitBox, useFullscreen, useNarrow } from '../components/wl.jsx';
 import { useSession } from '../context.jsx';
 import PlugGrid from '../components/PlugGrid.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
@@ -60,6 +60,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const fileRef = useRef(null);
   const [days, setDays] = useState(null);            // [{ date, n }] newest first (the latest 366 days with a list); null = loading
   const [totals, setTotals] = useState({ plugs: 0, days: 0, first: '', last: '' });   // across every day
+  const [full, setFull] = useFullscreen();
   const [period, setPeriodState] = useState(() => stored('period', 'day', PERIODS.map((p) => p.value)));
   const [size, setSizeState] = useState(() => stored('size', '50', SIZES.map((s) => s.value)));
   const [anchor, setAnchor] = useState('');          // the day / a day of the week / of the month being looked at
@@ -179,7 +180,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   };
 
   const rows = data ? data.rows : [];
-  useFitBox(`${isGrid}|${narrow}|${rows.length}|${days === null}|${!!data}|${size}`);
+  useFitBox(`${isGrid}|${narrow}|${rows.length}|${days === null}|${!!data}|${size}|${full}`);
   const chosen = rows.filter((r) => picked.has(r.id));
   const allOn = !!rows.length && rows.every((r) => picked.has(r.id));
   const toggle = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -224,20 +225,19 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
             <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
           </div>
         ) : null}
-        {!canWrite ? <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button> : null}
+        <button type="button" className="btn icon" id="export-btn" title="Export to Excel" aria-label="Export to Excel" onClick={exportXlsx} disabled={!total}><DownloadIcon /></button>
+        <FullscreenButton full={full} onToggle={() => setFull((f) => !f)} />
         {canWrite ? (
           <>
             <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files[0])} />
-            <button type="button" className="btn" disabled={importing} onClick={() => fileRef.current.click()}><UploadIcon /> {importing ? 'Importing…' : 'Import Plug List'}</button>
+            <button type="button" className="btn icon" id="import-btn" disabled={importing} title="Import the PSD's daily plug list workbook" aria-label="Import Plug List" onClick={() => fileRef.current.click()}><UploadIcon /></button>
             {isGrid ? (
               <>
                 <button type="button" className="btn" id="add-row" onClick={() => tbRef.current && tbRef.current.addRow()}><PlusIcon /> Add Row</button>
                 {tbRef.current && tbRef.current.selCount && tbRef.current.wholeRows ? <button type="button" className="btn danger" data-keep-sel onClick={() => tbRef.current.deleteRows()}>Delete {tbRef.current.selCount > 1 ? `${tbRef.current.selCount} Rows` : 'Row'}</button> : null}
               </>
             ) : <button type="button" className="btn" onClick={() => setAdding(true)}><PlusIcon /> Add Plug</button>}
-            <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button>
-            {canWorkload ? <button type="button" className="btn" disabled={filling} onClick={fillExisting}
-              title="Rows already in the Workload Tracker that have a Plug ID but a blank PSD or PROG. NAME / PROJ. TITLE get them from this list (anything typed is kept)">{filling ? 'Filling…' : 'Fill Blank Rows'}</button> : null}
+            {canWorkload ? <MoreMenu items={[{ label: filling ? 'Filling…' : 'Fill Blank Rows', disabled: filling, onClick: fillExisting }]} /> : null}
             {canWrite && !isGrid && chosen.length ? (
               <button type="button" className="btn danger" id="delete-selected-btn" onClick={removeChosen} title="Delete the plugs ticked in the table">
                 Delete Selected ({chosen.length})

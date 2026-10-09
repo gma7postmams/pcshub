@@ -4,7 +4,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { ago, downloadFile, fmtDate, fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { PlusIcon, SearchIcon, DownloadIcon } from '../components/Icons.jsx';
-import { Chip, DateChip, DateRange, FilterSelect, Pager, PlatformCell, SortTh, useFitBox, useNarrow } from '../components/wl.jsx';
+import { Chip, DateChip, DateRange, FilterChips, FilterSelect, FiltersMenu, FullscreenButton, Pager, PlatformCell, SortTh, useFitBox, useFullscreen, useNarrow } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
 // Status (CM) is blank (Pending) until CM picks one of these
@@ -146,6 +146,7 @@ export default function Ingest() {
   const [lookups, setLookups] = useState(null);
   const [filt, setFilt] = useState({ q: '', status: /^pending$/i.test(params.get('status') || '') ? 'PENDING' : (params.get('status') || ''), program: '', platform: '', from: '', to: '', approval: /^pending$/i.test(params.get('approval') || '') ? 'pending' : '' });
   const [offset, setOffset] = useState(0);
+  const [full, setFull] = useFullscreen();
   const [sort, setSortState] = useState({ k: '', dir: 'asc' });   // clicked column header
   const setSort = (s2) => { setSortState(s2); setOffset(0); };
   const [data, setData] = useState(null);
@@ -259,7 +260,7 @@ export default function Ingest() {
   const total = data ? data.total : 0;
 
   const rows = data && data.rows ? data.rows : [];
-  useFitBox(`${rows.length}|${!!data}|${picked.size ? 1 : 0}`);
+  useFitBox(`${rows.length}|${!!data}|${picked.size ? 1 : 0}|${full}`);
   const allOn = rows.length > 0 && rows.every((r) => picked.has(r.id));
   const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const removePicked = async () => {
@@ -277,24 +278,26 @@ export default function Ingest() {
       <h1 className="sr-only">Ingest Tracker</h1>
 
       <div className="card wl-card">
-        <div className="wl-tabbar one-row">
-          <div className="wl-filters">
+        <div className="ws-bar">
           <label className="wl-search short">
             <SearchIcon />
             <input type="search" placeholder="Search program, party, source, folder, remarks…" style={{ textOverflow: 'ellipsis' }} value={filt.q} onChange={setF('q')} />
           </label>
-          <FilterSelect label="Status" value={filt.status} onChange={setF('status')}><Options list={STATUS_FILTER} blank="All" /></FilterSelect>
-          <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All" /></FilterSelect>
+          <FiltersMenu count={['status', 'platform'].filter((k) => filt[k]).length}>
+            <FilterSelect label="Status" value={filt.status} onChange={setF('status')}><Options list={STATUS_FILTER} blank="All" /></FilterSelect>
+            <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All" /></FilterSelect>
+          </FiltersMenu>
           <DateRange title="Episode / Breakdate range" from={filt.from} to={filt.to} onChange={({ from, to }) => { setFilt((f) => ({ ...f, from, to })); setOffset(0); }} />
-          {filt.approval ? (   // opened from the Dashboard's Pending Approval card: only requests nobody has approved yet; the chip clears it
-            <button type="button" className="btn sm" title="Show every request again" onClick={() => { setFilt((f) => ({ ...f, approval: '' })); setOffset(0); }}>Awaiting approval ✕</button>
-          ) : null}
-          </div>
-          <div className="wl-tabactions">
-            <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
-            {canDelete && picked.size ? <button type="button" className="btn danger" id="del-sel" onClick={removePicked} title="Delete the records ticked in the table">Delete Selected ({picked.size})</button> : null}
-            {canWrite ? <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({})}><PlusIcon /> New Ingest</button> : null}
-          </div>
+          <FilterChips chips={[
+            ...[['status', 'Status'], ['platform', 'Platform']].filter(([k]) => filt[k]).map(([k, l]) => ({ key: k, label: `${l}: ${filt[k]}`, clear: () => { setFilt((f) => ({ ...f, [k]: '' })); setOffset(0); } })),
+            // opened from the Dashboard's Pending Approval card: only requests nobody has approved yet; the chip clears it
+            ...(filt.approval ? [{ key: 'approval', label: 'Awaiting approval', clear: () => { setFilt((f) => ({ ...f, approval: '' })); setOffset(0); } }] : []),
+          ]} />
+          <span className="grow" />
+          <button type="button" className="btn icon" id="export-btn" title="Export to Excel" aria-label="Export to Excel" onClick={exportXlsx}><DownloadIcon /></button>
+          <FullscreenButton full={full} onToggle={() => setFull((f) => !f)} />
+          {canDelete && picked.size ? <button type="button" className="btn danger" id="del-sel" onClick={removePicked} title="Delete the records ticked in the table">Delete Selected ({picked.size})</button> : null}
+          {canWrite ? <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({})}><PlusIcon /> New Ingest</button> : null}
         </div>
         <div className={`table-wrap${narrow ? "" : " wl-fit"}`} id="tbl">
           {!data ? <Empty>Loading…</Empty>

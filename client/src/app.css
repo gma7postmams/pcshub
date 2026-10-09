@@ -979,3 +979,54 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 .rows-sel { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 13px; color: var(--text-2); }
 .rows-sel select { box-sizing: border-box; height: 30px; margin: 0; padding: 0 22px 0 8px; font-size: 13px; width: auto; min-width: 0; }
 .plug-list .pager { box-sizing: border-box; height: 54px; padding: 0; border-top: 1px solid var(--border); }
+
+/* ---- Workspace toolbar: one row, Filters popover, icon buttons, full screen, bottom bar with team tabs + day strip ---- */
+.ws-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.ws-bar .grow { flex: 1; }
+.ws-bar .wl-search.short { flex: 0 1 340px; min-width: 160px; height: 34px; }
+.ws-bar .btn, .ws-bar .daterange-btn { height: 34px; }
+.btn.icon { width: 34px; padding: 0; justify-content: center; }
+.btn.icon svg { width: 16px; height: 16px; }
+.pop { position: relative; }
+.pop-panel { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; min-width: 240px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); border: 1px solid var(--border-2); border-radius: 10px; box-shadow: var(--shadow-lg, 0 10px 30px rgba(0,0,0,.18)); }
+.pop-panel.right { left: auto; right: 0; min-width: 170px; padding: 6px; gap: 2px; }
+.menu-panel button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.menu-panel button:hover { background: var(--surface-3); }
+.menu-panel button svg { width: 15px; height: 15px; }
+.btn.has-filters { border-color: var(--accent); color: var(--accent); }
+.badge-n { margin-left: 6px; min-width: 18px; padding: 0 6px; border-radius: 999px; background: var(--accent); color: var(--accent-contrast); font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+.fchip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.fchip button { width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
+.fchip button:hover { background: var(--accent); color: var(--accent-contrast); }
+.ws-foot { padding: 0 12px; min-height: 40px; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--border); }
+.ws-foot .sheet-tabs button { height: 40px; }
+.ds-count { color: var(--text-2); font-size: 13px; margin-left: 6px; }
+.daystrip { display: inline-flex; align-items: center; gap: 4px; }
+.daystrip .ds-month { color: var(--text-2); font-size: 13px; margin-right: 6px; white-space: nowrap; }
+.daystrip .pg { min-width: 32px; padding: 0 6px; position: relative; }
+.daystrip .pg.has::after { content: ''; position: absolute; bottom: 2px; left: 50%; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--accent); }
+.daystrip .pg.on.has::after { background: var(--accent-contrast); }
+tr[data-date] { scroll-margin-top: 44px; }
+tr.day-hit td { animation: dayhit 1.8s ease-out; }
+@keyframes dayhit { 0%, 40% { background: var(--accent-soft); } 100% { background: transparent; } }
+/* Full screen: the site header and page margins go; the card fills the window */
+body.ws-full .topnav { display: none; }
+body.ws-full .container.wl-page { padding: 0; }
+body.ws-full .wl-card { border-radius: 0; border-left: 0; border-right: 0; margin: 0; }
+@media (max-width: 700px) { .ws-bar .wl-search.short { flex: 1 1 100%; } .daystrip .ds-month { display: none; } }
+.ws-foot .sheet-tabs { margin: 0 6px 0 0; border: 0; flex: none; }
+.ws-foot .sheet-tabs button { display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border-bottom: 0; border-top: 2px solid transparent; font-size: 13px; }
+.ws-foot .sheet-tabs button.on { border-top-color: var(--accent); }
+@media (max-width: 700px) {
+  .ws-bar { gap: 6px; padding: 8px; }
+  .ws-bar .grow { display: none; }
+  .ws-bar .daterange { flex: 1 1 110px; min-width: 110px; }
+  .ws-bar .daterange-btn { width: 100%; justify-content: center; }
+  .ws-bar .wl-presence { display: none; }
+  .ws-bar #fullscreen-btn { display: none; }
+  .ws-bar .btn.primary { flex: 1 1 auto; justify-content: center; }
+  .ws-foot { padding: 0 6px; row-gap: 0; }
+  .ws-foot .ds-count { flex: 1 1 100%; order: 3; margin: 0 0 6px 6px; }
+  .daystrip { margin-left: auto; }
+  .daystrip .pg { min-width: 28px; }
+}

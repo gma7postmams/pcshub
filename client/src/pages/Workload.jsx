@@ -4,7 +4,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, LockIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, SortTh, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
+import { DateChip, DateRange, DayStrip, FilterChips, FilterSelect, FiltersMenu, FullscreenButton, MoreMenu, PlatformCell, RowMenu, SortTh, TypePill, UnitsPills, WorkDate, useFullscreen } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 
@@ -12,7 +12,8 @@ import PresenceAvatars from '../components/PresenceAvatars.jsx';
 // (All / VGFX / VEDIT / Audio) are filters over it. Fields, per-tab columns and the Platform rules come
 // from /api/workload/meta (field types follow the red notes in the Sept 2026 template:
 // dropdown / Date / Open). Table mode = read + add/edit form; Excel mode = editable grid with batch save.
-const PAGE = 50;
+const TABLE_LIMIT = 400;   // Table mode lists every row in the date range, up to what the server returns in one go
+const PAGE = TABLE_LIMIT;
 const GRID_LIMIT = 200;
 const CARDS_BELOW = 900;   // window width under which table rows become cards
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
@@ -366,7 +367,9 @@ export default function Workload() {
   const [mode, setMode] = useState(() => readView(s.session_key).mode);   // Table or Excel: kept across a refresh while you stay signed in
   const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', from: '', to: '' });
   const [stats, setStats] = useState(null);   // summary cards + tab badges
-  const [offset, setOffset] = useState(0);
+  const [offset, setOffset] = useState(0);   // always 0 now: no page numbers, every row in the date range is listed
+  const [full, setFull] = useFullscreen();
+  const [stripDay, setStripDay] = useState('');   // the day the day strip is centred on ('' = today)
   const [sort, setSortState] = useState({ k: '', dir: 'asc' });   // clicked column header (Table mode)
   const setSort = (s2) => { setSortState(s2); setOffset(0); };
   const [data, setData] = useState(null);   // table mode: { total, rows } | { error }
@@ -521,7 +524,7 @@ export default function Workload() {
         hist.current = { past: [], future: [], tag: null };
         setGrid({ total: d.total, rows: d.rows.map((r) => ({ ...r, _key: `r${r.id}`, _dirty: false })) });
       } else {
-        setData(await get(`/api/workload?${query({ limit: PAGE, offset })}`));
+        setData(await get(`/api/workload?${query({ limit: TABLE_LIMIT })}`));
       }
     } catch (e) {
       (isGrid ? setGrid : setData)({ error: e.message, rows: [], total: 0 });
@@ -1295,7 +1298,7 @@ export default function Workload() {
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
-  }, [hasMeta, mode, tab, cards, winW, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, !!data, !!grid]);
+  }, [hasMeta, mode, tab, cards, winW, full, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, !!data, !!grid]);
 
   if (!meta) return <main className="container wide"><Empty>Loading…</Empty></main>;
 
@@ -1454,6 +1457,42 @@ export default function Workload() {
   };
 
   const tabCount = { ALL: stats && stats.total, VGFX: stats && stats.vgfx, VEDIT: stats && stats.vedit, AUDIO: stats && stats.audio };
+  const sheetTabs = (
+    <div className="tabs sheet-tabs" id="section-tabs">
+      {meta.tabs.map((t) => (
+        <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => changeTab(t.key)}>
+          {t.label}<span className="count">{tabCount[t.key] ?? '–'}</span>
+        </button>
+      ))}
+    </div>
+  );
+  // Bottom bar: the team tabs, how many rows are listed, and the day strip (today +/- 3 days) that jumps to a day inside the listed range.
+  const listed = (isGrid ? grid : data) || { rows: [], total: 0 };
+  const listedRows = listed.rows || [];
+  const todayIso = isoDate();
+  const stripAnchor = stripDay || (filt.to && filt.to < todayIso ? filt.to : filt.from && filt.from > todayIso ? filt.from : todayIso);
+  const dayOf = (r) => String(r.work_date || '').slice(0, 10);
+  const jumpToDay = (d) => {
+    const box = document.getElementById(isGrid ? 'grid' : 'tbl');
+    const tr = box && box.querySelector(`tr[data-date="${d}"]`);
+    if (!tr) { toast(`No rows on ${fmtDate(d)}`, 'err'); return; }
+    tr.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    tr.classList.add('day-hit');
+    setTimeout(() => tr.classList.remove('day-hit'), 1800);
+  };
+  const rangeText = filt.from || filt.to ? ` · ${filt.from ? fmtDate(filt.from) : 'Any'} – ${filt.to ? fmtDate(filt.to) : 'Any'}` : ' · All dates';
+  const wsFoot = (
+    <div className="pager ws-foot">
+      {sheetTabs}
+      <span className="ds-count">
+        {listed.total > listedRows.length
+          ? `Showing the first ${listedRows.length} of ${listed.total} rows — narrow the date range to see the rest`
+          : `${listed.total || 0} row${listed.total === 1 ? '' : 's'}${rangeText}`}
+      </span>
+      <span className="grow" />
+      <DayStrip anchor={stripAnchor} today={todayIso} has={(d) => listedRows.some((r) => dayOf(r) === d)} onPick={jumpToDay} onAnchor={setStripDay} />
+    </div>
+  );
 
   return (
     <main className="container wide wl-page">
@@ -1468,65 +1507,56 @@ export default function Workload() {
       ) : null}
 
       <div className="card wl-card">
-        <div className="wl-tabbar">
-          <div className="tabs" id="section-tabs">
-            {meta.tabs.map((t) => (
-              <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => changeTab(t.key)}>
-                {t.label}<span className="count">{tabCount[t.key] ?? '–'}</span>
-              </button>
-            ))}
-          </div>
-          <div className="wl-tabactions">
-            <div className="segmented" id="mode-seg">
-              <button type="button" className={mode === 'table' ? 'on' : ''} onClick={() => changeMode('table')}>Table</button>
-              <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
-            </div>
-            {canWrite ? (
-              <>
-                <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} />
-                <button type="button" className="btn" id="import-btn" disabled={importing} onClick={() => fileRef.current.click()}>
-                  <UploadIcon /> {importing ? 'Importing…' : 'Import'}
-                </button>
-              </>
-            ) : null}
-            <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
-            {s.canPage('/admin') ? (
-              <>
-                <button type="button" className="btn" id="add-column-btn" onClick={() => setAddingColumn(true)}><ColumnIcon /> Add Column</button>
-              </>
-            ) : null}
-            {canWrite && isGrid && !isAll ? <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add Row</button> : null}
-            {canWrite && isGrid && selRows.length ? <button type="button" className="btn" id="priority-btn" data-keep-sel onClick={togglePriority} title="Highlights the Breakdate / Time of the selected row(s)">{allPrio ? 'Remove Priority' : 'Set Priority'}</button> : null}
-            {canWrite && isGrid && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? <button type="button" className="btn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}>Delete {selRows.filter((r) => !xlLocked(r)).length > 1 ? `${selRows.filter((r) => !xlLocked(r)).length} Rows` : 'Row'}</button> : null}
-            {s.canPage('/admin') ? <button type="button" className="btn" id="lock-dates-btn" onClick={() => setManagingLocks(true)}><LockIcon /> Lock Dates</button> : null}
-            {canWrite && !isGrid && pickedCount ? (
-              <button type="button" className="btn danger" id="delete-selected-btn" onClick={() => deleteSelected()} title="Delete the rows ticked in the table">
-                Delete Selected ({pickedCount})
-              </button>
-            ) : null}
-            {canWrite && !isGrid ? (
-              <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({ rec: null })}><PlusIcon /> New Workload</button>
-            ) : null}
-            {canWrite && isGrid ? (
-              <button type="button" className="btn primary" id="save-grid" disabled={saving || !dirtyCount} onClick={saveGrid}>
-                {saving ? 'Saving…' : `Save changes${dirtyCount ? ` (${dirtyCount})` : ''}`}
-              </button>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="wl-filters">
+        <div className="ws-bar">
           {!isGrid ? (
             <label className="wl-search short">
               <SearchIcon />
               <input type="search" placeholder="Search plug ID, PSD, program, billable party, remarks…" value={filt.q} onChange={setF('q')} />
             </label>
           ) : null}
-          <FilterSelect label="Units" value={filt.units} onChange={setF('units')}><Options list={[...meta.units, meta.notSet]} blank="All" /></FilterSelect>
-          <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
-          <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
+          <FiltersMenu count={['units', 'platform', 'plug_type'].filter((k) => filt[k]).length}>
+            <FilterSelect label="Units" value={filt.units} onChange={setF('units')}><Options list={[...meta.units, meta.notSet]} blank="All" /></FilterSelect>
+            <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
+            <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
+          </FiltersMenu>
           <DateRange from={filt.from} to={filt.to} onChange={setRange} />
+          <FilterChips chips={[['units', 'Units'], ['platform', 'Platform'], ['plug_type', 'Plug Type']].filter(([k]) => filt[k]).map(([k, l]) => ({
+            key: k, label: `${l}: ${filt[k]}`, clear: () => setF(k)({ target: { value: '' } }),
+          }))} />
+          <span className="grow" />
           <div className="wl-presence"><PresenceAvatars path="/workload" /></div>
+          <div className="segmented" id="mode-seg">
+            <button type="button" className={mode === 'table' ? 'on' : ''} onClick={() => changeMode('table')}>Table</button>
+            <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
+          </div>
+          {canWrite ? (
+            <>
+              <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} />
+              <button type="button" className="btn icon" id="import-btn" title="Import from Excel" aria-label="Import from Excel" disabled={importing} onClick={() => fileRef.current.click()}><UploadIcon /></button>
+            </>
+          ) : null}
+          <button type="button" className="btn icon" id="export-btn" title="Export to Excel" aria-label="Export to Excel" onClick={exportXlsx}><DownloadIcon /></button>
+          <MoreMenu items={[
+            { label: 'Add Column', icon: <ColumnIcon />, hidden: !s.canPage('/admin'), onClick: () => setAddingColumn(true) },
+            { label: 'Lock Dates', icon: <LockIcon />, hidden: !s.canPage('/admin'), onClick: () => setManagingLocks(true) },
+          ]} />
+          <FullscreenButton full={full} onToggle={() => setFull((f) => !f)} />
+          {canWrite && isGrid && !isAll ? <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add Row</button> : null}
+          {canWrite && isGrid && selRows.length ? <button type="button" className="btn" id="priority-btn" data-keep-sel onClick={togglePriority} title="Highlights the Breakdate / Time of the selected row(s)">{allPrio ? 'Remove Priority' : 'Set Priority'}</button> : null}
+          {canWrite && isGrid && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? <button type="button" className="btn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}>Delete {selRows.filter((r) => !xlLocked(r)).length > 1 ? `${selRows.filter((r) => !xlLocked(r)).length} Rows` : 'Row'}</button> : null}
+          {canWrite && !isGrid && pickedCount ? (
+            <button type="button" className="btn danger" id="delete-selected-btn" onClick={() => deleteSelected()} title="Delete the rows ticked in the table">
+              Delete Selected ({pickedCount})
+            </button>
+          ) : null}
+          {canWrite && !isGrid ? (
+            <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({ rec: null })}><PlusIcon /> New Workload</button>
+          ) : null}
+          {canWrite && isGrid ? (
+            <button type="button" className="btn primary" id="save-grid" disabled={saving || !dirtyCount} onClick={saveGrid}>
+              {saving ? 'Saving…' : `Save changes${dirtyCount ? ` (${dirtyCount})` : ''}`}
+            </button>
+          ) : null}
         </div>
 
         {isGrid ? (
@@ -1549,7 +1579,7 @@ export default function Workload() {
                       </thead>
                       <tbody>
                         {grid.rows.length ? grid.rows.map((r, ri) => (
-                          <tr key={r._key} data-ri={ri} className={`${r._dirty ? 'dirty' : ''}${r.is_priority ? ' prio-row' : ''}${xlLocked(r) ? ' locked-row' : ''}`.trim()}>
+                          <tr key={r._key} data-ri={ri} data-date={dayOf(r)} className={`${r._dirty ? 'dirty' : ''}${r.is_priority ? ' prio-row' : ''}${xlLocked(r) ? ' locked-row' : ''}`.trim()}>
                             <td className={`rn${rowInSel(ri) ? ' hl' : ''}`} title={xlLocked(r) ? `Locked: ${lockNote(r.work_date, meta.locks)} — an Admin must unlock it first` : 'Click to select the whole row (Ctrl+C to copy)'}
                               onMouseDown={(e) => startSel('row', ri, 0, e)}>{ri + 1}{r.is_priority ? <i className="prio-dot" title="Priority" /> : null}{xlLocked(r) ? <span className="row-lock"><LockIcon /></span> : null}</td>
                             {tableCols.map((k, ci) => (
@@ -1600,9 +1630,7 @@ export default function Workload() {
                 </FitMenu>
               );
             })() : null}
-            {grid && grid.total > GRID_LIMIT ? (
-              <div className="pager"><span>Showing the first {GRID_LIMIT} of {grid.total} rows — narrow the date range to edit the rest.</span></div>
-            ) : null}
+            {wsFoot}
           </>
         ) : (
           <>
@@ -1618,7 +1646,7 @@ export default function Workload() {
                         <thead><tr>{canWrite ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {data.rows.map((r, idx) => (
-                            <tr key={r.id} data-id={r.id}
+                            <tr key={r.id} data-id={r.id} data-date={dayOf(r)}
                               className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}`.trim()}
                               onMouseDown={canWrite ? (e) => rowDown(e, r, idx) : undefined}
                               onContextMenu={canWrite ? (e) => rowMenu(e, r) : undefined}
@@ -1645,7 +1673,7 @@ export default function Workload() {
                       </table>
                     )}
             </div>
-            <Pager total={total} offset={offset} size={PAGE} onOffset={setOffset} />
+            {wsFoot}
             {tctx ? (
               <FitMenu x={tctx.x} y={tctx.y} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
                 <button type="button" disabled={!tblHist.current.past.length} onClick={() => { setTctx(null); undoTbl(); }}>Undo<span>Ctrl+Z</span></button>

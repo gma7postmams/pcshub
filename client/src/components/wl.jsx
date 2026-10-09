@@ -266,3 +266,110 @@ export function useNarrow(px = 900) {
   }, [px]);
   return narrow;
 }
+
+// ---- workspace toolbar pieces (shared by Workload, Ingest and the Plug List) ----
+
+/** Closes on an outside click or Escape. */
+function usePopover() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const away = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
+  }, [open]);
+  return { open, setOpen, ref };
+}
+
+/** "Filters" button with a count badge; the dropdown filters live in its panel. */
+export function FiltersMenu({ count = 0, children }) {
+  const { open, setOpen, ref } = usePopover();
+  return (
+    <div className="pop" ref={ref}>
+      <button type="button" className={`btn${count ? ' has-filters' : ''}`} id="filters-btn" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M3 5h18M6 12h12M10 19h4" /></svg>
+        Filters{count ? <span className="badge-n">{count}</span> : null}
+      </button>
+      {open ? <div className="pop-panel filters-panel">{children}</div> : null}
+    </div>
+  );
+}
+
+/** Removable chips for the filters that are set: [{ key, label, clear }] */
+export function FilterChips({ chips }) {
+  if (!chips.length) return null;
+  return (
+    <>
+      {chips.map((c) => (
+        <span key={c.key} className="fchip">{c.label}<button type="button" aria-label={`Remove filter ${c.label}`} onClick={c.clear}>×</button></span>
+      ))}
+    </>
+  );
+}
+
+/** "⋯" menu for the less-used actions. items: [{ label, icon, onClick, hidden, disabled }] */
+export function MoreMenu({ items }) {
+  const { open, setOpen, ref } = usePopover();
+  const shown = items.filter((i) => !i.hidden);
+  if (!shown.length) return null;
+  return (
+    <div className="pop" ref={ref}>
+      <button type="button" className="btn icon" id="more-btn" title="More actions" aria-label="More actions" aria-expanded={open} onClick={() => setOpen((o) => !o)}>⋯</button>
+      {open ? (
+        <div className="pop-panel menu-panel right">
+          {shown.map((i) => <button key={i.label} type="button" disabled={i.disabled} onClick={() => { setOpen(false); i.onClick(); }}>{i.icon || null}{i.label}</button>)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Full screen for the workspace: hides the site header and page margins (CSS class on <body>). Esc leaves it. Remembered per browser. */
+export function useFullscreen() {
+  const [full, setFull] = useState(() => { try { return localStorage.getItem('ws-full') === '1'; } catch (e) { return false; } });
+  useLayoutEffect(() => {
+    document.body.classList.toggle('ws-full', full);
+    try { localStorage.setItem('ws-full', full ? '1' : '0'); } catch (e) { /* not available */ }
+    if (!full) return undefined;
+    const esc = (e) => { if (e.key === 'Escape' && !document.querySelector('.modal, .pop-panel')) setFull(false); };
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [full]);
+  useEffect(() => () => document.body.classList.remove('ws-full'), []);   // leaving the page restores the header
+  return [full, setFull];
+}
+export function FullscreenButton({ full, onToggle }) {
+  return (
+    <button type="button" className="btn icon" id="fullscreen-btn" title={full ? 'Exit full screen (Esc)' : 'Full screen'} aria-label={full ? 'Exit full screen' : 'Full screen'} onClick={onToggle}>
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        {full ? <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" /> : <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />}
+      </svg>
+    </button>
+  );
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const addDays = (iso, n) => { const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+/** Day strip: the anchor day with 3 days either side. Days that have rows get a dot; clicking one calls onPick(iso). ‹ › move a week. */
+export function DayStrip({ anchor, today, has, onPick, onAnchor }) {
+  const days = Array.from({ length: 7 }, (_, i) => addDays(anchor, i - 3));
+  const [y, m] = anchor.split('-');
+  return (
+    <div className="daystrip" role="group" aria-label="Jump to a day">
+      <span className="ds-month">{MONTHS[Number(m) - 1]} {y}</span>
+      <button type="button" className="btn sm pg" aria-label="Previous week" onClick={() => onAnchor(addDays(anchor, -7))}>‹</button>
+      {days.map((d) => {
+        const dm = d.slice(5, 7);
+        return (
+          <button key={d} type="button" className={`btn sm pg${d === today ? ' on' : ''}${has(d) ? ' has' : ''}`} title={d} onClick={() => onPick(d)}>
+            {dm !== m ? `${MONTHS[Number(dm) - 1]} ` : ''}{Number(d.slice(8))}
+          </button>
+        );
+      })}
+      <button type="button" className="btn sm pg" aria-label="Next week" onClick={() => onAnchor(addDays(anchor, 7))}>›</button>
+    </div>
+  );
+}
