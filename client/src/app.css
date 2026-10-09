@@ -966,11 +966,6 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 .plug-bar .btn { padding-left: 11px; padding-right: 11px; }
 .plug-bar .wl-search { flex: 1 1 160px; min-width: 160px; }
 
-/* Workload Table mode: the table's own sideways bar is hidden; .hscroll is a copy that stays at the bottom edge of the window (see HScrollBar) */
-.table-wrap.wl-hs { scrollbar-width: none; }
-.table-wrap.wl-hs::-webkit-scrollbar { display: none; }
-.hscroll { height: 16px; position: sticky; bottom: 0; z-index: 5; overflow-x: auto; overflow-y: hidden; background: var(--surface); border-top: 1px solid var(--border); }
-.hscroll > div { height: 1px; }
 /* Ingest Tracker: search, filters and buttons share one row */
 .wl-tabbar.one-row { flex-wrap: nowrap; align-items: center; }
 .wl-tabbar.one-row .wl-filters { flex: 1 1 auto; min-width: 0; padding: 8px 0; border: 0; }
