@@ -10,7 +10,7 @@ import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../co
 // PSD Daily Plug List — the PSD's daily plug list (imported from their workbook: NO / PLUG ID / PROG NAME/PROJ TITLE / PSD / Account By),
 // one row per plug with its DATE in a column of its own. The "View" dropdown chooses the period shown: All, Daily, Weekly, Monthly or a
 // Custom range; "Rows" chooses how many rows are visible per page. The Workload Tracker copies Plug ID, PSD and PROG. NAME / PROJ. TITLE
-// from here, and "Copy to Workload" makes Workload rows from the selected plugs (or everything in the view).
+// from here, and every new plug is copied to the Workload Tracker automatically (there is no manual copy button any more).
 const weekday = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' });
 const dateLabel = (iso) => `${weekday(iso)}, ${fmtDate(iso)}`;
 
@@ -67,14 +67,12 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
   const [q, setQ] = useState('');
   const query = useDebounced(q, 250);
   const [data, setData] = useState(null);            // { rows, total }; null = loading
-  const [picked, setPicked] = useState(() => new Set());
   const [importing, setImporting] = useState(false);
   const [needYear, setNeedYear] = useState(null);    // file waiting for a year (its name has none)
   const [year, setYear] = useState(new Date().getFullYear());
   const [summary, setSummary] = useState(null);      // result of the last import
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(null);      // the plug being edited
-  const [copying, setCopying] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [filling, setFilling] = useState(false);
   const [mode, setModeState] = useState(() => (canWrite ? readMode(session.session_key) : 'table'));   // Table or Excel (Excel is for people who can edit)
@@ -85,7 +83,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
   const registerToolbar = useCallback((tb) => { tbRef.current = tb; setTbSig(tb ? `${tb.dirtyCount}|${tb.saving}|${tb.selCount}|${tb.wholeRows}` : ''); }, []);
   const okToLeave = async () => gridDirty === 0
     || !!(await confirm('Discard unsaved changes?', `${gridDirty} row${gridDirty === 1 ? '' : 's'} in the grid ${gridDirty === 1 ? 'has' : 'have'} unsaved changes. Leave without saving?`, { okText: 'Discard', danger: true }));
-  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setModeState(m); saveMode(session.session_key, m); setPicked(new Set()); };
+  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setModeState(m); saveMode(session.session_key, m); };
 
   const range = rangeOf(period, anchor, custom);
   const limit = size === 'all' ? ALL_CAP : Number(size);
@@ -123,7 +121,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
       setData(await get(`/api/plugs?${p}`));
     } catch (e) { setData({ rows: [], total: 0 }); toast(e.message, 'err'); }
   }, [anchor, range.from, range.to, query, limit, offset, period, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setData(null); setPicked(new Set()); loadRows(); }, [loadRows]);
+  useEffect(() => { setData(null); loadRows(); }, [loadRows]);
   const exportXlsx = async () => {   // the days and search on screen, in the sort on screen
     const p = new URLSearchParams({ order: period === 'all' ? 'desc' : 'asc' });
     if (range.from) p.set('from', range.from);
@@ -182,10 +180,6 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
 
   const rows = data ? data.rows : [];
   const total = data ? data.total : 0;
-  const todo = rows.filter((r) => !r.in_workload);
-  const chosen = rows.filter((r) => picked.has(r.id));
-  const toggle = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const allOn = !!todo.length && todo.every((r) => picked.has(r.id));
   const viewLabel = `${rangeLabel(period, range, anchor)}${query ? ` · “${query}”` : ''}`;
   const everything = period === 'all' && !query;   // the view is the whole list
 
@@ -238,11 +232,6 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
               <button type="button" className="btn primary" id="save-grid" disabled={!tbRef.current || tbRef.current.saving || !gridDirty} onClick={() => tbRef.current && tbRef.current.save()}>
                 {tbRef.current && tbRef.current.saving ? 'Saving…' : `Save changes${gridDirty ? ` (${gridDirty})` : ''}`}
               </button>
-            ) : canWorkload ? (
-              <button type="button" className="btn primary" disabled={!total} onClick={() => setCopying(true)}
-                title={chosen.length ? 'Copy the selected plugs' : 'Copy every plug in this view that is not in the Workload Tracker yet'}>
-                {chosen.length ? `Copy ${chosen.length} to Workload` : 'Copy to Workload'}
-              </button>
             ) : null}
           </>
         ) : null}
@@ -263,14 +252,12 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
               <table className={`t wl plug-t${narrow ? ' cards' : ''}`}>
                 <thead>
                   <tr>
-                    {canWrite ? <th className="chk"><input type="checkbox" checked={allOn} disabled={!todo.length} onChange={() => setPicked(allOn ? new Set() : new Set(todo.map((r) => r.id)))} title="Select every plug on this page that is not yet in the Workload Tracker" /></th> : null}
                     <SortTh k="plug_date" sort={sort} onSort={setSort}>DATE</SortTh><SortTh k="plug_id" sort={sort} onSort={setSort}>PLUG ID</SortTh><SortTh k="prog_name" sort={sort} onSort={setSort}>PROG. NAME / PROJ. TITLE</SortTh><SortTh k="psd" sort={sort} onSort={setSort}>PSD</SortTh><SortTh k="account_by" sort={sort} onSort={setSort}>ACCOUNT BY</SortTh><SortTh k="requested_by" sort={sort} onSort={setSort}>REQUESTED BY</SortTh><SortTh k="in_workload" sort={sort} onSort={setSort} className="plug-inwl">IN WORKLOAD</SortTh>{canWrite ? <th className="plug-actions">Actions</th> : null}
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length ? rows.map((r, i) => (
                     <tr key={r.id} className={r.in_workload ? 'done' : ''}>
-                      {canWrite ? <td className="chk"><input type="checkbox" checked={picked.has(r.id)} disabled={r.in_workload} onChange={() => toggle(r.id)} /></td> : null}
                       <td data-label="Date" className="nowrap">{dateLabel(r.plug_date)}</td>
                       <td data-k="plug_id" data-label="Plug ID" className="mono">{r.plug_id}{r.is_additional ? <span className="chip c-orange plug-add" title="Listed under “Additional for …”">Added</span> : null}</td>
                       <td data-label="PROG. NAME / PROJ. TITLE">{r.prog_name}</td>
@@ -285,7 +272,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
                         </td>
                       ) : null}
                     </tr>
-                  )) : <tr><td colSpan={canWrite ? 9 : 7} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr>}
+                  )) : <tr><td colSpan={canWrite ? 8 : 7} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -329,7 +316,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
       {deleting ? (
         <DeleteAllPlugsModal viewLabel={viewLabel} viewCount={total} everything={everything} totals={totals}
           filters={{ from: range.from || undefined, to: range.to || undefined, q: query || undefined }} onClose={() => setDeleting(false)}
-          onDone={async (out) => { setDeleting(false); setPicked(new Set()); toast(`${out.deleted} plug${out.deleted === 1 ? '' : 's'} deleted`); await loadDays(); loadRows(); }} />
+          onDone={async (out) => { setDeleting(false); toast(`${out.deleted} plug${out.deleted === 1 ? '' : 's'} deleted`); await loadDays(); loadRows(); }} />
       ) : null}
 
       {adding || editing ? (
@@ -344,11 +331,6 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
             if (d && period !== 'all' && period !== 'custom' && (d < range.from || d > range.to)) setAnchor(d);   // a plug on another day: go there
             loadRows();
           }} />
-      ) : null}
-
-      {copying ? (
-        <CopyModal chosen={chosen} viewLabel={viewLabel} viewCount={total} filters={{ from: range.from || undefined, to: range.to || undefined, q: query || undefined }}
-          onClose={() => setCopying(false)} onDone={(out) => { setCopying(false); setPicked(new Set()); loadRows(); if (onCopied) onCopied(out); }} />
       ) : null}
     </div>
   );
@@ -405,40 +387,6 @@ function PlugModal({ date, plug, onClose, onSaved }) {
         <label className="f"><span>Account By</span><input value={f.account_by} onChange={set('account_by')} maxLength={100} /></label>
       </form>
       {plug ? <p className="dim m-0 mt-12">Workload rows already filled from this plug keep what they have; only blank PSD / PROG. NAME fields get filled.</p> : null}
-    </Modal>
-  );
-}
-
-function CopyModal({ chosen, viewLabel, viewCount, filters, onClose, onDone }) {
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
-  const days = new Set(chosen.map((p) => p.plug_date)).size;
-  const go = async () => {
-    setBusy(true);
-    try {
-      const out = await post('/api/plugs/copy', chosen.length ? { ids: chosen.map((p) => p.id) } : filters);
-      const bits = [`${out.created} row${out.created === 1 ? '' : 's'} added to the Workload Tracker`];
-      if (out.already) bits.push(`${out.already} already there`);
-      if (out.locked) bits.push(`${out.locked} skipped — in a locked period`);
-      if (out.truncated) bits.push('only the first 5000 were copied');
-      if (out.errors && out.errors.length) bits.push(`${out.errors.length} failed`);
-      toast(bits.join(' — '), (out.errors && out.errors.length) || out.locked ? 'err' : undefined);
-      if (out.errors && out.errors.length) console.warn('Copy errors:', out.errors);
-      onDone(out);
-    } catch (e) { toast(e.message, 'err'); setBusy(false); }
-  };
-  return (
-    <Modal title="Copy to Workload Tracker" onClose={onClose} footer={(<><span className="grow" /><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className="btn primary" disabled={busy} onClick={go}>{chosen.length ? `Copy ${chosen.length}` : 'Copy'}</button></>)}>
-      {chosen.length ? (
-        <p>Adds a Workload row for each of the <strong>{chosen.length}</strong> selected plug{chosen.length === 1 ? '' : 's'}{days > 1 ? <> (from <strong>{days}</strong> different days)</> : null}, with Plug ID, PSD and PROG. NAME / PROJ. TITLE filled in. Plugs that already have a row for their day are left alone.</p>
-      ) : (
-        <p>Adds a Workload row for every plug in this view — <strong>{viewLabel}</strong>, {viewCount} plug{viewCount === 1 ? '' : 's'} — that isn’t in the Workload Tracker yet, with Plug ID, PSD and PROG. NAME / PROJ. TITLE filled in. Days inside a locked period are skipped.</p>
-      )}
-      <p>
-        <strong>Units Concerned is left blank.</strong> The new rows show only under <strong>All</strong> (marked “Set units”) until you choose the
-        team(s) for each one — click its Units cell, or edit the row. Once set, the row moves to the VGFX / VEDIT / Audio tabs it belongs to.
-        Use the Units filter “(Not set)” to find the ones still waiting.
-      </p>
     </Modal>
   );
 }

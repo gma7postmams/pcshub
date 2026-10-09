@@ -959,3 +959,4 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 .wl-search.short { flex: 0 1 640px; min-width: 200px; }
 .wl-search.short input { text-overflow: ellipsis; }
 .wl-presence { margin-left: auto; display: flex; align-items: center; }
+.kb-count { margin-left: auto; white-space: nowrap; font-size: 13px; }   /* Knowledge Base: the PDF count sits at the right end of the search row, so it needs no row of its own */

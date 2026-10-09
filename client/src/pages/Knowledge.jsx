@@ -106,16 +106,6 @@ export default function Knowledge() {
     <main className="container wide wl-page">
       <h1 className="sr-only">Knowledge Base</h1>
       {canWrite ? (
-        <div className="page-head">
-          <div className="actions">
-            <button type="button" className="btn primary" disabled={busy} onClick={() => inputRef.current && inputRef.current.click()}>
-              <UploadIcon /> Upload PDF
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {canWrite ? (
         <>
           <input ref={inputRef} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => pick(e.target.files)} />
           <div
@@ -145,6 +135,7 @@ export default function Knowledge() {
       <div className="card mt-12">
         <div className="filters">
           <input type="search" placeholder="Search documents" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search documents" />
+          {docs ? <span className="dim kb-count" aria-live="polite">{q.trim() && shown.length !== docs.length ? `${shown.length} of ${docs.length}` : docs.length} PDF{docs.length === 1 ? '' : 's'}</span> : null}
         </div>
         {docs === null ? <Empty>Loading…</Empty> : !shown.length ? (
           <Empty>{docs.length ? 'No documents match your search.' : canWrite ? 'No documents yet. Add a PDF above to create the first one.' : 'No documents have been added yet.'}</Empty>
