@@ -276,11 +276,7 @@ export default function Ingest() {
       <h1 className="sr-only">Ingest Tracker</h1>
 
       <div className="card wl-card">
-        <div className="wl-tabbar">
-          <label className="wl-search ing-search">
-            <SearchIcon />
-            <input type="search" placeholder="Search program, party, source, folder, remarks…" style={{ textOverflow: 'ellipsis' }} value={filt.q} onChange={setF('q')} />
-          </label>
+        <div className="wl-tabbar acts-only">
           <div className="wl-tabactions">
             <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
             {canDelete && picked.size ? <button type="button" className="btn danger" id="del-sel" onClick={removePicked} title="Delete the records ticked in the table">Delete Selected ({picked.size})</button> : null}
@@ -288,6 +284,10 @@ export default function Ingest() {
           </div>
         </div>
         <div className="wl-filters">
+          <label className="wl-search short">
+            <SearchIcon />
+            <input type="search" placeholder="Search program, party, source, folder, remarks…" style={{ textOverflow: 'ellipsis' }} value={filt.q} onChange={setF('q')} />
+          </label>
           <FilterSelect label="Status" value={filt.status} onChange={setF('status')}><Options list={STATUS_FILTER} blank="All" /></FilterSelect>
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All" /></FilterSelect>
           <DateRange title="Episode / Breakdate range" from={filt.from} to={filt.to} onChange={({ from, to }) => { setFilt((f) => ({ ...f, from, to })); setOffset(0); }} />

@@ -962,7 +962,7 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 .btn.danger:disabled { background: var(--surface-3); border-color: var(--border); color: var(--text-3); opacity: .8; cursor: not-allowed; }
 /* Workload Tracker toolbar: slightly tighter buttons so Delete Selected fits beside the others on a 1400 px window */
 .wl-tabactions .btn { padding-left: 11px; padding-right: 11px; }
-.wl-tabbar > .wl-search.ing-search { flex: 1 1 320px; max-width: 640px; margin: 7px 0; }   /* Ingest Tracker: the search box leads the card's top row, the buttons sit at its right end */
+.wl-tabbar.acts-only { justify-content: flex-end; }   /* Ingest Tracker: no tabs, so the buttons sit alone at the right of the top row, like the Workload Tracker's */
 /* PSD Daily Plug List toolbar: tighter buttons so Delete Selected stays on the same line at ~1400 px */
 .plug-bar .btn { padding-left: 11px; padding-right: 11px; }
 .plug-bar .wl-search { flex: 1 1 160px; min-width: 160px; }
