@@ -1601,7 +1601,7 @@ export default function Workload() {
           </>
         ) : (
           <>
-            <div className="table-wrap" id="tbl" onClickCapture={(e) => {
+            <div className={`table-wrap${cards ? '' : ' wl-hs'}`} id="tbl" onClickCapture={(e) => {
               if (tblSuppress.current) { tblSuppress.current = false; e.stopPropagation(); e.preventDefault(); return; }   // the click that ended a drag / Shift / Ctrl+click
               if (canWrite && (picked.size || allMatching) && !(e.target.closest && e.target.closest('.actions-cell, .chk'))) clearPicks();
             }}>
@@ -1640,6 +1640,7 @@ export default function Workload() {
                       </table>
                     )}
             </div>
+            {!cards ? <HScrollBar targetId="tbl" dep={`${tab}|${!!data}|${data && data.rows ? data.rows.length : 0}|${winW}`} /> : null}
             <Pager total={total} offset={offset} size={PAGE} onOffset={setOffset} />
             {tctx ? (
               <FitMenu x={tctx.x} y={tctx.y} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
@@ -1700,6 +1701,32 @@ export default function Workload() {
 
 // Admin-only: name a new column. It shows up everywhere (Table, Excel grid, the add/edit form, Excel export)
 // as a plain open-text field, appended after the template's own columns.
+// The table's sideways scroll bar, kept on screen: a copy of it sticks to the bottom edge of the window while the table runs below the fold, and
+// drops into place under the last row once that is in view. The table's own bar is hidden (.wl-hs); the two scroll together.
+function HScrollBar({ targetId, dep }) {
+  const bar = useRef(null);
+  const fill = useRef(null);
+  useEffect(() => {
+    const t = document.getElementById(targetId);
+    const b = bar.current;
+    if (!t || !b) return undefined;
+    const size = () => {
+      fill.current.style.width = `${t.scrollWidth}px`;
+      b.style.display = t.scrollWidth > t.clientWidth + 1 ? 'block' : 'none';
+      if (b.scrollLeft !== t.scrollLeft) b.scrollLeft = t.scrollLeft;
+    };
+    const fromTable = () => { if (b.scrollLeft !== t.scrollLeft) b.scrollLeft = t.scrollLeft; };
+    const fromBar = () => { if (t.scrollLeft !== b.scrollLeft) t.scrollLeft = b.scrollLeft; };
+    size();
+    t.addEventListener('scroll', fromTable);
+    b.addEventListener('scroll', fromBar);
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(size) : null;
+    if (ro) { ro.observe(t); if (t.firstElementChild) ro.observe(t.firstElementChild); }
+    return () => { t.removeEventListener('scroll', fromTable); b.removeEventListener('scroll', fromBar); if (ro) ro.disconnect(); };
+  }, [targetId, dep]);
+  return <div className="hscroll" ref={bar} style={{ display: 'none' }}><div ref={fill} /></div>;
+}
+
 function DeleteAllModal({ total, scope, filters, onClose, onDone }) {
   const toast = useToast();
   const [typed, setTyped] = useState('');

@@ -276,14 +276,8 @@ export default function Ingest() {
       <h1 className="sr-only">Ingest Tracker</h1>
 
       <div className="card wl-card">
-        <div className="wl-tabbar acts-only">
-          <div className="wl-tabactions">
-            <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
-            {canDelete && picked.size ? <button type="button" className="btn danger" id="del-sel" onClick={removePicked} title="Delete the records ticked in the table">Delete Selected ({picked.size})</button> : null}
-            {canWrite ? <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({})}><PlusIcon /> New Ingest</button> : null}
-          </div>
-        </div>
-        <div className="wl-filters">
+        <div className="wl-tabbar one-row">
+          <div className="wl-filters">
           <label className="wl-search short">
             <SearchIcon />
             <input type="search" placeholder="Search program, party, source, folder, remarks…" style={{ textOverflow: 'ellipsis' }} value={filt.q} onChange={setF('q')} />
@@ -294,6 +288,12 @@ export default function Ingest() {
           {filt.approval ? (   // opened from the Dashboard's Pending Approval card: only requests nobody has approved yet; the chip clears it
             <button type="button" className="btn sm" title="Show every request again" onClick={() => { setFilt((f) => ({ ...f, approval: '' })); setOffset(0); }}>Awaiting approval ✕</button>
           ) : null}
+          </div>
+          <div className="wl-tabactions">
+            <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
+            {canDelete && picked.size ? <button type="button" className="btn danger" id="del-sel" onClick={removePicked} title="Delete the records ticked in the table">Delete Selected ({picked.size})</button> : null}
+            {canWrite ? <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({})}><PlusIcon /> New Ingest</button> : null}
+          </div>
         </div>
         <div className="table-wrap" id="tbl">
           {!data ? <Empty>Loading…</Empty>

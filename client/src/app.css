@@ -962,7 +962,17 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 .btn.danger:disabled { background: var(--surface-3); border-color: var(--border); color: var(--text-3); opacity: .8; cursor: not-allowed; }
 /* Workload Tracker toolbar: slightly tighter buttons so Delete Selected fits beside the others on a 1400 px window */
 .wl-tabactions .btn { padding-left: 11px; padding-right: 11px; }
-.wl-tabbar.acts-only { justify-content: flex-end; }   /* Ingest Tracker: no tabs, so the buttons sit alone at the right of the top row, like the Workload Tracker's */
 /* PSD Daily Plug List toolbar: tighter buttons so Delete Selected stays on the same line at ~1400 px */
 .plug-bar .btn { padding-left: 11px; padding-right: 11px; }
 .plug-bar .wl-search { flex: 1 1 160px; min-width: 160px; }
+
+/* Workload Table mode: the table's own sideways bar is hidden; .hscroll is a copy that stays at the bottom edge of the window (see HScrollBar) */
+.table-wrap.wl-hs { scrollbar-width: none; }
+.table-wrap.wl-hs::-webkit-scrollbar { display: none; }
+.hscroll { height: 16px; position: sticky; bottom: 0; z-index: 5; overflow-x: auto; overflow-y: hidden; background: var(--surface); border-top: 1px solid var(--border); }
+.hscroll > div { height: 1px; }
+/* Ingest Tracker: search, filters and buttons share one row */
+.wl-tabbar.one-row { flex-wrap: nowrap; align-items: center; }
+.wl-tabbar.one-row .wl-filters { flex: 1 1 auto; min-width: 0; padding: 8px 0; border: 0; }
+.wl-tabbar.one-row .wl-tabactions { flex: 0 0 auto; flex-wrap: nowrap; }
+@media (max-width: 1000px) { .wl-tabbar.one-row { flex-wrap: wrap; } }
