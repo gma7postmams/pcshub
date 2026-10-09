@@ -1601,7 +1601,7 @@ export default function Workload() {
           </>
         ) : (
           <>
-            <div className={`table-wrap${cards ? '' : ' wl-fit'}`} id="tbl" onClickCapture={(e) => {
+            <div className="table-wrap" id="tbl" onClickCapture={(e) => {
               if (tblSuppress.current) { tblSuppress.current = false; e.stopPropagation(); e.preventDefault(); return; }   // the click that ended a drag / Shift / Ctrl+click
               if (canWrite && (picked.size || allMatching) && !(e.target.closest && e.target.closest('.actions-cell, .chk'))) clearPicks();
             }}>

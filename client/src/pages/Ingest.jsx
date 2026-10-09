@@ -290,9 +290,6 @@ export default function Ingest() {
         <div className="wl-filters">
           <FilterSelect label="Status" value={filt.status} onChange={setF('status')}><Options list={STATUS_FILTER} blank="All" /></FilterSelect>
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All" /></FilterSelect>
-          <label className="wl-search" style={{ flex: '0 1 320px', minWidth: 'min(100%, 300px)' }}>   {/* wide enough for the whole hint, with room to spare for wider fonts (a Mac's system font is wider) */}
-            <input type="text" placeholder="PROG. NAME / PROJ. TITLE (exact match)" value={filt.program} onChange={setF('program')} style={{ textOverflow: 'ellipsis' }} />
-          </label>
           <DateRange title="Episode / Breakdate range" from={filt.from} to={filt.to} onChange={({ from, to }) => { setFilt((f) => ({ ...f, from, to })); setOffset(0); }} />
           {filt.approval ? (   // opened from the Dashboard's Pending Approval card: only requests nobody has approved yet; the chip clears it
             <button type="button" className="btn sm" title="Show every request again" onClick={() => { setFilt((f) => ({ ...f, approval: '' })); setOffset(0); }}>Awaiting approval ✕</button>
