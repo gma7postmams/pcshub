@@ -1030,3 +1030,11 @@ body.ws-full .wl-card { border-radius: 0; border-left: 0; border-right: 0; margi
   .daystrip { margin-left: auto; }
   .daystrip .pg { min-width: 28px; }
 }
+
+/* One grid: sort button inside each column header, unsaved-changes strip in the bottom bar */
+.xl-colhead { position: relative; }
+.xl-sort { all: unset; box-sizing: border-box; margin-left: 4px; padding: 0 3px; font-size: 9px; line-height: 1; color: inherit; opacity: .35; cursor: pointer; border-radius: 4px; }
+.xl-colhead:hover .xl-sort, .xl-sort.on { opacity: .9; }
+.xl-sort:hover { background: var(--surface-3); }
+.unsaved { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; padding: 3px 4px 3px 10px; border-radius: 999px; background: #fff4d6; color: #7a5200; font-size: 12.5px; font-weight: 600; }
+.unsaved .btn.sm { height: 24px; padding: 0 10px; }

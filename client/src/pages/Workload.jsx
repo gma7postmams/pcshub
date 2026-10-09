@@ -4,7 +4,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, LockIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, DayStrip, FilterChips, FilterSelect, FiltersMenu, FullscreenButton, MoreMenu, PlatformCell, RowMenu, SortTh, TypePill, UnitsPills, WorkDate, useFullscreen } from '../components/wl.jsx';
+import { nextSort, DateChip, DateRange, DayStrip, FilterChips, FilterSelect, FiltersMenu, FullscreenButton, MoreMenu, PlatformCell, RowMenu, SortTh, TypePill, UnitsPills, WorkDate, useFullscreen } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 
@@ -364,14 +364,21 @@ export default function Workload() {
   const [meta, setMeta] = useState(null);
   const [lookups, setLookups] = useState({ workload_platform: [], plug_type: [] });
   const [tab, setTab] = useState(() => readView(s.session_key).tab);   // kept across a refresh while you stay signed in
-  const [mode, setMode] = useState(() => readView(s.session_key).mode);   // Table or Excel: kept across a refresh while you stay signed in
+  // One view: an editable spreadsheet-style grid. Phones and small tablets get the card list (with the edit form) instead.
+  const [winW, setWinW] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const on = () => setWinW(window.innerWidth);
+    window.addEventListener('resize', on);
+    return () => window.removeEventListener('resize', on);
+  }, []);
+  const mode = winW < CARDS_BELOW ? 'table' : 'excel';
   const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', from: '', to: '' });
   const [stats, setStats] = useState(null);   // summary cards + tab badges
   const [offset, setOffset] = useState(0);   // always 0 now: no page numbers, every row in the date range is listed
   const [full, setFull] = useFullscreen();
   const [stripDay, setStripDay] = useState('');   // the day the day strip is centred on ('' = today)
   const [sort, setSortState] = useState({ k: '', dir: 'asc' });   // clicked column header (Table mode)
-  const setSort = (s2) => { setSortState(s2); setOffset(0); };
+  const setSort = async (s2) => { if (!(await okToLeave())) return; setSortState(s2); setOffset(0); };   // the grid reloads, so unsaved edits are asked about first
   const [data, setData] = useState(null);   // table mode: { total, rows } | { error }
   const [grid, setGrid] = useState(null);   // excel mode: { total, rows } | { error }
   const [gridSel, setGridSel] = useState(null);   // { r0, c0, r1, c1 } — row/col INDICES into (grid.rows, cols); null = nothing selected
@@ -481,13 +488,7 @@ export default function Workload() {
 
   // Rows are one line each (Remarks wraps), so a wide table scrolls sideways inside the card, like Excel.
   // Phones and small tablets show each row as a card instead.
-  const [winW, setWinW] = useState(() => window.innerWidth);
-  useEffect(() => {
-    const on = () => setWinW(window.innerWidth);
-    window.addEventListener('resize', on);
-    return () => window.removeEventListener('resize', on);
-  }, []);
-  const cards = mode === 'table' && winW < CARDS_BELOW;
+  const cards = mode === 'table';
 
   const loadMeta = useCallback(() => {
     Promise.all([get('/api/workload/meta'), get('/api/dropdowns?categories=workload_platform,plug_type')])
@@ -500,8 +501,8 @@ export default function Workload() {
     const p = new URLSearchParams(extra);
     if (tab !== 'ALL') p.set('team', tab);
     ['units', 'platform', 'plug_type', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
-    if (!isGrid && q) p.set('q', q);
-    if (!isGrid && sort.k && extra.limit !== undefined) { p.set('sort', sort.k); p.set('dir', sort.dir); }   // only the table's own list; counts and exports ignore it
+    if (q) p.set('q', q);
+    if (sort.k && extra.limit !== undefined) { p.set('sort', sort.k); p.set('dir', sort.dir); }   // only the table's own list; counts and exports ignore it
     return p;
   }, [tab, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q, isGrid, sort.k, sort.dir]);
 
@@ -520,7 +521,7 @@ export default function Workload() {
     try {
       if (isGrid) {
         // All tab: the rows nobody has given a team yet — e.g. plugs just copied from the PSD Daily Plug List. A Units filter you choose still wins.
-        const d = await get(`/api/workload?${query({ limit: GRID_LIMIT, ...(tab === 'ALL' ? { units: meta.notSet } : {}) })}`);
+        const d = await get(`/api/workload?${query({ limit: TABLE_LIMIT })}`);
         hist.current = { past: [], future: [], tag: null };
         setGrid({ total: d.total, rows: d.rows.map((r) => ({ ...r, _key: `r${r.id}`, _dirty: false })) });
       } else {
@@ -545,7 +546,6 @@ export default function Workload() {
     || !!(await confirm('Discard unsaved changes?', `${dirtyCount} row(s) in the grid have unsaved changes. Leave without saving?`, { okText: 'Discard', danger: true }));
 
   const changeTab = async (t) => { if (t === tab || !(await okToLeave())) return; setTab(t); saveView(s.session_key, { t }); setOffset(0); };
-  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setMode(m); saveView(s.session_key, { m }); setOffset(0); };
   const setF = (k) => async (e) => {
     const val = e.target.value;
     if (k !== 'q' && !(await okToLeave())) return;
@@ -1473,6 +1473,13 @@ export default function Workload() {
   const wsFoot = (
     <div className="pager ws-foot">
       {sheetTabs}
+      {isGrid && dirtyCount ? (
+        <span className="unsaved">
+          {dirtyCount} unsaved row{dirtyCount === 1 ? '' : 's'}
+          <button type="button" className="btn sm primary" disabled={saving} onClick={saveGrid}>{saving ? 'Saving…' : 'Save'}</button>
+          <button type="button" className="btn sm" disabled={saving} onClick={async () => { if (await okToLeave()) load(); }}>Discard</button>
+        </span>
+      ) : null}
       <span className="ds-count">
         {listed.total > listedRows.length
           ? `Showing the first ${listedRows.length} of ${listed.total} rows — narrow the date range to see the rest`
@@ -1497,12 +1504,10 @@ export default function Workload() {
 
       <div className="card wl-card">
         <div className="ws-bar">
-          {!isGrid ? (
-            <label className="wl-search short">
-              <SearchIcon />
-              <input type="search" placeholder="Search plug ID, PSD, program, billable party, remarks…" value={filt.q} onChange={setF('q')} />
-            </label>
-          ) : null}
+          <label className="wl-search short" title={dirtyCount ? 'Save or discard your changes before searching' : undefined}>
+            <SearchIcon />
+            <input type="search" placeholder="Search plug ID, PSD, program, billable party, remarks…" value={filt.q} disabled={!!dirtyCount} onChange={setF('q')} />
+          </label>
           <FiltersMenu count={['units', 'platform', 'plug_type'].filter((k) => filt[k]).length}>
             <FilterSelect label="Units" value={filt.units} onChange={setF('units')}><Options list={[...meta.units, meta.notSet]} blank="All" /></FilterSelect>
             <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
@@ -1514,10 +1519,6 @@ export default function Workload() {
           }))} />
           <span className="grow" />
           <div className="wl-presence"><PresenceAvatars path="/workload" /></div>
-          <div className="segmented" id="mode-seg">
-            <button type="button" className={mode === 'table' ? 'on' : ''} onClick={() => changeMode('table')}>Table</button>
-            <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
-          </div>
           {canWrite ? (
             <>
               <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} />
@@ -1526,11 +1527,13 @@ export default function Workload() {
           ) : null}
           <button type="button" className="btn icon" id="export-btn" title="Export to Excel" aria-label="Export to Excel" onClick={exportXlsx}><DownloadIcon /></button>
           <MoreMenu items={[
+            { label: 'New via form', hidden: !canWrite || !isGrid || isAll, onClick: async () => { if (await okToLeave()) setForm({ rec: null }); } },
             { label: 'Add Column', icon: <ColumnIcon />, hidden: !s.canPage('/admin'), onClick: () => setAddingColumn(true) },
             { label: 'Lock Dates', icon: <LockIcon />, hidden: !s.canPage('/admin'), onClick: () => setManagingLocks(true) },
           ]} />
           <FullscreenButton full={full} onToggle={() => setFull((f) => !f)} />
           {canWrite && isGrid && !isAll ? <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add Row</button> : null}
+          {canWrite && isGrid && isAll ? <button type="button" className="btn" id="new-btn" onClick={async () => { if (await okToLeave()) setForm({ rec: null }); }}><PlusIcon /> New Workload</button> : null}
           {canWrite && isGrid && selRows.length ? <button type="button" className="btn" id="priority-btn" data-keep-sel onClick={togglePriority} title="Highlights the Breakdate / Time of the selected row(s)">{allPrio ? 'Remove Priority' : 'Set Priority'}</button> : null}
           {canWrite && isGrid && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? <button type="button" className="btn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}>Delete {selRows.filter((r) => !xlLocked(r)).length > 1 ? `${selRows.filter((r) => !xlLocked(r)).length} Rows` : 'Row'}</button> : null}
           {canWrite && !isGrid && pickedCount ? (
@@ -1561,7 +1564,11 @@ export default function Workload() {
                           <th className="rn" title="Select all" onMouseDown={(e) => startSel('all', 0, 0, e)} />
                           {tableCols.map((k, ci) => (
                             <th key={k} className={`xl-colhead${colInSel(ci) ? ' hl' : ''}`} title="Click to select the column"
-                              data-c={ci} onMouseDown={(e) => startSel('col', 0, ci, e)}>{head(k)}</th>
+                              data-c={ci} onMouseDown={(e) => startSel('col', 0, ci, e)}>
+                              {head(k)}
+                              <button type="button" className={`xl-sort${sort.k === k ? ' on' : ''}`} title="Sort by this column" aria-label={`Sort by ${head(k)}`}
+                                onMouseDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); setSort(nextSort(sort, k)); }}>{sort.k === k ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}</button>
+                            </th>
                           ))}
                         </tr>
                       </thead>
