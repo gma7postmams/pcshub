@@ -1289,7 +1289,7 @@ export default function Workload() {
       const pager = el.parentElement && el.parentElement.querySelector('.pager');
       const main = el.closest('main');
       const pad = main ? parseFloat(getComputedStyle(main).paddingBottom) || 0 : 0;
-      const below = el.id === 'tbl' ? (pager ? pager.offsetHeight : 0) + pad + 4 : 80;
+      const below = el.id === 'tbl' ? (pager ? pager.offsetHeight : 0) + pad + 2 : 80;
       el.style.maxHeight = `${Math.max(240, Math.round(window.innerHeight - top - below))}px`;
     };
     fit();
