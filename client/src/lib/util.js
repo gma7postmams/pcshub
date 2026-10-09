@@ -14,6 +14,19 @@ export function fmtDateTime(d) {
   return new Date(d).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+export function fmtDateTimeSec(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleString([], {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+
 export function fmtBytes(n) {
   if (n == null || Number.isNaN(Number(n))) return '';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];

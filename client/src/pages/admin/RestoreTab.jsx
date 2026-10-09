@@ -105,7 +105,7 @@ function DiffList({ title, items, total, cls }) {
 const num = (n, cls) => (n ? <strong className={cls}>{n.toLocaleString()}</strong> : <span className="dim">0</span>);
 
 function ImpactTable({ rows }) {
-  const [open, setOpen] = useState(null);
+  const [open, setOpen] = useState(new Set());
   return (
     <div className="table-wrap">
       <table className="t wl">
@@ -141,32 +141,36 @@ function ImpactTable({ rows }) {
                       <button
                         type="button"
                         className="btn sm ghost"
-                        onClick={() => setOpen(open === t.id ? null : t.id)}
+                        onClick={() => {
+                          const next = new Set(open);
+                          if (next.has(t.id)) next.delete(t.id);
+                          else next.add(t.id);
+                          setOpen(next);
+                        }}
                       >
-                        {open === t.id ? 'Hide' : 'Details'}
+                        {open.has(t.id) ? 'Hide' : 'Details'}
                       </button>
                     ) : null}
                   </td>
 
                 </tr>
-                {open === t.id ? (
-                  <tr className="diff-row">
-                    <td colSpan={7}>
-
-                      {t.preserved ? (
-                        <div className="alert info mb-12">
-                          Audit logs are preserved during restore and are not replaced by the copy contained in the backup.
-                        </div>
-                      ) : null}
-
-                      <div className="diff-grid">
-                        <DiffList title="Added (in backup, not current)" items={t.samples.added} total={t.added} cls="c-add" />
-                        <DiffList title="Removed (current, not in backup)" items={t.samples.removed} total={t.removed} cls="c-rem" />
-                        <DiffList title="Modified" items={t.samples.modified} total={t.modified} cls="c-mod" />
-                      </div>
-                    </td>
-                  </tr>
-                ) : null}
+                  {open.has(t.id) ? (
+                    <tr className="diff-row">
+                      <td colSpan={7}>
+                        {t.preservedMessage ? (
+                          <div className="detail-message">
+                            ℹ️ Audit logs are preserved during restore and are not replaced by the copy contained in the backup.
+                          </div>
+                        ) : (
+                          <div className="diff-grid">
+                            <DiffList title="Added (in backup, not current)" items={t.samples.added} total={t.added} cls="c-add" />
+                            <DiffList title="Removed (current, not in backup)" items={t.samples.removed} total={t.removed} cls="c-rem" />
+                            <DiffList title="Modified" items={t.samples.modified} total={t.modified} cls="c-mod" />
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ) : null}
               </Fragment>
             );
           })}

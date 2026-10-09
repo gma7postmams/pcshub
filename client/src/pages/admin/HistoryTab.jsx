@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, get, post } from '../../lib/api.js';
 import ReauthDialog from './ReauthDialog.jsx';
-import { fmtBytes, fmtDateTime } from '../../lib/util.js';
+import { fmtBytes, fmtDateTime, fmtDateTimeSec } from '../../lib/util.js';
 import { Empty, Modal, useToast } from '../../components/ui.jsx';
 
 const PAGE = 25;
@@ -148,7 +148,7 @@ export default function HistoryTab({ active, refreshKey, onRunning, onChanged, o
                   const ok = backup && !j.deleted_at && j.status === 'succeeded';
                   return (
                     <tr key={j.id}>
-                      <td className="nowrap">{fmtDateTime(j.created_at)}</td>
+                      <td className="nowrap">{fmtDateTimeSec(j.created_at)}</td>
                       <td><span className={`pill ${backup ? 's-new' : 's-progress'}`}>{backup ? 'Backup' : 'Restore'}</span></td>
                       <td>{j.created_by_name || <span className="dim">—</span>}</td>
                       <td>
