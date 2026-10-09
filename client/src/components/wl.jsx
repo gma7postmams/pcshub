@@ -1,4 +1,4 @@
-import { Children, useCallback, useEffect, useRef, useState } from 'react';
+import { Children, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { fmtDate, isoDate } from '../lib/util.js';
 import { CalendarIcon, ChevronDownIcon, CopyIcon, KebabIcon, PencilIcon, TrashIcon } from './Icons.jsx';
 
@@ -183,12 +183,35 @@ export function RowMenu({ onEdit, onDuplicate, onDelete }) {
       {pos ? (
         <div className="rowmenu" role="menu" style={pos} ref={menu}>
           <button type="button" role="menuitem" onClick={() => { close(); onEdit(); }}><PencilIcon /> Edit</button>
-          <button type="button" role="menuitem" onClick={() => { close(); onDuplicate(); }}><CopyIcon /> Duplicate</button>
+          {onDuplicate ? <button type="button" role="menuitem" onClick={() => { close(); onDuplicate(); }}><CopyIcon /> Duplicate</button> : null}
           <button type="button" role="menuitem" className="danger row-del" onClick={() => { close(); onDelete(); }}><TrashIcon /> Delete</button>
         </div>
       ) : null}
     </>
   );
+}
+
+/** Table box that ends just above whatever sits under it (pager, footer), so the page itself has no scroll bar and the table's own scroll bars stay on screen.
+ *  Put className "wl-fit" on the table's wrapper; `dep` changes when the content does. */
+export function useFitBox(dep) {
+  useLayoutEffect(() => {
+    const fit = () => {
+      const el = document.querySelector('.wl-fit');
+      if (!el) return;
+      el.style.maxHeight = 'none';
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      let below = 0;
+      for (let n = el.nextElementSibling; n; n = n.nextElementSibling) if (getComputedStyle(n).position !== 'fixed') below += n.offsetHeight;
+      const main = el.closest('main');
+      const pad = main ? parseFloat(getComputedStyle(main).paddingBottom) || 0 : 0;
+      el.style.maxHeight = `${Math.max(240, Math.round(window.innerHeight - top - below - pad - 4))}px`;
+      const over = document.documentElement.scrollHeight - window.innerHeight;   // margins under the table that the sum above missed
+      if (over > 0 && el.scrollHeight > el.clientHeight) el.style.maxHeight = `${Math.max(240, el.clientHeight - over)}px`;
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [dep]);
 }
 
 function pageList(cur, pages) {

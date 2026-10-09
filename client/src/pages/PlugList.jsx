@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
 import { DownloadIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
-import { FilterSelect, Pager, SortTh, useNarrow } from '../components/wl.jsx';
+import { FilterSelect, Pager, RowMenu, SortTh, useFitBox, useNarrow } from '../components/wl.jsx';
 import { useSession } from '../context.jsx';
 import PlugGrid from '../components/PlugGrid.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
@@ -179,6 +179,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   };
 
   const rows = data ? data.rows : [];
+  useFitBox(`${isGrid}|${narrow}|${rows.length}|${days === null}|${!!data}|${size}`);
   const chosen = rows.filter((r) => picked.has(r.id));
   const allOn = !!rows.length && rows.every((r) => picked.has(r.id));
   const toggle = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -262,12 +263,12 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
               <PlugGrid source={data} canWrite={canWrite} me={(session.user && (session.user.full_name || session.user.username)) || ''} defaultDate={period === 'day' ? anchor : ''} limit={limit} onDirty={setGridDirty} registerToolbar={registerToolbar}
                 onSaved={async () => { await loadDays(); loadRows(); }} />
             ) : (
-            <div className="table-wrap">
+            <div className={`table-wrap${narrow ? '' : ' wl-fit'}`}>
               <table className={`t wl plug-t${narrow ? ' cards' : ''}`}>
                 <thead>
                   <tr>
                     {canWrite ? <th className="chk"><input type="checkbox" checked={allOn} disabled={!rows.length} onChange={() => setPicked(allOn ? new Set() : new Set(rows.map((r) => r.id)))} title="Select every plug on this page" /></th> : null}
-                    <SortTh k="plug_date" sort={sort} onSort={setSort}>DATE</SortTh><SortTh k="plug_id" sort={sort} onSort={setSort}>PLUG ID</SortTh><SortTh k="prog_name" sort={sort} onSort={setSort}>PROG. NAME / PROJ. TITLE</SortTh><SortTh k="psd" sort={sort} onSort={setSort}>PSD</SortTh><SortTh k="account_by" sort={sort} onSort={setSort}>ACCOUNT BY</SortTh><SortTh k="requested_by" sort={sort} onSort={setSort}>REQUESTED BY</SortTh><SortTh k="in_workload" sort={sort} onSort={setSort} className="plug-inwl">IN WORKLOAD</SortTh>{canWrite ? <th className="plug-actions">Actions</th> : null}
+                    <SortTh k="plug_date" sort={sort} onSort={setSort}>DATE</SortTh><SortTh k="plug_id" sort={sort} onSort={setSort}>PLUG ID</SortTh><SortTh k="prog_name" sort={sort} onSort={setSort}>PROG. NAME / PROJ. TITLE</SortTh><SortTh k="psd" sort={sort} onSort={setSort}>PSD</SortTh><SortTh k="account_by" sort={sort} onSort={setSort}>ACCOUNT BY</SortTh><SortTh k="requested_by" sort={sort} onSort={setSort}>REQUESTED BY</SortTh><SortTh k="in_workload" sort={sort} onSort={setSort} className="plug-inwl">IN WORKLOAD</SortTh>{canWrite ? <th className="plug-actions" /> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -282,9 +283,8 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
                       <td data-label="Requested By">{r.requested_by}</td>
                       <td data-label="In Workload" className="plug-inwl">{r.in_workload ? <span className="chip c-green">In workload</span> : <span className="dim">—</span>}</td>
                       {canWrite ? (
-                        <td className="plug-actions">
-                          <button type="button" className="btn sm ghost" onClick={() => setEditing(r)}>Edit</button>
-                          <button type="button" className="btn sm ghost" onClick={() => removePlug(r)}>Delete</button>
+                        <td className="plug-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowMenu onEdit={() => setEditing(r)} onDelete={() => removePlug(r)} />
                         </td>
                       ) : null}
                     </tr>

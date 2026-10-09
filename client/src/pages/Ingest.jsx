@@ -4,7 +4,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { ago, downloadFile, fmtDate, fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { PlusIcon, SearchIcon, DownloadIcon } from '../components/Icons.jsx';
-import { Chip, DateChip, DateRange, FilterSelect, Pager, PlatformCell, SortTh, useNarrow } from '../components/wl.jsx';
+import { Chip, DateChip, DateRange, FilterSelect, Pager, PlatformCell, SortTh, useFitBox, useNarrow } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
 // Status (CM) is blank (Pending) until CM picks one of these
@@ -259,6 +259,7 @@ export default function Ingest() {
   const total = data ? data.total : 0;
 
   const rows = data && data.rows ? data.rows : [];
+  useFitBox(`${rows.length}|${!!data}|${picked.size ? 1 : 0}`);
   const allOn = rows.length > 0 && rows.every((r) => picked.has(r.id));
   const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const removePicked = async () => {
@@ -295,7 +296,7 @@ export default function Ingest() {
             {canWrite ? <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({})}><PlusIcon /> New Ingest</button> : null}
           </div>
         </div>
-        <div className="table-wrap" id="tbl">
+        <div className={`table-wrap${narrow ? "" : " wl-fit"}`} id="tbl">
           {!data ? <Empty>Loading…</Empty>
             : data.error ? <Empty>{data.error}</Empty>
               : !data.rows.length ? <Empty>No ingest records match these filters.</Empty>
