@@ -256,7 +256,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
         ) : (
           <>
             {isGrid && data ? (
-              <PlugGrid source={data} canWrite={canWrite} defaultDate={period === 'day' ? anchor : ''} limit={limit} onDirty={setGridDirty} registerToolbar={registerToolbar}
+              <PlugGrid source={data} canWrite={canWrite} me={(session.user && (session.user.full_name || session.user.username)) || ''} defaultDate={period === 'day' ? anchor : ''} limit={limit} onDirty={setGridDirty} registerToolbar={registerToolbar}
                 onSaved={async () => { await loadDays(); loadRows(); }} />
             ) : (
             <div className="table-wrap">
@@ -264,7 +264,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
                 <thead>
                   <tr>
                     {canWrite ? <th className="chk"><input type="checkbox" checked={allOn} disabled={!todo.length} onChange={() => setPicked(allOn ? new Set() : new Set(todo.map((r) => r.id)))} title="Select every plug on this page that is not yet in the Workload Tracker" /></th> : null}
-                    <SortTh k="plug_date" sort={sort} onSort={setSort}>DATE</SortTh><SortTh k="plug_id" sort={sort} onSort={setSort}>PLUG ID</SortTh><SortTh k="prog_name" sort={sort} onSort={setSort}>PROG. NAME / PROJ. TITLE</SortTh><SortTh k="psd" sort={sort} onSort={setSort}>PSD</SortTh><SortTh k="account_by" sort={sort} onSort={setSort}>ACCOUNT BY</SortTh><SortTh k="in_workload" sort={sort} onSort={setSort}>IN WORKLOAD</SortTh>{canWrite ? <th className="plug-actions">Actions</th> : null}
+                    <SortTh k="plug_date" sort={sort} onSort={setSort}>DATE</SortTh><SortTh k="plug_id" sort={sort} onSort={setSort}>PLUG ID</SortTh><SortTh k="prog_name" sort={sort} onSort={setSort}>PROG. NAME / PROJ. TITLE</SortTh><SortTh k="psd" sort={sort} onSort={setSort}>PSD</SortTh><SortTh k="account_by" sort={sort} onSort={setSort}>ACCOUNT BY</SortTh><SortTh k="requested_by" sort={sort} onSort={setSort}>REQUESTED BY</SortTh><SortTh k="in_workload" sort={sort} onSort={setSort} className="plug-inwl">IN WORKLOAD</SortTh>{canWrite ? <th className="plug-actions">Actions</th> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -276,7 +276,8 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
                       <td data-label="PROG. NAME / PROJ. TITLE">{r.prog_name}</td>
                       <td data-label="PSD">{r.psd}</td>
                       <td data-label="Account By">{r.account_by}</td>
-                      <td data-label="In Workload">{r.in_workload ? <span className="chip c-green">In workload</span> : <span className="dim">—</span>}</td>
+                      <td data-label="Requested By">{r.requested_by}</td>
+                      <td data-label="In Workload" className="plug-inwl">{r.in_workload ? <span className="chip c-green">In workload</span> : <span className="dim">—</span>}</td>
                       {canWrite ? (
                         <td className="plug-actions">
                           <button type="button" className="btn sm ghost" onClick={() => setEditing(r)}>Edit</button>
@@ -284,7 +285,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
                         </td>
                       ) : null}
                     </tr>
-                  )) : <tr><td colSpan={canWrite ? 8 : 6} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr>}
+                  )) : <tr><td colSpan={canWrite ? 9 : 7} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr>}
                 </tbody>
               </table>
             </div>

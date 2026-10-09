@@ -941,3 +941,7 @@ table.t.xl.plug-xl td[data-k="plug_date"] input { min-width: 120px; text-align: 
 table.t.xl.plug-xl td[data-k="plug_id"] input { min-width: 150px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 table.t.xl.plug-xl td[data-k="prog_name"] input { min-width: 260px; }
 table.t.xl.plug-xl td[data-k="psd"] input, table.t.xl.plug-xl td[data-k="account_by"] input { min-width: 150px; }
+/* PSD Daily Plug List: the IN WORKLOAD column only needs the width of its chip */
+.plug-t th.plug-inwl, .plug-t td.plug-inwl { width: 1%; white-space: nowrap; text-align: center; padding-left: 8px; padding-right: 8px; }
+table.t.xl.plug-xl td[data-k="requested_by"] input { min-width: 140px; }
+table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color: var(--muted, #6b7280); cursor: default; }

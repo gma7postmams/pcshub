@@ -158,6 +158,9 @@ function plugFilter(query) {
 }
 const whereSql = (where) => (where.length ? `WHERE ${where.join(' AND ')}` : '');
 
+/** The name stored as Requested By: the signed-in person's full name, else their username. */
+const whoIs = (req) => String((req.user && (req.user.full_name || '').trim()) || (req.user && req.user.username) || '');
+
 module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked, exportPalette }) {
   const router = express.Router();
   // Mounted at /api/plugs. Anyone who can open the PSD Daily Plug List page OR the Workload Tracker may read the list (the tracker
@@ -186,14 +189,14 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     const { limit, offset } = v.paging(req.query, { def: 3000, max: 5000 });
     let order = req.query.order === 'desc' ? 'p.plug_date DESC, p.seq, p.id' : 'p.plug_date, p.seq, p.id';   // newest day first, or oldest first; list order within a day
     // a clicked column header (?sort=&dir=) sorts the whole result, text case-insensitively, empty values last
-    const SORTS = { plug_date: 'p.plug_date', plug_id: 'lower(p.plug_id)', prog_name: 'lower(p.prog_name)', psd: 'lower(p.psd)', account_by: 'lower(p.account_by)' };
+    const SORTS = { plug_date: 'p.plug_date', plug_id: 'lower(p.plug_id)', prog_name: 'lower(p.prog_name)', psd: 'lower(p.psd)', account_by: 'lower(p.account_by)', requested_by: 'lower(p.requested_by)' };
     if (used) SORTS.in_workload = 'in_workload';
     if (Object.prototype.hasOwnProperty.call(SORTS, req.query.sort)) {
       order = `${SORTS[req.query.sort]} ${req.query.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, p.plug_date, p.seq, p.id`;
     }
     const total = (await db.query(`SELECT count(*)::int AS n FROM workload_plugs p ${whereSql(where)}`, params)).rows[0].n;
     const { rows } = await db.query(
-      `SELECT p.id, p.plug_date, p.seq, p.list_no, p.plug_id, p.prog_name, p.psd, p.account_by, p.is_additional${used}
+      `SELECT p.id, p.plug_date, p.seq, p.list_no, p.plug_id, p.prog_name, p.psd, p.account_by, p.requested_by, p.is_additional${used}
          FROM workload_plugs p ${whereSql(where)} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params
     );
     res.json({ rows, total });
@@ -203,12 +206,12 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
   router.get('/export', asyncH(async (req, res) => {
     const ExcelJS = require('exceljs');
     const { where, params } = plugFilter(req.query);
-    const SORTS = { plug_date: 'p.plug_date', plug_id: 'lower(p.plug_id)', prog_name: 'lower(p.prog_name)', psd: 'lower(p.psd)', account_by: 'lower(p.account_by)' };
+    const SORTS = { plug_date: 'p.plug_date', plug_id: 'lower(p.plug_id)', prog_name: 'lower(p.prog_name)', psd: 'lower(p.psd)', account_by: 'lower(p.account_by)', requested_by: 'lower(p.requested_by)' };
     const order = Object.prototype.hasOwnProperty.call(SORTS, req.query.sort)
       ? `${SORTS[req.query.sort]} ${req.query.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, p.plug_date, p.seq, p.id`
       : (req.query.order === 'desc' ? 'p.plug_date DESC, p.seq, p.id' : 'p.plug_date, p.seq, p.id');
     const { rows } = await db.query(
-      `SELECT p.plug_date, p.plug_id, p.prog_name, p.psd, p.account_by, p.is_additional,
+      `SELECT p.plug_date, p.plug_id, p.prog_name, p.psd, p.account_by, p.requested_by, p.is_additional,
               EXISTS (SELECT 1 FROM workload_items w WHERE w.work_date = p.plug_date
                  AND upper(p.plug_id) IN (SELECT upper(btrim(x)) FROM unnest(string_to_array(w.plug_id, E'\n')) AS x)) AS in_workload
          FROM workload_plugs p ${whereSql(where)} ORDER BY ${order} LIMIT 20000`, params
@@ -222,7 +225,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     const ws = wb.addWorksheet('PSD Daily Plug List');
     const COLS = [
       { header: 'DATE', key: 'd' }, { header: 'PLUG ID', key: 'plug_id' }, { header: 'PROG. NAME / PROJ. TITLE', key: 'prog_name' },
-      { header: 'PSD', key: 'psd' }, { header: 'ACCOUNT BY', key: 'account_by' }, { header: 'IN WORKLOAD', key: 'in_workload' },
+      { header: 'PSD', key: 'psd' }, { header: 'ACCOUNT BY', key: 'account_by' }, { header: 'REQUESTED BY', key: 'requested_by' }, { header: 'IN WORKLOAD', key: 'in_workload' },
     ];
     ws.columns = COLS.map((c) => ({ ...c, width: 16, style: c.key === 'd' ? { numFmt: 'ddd, mmm d, yyyy' } : {} }));
     ws.getRow(1).eachCell((cell) => {
@@ -234,7 +237,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     ws.views = [{ state: 'frozen', ySplit: 1 }];
     const asDate = (v) => { const t = v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10); return new Date(`${t}T00:00:00Z`); };
     for (const r of rows) {
-      const row = ws.addRow({ d: asDate(r.plug_date), plug_id: r.plug_id, prog_name: r.prog_name || '', psd: r.psd || '', account_by: r.account_by || '', in_workload: r.in_workload ? 'In workload' : '—' });
+      const row = ws.addRow({ d: asDate(r.plug_date), plug_id: r.plug_id, prog_name: r.prog_name || '', psd: r.psd || '', account_by: r.account_by || '', requested_by: r.requested_by || '', in_workload: r.in_workload ? 'In workload' : '—' });
       row.alignment = { wrapText: false, vertical: 'middle', horizontal: 'center' };
       row.eachCell({ includeEmpty: true }, (cell) => { cell.border = { right: thin }; });
       const pid = row.getCell('plug_id');
@@ -289,15 +292,15 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
         for (const sh of sheets) {
           const p = sh.plugs;
           const { rows } = await c.query(
-            `INSERT INTO workload_plugs (plug_date, seq, list_no, plug_id, prog_name, psd, account_by, is_additional, source_file, created_by)
-             SELECT $1::date, t.seq, t.list_no, t.plug_id, t.prog_name, t.psd, t.account_by, t.addl, $2, $3
+            `INSERT INTO workload_plugs (plug_date, seq, list_no, plug_id, prog_name, psd, account_by, is_additional, source_file, created_by, requested_by)
+             SELECT $1::date, t.seq, t.list_no, t.plug_id, t.prog_name, t.psd, t.account_by, t.addl, $2, $3, $11
                FROM unnest($4::int[], $5::int[], $6::text[], $7::text[], $8::text[], $9::text[], $10::bool[]) AS t(seq, list_no, plug_id, prog_name, psd, account_by, addl)
              ON CONFLICT (plug_date, plug_id, prog_name, psd)
              DO UPDATE SET seq = EXCLUDED.seq, list_no = EXCLUDED.list_no, account_by = EXCLUDED.account_by,
                            is_additional = EXCLUDED.is_additional, source_file = EXCLUDED.source_file, updated_at = now()
              RETURNING (xmax = 0) AS inserted`,
             [sh.date, req.file.originalname || null, req.user.id, p.map((x) => x.seq), p.map((x) => x.list_no), p.map((x) => x.plug_id),
-              p.map((x) => x.prog_name), p.map((x) => x.psd), p.map((x) => x.account_by), p.map((x) => x.is_additional)]
+              p.map((x) => x.prog_name), p.map((x) => x.psd), p.map((x) => x.account_by), p.map((x) => x.is_additional), whoIs(req)]
           );
           const added = rows.filter((r) => r.inserted).length;
           result.push({ sheet: sh.sheet, date: sh.date, plugs: p.length, added, existing: p.length - added, additional: sh.additional, skipped: sh.skippedNoId });
@@ -330,9 +333,9 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     let row;
     try {
       ({ rows: [row] } = await db.query(
-        `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by)
-         VALUES ($1, (SELECT COALESCE(MAX(seq), 0) + 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6) RETURNING id`,
-        [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by, req.user.id]
+        `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by, requested_by)
+         VALUES ($1, (SELECT COALESCE(MAX(seq), 0) + 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6, $7) RETURNING id`,
+        [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by, req.user.id, whoIs(req)]
       ));
     } catch (e) { dupe(e); }
     await audit(req, 'workload.plug_add', 'workload_plug', row.id, { plug_date: b.plug_date, plug_id: b.plug_id });
@@ -366,9 +369,9 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
             updated++;
           } else {
             const ins = await c.query(
-              `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by)
-               VALUES ($1, (SELECT COALESCE(MAX(seq), 0) + 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6) RETURNING id`,
-              [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by, req.user.id]);
+              `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by, requested_by)
+               VALUES ($1, (SELECT COALESCE(MAX(seq), 0) + 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6, $7) RETURNING id`,
+              [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by, req.user.id, whoIs(req)]);
             await audit(req, 'workload.plug_add', 'workload_plug', ins.rows[0].id, { plug_date: b.plug_date, plug_id: b.plug_id }, c);
             addedIds.push(ins.rows[0].id);
           }

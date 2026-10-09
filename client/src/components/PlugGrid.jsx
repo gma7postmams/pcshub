@@ -6,9 +6,10 @@ import { useConfirm, useToast } from './ui.jsx';
 // PSD Daily Plug List — Excel mode. An editable grid that works like the Workload Tracker's Excel mode: click a cell and type, drag to select a
 // range, click a row number / column heading to select whole rows / columns, copy / cut / paste with Excel, Delete clears, Ctrl+Z / Ctrl+Y undo
 // and redo, Add Row puts a new row on top, and nothing is saved until "Save changes" (one all-or-nothing request to /api/plugs/batch).
-const COLS = ['plug_date', 'plug_id', 'prog_name', 'psd', 'account_by'];
-const HEAD = { plug_date: 'DATE', plug_id: 'PLUG ID', prog_name: 'PROG. NAME / PROJ. TITLE', psd: 'PSD', account_by: 'ACCOUNT BY' };
-const MAXLEN = { plug_date: 10, plug_id: 200, prog_name: 300, psd: 200, account_by: 100 };
+const COLS = ['plug_date', 'plug_id', 'prog_name', 'psd', 'account_by', 'requested_by'];
+const READONLY = new Set(['requested_by']);   // set by the server from who imported / added the plug
+const HEAD = { plug_date: 'DATE', plug_id: 'PLUG ID', prog_name: 'PROG. NAME / PROJ. TITLE', psd: 'PSD', account_by: 'ACCOUNT BY', requested_by: 'REQUESTED BY' };
+const MAXLEN = { plug_date: 10, plug_id: 200, prog_name: 300, psd: 200, account_by: 100, requested_by: 200 };
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 let keySeq = 0;
 const newKey = () => `n${Date.now()}-${keySeq++}`;
@@ -43,8 +44,8 @@ function parseTsv(text) {
 }
 const tsvCell = (x) => (/[\t\n"]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x);
 
-const fromServer = (r) => ({ _key: `s${r.id}`, id: r.id, plug_date: r.plug_date, plug_id: r.plug_id || '', prog_name: r.prog_name || '', psd: r.psd || '', account_by: r.account_by || '' });
-const isEmptyRow = (r) => COLS.every((k) => k === 'plug_date' || !String(r[k] ?? '').trim());
+const fromServer = (r) => ({ _key: `s${r.id}`, id: r.id, plug_date: r.plug_date, plug_id: r.plug_id || '', prog_name: r.prog_name || '', psd: r.psd || '', account_by: r.account_by || '', requested_by: r.requested_by || '' });
+const isEmptyRow = (r) => COLS.every((k) => k === 'plug_date' || READONLY.has(k) || !String(r[k] ?? '').trim());
 
 function GridMenu({ x, y, children, ...rest }) {
   const ref = useRef(null);
@@ -64,7 +65,7 @@ function GridMenu({ x, y, children, ...rest }) {
  * source: the rows the Table view would show ({ rows, total }); every time it is replaced (a reload, another day…) the grid starts again from it.
  * Reports the number of unsaved rows through onDirty so the page can ask before leaving. toolbar(node) lets the page place Add Row / Save in its own bar.
  */
-export default function PlugGrid({ source, canWrite, defaultDate, limit, onDirty, onSaved, registerToolbar }) {
+export default function PlugGrid({ source, canWrite, defaultDate, me, limit, onDirty, onSaved, registerToolbar }) {
   const toast = useToast();
   const confirm = useConfirm();
   const boxRef = useRef(null);
@@ -195,13 +196,13 @@ export default function PlugGrid({ source, canWrite, defaultDate, limit, onDirty
     setRows((rs) => rs.map((r, ri) => {
       if (ri < norm.rLo || ri > norm.rHi) return r;
       const c = { ...r };
-      for (let ci = norm.cLo; ci <= norm.cHi; ci++) c[COLS[ci]] = '';
+      for (let ci = norm.cLo; ci <= norm.cHi; ci++) if (!READONLY.has(COLS[ci])) c[COLS[ci]] = '';
       return { ...c, _dirty: true };
     }));
   };
   const addRow = () => {
     pushHistory(null);
-    setRows((rs) => [{ _key: newKey(), _new: true, _dirty: false, plug_date: (rs.length && rs[0].plug_date) || defaultDate || isoDate(), plug_id: '', prog_name: '', psd: '', account_by: '' }, ...rs]);
+    setRows((rs) => [{ _key: newKey(), _new: true, _dirty: false, plug_date: (rs.length && rs[0].plug_date) || defaultDate || isoDate(), plug_id: '', prog_name: '', psd: '', account_by: '', requested_by: me || '' }, ...rs]);
     setSel({ r0: 0, c0: 0, r1: 0, c1: 0 });
     requestAnimationFrame(() => {
       const box = boxRef.current;
@@ -268,7 +269,7 @@ export default function PlugGrid({ source, canWrite, defaultDate, limit, onDirty
     pushHistory(null); setEpoch((v) => v + 1);
     setRows((rs) => {
       let next = rs;
-      if (r0 + tileR > next.length) next = [...next, ...Array.from({ length: r0 + tileR - next.length }, () => ({ _key: newKey(), _new: true, plug_date: (rs[rs.length - 1] && rs[rs.length - 1].plug_date) || defaultDate || isoDate(), plug_id: '', prog_name: '', psd: '', account_by: '' }))];
+      if (r0 + tileR > next.length) next = [...next, ...Array.from({ length: r0 + tileR - next.length }, () => ({ _key: newKey(), _new: true, plug_date: (rs[rs.length - 1] && rs[rs.length - 1].plug_date) || defaultDate || isoDate(), plug_id: '', prog_name: '', psd: '', account_by: '', requested_by: me || '' }))];
       return next.map((row, ri) => {
         const bi = ri - r0;
         if (bi < 0 || bi >= tileR) return row;
@@ -276,6 +277,7 @@ export default function PlugGrid({ source, canWrite, defaultDate, limit, onDirty
         for (let ci = 0; ci < tileC; ci++) {
           const k = COLS[c0 + ci];
           if (!k) break;
+          if (READONLY.has(k)) continue;
           const raw = (block[bi % bR][ci % bC]) ?? '';
           c[k] = k === 'plug_date' ? normDate(raw) : raw.replace(/\s*\n\s*/g, ' ').trim();
         }
@@ -373,7 +375,7 @@ export default function PlugGrid({ source, canWrite, defaultDate, limit, onDirty
                     onFocus={(e) => { if (isText(e.target)) setSel((s) => (s && s.r0 === ri && s.r1 === ri && s.c0 === ci && s.c1 === ci ? s : { r0: ri, c0: ci, r1: ri, c1: ci })); }}
                     className={selClass(ri, ci)}>
                     <div className="xl-cell" data-value={`${r[k] ?? ''}​`}>
-                      <input maxLength={MAXLEN[k]} value={r[k] ?? ''} disabled={!canWrite} placeholder={k === 'plug_date' ? 'YYYY-MM-DD' : undefined} onChange={(e) => setCell(r._key, k, e.target.value)} />
+                      <input maxLength={MAXLEN[k]} value={r[k] ?? ''} disabled={!canWrite || READONLY.has(k)} placeholder={k === 'plug_date' ? 'YYYY-MM-DD' : undefined} onChange={(e) => setCell(r._key, k, e.target.value)} />
                     </div>
                   </td>
                 ))}
