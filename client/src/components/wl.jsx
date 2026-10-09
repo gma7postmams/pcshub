@@ -204,7 +204,7 @@ export function useFitBox(dep) {
       for (let n = el.nextElementSibling; n; n = n.nextElementSibling) if (getComputedStyle(n).position !== 'fixed') below += n.offsetHeight;
       const main = el.closest('main');
       const pad = main ? parseFloat(getComputedStyle(main).paddingBottom) || 0 : 0;
-      el.style.maxHeight = `${Math.max(240, Math.round(window.innerHeight - top - below - pad - 20))}px`;
+      el.style.maxHeight = `${Math.max(240, Math.round(window.innerHeight - top - below - pad - 4))}px`;
       const over = document.documentElement.scrollHeight - window.innerHeight;   // margins under the table that the sum above missed
       if (over > 0 && el.scrollHeight > el.clientHeight) el.style.maxHeight = `${Math.max(240, el.clientHeight - over)}px`;
     };
