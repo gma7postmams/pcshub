@@ -973,4 +973,4 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 @media (max-width: 1000px) { .wl-tabbar.one-row { flex-wrap: wrap; } }
 
 /* Workload Tracker, Ingest Tracker, PSD Daily Plug List: the table's box reaches nearly to the bottom of the window (less padding under the card) */
-.container.wl-page { padding-bottom: 10px; }
+.container.wl-page { padding: 10px; }
