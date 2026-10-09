@@ -1452,10 +1452,7 @@ export default function Workload() {
 
   return (
     <main className="container wide wl-page">
-      <div className="page-head">
-        <h1 className="sr-only">Workload Tracker</h1>
-        <div className="actions"><PresenceAvatars path="/workload" /></div>
-      </div>
+      <h1 className="sr-only">Workload Tracker</h1>
 
       {!lookups.workload_platform.length || !lookups.plug_type.length ? (
         <div className="alert warn mb-12">
@@ -1517,15 +1514,16 @@ export default function Workload() {
 
         <div className="wl-filters">
           {!isGrid ? (
-            <label className="wl-search">
+            <label className="wl-search short">
               <SearchIcon />
-              <input type="search" placeholder="Search plug ID, PSD, program, billable party, remarks…" value={filt.q} onChange={setF('q')} />
+              <input type="search" placeholder="Search plug ID, PSD, program, remarks…" value={filt.q} onChange={setF('q')} />
             </label>
           ) : null}
           <FilterSelect label="Units" value={filt.units} onChange={setF('units')}><Options list={[...meta.units, meta.notSet]} blank="All" /></FilterSelect>
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
           <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
           <DateRange from={filt.from} to={filt.to} onChange={setRange} />
+          <div className="wl-presence"><PresenceAvatars path="/workload" /></div>
         </div>
 
         {isGrid ? (
