@@ -945,8 +945,8 @@ table.t.xl.plug-xl td[data-k="psd"] input, table.t.xl.plug-xl td[data-k="account
 .plug-t th.plug-inwl, .plug-t td.plug-inwl { width: 1%; white-space: nowrap; text-align: center; padding-left: 8px; padding-right: 8px; }
 table.t.xl.plug-xl td[data-k="requested_by"] input { min-width: 140px; }
 table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color: var(--muted, #6b7280); cursor: default; }
-/* PSD Daily Plug List (Table mode): every column is exactly as wide as its longest content — the table no longer stretches to fill the card.
-   A very long program title wraps at a sensible width instead of pushing everything sideways. */
-.plug-t:not(.cards) { width: max-content; min-width: 0; }
+/* PSD Daily Plug List (Table mode): the table fills the card and the spare width is shared out in proportion to each column's content,
+   so no column is cramped and there is no empty area at the right. IN WORKLOAD / checkbox / actions stay as narrow as their content. */
+.plug-t:not(.cards) { width: 100%; min-width: 0; }
 .plug-t:not(.cards) th, .plug-t:not(.cards) td { white-space: nowrap; }
-.plug-t:not(.cards) td[data-label="PROG. NAME / PROJ. TITLE"] { white-space: normal; max-width: 460px; }
+.plug-t:not(.cards) td[data-label="PROG. NAME / PROJ. TITLE"] { white-space: normal; min-width: 260px; }
