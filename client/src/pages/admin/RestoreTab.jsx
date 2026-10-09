@@ -128,13 +128,37 @@ function ImpactTable({ rows }) {
                       <td className="num">{num(t.modified, 'c-mod')}</td>
                     </>
                   ) : (
-                    <td className="num dim" colSpan={3} title={t.error}>{t.error ? 'Comparison unavailable' : t.backup == null || t.current == null ? 'Count only' : `Net change ${t.backup - t.current >= 0 ? '+' : ''}${t.backup - t.current} (count only)`}</td>
+                    <td className="num dim" colSpan={3} title={t.error}>
+                      {t.error
+                        ? 'Comparison unavailable'
+                        : t.backup == null || t.current == null
+                          ? 'Count only'
+                          : `Net change ${t.backup - t.current >= 0 ? '+' : ''}${t.backup - t.current} (count only)`}
+                    </td>
                   )}
-                  <td className="right">{changed ? <button type="button" className="btn sm ghost" onClick={() => setOpen(open === t.id ? null : t.id)}>{open === t.id ? 'Hide' : 'Details'}</button> : null}</td>
+                  <td className="right">
+                    {(changed || t.preserved) ? (
+                      <button
+                        type="button"
+                        className="btn sm ghost"
+                        onClick={() => setOpen(open === t.id ? null : t.id)}
+                      >
+                        {open === t.id ? 'Hide' : 'Details'}
+                      </button>
+                    ) : null}
+                  </td>
+
                 </tr>
                 {open === t.id ? (
                   <tr className="diff-row">
                     <td colSpan={7}>
+
+                      {t.preserved ? (
+                        <div className="alert info mb-12">
+                          Audit logs are preserved during restore and are not replaced by the copy contained in the backup.
+                        </div>
+                      ) : null}
+
                       <div className="diff-grid">
                         <DiffList title="Added (in backup, not current)" items={t.samples.added} total={t.added} cls="c-add" />
                         <DiffList title="Removed (current, not in backup)" items={t.samples.removed} total={t.removed} cls="c-rem" />
@@ -240,10 +264,29 @@ function RestoreDialog({ a, onClose, onStarted }) {
   };
   return (
     <ReauthDialog
-      title="Restore backup" okText="Restore now" danger typed="RESTORE" onClose={onClose} onSubmit={submit}
+      title="Restore backup"
+      okText="Restore now"
+      danger
+      typed="RESTORE"
+      onClose={onClose}
+      onSubmit={submit}
       extraReady={r.risk.level !== 'HIGH' || ack}
       intro={`This replaces the live system with ${r.source.filename}.`}
     >
+      <div className="alert warn">
+        <strong>Important:</strong>
+        <div>
+          Restoring a backup replaces the current database with the selected backup.
+        </div>
+        <div>
+          Users, roles, groups, ingest records, workload data, settings, and other
+          records created after the backup date will be lost.
+        </div>
+        <div>
+          Audit history and backup history are preserved.
+        </div>
+      </div>
+
       <div className="readiness">
         <div><span className="stat-label">Risk level</span><div><span className={`pill risk ${RISK_PILL[r.risk.level]}`}>{r.risk.level}</span></div></div>
         <div><span className="stat-label">Added</span><div><strong className="c-add">{r.totals.added}</strong></div></div>
@@ -254,7 +297,7 @@ function RestoreDialog({ a, onClose, onStarted }) {
       <ul className="reasons">
         <li>A pre-restore backup is created and verified first. If it fails, nothing is changed.</li>
         <li>The system goes into maintenance mode and is unavailable to everyone until the restore ends.</li>
-        <li>Users created after this backup are lost, and other users are signed out. The audit log is kept.</li>
+        <li>Audit history and backup history are preserved.</li>
       </ul>
       {r.risk.level === 'HIGH' ? <label className="check"><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} /> I understand the risk and want to continue</label> : null}
     </ReauthDialog>

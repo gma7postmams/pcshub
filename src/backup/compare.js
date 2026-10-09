@@ -26,8 +26,14 @@ const ENTITIES = [
       to_jsonb(r) ${VOLATILE} AS f FROM ingest_records r` },
   { id: 'workload_items', label: 'Workload Records', sql: `SELECT id::text AS k, concat_ws(' · ', '#' || id, prog_name, plug_id) AS label,
       to_jsonb(r) ${VOLATILE} AS f FROM workload_items r` },
-  // Immutable history: only added/removed make sense, so no fields are compared.
-  { id: 'audit_logs', label: 'Audit Logs', sql: `SELECT id::text AS k, action AS label, NULL::jsonb AS f FROM audit_logs` },
+  // Audit logs are preserved during restore.
+  {
+    id: 'audit_logs',
+    label: 'Audit Logs',
+    preserved: true,
+    preservedMessage: 'Audit logs are preserved during restore and are not replaced by the backup.',
+    sql: `SELECT id::text AS k, action AS label, NULL::jsonb AS f FROM audit_logs`
+  },
 ];
 
 const show = (v) => {
@@ -63,9 +69,23 @@ async function compareTables(curDb, bakDb) {
       const [c, b] = await Promise.all([curDb.query(e.sql), bakDb.query(e.sql)]);
       const d = diffRows(c.rows, b.rows);
       out.push({
-        id: e.id, label: e.label, detail: true, current: d.current, backup: d.backup,
-        added: d.added.length, removed: d.removed.length, modified: d.modified.length,
-        samples: { added: sample(d.added), removed: sample(d.removed), modified: sample(d.modified) },
+        id: e.id,
+        label: e.label,
+        preserved: Boolean(e.preserved),
+        preservedMessage: e.preservedMessage || null,
+        detail: true,
+        current: d.current,
+        backup: d.backup,
+        added: e.preserved ? 0 : d.added.length,
+        removed: e.preserved ? 0 : d.removed.length,
+        modified: e.preserved ? 0 : d.modified.length,
+        samples: e.preserved
+          ? { added: [], removed: [], modified: [] }
+          : {
+              added: sample(d.added),
+              removed: sample(d.removed),
+              modified: sample(d.modified),
+            },
       });
     } catch (err) {
       out.push({ id: e.id, label: e.label, detail: false, error: String(err.message).slice(0, 200) });
