@@ -557,7 +557,7 @@ table.t.wl .stack .sub { margin: 0; }
 .rowmenu button { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font: 550 13.5px var(--font); text-align: left; cursor: pointer; }
 .rowmenu button:hover { background: var(--surface-3); }
 .rowmenu button.danger { color: var(--red); }
-.rowmenu button:disabled, .rowmenu button.danger:disabled { color: var(--text-3, #9aa3b2); opacity: .55; cursor: not-allowed; background: transparent; }   /* greyed out: e.g. Delete Selected while nothing is ticked */
+
 .rowmenu svg { width: 16px; height: 16px; flex: none; }
 
 .wl-card .pager { padding: 12px 16px; border-top: 1px solid var(--border); }
@@ -953,11 +953,16 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 .plug-t:not(.cards) th, .plug-t:not(.cards) td { white-space: nowrap; }
 .plug-t:not(.cards) td[data-label="PROG. NAME / PROJ. TITLE"] { white-space: normal; min-width: 260px; }
 
-/* Workload Tracker toolbar: "⋯" menu (Delete selected / Delete all…) that replaced the strip above the table */
-.btn.icon-only { padding-left: 8px; padding-right: 8px; min-width: 36px; justify-content: center; }
-.btn.icon-only svg { width: 20px; height: 20px; }
 /* Workload Tracker: a shorter search box, with the people on the page at the right end of the same row (no separate strip above the card) */
 .wl-search.short { flex: 0 1 640px; min-width: 200px; }
 .wl-search.short input { text-overflow: ellipsis; }
 .wl-presence { margin-left: auto; display: flex; align-items: center; }
 .kb-count { margin-left: auto; white-space: nowrap; font-size: 13px; }   /* Knowledge Base: the PDF count sits at the right end of the search row, so it needs no row of its own */
+/* A danger button with nothing to act on (Delete Selected while no row is ticked) is plain grey, not a faded red */
+.btn.danger:disabled { background: var(--surface-3); border-color: var(--border); color: var(--text-3); opacity: .8; cursor: not-allowed; }
+/* Workload Tracker toolbar: slightly tighter buttons so Delete Selected fits beside the others on a 1400 px window */
+.wl-tabactions .btn { padding-left: 11px; padding-right: 11px; }
+.wl-tabbar > .wl-search.ing-search { flex: 1 1 320px; max-width: 640px; margin: 8px 0; }   /* Ingest Tracker: the search box leads the card's top row, the buttons sit at its right end */
+/* PSD Daily Plug List toolbar: tighter buttons so Delete Selected stays on the same line at ~1400 px */
+.plug-bar .btn { padding-left: 11px; padding-right: 11px; }
+.plug-bar .wl-search { flex: 1 1 160px; min-width: 160px; }

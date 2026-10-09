@@ -273,21 +273,21 @@ export default function Ingest() {
 
   return (
     <main className="container wide wl-page">
-      <div className="page-head">
-        <h1 className="sr-only">Ingest Tracker</h1>
-        <div className="actions">
-          {canDelete && picked.size ? <button type="button" className="btn danger" id="del-sel" onClick={removePicked}>Delete Selected ({picked.size})</button> : null}
-          <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
-          {canWrite ? <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({})}><PlusIcon /> New Ingest</button> : null}
-        </div>
-      </div>
+      <h1 className="sr-only">Ingest Tracker</h1>
 
       <div className="card wl-card">
-        <div className="wl-filters">
-          <label className="wl-search" style={{ minWidth: 'min(100%, 410px)' }}>
+        <div className="wl-tabbar">
+          <label className="wl-search ing-search">
             <SearchIcon />
             <input type="search" placeholder="Search program, party, source, folder, remarks…" style={{ textOverflow: 'ellipsis' }} value={filt.q} onChange={setF('q')} />
           </label>
+          <div className="wl-tabactions">
+            {canDelete ? <button type="button" className="btn danger" id="del-sel" disabled={!picked.size} onClick={removePicked} title="Delete the records ticked in the table">{picked.size ? `Delete Selected (${picked.size})` : 'Delete Selected'}</button> : null}
+            <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
+            {canWrite ? <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({})}><PlusIcon /> New Ingest</button> : null}
+          </div>
+        </div>
+        <div className="wl-filters">
           <FilterSelect label="Status" value={filt.status} onChange={setF('status')}><Options list={STATUS_FILTER} blank="All" /></FilterSelect>
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All" /></FilterSelect>
           <label className="wl-search" style={{ flex: '0 1 320px', minWidth: 'min(100%, 300px)' }}>   {/* wide enough for the whole hint, with room to spare for wider fonts (a Mac's system font is wider) */}

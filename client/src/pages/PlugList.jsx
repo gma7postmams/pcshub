@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
 import { DownloadIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
-import { FilterSelect, MoreMenu, Pager, SortTh, useNarrow } from '../components/wl.jsx';
+import { FilterSelect, Pager, SortTh, useNarrow } from '../components/wl.jsx';
 import { useSession } from '../context.jsx';
 import PlugGrid from '../components/PlugGrid.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
@@ -53,7 +53,7 @@ const readMode = (key) => { try { const v = JSON.parse(localStorage.getItem(MODE
 const saveMode = (key, m) => { if (!key) return; try { localStorage.setItem(MODE_KEY, JSON.stringify({ k: key, m })); } catch (e) { /* storage unavailable */ } };
 const remember = (k, v) => { try { localStorage.setItem(`plugs:${k}`, v); } catch (e) { /* storage unavailable */ } };
 
-export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
+export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const toast = useToast();
   const confirm = useConfirm();
   const session = useSession();
@@ -74,7 +74,6 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
   const [summary, setSummary] = useState(null);      // result of the last import
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(null);      // the plug being edited
-  const [deleting, setDeleting] = useState(false);
   const [filling, setFilling] = useState(false);
   const [mode, setModeState] = useState(() => (canWrite ? readMode(session.session_key) : 'table'));   // Table or Excel (Excel is for people who can edit)
   const isGrid = mode === 'excel' && canWrite;
@@ -193,7 +192,6 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
   };
   const total = data ? data.total : 0;
   const viewLabel = `${rangeLabel(period, range, anchor)}${query ? ` · “${query}”` : ''}`;
-  const everything = period === 'all' && !query;   // the view is the whole list
 
   return (
     <div className="plug-list">
@@ -215,7 +213,7 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
         {!isGrid ? (
           <label className="wl-search">
             <SearchIcon />
-            <input type="search" placeholder="Search plug ID, program, PSD…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input type="search" placeholder="Search plugs…" title="Search plug ID, program, PSD" value={q} onChange={(e) => setQ(e.target.value)} />
           </label>
         ) : null}
         <span className="grow" />
@@ -239,12 +237,10 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
             <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button>
             {canWorkload ? <button type="button" className="btn" disabled={filling} onClick={fillExisting}
               title="Rows already in the Workload Tracker that have a Plug ID but a blank PSD or PROG. NAME / PROJ. TITLE get them from this list (anything typed is kept)">{filling ? 'Filling…' : 'Fill Blank Rows'}</button> : null}
-            {(canWrite && !isGrid) || isAdmin ? (
-              <MoreMenu id="plug-more" label="More actions" items={[
-                canWrite && !isGrid && { label: `Delete Selected${chosen.length ? ` (${chosen.length})` : ''}`, danger: true, disabled: !chosen.length, title: 'Delete the plugs ticked in the table', onClick: removeChosen },
-                canWrite && !isGrid && chosen.length ? { label: 'Clear selection', onClick: () => setPicked(new Set()) } : null,
-                isAdmin && { label: 'Delete All', danger: true, disabled: !totals.plugs, title: "Delete what this view shows, or every day's plugs", onClick: () => setDeleting(true) },
-              ]} />
+            {canWrite && !isGrid ? (
+              <button type="button" className="btn danger" id="delete-selected-btn" disabled={!chosen.length} onClick={removeChosen} title="Delete the plugs ticked in the table">
+                {chosen.length ? `Delete Selected (${chosen.length})` : 'Delete Selected'}
+              </button>
             ) : null}
             {isGrid ? (
               <button type="button" className="btn primary" id="save-grid" disabled={!tbRef.current || tbRef.current.saving || !gridDirty} onClick={() => tbRef.current && tbRef.current.save()}>
@@ -333,12 +329,6 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
         </Modal>
       ) : null}
 
-      {deleting ? (
-        <DeleteAllPlugsModal viewLabel={viewLabel} viewCount={total} everything={everything} totals={totals}
-          filters={{ from: range.from || undefined, to: range.to || undefined, q: query || undefined }} onClose={() => setDeleting(false)}
-          onDone={async (out) => { setDeleting(false); toast(`${out.deleted} plug${out.deleted === 1 ? '' : 's'} deleted`); await loadDays(); loadRows(); }} />
-      ) : null}
-
       {adding || editing ? (
         <PlugModal date={period === 'day' ? anchor : ''} plug={editing} onClose={() => { setAdding(false); setEditing(null); }}
           onSaved={async (d, out) => {
@@ -353,31 +343,6 @@ export default function PlugList({ canWrite, canWorkload, isAdmin, onCopied }) {
           }} />
       ) : null}
     </div>
-  );
-}
-
-function DeleteAllPlugsModal({ viewLabel, viewCount, everything, totals, filters, onClose, onDone }) {
-  const toast = useToast();
-  const [scope, setScope] = useState(everything || !viewCount ? 'all' : 'view');
-  const [typed, setTyped] = useState('');
-  const [busy, setBusy] = useState(false);
-  const count = scope === 'view' ? viewCount : totals.plugs;
-  const go = async () => {
-    setBusy(true);
-    try { onDone(await post('/api/plugs/delete-all', scope === 'view' ? { scope: 'range', ...filters } : { scope: 'all' })); } catch (e) { toast(e.message, 'err'); setBusy(false); }
-  };
-  return (
-    <Modal title="Delete plug list" onClose={onClose}
-      footer={(<><span className="grow" /><button type="button" className="btn" onClick={onClose}>Cancel</button>
-        <button type="button" className="btn danger" disabled={busy || typed.trim() !== 'DELETE' || !count} onClick={go}>Delete {count} plug{count === 1 ? '' : 's'}</button></>)}>
-      <div className="stack">
-        {!everything ? <label className="radio-row"><input type="radio" name="plug-scope" checked={scope === 'view'} disabled={!viewCount} onChange={() => setScope('view')} /> Everything in this view — <strong>{viewLabel}</strong> — {viewCount} plug{viewCount === 1 ? '' : 's'}</label> : null}
-        <label className="radio-row"><input type="radio" name="plug-scope" checked={scope === 'all'} onChange={() => setScope('all')} /> <strong>Every day</strong> — {totals.plugs} plug{totals.plugs === 1 ? '' : 's'} on {totals.days} day{totals.days === 1 ? '' : 's'}</label>
-        <p className="dim m-0">This only removes the PSD Daily Plug List. Workload rows that were already made from it are not touched (they just stop being auto-filled until the list is imported again).</p>
-        <label className="f"><span>Type <strong>DELETE</strong> to confirm</span>
-          <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" onKeyDown={(e) => { if (e.key === 'Enter' && typed.trim() === 'DELETE' && !busy && count) go(); }} /></label>
-      </div>
-    </Modal>
   );
 }
 

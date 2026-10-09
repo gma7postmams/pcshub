@@ -12,7 +12,6 @@ export const DownloadIcon = () => <svg {...base} strokeWidth="1.8"><path d="M12 
 export const CalendarIcon = () => <svg {...base} strokeWidth="1.8"><rect x="4" y="5" width="16" height="16" rx="2" /><path d="M8 3v4M16 3v4M4 10h16" /></svg>;
 export const SearchIcon = () => <svg {...base} strokeWidth="1.8"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>;
 export const ChevronDownIcon = () => <svg {...base} strokeWidth="2"><path d="M6 9l6 6 6-6" /></svg>;
-export const MoreIcon = () => <svg {...base} strokeWidth="2.4"><circle cx="5" cy="12" r=".6" /><circle cx="12" cy="12" r=".6" /><circle cx="19" cy="12" r=".6" /></svg>;
 export const KebabIcon = () => <svg {...base} strokeWidth="2.4"><circle cx="12" cy="5" r=".6" /><circle cx="12" cy="12" r=".6" /><circle cx="12" cy="19" r=".6" /></svg>;
 export const PencilIcon = () => <svg {...base} strokeWidth="1.8"><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="M14 6l4 4" /></svg>;
 export const TrashIcon = () => <svg {...base} strokeWidth="1.8"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" /></svg>;
