@@ -26,8 +26,8 @@ const CATALOG = [
   },
 
   { key: 'ingest', label: 'Ingest Tracker', path: '/ingest', sections: [] },
-  { key: 'workload', label: 'Workload Tracker', path: '/workload', sections: [] },
   { key: 'plugs', label: 'PSD Daily Plug List', path: '/plug-list', sections: [] },
+  { key: 'workload', label: 'Workload Tracker', path: '/workload', sections: [] },
 
   {
     key: 'knowledge',
