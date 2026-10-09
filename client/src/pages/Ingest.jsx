@@ -46,7 +46,7 @@ const dayText = (x) => { const m = RANGE.exec(String(x || '')); return m ? `${fm
 // Columns that can be edited right in the table, like the Workload Tracker: click a cell, change it, Enter or click away saves, Esc cancels.
 // Requested By is not one of them — it is filled in from whoever created the request. Destination Folder and Approved By are for PCS / OCS only.
 const CELLS = {
-  program: { kind: 'select' },
+  program: { kind: 'text', max: 200 },
   platform: { kind: 'select' },
   billable_party: { kind: 'text', max: 200 },
   episode_break_date_text: { kind: 'daterange' },   // one date or a from–to range, with the browser's own date pickers
@@ -157,7 +157,7 @@ export default function Ingest() {
   const q = useDebounced(filt.q, 300);
 
   useEffect(() => {
-    get('/api/dropdowns?categories=platform,program').then(setLookups);
+    get('/api/dropdowns?categories=platform').then(setLookups);
   }, []);
 
   const load = useCallback(async () => {
@@ -242,7 +242,7 @@ export default function Ingest() {
       const initial = cellInitial(r, k);
       return (
         <td className="editing" onClick={(e) => e.stopPropagation()}>
-          <InlineCell def={def} initial={initial} options={k === 'cm_status' ? CM_OPTIONS : k === 'program' ? withCurrent(lookups ? lookups.program : [], r.program) : withCurrent(lookups ? lookups.platform : [], r.platform)}
+          <InlineCell def={def} initial={initial} options={k === 'cm_status' ? CM_OPTIONS : withCurrent(lookups ? lookups.platform : [], r.platform)}
             onSave={(value) => saveCell(r, k, value, initial)} onCancel={() => setEditing(null)} />
         </td>
       );
@@ -446,7 +446,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
     >
       <form id="ing-form" className="form-grid" noValidate onSubmit={(e) => e.preventDefault()}>
         <label className="f"><span>PROG. NAME / PROJ. TITLE <span className="req">*</span></span>
-          <select name="program" value={f.program} onChange={set('program')}><Options list={withCurrent(lookups.program, r.program)} blank="Select…" /></select></label>
+          <input name="program" maxLength={200} value={f.program} onChange={set('program')} /></label>
         <label className="f"><span>Platform <span className="req">*</span></span>
           <select name="platform" value={f.platform} onChange={set('platform')}><Options list={withCurrent(lookups.platform, r.platform)} blank="Select platform…" /></select></label>
         <label className="f"><span>Billable Party</span><input name="billable_party" maxLength={200} value={f.billable_party} onChange={set('billable_party')} /></label>

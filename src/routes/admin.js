@@ -20,10 +20,10 @@ router.use((req, res, next) => (req.user && req.user.role === 'Admin' ? next() :
 const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads', 'branding');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-const DROPDOWN_CATEGORIES = ['program', 'platform', 'workload_platform', 'plug_type'];
+// (The PROG. NAME / PROJ. TITLE list was removed: titles are free text everywhere. Old 'program' rows stay in the table, unused, and the audit log keeps its history.)
+const DROPDOWN_CATEGORIES = ['platform', 'workload_platform', 'plug_type'];
 // Which table/column each dropdown category is stored in (used for usage counts, rename propagation, delete guard)
 const DROPDOWN_USAGE = Object.assign(Object.create(null), {
-  program: [{ table: 'ingest_records', col: 'program' }, { table: 'workload_items', col: 'prog_name' }, { table: 'workload_plugs', col: 'prog_name' }],
   platform: { table: 'ingest_records', col: 'platform' },
   workload_platform: { table: 'workload_items', col: 'platform' },
   plug_type: { table: 'workload_items', col: 'plug_type' },
@@ -375,11 +375,11 @@ router.get('/dropdowns', asyncH(async (req, res) => {
   const { rows } = await db.query(
     `SELECT d.*, (
               (SELECT count(*)::int FROM ingest_records i
-                WHERE (d.category='program' AND i.program=d.value) OR (d.category='platform' AND i.platform=d.value))
+                WHERE d.category='platform' AND i.platform=d.value)
             + (SELECT count(*)::int FROM workload_items w
                 WHERE (d.category='workload_platform' AND w.platform=d.value)
                    OR (d.category='plug_type' AND w.plug_type=d.value))) AS usage
-       FROM dropdown_options d ORDER BY category, sort_order, value`
+       FROM dropdown_options d WHERE d.category <> 'program' ORDER BY category, sort_order, value`
   );
   res.json({ categories: DROPDOWN_CATEGORIES, rows });
 }));
@@ -422,7 +422,7 @@ router.get('/dropdowns/export', asyncH(async (req, res) => {
 router.post('/dropdowns/import', asyncH(async (req, res) => {
   const src = req.body && req.body.dropdowns;
   if (!src || typeof src !== 'object' || Array.isArray(src)) throw new HttpError(400, 'Not a dropdown export file (missing "dropdowns")');
-  const unknown = Object.keys(src).filter((k) => !DROPDOWN_CATEGORIES.includes(k));
+  const unknown = Object.keys(src).filter((k) => k !== 'program' && !DROPDOWN_CATEGORIES.includes(k));   // 'program' (an older export) is ignored
   if (unknown.length) throw new HttpError(400, `Unknown dropdown list: ${unknown.slice(0, 3).join(', ')}`);
   const plan = [];
   for (const cat of DROPDOWN_CATEGORIES) {

@@ -7,7 +7,6 @@ const router = express.Router();
 
 // Which page each dropdown category belongs to. A user only gets the values for pages their group can open.
 const CATEGORY_PAGE = Object.assign(Object.create(null), {
-  program: ['/ingest', '/workload', '/plugs'],
   platform: '/ingest',
   workload_platform: '/workload',
   plug_type: '/workload',

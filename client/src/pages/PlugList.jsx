@@ -384,8 +384,6 @@ function PlugModal({ date, plug, onClose, onSaved }) {
   const [f, setF] = useState(plug
     ? { plug_date: plug.plug_date, plug_id: plug.plug_id, prog_name: plug.prog_name || '', psd: plug.psd || '', account_by: plug.account_by || '' }
     : { plug_date: date || isoDate(), plug_id: '', prog_name: '', psd: '', account_by: '' });
-  const [progs, setProgs] = useState([]);
-  useEffect(() => { get('/api/dropdowns?categories=program').then((d) => setProgs(d.program || [])).catch(() => {}); }, []);
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const save = async () => {
@@ -402,7 +400,7 @@ function PlugModal({ date, plug, onClose, onSaved }) {
       <form className="form-grid" noValidate onSubmit={(e) => { e.preventDefault(); save(); }}>
         <label className="f"><span>Date <span className="req">*</span></span><input type="date" value={f.plug_date} onChange={set('plug_date')} /></label>
         <label className="f"><span>Plug ID <span className="req">*</span></span><input value={f.plug_id} onChange={set('plug_id')} maxLength={200} autoFocus /></label>
-        <label className="f full"><span>PROG. NAME / PROJ. TITLE</span><input value={f.prog_name} onChange={set('prog_name')} maxLength={300} list="plug-prog-options" autoComplete="off" /><datalist id="plug-prog-options">{progs.map((o) => <option key={o.value ?? o} value={o.value ?? o} />)}</datalist></label>
+        <label className="f full"><span>PROG. NAME / PROJ. TITLE</span><input value={f.prog_name} onChange={set('prog_name')} maxLength={300} autoComplete="off" /></label>
         <label className="f"><span>PSD</span><input value={f.psd} onChange={set('psd')} maxLength={200} /></label>
         <label className="f"><span>Account By</span><input value={f.account_by} onChange={set('account_by')} maxLength={100} /></label>
       </form>

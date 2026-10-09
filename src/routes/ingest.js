@@ -83,7 +83,6 @@ async function parseBody(client, body, user, current = null) {
     remarks: v.str(body.remarks, { field: 'Remarks', max: 4000 }),
   };
   await assertDropdown(client, 'platform', rec.platform, 'Platform');
-  if (!current || current.program !== rec.program) await assertDropdown(client, 'program', rec.program, 'PROG. NAME / PROJ. TITLE');
   return rec;
 }
 
@@ -296,10 +295,6 @@ router.patch('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
       throw new HttpError(409, `Record is marked ${cur.rows[0].cm_status} and can no longer be edited`);
     }
     if (field === 'platform') await assertDropdown(c, 'platform', value, 'Platform');
-    if (field === 'program') {
-      const old = await c.query('SELECT program FROM ingest_records WHERE id=$1', [id]);
-      if (old.rows[0].program !== value) await assertDropdown(c, 'program', value, 'PROG. NAME / PROJ. TITLE');
-    }
     // `field` is one of the fixed keys above (never user text), so it is safe to name the column here
     if (field === 'episode_break_date_text') {
       await c.query('UPDATE ingest_records SET episode_date=$2, episode_break_date_text=$3, updated_by=$4, updated_at=now() WHERE id=$1', [id, value.start, value.text, req.user.id]);   // separate params: one column is a date, the other text

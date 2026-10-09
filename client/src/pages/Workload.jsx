@@ -361,7 +361,7 @@ export default function Workload() {
   const canWrite = s.can('workload.write');
 
   const [meta, setMeta] = useState(null);
-  const [lookups, setLookups] = useState({ workload_platform: [], plug_type: [], program: [] });
+  const [lookups, setLookups] = useState({ workload_platform: [], plug_type: [] });
   const [tab, setTab] = useState(() => readView(s.session_key).tab);   // kept across a refresh while you stay signed in
   const [mode, setMode] = useState(() => readView(s.session_key).mode);   // Table or Excel: kept across a refresh while you stay signed in
   const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', from: '', to: '' });
@@ -487,7 +487,7 @@ export default function Workload() {
   const cards = mode === 'table' && winW < CARDS_BELOW;
 
   const loadMeta = useCallback(() => {
-    Promise.all([get('/api/workload/meta'), get('/api/dropdowns?categories=workload_platform,plug_type,program')])
+    Promise.all([get('/api/workload/meta'), get('/api/dropdowns?categories=workload_platform,plug_type')])
       .then(([m, dd]) => { setMeta(m); setLookups(dd); })
       .catch((e) => toast(e.message, 'err'));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
