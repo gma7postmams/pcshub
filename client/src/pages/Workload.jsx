@@ -1516,7 +1516,7 @@ export default function Workload() {
           {!isGrid ? (
             <label className="wl-search short">
               <SearchIcon />
-              <input type="search" placeholder="Search plug ID, PSD, program, remarks…" value={filt.q} onChange={setF('q')} />
+              <input type="search" placeholder="Search plug ID, PSD, program, billable party, remarks…" value={filt.q} onChange={setF('q')} />
             </label>
           ) : null}
           <FilterSelect label="Units" value={filt.units} onChange={setF('units')}><Options list={[...meta.units, meta.notSet]} blank="All" /></FilterSelect>
