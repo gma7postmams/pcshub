@@ -1073,17 +1073,6 @@ export default function Workload() {
       if (first) first.focus({ preventScroll: true });
     });
   };
-  const removeRow = async (r) => {
-    if (xlLocked(r)) { toast(`Locked: ${lockNote(r.work_date, meta.locks)}. An Admin must unlock it first.`, 'err'); return; }
-    if (!r._new) {
-      if (!(await confirm('Delete row', `Permanently delete "${firstLine(r.plug_id)}"?`, { okText: 'Delete', danger: true }))) return;
-      try { await del(`/api/workload/${r.id}`); toast('Deleted'); } catch (e) { toast(e.message, 'err'); return; }
-    }
-    if (r._new) pushHistory(null); else hist.current = { past: [], future: [], tag: null };   // a deleted saved row can't be brought back by undo
-    setGrid((g) => ({ ...g, rows: g.rows.filter((x) => x._key !== r._key), total: r._new ? g.total : g.total - 1 }));
-    setGridSel(null);   // row indices shift after a removal; avoid a stale selection pointing at the wrong row
-    if (!r._new) loadStats();
-  };
   // ---- table-mode delete (per row) ----
   const deleteItem = async (r) => {
     const what = `${firstLine(r.plug_id)}${r.work_date ? ` (${fmtDate(r.work_date)})` : ''}`;
@@ -1574,7 +1563,6 @@ export default function Workload() {
                             <th key={k} className={`xl-colhead${colInSel(ci) ? ' hl' : ''}`} title="Click to select the column"
                               data-c={ci} onMouseDown={(e) => startSel('col', 0, ci, e)}>{head(k)}</th>
                           ))}
-                          {canWrite ? <th /> : null}
                         </tr>
                       </thead>
                       <tbody>
@@ -1598,7 +1586,6 @@ export default function Workload() {
                                 )}
                               </td>
                             ))}
-                            {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removeRow(r)} disabled={xlLocked(r)} title={xlLocked(r) ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}>{r._new ? 'Remove' : 'Delete'}</button></td> : null}
                           </tr>
                         )) : (() => {
                           const text = isAll
