@@ -781,7 +781,7 @@ table.t.xl td[data-k="breakdate_vgfx"] .xl-cell { min-width: 250px; }
 .sub-tabs { margin-bottom: 14px; }
 .restore-overlay { z-index: 1000; }
 /* PSD Daily Plug List tab */
-.plug-list { padding: 12px 16px 16px; }
+.plug-list { padding: 12px 16px 0; }
 .plug-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
 .plug-bar .grow { flex: 1; }
 .plug-date { display: inline-flex; gap: 4px; align-items: center; }
@@ -978,4 +978,4 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 /* PSD Daily Plug List footer: one slim row like the Workload Tracker's — the count, a compact Rows picker, then the page buttons */
 .rows-sel { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 13px; color: var(--text-2); }
 .rows-sel select { height: 30px; padding: 0 22px 0 8px; font-size: 13px; width: auto; min-width: 0; }
-.plug-list .pager { padding: 12px 16px; border-top: 1px solid var(--border); }
+.plug-list .pager { padding: 12px 0; border-top: 1px solid var(--border); }
