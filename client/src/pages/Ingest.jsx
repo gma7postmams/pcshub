@@ -282,8 +282,8 @@ export default function Ingest() {
             <input type="search" placeholder="Search program, party, source, folder, remarks…" style={{ textOverflow: 'ellipsis' }} value={filt.q} onChange={setF('q')} />
           </label>
           <div className="wl-tabactions">
-            {canDelete && picked.size ? <button type="button" className="btn danger" id="del-sel" onClick={removePicked} title="Delete the records ticked in the table">Delete Selected ({picked.size})</button> : null}
             <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
+            {canDelete && picked.size ? <button type="button" className="btn danger" id="del-sel" onClick={removePicked} title="Delete the records ticked in the table">Delete Selected ({picked.size})</button> : null}
             {canWrite ? <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({})}><PlusIcon /> New Ingest</button> : null}
           </div>
         </div>
