@@ -276,7 +276,7 @@ export default function Ingest() {
       <div className="page-head">
         <h1 className="sr-only">Ingest Tracker</h1>
         <div className="actions">
-          {canDelete && picked.size ? <button type="button" className="btn danger" id="del-sel" onClick={removePicked}>Delete selected ({picked.size})</button> : null}
+          {canDelete && picked.size ? <button type="button" className="btn danger" id="del-sel" onClick={removePicked}>Delete Selected ({picked.size})</button> : null}
           <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
           {canWrite ? <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({})}><PlusIcon /> New Ingest</button> : null}
         </div>
