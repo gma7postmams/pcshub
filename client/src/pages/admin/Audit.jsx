@@ -272,6 +272,9 @@ function formatDetails(row) {
     case 'admin.user_reset_2fa':
       return '2FA reset';
 
+    case 'admin.user_delete':
+      return `Deleted user: ${d.username || ''}${d.role ? ` (${d.role})` : ''}`;      
+
     case 'admin.role_create':
       return `Created role: ${d.name || ''}${d.actions && d.actions.length ? ` (can: ${d.actions.join(', ')})` : ''}`;
 
