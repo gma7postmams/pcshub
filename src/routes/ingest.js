@@ -416,8 +416,20 @@ router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(asyn
         WHERE id=$1`,
       [id, decision, req.user.id, newReason]
     );
-    await audit(req, decision === 'DONE' ? 'ingest.cm_done' : 'ingest.cm_non_compliant',
-      'ingest_record', id, { decision, reason: newReason, previous: r.cm_status }, c);
+    
+    await audit(
+      req,
+      decision === 'DONE' ? 'ingest.cm_done' : 'ingest.cm_non_compliant',
+      'ingest_record',
+      id,
+      {
+        program: r.program,
+        decision,
+        reason: newReason,
+        previous: r.cm_status
+      },
+      c
+    );
 
     const reasonSuffix = decision === 'NON-COMPLIANT' ? ` — ${reason}` : '';
     await notifyUsers(interested(r, req.user.id), {

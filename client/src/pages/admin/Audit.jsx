@@ -138,14 +138,6 @@ function formatEntity(row) {
   }
 }
 
-const USER_FIELD_LABELS = {
-  full_name: 'Full Name',
-  email: 'Email',
-  role: 'Role',
-  group_id: 'Group',
-  is_active: 'Status',
-};
-
 function describeUserUpdate(d) {
   const from = d.from || {};
   const to = d.to || {};
@@ -341,33 +333,42 @@ function formatDetails(row) {
           : 'Submitted ingest record for approval';
 
     case 'approval.approved':
-      return d.note
-        ? `Approved ingest request${d.title ? `: ${d.title}` : ''} - Note: ${d.note}`
-        : `Approved ingest request${d.title ? `: ${d.title}` : ''}`;
+      return d.program
+        ? `Approved ingest request (${d.program})`
+        : d.note
+          ? `Approved ingest request${d.title ? `: ${d.title}` : ''} - Note: ${d.note}`
+          : `Approved ingest request${d.title ? `: ${d.title}` : ''}`;
+
 
     case 'approval.rejected':
-      return d.note
-        ? `Rejected ingest request${d.title ? `: ${d.title}` : ''} - Reason: ${d.note}`
-        : `Rejected ingest request${d.title ? `: ${d.title}` : ''}`;
+      return d.program
+        ? `Rejected ingest request (${d.program})`
+        : d.note
+          ? `Rejected ingest request${d.title ? `: ${d.title}` : ''} - Reason: ${d.note}`
+          : `Rejected ingest request${d.title ? `: ${d.title}` : ''}`;
 
     case 'reports_export_ingest':
     case 'reports.export_ingest':
       return 'Exported ingest report';
 
     case 'workload.create':
-      return d.title
-        ? `Created workload item (${d.title})`
-        : 'Created workload item';
+      return `Created workload item`
+        + `${d.plug_id ? ` (${d.plug_id})` : ''}`
+        + `${d.prog_name ? ` - ${d.prog_name}` : ''}`
+        + `${d.work_date ? ` • ${d.work_date}` : ''}`
+        + `${d.units_concerned ? ` • ${d.units_concerned}` : ''}`;
 
     case 'workload.update':
-      return d.title
-        ? `Updated workload item (${d.title})`
-        : 'Updated workload item';
+      return `Updated workload item`
+        + `${d.plug_id ? ` (${d.plug_id})` : ''}`
+        + `${d.prog_name ? ` - ${d.prog_name}` : ''}`
+        + `${d.work_date ? ` • ${d.work_date}` : ''}`;
 
     case 'workload.delete':
-      return d.title
-        ? `Deleted workload item (${d.title})`
-        : 'Deleted workload item';
+      return `Deleted workload item`
+        + `${d.plug_id ? ` (${d.plug_id})` : ''}`
+        + `${d.prog_name ? ` - ${d.prog_name}` : ''}`
+        + `${d.work_date ? ` • ${d.work_date}` : ''}`;
 
     case 'profile.update': {
       const changes = [];
@@ -417,21 +418,30 @@ function formatDetails(row) {
       return `Deleted knowledge document: ${d.title || d.filename || ''}`;
 
     case 'ingest.approve':
-      return 'Approved ingest request';
+      return d.program
+        ? `Approved ingest request (${d.program})`
+        : 'Approved ingest request';
 
     case 'ingest.unapprove':
-      return 'Removed the approval on an ingest request';
+      return d.program
+        ? `Removed approval from ingest request (${d.program})`
+        : 'Removed approval from ingest request';
 
     case 'ingest.cm_reset':
-      return 'Set ingest request status back to Pending';
+      return d.program
+        ? `Reset CM status to Pending (${d.program})`
+        : 'Set ingest request status back to Pending';
 
     case 'ingest.cm_done':
-      return 'CM completed ingest request';
+      return d.program
+        ? `CM completed: ${d.program}`
+        : 'CM completed ingest request';
 
     case 'ingest.cm_non_compliant':
-      return d.reason
-        ? `Marked ingest request as NON-COMPLIANT - Reason: ${d.reason}`
-        : 'Marked ingest request as NON-COMPLIANT';     
+      return d.program
+        ? `CM marked NON-COMPLIANT: ${d.program}${d.reason ? ` - ${d.reason}` : ''}`
+        : `Marked ingest request as NON-COMPLIANT${d.reason ? ` - ${d.reason}` : ''}`;
+     
         
     case 'admin.workload_column_add':
       return `Added workload column: ${d.label || ''}`;
@@ -468,14 +478,19 @@ function formatDetails(row) {
       return `Workload import failed${fileOf(d)}: ${d.error || 'unknown error'}`;
 
     case 'workload.bulk_delete':
-      return `Deleted ${n(d.deleted, 'workload row')}${d.skippedLocked ? `, ${d.skippedLocked} locked and kept` : ''}${filtersOf(d.filters)}`;
+      return `Deleted ${n(d.deleted, 'workload row')}`
+        + `${d.sample?.length ? `: ${d.sample.slice(0, 3).join(', ')}` : ''}`
+        + `${d.deleted > 3 ? ` and ${d.deleted - 3} more` : ''}`
+        + `${d.skippedLocked ? `, ${d.skippedLocked} locked and kept` : ''}`;
 
     case 'workload.plugs_import':
       return `Imported plug list${fileOf(d)}: ${n(d.plugs, 'plug')} over ${n(d.days, 'day')}${rangeOf(d)}, ${d.added || 0} new`
         + `${d.skipped ? `, ${d.skipped} skipped` : ''}${d.workloadRowsFilled ? `; filled ${n(d.workloadRowsFilled, 'workload row')}` : ''}`;
 
     case 'workload.plugs_import_failed':
-      return `Plug list import failed${fileOf(d)}: ${d.error || 'unknown error'}`;
+      return d.file
+        ? `Failed to import "${d.file}"`
+        : 'Plug list import failed';
 
     case 'workload.plugs_copy':
       return `Copied ${n(d.created, 'plug')} to the Workload Tracker${rangeOf(d)}`
