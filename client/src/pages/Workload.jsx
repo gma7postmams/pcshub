@@ -1435,9 +1435,10 @@ export default function Workload() {
     return ok;
   };
   // write values into the picked block (clear: blank, but never the required Work Date / Plug ID / Units); undoable
-  const writeCells = async (n, valueAt, label) => {
+  const writeCells = async (n, valueAt, label, note) => {
     const olds = [];
     const list = [];
+    let cellCount = 0;
     for (let ri = n.r0; ri <= n.r1; ri++) {
       const r = pageRows[ri];
       if (!r || rowLocked(r)) continue;
@@ -1447,22 +1448,29 @@ export default function Workload() {
         const k = tableCols[ci];
         const val = valueAt(ri - n.r0, ci - n.c0, k);
         if (val === undefined) continue;
+        if (String(cellText(r, k) ?? '') === String(val ?? '')) continue;   // already that value
         row = setCellValue(row, k, val, true);
         changed = true;
+        cellCount++;
       }
       if (changed) { olds.push({ id: r.id, ...toPayload(r) }); list.push(row); }
     }
-    if (!list.length) { toast('Nothing to change (locked or required cells)', 'err'); return; }
+    if (!list.length) { toast(note ? `Nothing changed. ${note}` : 'Nothing changed (the cells already hold that, or the rows are locked)', 'err'); return; }
     try {
       await post('/api/workload/batch', { rows: list });
       pushTbl({ label, undo: async () => { await post('/api/workload/batch', { rows: olds }); }, redo: async () => { await post('/api/workload/batch', { rows: list }); } });
-      toast(`${label.charAt(0).toUpperCase()}${label.slice(1)}`);
+      toast(`${cellCount} cell${cellCount === 1 ? '' : 's'} ${label}${note ? ` — ${note}` : ''}`);
       load();
       loadStats();
     } catch (e) { toast(e.message, 'err'); }
   };
   const REQUIRED_KEYS = ['work_date', 'plug_id', 'units_concerned'];
-  const clearCells = async () => { const n = normCells(); if (n) await writeCells(n, (ri, ci, k) => (REQUIRED_KEYS.includes(k) ? undefined : ''), 'cells cleared'); };
+  const clearCells = async () => {
+    const n = normCells();
+    if (!n) return;
+    const skipped = tableCols.slice(n.c0, n.c1 + 1).filter((k) => REQUIRED_KEYS.includes(k)).map((k) => head(k));
+    await writeCells(n, (ri, ci, k) => (REQUIRED_KEYS.includes(k) ? undefined : ''), 'cleared', skipped.length ? `${skipped.join(', ')} can't be blank` : '');
+  };
   const pasteCells = async (text) => {
     const n = normCells();
     if (!n) return;
@@ -1471,7 +1479,7 @@ export default function Workload() {
     const single = block.length === 1 && block[0].length === 1;
     const bigger = { ...n };
     if (!single) { bigger.r1 = Math.min(pageRows.length - 1, n.r0 + block.length - 1); bigger.c1 = Math.min(tableCols.length - 1, n.c0 + Math.max(...block.map((x) => x.length)) - 1); }
-    await writeCells(bigger, (ri, ci) => (single ? block[0][0] : (block[ri] && block[ri][ci] !== undefined ? block[ri][ci] : undefined)), 'cells pasted');
+    await writeCells(bigger, (ri, ci) => (single ? block[0][0] : (block[ri] && block[ri][ci] !== undefined ? block[ri][ci] : undefined)), 'pasted');
   };
   tblMouse.current.down = (e) => {   // a click anywhere outside the table (and its bar / dialogs) drops the selection
     const t = e.target;
