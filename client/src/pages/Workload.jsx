@@ -180,6 +180,7 @@ function canonUnit(meta, text) {
 }
 // Table / Excel AND the tab (All, VGFX, VEDIT, Audio) are remembered across a refresh, for the current sign-in only (they start as Table / All again after signing out and
 // in) — the same rule as the Dashboard's period menu. Stored together with that sign-in's key (session_key from /api/auth/me).
+const fmtMDY = (iso) => `${iso.slice(5, 7)}${iso.slice(8, 10)}${iso.slice(2, 4)}`;   // 2026-10-10 -> 101026 (Script, Artwork / STB, Audio Guide dates)
 const VIEW_KEY = 'wl:mode';
 const TAB_KEYS = ['ALL', 'VGFX', 'VEDIT', 'AUDIO'];
 const readView = (sessionKey) => {
@@ -1534,9 +1535,9 @@ export default function Workload() {
             {val ? <span className="strong">{oneLine(val)}</span> : null}
           </td>
         );
-      case 'script': return <td {...common}>{val ? (ISO.test(val) ? <DateChip>{fmtDate(val)}</DateChip> : <div className="rem">{oneLine(val)}</div>) : null}</td>;   // a date is a chip; text wraps in a box no wider than 300 px, like VO
-      case 'art_stb': return <td {...common}>{val ? (ISO.test(val) ? <DateChip>{fmtDate(val)}</DateChip> : oneLine(val)) : null}</td>;   // a date shows as a chip, text as text
-      case 'audio_guide': return <td {...common}><DateChip hue="fuchsia">{val ? (ISO.test(val) ? fmtDate(val) : oneLine(val)) : null}</DateChip></td>;
+      case 'script': return <td {...common}>{val ? (ISO.test(val) ? <DateChip>{fmtMDY(val)}</DateChip> : <div className="rem">{oneLine(val)}</div>) : null}</td>;   // a date is a chip; text wraps in a box no wider than 300 px, like VO
+      case 'art_stb': return <td {...common}>{val ? (ISO.test(val) ? <DateChip>{fmtMDY(val)}</DateChip> : oneLine(val)) : null}</td>;   // a date shows as a chip, text as text
+      case 'audio_guide': return <td {...common}><DateChip hue="fuchsia">{val ? (ISO.test(val) ? fmtMDY(val) : oneLine(val)) : null}</DateChip></td>;
       case 'breakdate_vgfx': return <td {...common}><DateChip hue="purple">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VGFX in Units Concerned
       case 'breakdate_vedit': return <td {...common}><DateChip hue="orange">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VEDIT in Units Concerned
       case 'vo': return <td {...common}>{val ? <div className="rem">{oneLine(val)}</div> : null}</td>;   // wraps in the same box as Remarks, so the column is no wider than Remarks
