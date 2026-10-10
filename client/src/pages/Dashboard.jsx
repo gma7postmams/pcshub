@@ -309,7 +309,7 @@ export default function Dashboard() {
   const changeRange = (key) => {
     setRangeState(key);
     saveRange(s.session_key, key);
-    get(`/api/dashboard/days?range=${key}`).then((r) => setD((cur) => (cur && cur.workload ? { ...cur, workload: { ...cur.workload, byDay: r.days, bucket: r.bucket, range: r.range, rangeLabel: r.label, rangeSub: r.sub } } : cur))).catch(() => { /* keep the old chart */ });
+    get(`/api/dashboard/days?range=${key}`).then((r) => setD((cur) => (cur && cur.workload ? { ...cur, workload: { ...cur.workload, byDay: r.days, priority: r.priority, bucket: r.bucket, range: r.range, rangeLabel: r.label, rangeSub: r.sub } } : cur))).catch(() => { /* keep the old chart */ });
   };
 
   if (!d) return <main className="container wide dsh"><Empty>Loading…</Empty></main>;
@@ -398,7 +398,7 @@ export default function Dashboard() {
             <StatCard icon={CalendarGridIcon} hue="blue" label="Today" value={w.today} foot={w.today === 1 ? 'item to work on' : 'items to work on'} onClick={go('/workload')} />
             <StatCard icon={CalendarGridIcon} hue="purple" label="This week" value={w.thisWeek} foot="Monday to Sunday" onClick={go('/workload')} />
             <StatCard icon={ClockIcon} hue="teal" label="Breakdates, next 7 days" value={w.breakdatesNext7Days} foot="VGFX and VEDIT times coming up" onClick={go('/workload')} />
-            <StatCard icon={FlagIcon} hue="rose" label="Priority" value={w.priority} foot={w.priority === 1 ? 'item flagged priority' : 'items flagged priority'} onClick={go('/workload')} />
+            <StatCard icon={FlagIcon} hue="rose" label="Priority" value={w.priority} foot={`${w.priority === 1 ? 'item' : 'items'} flagged priority · ${w.rangeLabel.toLowerCase()}`} onClick={go('/workload')} />
           </div>
         </section>
       ) : null}
