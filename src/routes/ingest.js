@@ -240,6 +240,98 @@ router.get('/export', asyncH(async (req, res) => {
   res.send(Buffer.from(buffer));
 }));
 
+// ---- Import from Excel: reads a file shaped like this page's own Export (header row; the same column names). Every row becomes a NEW request from the person
+// importing (Requested By is always them, Approved By and Status (CM) start empty, exactly as for a request added in the table). Columns this page
+// doesn't take from a file (Requested By, Approved By, Status (CM), Updated) are ignored. A row that is already in the list (same program, platform,
+// Billable Party, Source and Episode / Breakdate) is left out, so importing the same file twice doesn't double the list. Destination Folder is
+// only read for PCS / OCS, like everywhere else.
+const multer = require('multer');
+const { assertSafeXlsx, oneImportAtATime } = require('../xlsx-guard');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
+const IMPORT_HEADERS = {
+  'prog. name / proj. title': 'program', 'program': 'program', 'prog name/proj title': 'program',
+  'platform': 'platform', 'billable party': 'billable_party', 'episode / breakdate': 'episode_break_date_text',
+  'source': 'source', 'no. of materials': 'materials_count', 'destination folder': 'destination_folder', 'remarks': 'remarks',
+};
+const MON_NUM = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+const iso3 = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+function oneDay(part) {   // "2026-10-10", "Oct 10, 2026", "10/10/2026" or an Excel date
+  if (part instanceof Date) return part.toISOString().slice(0, 10);
+  const t = String(part).trim();
+  let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t);
+  if (m) return iso3(m[1], m[2], m[3]);
+  m = /^([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})$/.exec(t);
+  const mon = m && (MON_NUM[m[1].slice(0, 4).toLowerCase()] || MON_NUM[m[1].slice(0, 3).toLowerCase()]);
+  if (m && mon) return iso3(m[3], mon, m[2]);
+  m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(t);
+  if (m) return iso3(m[3], m[1], m[2]);
+  throw new HttpError(400, `Episode / Breakdate "${t}" is not a date`);
+}
+function episodeFromCell(val) {   // one date, or "start – end" / "start to end" / "start/end" → what the table stores
+  if (val == null || val === '') return '';
+  if (val instanceof Date) return val.toISOString().slice(0, 10);
+  const parts = String(val).split(/\s+(?:–|—|-|to)\s+|\//).map((x) => x.trim()).filter(Boolean);
+  if (parts.length === 1) return oneDay(parts[0]);
+  if (parts.length === 2) return `${oneDay(parts[0])}/${oneDay(parts[1])}`;
+  throw new HttpError(400, `Episode / Breakdate "${String(val).trim()}" is not a date or a date range`);
+}
+router.post('/import', requireAction('ingest.write'), upload.single('file'), oneImportAtATime, asyncH(async (req, res) => {
+  if (!req.file) throw new HttpError(400, 'No file uploaded');
+  await assertSafeXlsx(req.file.buffer, req.file.originalname);
+  const ExcelJS = require('exceljs');
+  const wb = new ExcelJS.Workbook();
+  try { await wb.xlsx.load(req.file.buffer); } catch (e) { throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)'); }
+  const text = (c) => { const x = c && c.value; if (x == null) return ''; if (x instanceof Date) return x; if (x.richText) return x.richText.map((t) => t.text).join(''); if (typeof x === 'object' && x.text != null) return String(x.text); return typeof x === 'number' ? x : String(x); };
+  const recs = [];
+  for (const ws of wb.worksheets) {
+    if (!ws || ws.rowCount < 2) continue;
+    const colKey = {};
+    ws.getRow(1).eachCell((cell, n) => { const k = IMPORT_HEADERS[String(text(cell)).trim().toLowerCase()]; if (k) colKey[n] = k; });
+    if (!Object.values(colKey).includes('program')) continue;   // not an ingest sheet
+    for (let r = 2; r <= ws.rowCount && recs.length < 2000; r++) {
+      const row = ws.getRow(r);
+      const o = { __row: r, __sheet: ws.name };
+      let any = false;
+      for (const [n, k] of Object.entries(colKey)) { const val = text(row.getCell(Number(n))); if (val !== '' && val != null) { o[k] = val; any = true; } }
+      if (any) recs.push(o);
+    }
+  }
+  if (!recs.length) throw new HttpError(400, 'Nothing recognisable to import — expected the column headings this page\'s own Export has (PROG. NAME / PROJ. TITLE, Platform, Billable Party, Episode / Breakdate, …).');
+  let created = 0; let existing = 0;
+  const errors = [];
+  await db.tx(async (c) => {
+    const have = new Set((await c.query(`SELECT program, platform, COALESCE(billable_party, '') AS bp, COALESCE(source, '') AS src, COALESCE(episode_break_date_text, '') AS ep FROM ingest_records`)).rows
+      .map((x) => [x.program, x.platform, x.bp, x.src, x.ep].join('\u0001')));
+    for (const o of recs) {
+      try {
+        const body = {
+          program: String(o.program ?? ''), platform: String(o.platform ?? ''), billable_party: String(o.billable_party ?? ''), source: String(o.source ?? ''),
+          episode_break_date_text: episodeFromCell(o.episode_break_date_text),
+          materials_count: o.materials_count === undefined || o.materials_count === '' ? null : o.materials_count,
+          destination_folder: String(o.destination_folder ?? ''), remarks: String(o.remarks ?? ''),
+        };
+        const r = await parseBody(c, body, req.user);
+        const key = [r.program, r.platform, r.billable_party || '', r.source || '', r.episode_break_date_text || ''].join('\u0001');
+        if (have.has(key)) { existing++; continue; }   // compared with what was already there, not with earlier rows of this file
+        const { rows } = await c.query(
+          `INSERT INTO ingest_records (program, billable_party, platform, episode_date, episode_break_date_text, materials_count, source, destination_folder,
+             approved_by, requested_by_user_id, requested_by_psd, remarks, created_by, updated_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13) RETURNING id`,
+          [r.program, r.billable_party, r.platform, r.episode_date, r.episode_break_date_text, r.materials_count, r.source, r.destination_folder,
+            r.approved_by, r.requested_by_user_id, r.requested_by_psd, r.remarks, req.user.id]
+        );
+        await audit(req, 'ingest.create', 'ingest_record', rows[0].id, { ...r, imported: true }, c);
+        created++;
+      } catch (e) {
+        if (!(e instanceof HttpError)) throw e;
+        errors.push(`Row ${o.__row}${o.program ? ` (${String(o.program).slice(0, 40)})` : ''}: ${e.message}`);
+      }
+    }
+  });
+  await audit(req, 'ingest.import', 'ingest_record', null, { file: req.file.originalname, rows: recs.length, created, existing, skipped: errors.length });
+  res.json({ ok: true, created, existing, skipped: errors.length, errors: errors.slice(0, 20) });
+}));
+
 router.get('/:id', asyncH(async (req, res) => {
   const { rows } = await db.query(`${SELECT} WHERE i.id=$1`, [v.id(req.params.id)]);
   if (!rows.length) throw new HttpError(404, 'Ingest record not found');

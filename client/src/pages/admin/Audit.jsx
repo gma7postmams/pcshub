@@ -14,6 +14,7 @@ const ACTION_LABELS = {
 
   'ingest.create': 'Created Ingest Record',
   'ingest.export': 'Exported Ingest Records',
+  'ingest.import': 'Imported Ingest Records',
   'workload.plugs_export': 'Exported Plug List',
   'ingest.update': 'Updated Ingest Record',
   'ingest.delete': 'Deleted Ingest Record',
@@ -317,6 +318,9 @@ function formatDetails(row) {
       const list = ch.map(([k, c2]) => `${L[k] || k}: ${show(c2 && c2.from)} → ${show(c2 && c2.to)}`).join('; ');
       return `Updated ingest record${d.program ? ` (${d.program})` : ''}${list ? ` — ${list}` : ''}`;
     }
+
+    case 'ingest.import':
+      return `Imported ingest records from ${d.file || 'Excel'} — ${d.created ?? 0} added${d.existing ? `, ${d.existing} already there` : ''}${d.skipped ? `, ${d.skipped} skipped` : ''}`;
 
     case 'ingest.export':
       return `Exported ${d.rows ?? ''} ingest record(s) to Excel${d.truncated ? ' (stopped at 20,000 rows)' : ''}`;

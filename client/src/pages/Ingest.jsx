@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
 import { ago, downloadFile, fmtDate, fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { PlusIcon, SearchIcon, DownloadIcon, TrashIcon, FullscreenIcon, ExitFullscreenIcon } from '../components/Icons.jsx';
+import { PlusIcon, SearchIcon, DownloadIcon, UploadIcon, TrashIcon, FullscreenIcon, ExitFullscreenIcon } from '../components/Icons.jsx';
 import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
 import { Chip, DateChip, DateRange, FilterSelect, FiltersMenu, Pager, PlatformCell, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
@@ -206,6 +206,25 @@ export default function Ingest() {
 
   useEffect(() => { load(); }, [load]);
 
+  const fileRef = useRef(null);
+  const [importing, setImporting] = useState(false);
+  // Import from Excel: a file shaped like this page's own Export; every row becomes a new request from you (rows already in the list are left out)
+  const importFile = async (file) => {
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    setImporting(true);
+    try {
+      const out = await post('/api/ingest/import', fd);
+      const bits = [`${out.created} request${out.created === 1 ? '' : 's'} imported`];
+      if (out.existing) bits.push(`${out.existing} already in the list`);
+      if (out.skipped) bits.push(`${out.skipped} skipped`);
+      toast(bits.join(' — '), out.skipped && !out.created ? 'err' : undefined);
+      if (out.errors && out.errors.length) console.warn('Import errors:', out.errors);   // eslint-disable-line no-console
+      if (out.skipped && out.errors && out.errors[0]) toast(out.errors[0], 'err');
+      load();
+    } catch (e) { toast(e.message, 'err'); } finally { setImporting(false); if (fileRef.current) fileRef.current.value = ''; }
+  };
   const exportXlsx = async () => {   // what the table shows: same filters, search and sort
     const p = new URLSearchParams();
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
@@ -671,6 +690,8 @@ export default function Ingest() {
           </div>
           <div className="wl-tabactions">
             {canWrite ? <button type="button" className="btn ibtn primary" id="new-btn" aria-label="New Ingest" title="New Ingest" onClick={() => setForm({})}><PlusIcon /></button> : null}
+            {canWrite ? <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
+            {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import from Excel" title={importing ? 'Importing…' : 'Import from Excel'} disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}><UploadIcon /></button> : null}
             <button type="button" className="btn ibtn" id="export-btn" aria-label="Export to Excel" title="Export to Excel" onClick={exportXlsx}><DownloadIcon /></button>
             {canDelete && picked.size ? <button type="button" className="btn ibtn danger" id="del-sel" onClick={removePicked} aria-label="Delete selected records" title={`Delete Selected (${picked.size})`}><TrashIcon /></button> : null}
             <button type="button" className="btn ibtn" id="full-btn" aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen' : 'Full screen'} onClick={() => setFull((f) => !f)}>
