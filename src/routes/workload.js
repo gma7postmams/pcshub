@@ -412,8 +412,10 @@ router.get('/export', asyncH(async (req, res) => {
   const fieldsExt = extendFields(customCols);
   const customKeys = customCols.map((c) => c.col_key);
   const { where, params } = buildFilter({ ...req.query, team: undefined });
+  // the same order as the table on screen: newest Work Date first (or the column header you sorted by), so the latest is at the top of each sheet
+  const order = orderBy(req.query, params);
   const { rows: rawRows } = await db.query(
-    `SELECT w.* FROM workload_items w ${whereSql(where)} ORDER BY w.work_date ASC, w.id ASC LIMIT 20000`, params
+    `SELECT w.* FROM workload_items w ${whereSql(where)} ORDER BY ${order} LIMIT 20000`, params
   );
   const rows = rawRows.map(flattenCustom);
   exportInfo.matched = rows.length;

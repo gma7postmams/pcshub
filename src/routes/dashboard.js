@@ -22,6 +22,18 @@ const RANGES = Object.assign(Object.create(null), {   // the order here is the o
 });
 const DEFAULT_RANGE = 'week';   // what people see until they choose something else
 const rangeKey = (q) => (RANGES[q] ? q : DEFAULT_RANGE);
+// The first and last day (SQL) of each fixed window: the chart's bars and the Priority card both use them, so they always cover the same days.
+const RANGE_SQL = {
+  week: { start: 'CURRENT_DATE - 6', end: 'CURRENT_DATE + 7' },
+  month: { start: `date_trunc('month', CURRENT_DATE)::date`, end: `(date_trunc('month', CURRENT_DATE) + interval '1 month - 1 day')::date` },
+  last30: { start: 'CURRENT_DATE - 29', end: 'CURRENT_DATE' },
+  next30: { start: 'CURRENT_DATE', end: 'CURRENT_DATE + 29' },
+};
+// Items flagged Priority whose Work Date is inside the chosen window (All time = every flagged item)
+async function priorityIn(range) {
+  const w = range === 'all' ? '' : `AND work_date BETWEEN ${RANGE_SQL[range].start} AND ${RANGE_SQL[range].end}`;
+  return (await db.query(`SELECT count(*)::int AS n FROM workload_items WHERE is_priority ${w}`)).rows[0].n;
+}
 const BUCKET_NAME = { day: 'day', week: 'week', month: 'month', year: 'year' };
 
 /**
@@ -31,8 +43,7 @@ const BUCKET_NAME = { day: 'day', week: 'week', month: 'month', year: 'year' };
  */
 async function workloadDays(range) {
   if (range !== 'all') {
-    const start = { week: 'CURRENT_DATE - 6', month: `date_trunc('month', CURRENT_DATE)::date`, last30: 'CURRENT_DATE - 29', next30: 'CURRENT_DATE' }[range];
-    const end = { week: 'CURRENT_DATE + 7', month: `(date_trunc('month', CURRENT_DATE) + interval '1 month - 1 day')::date`, last30: 'CURRENT_DATE', next30: 'CURRENT_DATE + 29' }[range];
+    const { start, end } = RANGE_SQL[range];
     const { rows } = await db.query(
       `SELECT d::date AS day, d::date AS last, count(w.id)::int AS n
          FROM generate_series(${start}, ${end}, interval '1 day') d
@@ -175,7 +186,7 @@ router.get('/days', asyncH(async (req, res) => {
   const range = rangeKey(req.query.range);
   res.set('Cache-Control', 'no-store');
   const { rows, bucket } = await workloadDays(range);
-  res.json({ range, label: RANGES[range].label, sub: rangeSub(range, bucket), bucket, days: rows });
+  res.json({ range, label: RANGES[range].label, sub: rangeSub(range, bucket), bucket, days: rows, priority: await priorityIn(range) });
 }));
 
 router.get('/users', asyncH(async (req, res) => {
@@ -268,7 +279,7 @@ router.get('/', asyncH(async (req, res) => {
                        count(*) FILTER (WHERE work_date = CURRENT_DATE)::int AS today,
                        count(*) FILTER (WHERE work_date >= date_trunc('week', CURRENT_DATE)::date
                                           AND work_date <  date_trunc('week', CURRENT_DATE)::date + 7)::int AS this_week,
-                       count(*) FILTER (WHERE is_priority)::int AS priority
+                       0::int AS priority
                   FROM workload_items`),
       db.query(`SELECT units_concerned AS u, count(*)::int AS n FROM workload_items WHERE units_concerned IS NOT NULL GROUP BY 1`),
       workloadDays(range),
@@ -284,7 +295,7 @@ router.get('/', asyncH(async (req, res) => {
        ) x`, [unitsFor('VGFX'), unitsFor('VEDIT')])).rows[0].n;
     const t = totals.rows[0];
     out.workload = {
-      total: t.total, today: t.today, thisWeek: t.this_week, priority: t.priority, breakdatesNext7Days: nextWeek,
+      total: t.total, today: t.today, thisWeek: t.this_week, priority: await priorityIn(range), breakdatesNext7Days: nextWeek,
       byTeam, byDay: byDay.rows, bucket: byDay.bucket, range, rangeLabel: RANGES[range].label, rangeSub: rangeSub(range, byDay.bucket), ranges: Object.entries(RANGES).map(([k, v]) => ({ key: k, label: v.label })),
     };
   }
