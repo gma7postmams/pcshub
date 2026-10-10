@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FullscreenIcon, LockIcon, PlusIcon, SaveIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
+import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FlagIcon, FullscreenIcon, LockIcon, PlusIcon, SaveIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import { DateChip, DateRange, FilterSelect, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
@@ -1688,7 +1688,7 @@ export default function Workload() {
                 canWrite && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
                 s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
-                canWrite && !isGrid && pickedRowsList.length > 0 && { id: 'priority-btn', label: pickedAllPrio ? 'Remove Priority' : 'Set Priority', onClick: toggleTablePriority },
+                canWrite && !isGrid && pickedRowsList.length > 0 && { id: 'priority-btn', label: pickedAllPrio ? 'Remove Priority' : 'Set Priority', icon: <FlagIcon />, onClick: toggleTablePriority },
               ]} />
             </div>
           </div>
