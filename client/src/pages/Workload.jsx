@@ -327,11 +327,11 @@ function CellEditor({ def, initial, lookups, onSave, onCancel }) {
     // dropdowns open straight away; date fields open focused (the browser's own picker would swallow Enter while it is open)
     try { if (el.tagName === 'SELECT') el.showPicker(); } catch (e) { /* needs a user gesture; the field is focused anyway */ }
   }, []);
-  const save = async (value) => {
+  const save = async (value, move) => {
     if (finished.current) return;
     finished.current = true;
     setBusy(true);
-    try { await onSave(value); } catch (e) {
+    try { await onSave(value, move); } catch (e) {
       finished.current = false;
       setBusy(false);
       setTimeout(() => { const el = field(); if (el) el.focus(); }, 0);
@@ -346,7 +346,19 @@ function CellEditor({ def, initial, lookups, onSave, onCancel }) {
   const key = (e) => {
     if (e.key === 'Escape') { finished.current = true; onCancel(); return; }
     const tag = e.target.tagName;
-    if (e.key === 'Enter' && tag !== 'SELECT' && (tag !== 'TEXTAREA' || e.ctrlKey || e.metaKey)) { e.preventDefault(); save(val); }
+    // Like the grid in Excel mode: Alt+Enter is a line break inside a multi-line cell; Enter saves and moves to the cell below (Shift+Enter: above);
+    // Tab / Shift+Tab save and move to the next / previous cell. (Ctrl+Enter in a multi-line cell saves and moves down too.)
+    if (e.key === 'Enter' && e.altKey && tag === 'TEXTAREA') {
+      e.preventDefault();
+      const t = e.target;
+      const a = t.selectionStart; const z = t.selectionEnd;
+      const nv = `${t.value.slice(0, a)}\n${t.value.slice(z)}`;
+      setVal(nv);
+      requestAnimationFrame(() => { try { t.setSelectionRange(a + 1, a + 1); } catch (err) { /* not a text box */ } });
+      return;
+    }
+    if (e.key === 'Enter' && tag !== 'SELECT' && (tag !== 'TEXTAREA' || e.ctrlKey || e.metaKey)) { e.preventDefault(); save(val, { dr: e.shiftKey ? -1 : 1, dc: 0 }); }
+    else if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); save(val, { dr: 0, dc: e.shiftKey ? -1 : 1 }); }
   };
   return (
     <div className={`cell-editor${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key}>
@@ -580,8 +592,30 @@ export default function Workload() {
   };
 
   // ---- click-to-edit: save ONE cell (PATCH writes only that column, so other people's edits to the row are kept) ----
-  const saveCell = async (r, k, value) => {
-    if (String(value ?? '') === String(r[k] ?? '')) { setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur)); return; }
+  // Table mode: which key a cell of this column edits in this row (the merged Breakdate / Time column edits VGFX or VEDIT; Plug ID uses the form)
+  const editKeyFor = (r, colKey) => {
+    if (colKey === 'plug_id') return null;
+    if (colKey !== 'breakdate_vgfx') return colKey;
+    const teams = meta.unitTeams[r.units_concerned] || [];
+    return teams.includes('VGFX') ? 'breakdate_vgfx' : teams.includes('VEDIT') ? 'breakdate_vedit' : null;
+  };
+  // After Enter / Tab in a cell editor: open the editor of the next cell — below / above (Enter, Shift+Enter) or beside it (Tab, Shift+Tab, wrapping to the next row)
+  const moveEdit = (r, k, dr, dc) => {
+    const rows = data && data.rows ? data.rows : [];
+    let ri = rows.findIndex((x) => x.id === r.id);
+    let ci = tableCols.findIndex((c) => c === k || (c === 'breakdate_vgfx' && k === 'breakdate_vedit'));
+    if (ri < 0 || ci < 0) return;
+    for (let n = 0; n < rows.length * tableCols.length + 2; n++) {
+      if (dc) { ci += dc; if (ci >= tableCols.length) { ci = 0; ri += 1; } else if (ci < 0) { ci = tableCols.length - 1; ri -= 1; } } else ri += dr;
+      if (ri < 0 || ri >= rows.length) return;
+      const row = rows[ri];
+      if (rowLocked(row)) continue;
+      const ek = editKeyFor(row, tableCols[ci]);
+      if (ek) { setEditing({ id: row.id, k: ek }); return; }
+    }
+  };
+  const saveCell = async (r, k, value, move) => {
+    if (String(value ?? '') === String(r[k] ?? '')) { setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur)); if (move) moveEdit(r, k, move.dr, move.dc); return; }
     try {
       const out = await patch(`/api/workload/${r.id}`, { field: k, value });
       const before = r[k] ?? '';
@@ -590,6 +624,7 @@ export default function Workload() {
       // close only THIS cell's editor: the person may already have opened another cell while this one was saving
       setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur));
       if (['work_date', 'units_concerned', 'platform', 'plug_type'].includes(k)) load();   // may change the row's place, filters or the counts
+      if (move) moveEdit(r, k, move.dr, move.dc);
     } catch (e) { toast(e.message, 'err'); throw e; }
   };
 
@@ -1439,7 +1474,7 @@ export default function Workload() {
     if (editing && editing.id === r.id && editing.k === k) {
       return (
         <td key={k} data-k={k} data-label={head(k)} className="editing" onClick={(e) => e.stopPropagation()}>
-          <CellEditor def={meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value) => saveCell(r, k, value)} onCancel={() => setEditing(null)} />
+          <CellEditor def={meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} />
         </td>
       );
     }
@@ -1476,7 +1511,7 @@ export default function Workload() {
             if (editing && editing.id === r.id && editing.k === k) {
               return (
                 <span key={k} className="cell-editor-inline" onClick={(e) => e.stopPropagation()}>
-                  <CellEditor def={meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value) => saveCell(r, k, value)} onCancel={() => setEditing(null)} />
+                  <CellEditor def={meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} />
                 </span>
               );
             }
