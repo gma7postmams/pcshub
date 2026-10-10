@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
-import { DownloadIcon, FillIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
+import { DownloadIcon, ExitFullscreenIcon, FillIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
+import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { FilterSelect, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
 import { useSession } from '../context.jsx';
 import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
@@ -111,6 +112,13 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const [data, setData] = useState(null);            // { rows, total }; null = loading
   const [picked, setPicked] = useState(() => new Set());   // ticked rows (Table mode) for Delete selected
   const [importing, setImporting] = useState(false);
+  // Full screen: the list covers the app's page (the browser's own tabs and address bar stay); Esc or the button leaves it
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    const esc = (e) => { if (e.key === 'Escape' && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || '')) setFull(false); };
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, []);
   const [needYear, setNeedYear] = useState(null);    // file waiting for a year (its name has none)
   const [year, setYear] = useState(new Date().getFullYear());
   const [summary, setSummary] = useState(null);      // result of the last import
@@ -227,7 +235,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const rows = data ? data.rows : [];
   const rowsRef = useRef(rows); rowsRef.current = rows;
   const clearPicksRef = useRef(() => {}); clearPicksRef.current = () => { setPicked(new Set()); lastPick.current = null; };
-  useFitBox(`table|${narrow}|${rows.length}|${days === null}|${!!data}|${size}`);
+  useFitBox(`table|${narrow}|${rows.length}|${days === null}|${!!data}|${size}|${full}`);
   const chosen = rows.filter((r) => picked.has(r.id));
   const pickedCount = chosen.length;
   const allOn = !!rows.length && rows.every((r) => picked.has(r.id));
@@ -587,7 +595,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   ]; };
 
   return (
-    <div className="plug-list">
+    <div className={`plug-list${full ? ' full' : ''}`}>
       <div className="plug-bar">
         <FilterSelect label="View" value={period} onChange={(e) => setPeriod(e.target.value)}><Options list={PERIODS} /></FilterSelect>
         {period === 'day' || period === 'week' || period === 'month' ? (
@@ -608,24 +616,25 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
           <input type="search" placeholder="Search plugs…" title="Search plug ID, program, PSD" value={q} onChange={(e) => setQ(e.target.value)} />
         </label>
         <span className="grow" />
-        {!canWrite ? <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button> : null}
-        {canWrite ? (
-          <>
-            <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files[0])} />
-            <button type="button" className="btn" disabled={importing} onClick={() => fileRef.current.click()}><UploadIcon /> {importing ? 'Importing…' : 'Import Plug List'}</button>
-            <button type="button" className="btn" onClick={() => setAdding(true)}><PlusIcon /> Add Plug</button>
-            <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button>
-            {pickedCount ? (
-              <button type="button" className="btn danger" id="delete-selected-btn" onClick={removeChosen} title="Delete the selected plugs">
-                <TrashIcon /> Delete Selected ({pickedCount})
-              </button>
-            ) : null}
+        <div className="wl-presence"><PresenceAvatars path="/plug-list" /></div>
+        <div className="wl-iconbar">
+          {canWrite ? <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files[0])} /> : null}
+          {canWrite ? <button type="button" className="btn ibtn primary" id="add-plug-btn" aria-label="Add Plug" title="Add Plug" onClick={() => setAdding(true)}><PlusIcon /></button> : null}
+          {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import Plug List" title={importing ? 'Importing…' : 'Import Plug List'} disabled={importing} onClick={() => fileRef.current.click()}><UploadIcon /></button> : null}
+          <button type="button" className="btn ibtn" id="export-btn" aria-label="Export to Excel" title="Export to Excel" onClick={exportXlsx} disabled={!total}><DownloadIcon /></button>
+          {canWrite && pickedCount ? (
+            <button type="button" className="btn ibtn danger" id="delete-selected-btn" onClick={removeChosen} aria-label="Delete selected plugs" title={`Delete Selected (${pickedCount})`}><TrashIcon /></button>
+          ) : null}
+          <button type="button" className="btn ibtn" id="full-btn" aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen' : 'Full screen'} onClick={() => setFull((f) => !f)}>
+            {full ? <ExitFullscreenIcon /> : <FullscreenIcon />}
+          </button>
+          {canWrite ? (
             <ToolMenu items={[
               { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
               canWorkload && { id: 'fill-blank-btn', label: filling ? 'Filling…' : 'Fill Blank Rows', icon: <FillIcon />, disabled: filling, onClick: fillExisting },
             ]} />
-          </>
-        ) : null}
+          ) : null}
+        </div>
       </div>
 
       {data === null || days === null ? <Empty>Loading…</Empty>

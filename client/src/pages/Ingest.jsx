@@ -3,8 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
 import { ago, downloadFile, fmtDate, fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { PlusIcon, SearchIcon, DownloadIcon } from '../components/Icons.jsx';
-import { Chip, DateChip, DateRange, FilterSelect, Pager, PlatformCell, SortTh, useFitBox, useNarrow } from '../components/wl.jsx';
+import { PlusIcon, SearchIcon, DownloadIcon, TrashIcon } from '../components/Icons.jsx';
+import { Chip, DateChip, DateRange, FilterSelect, FiltersMenu, Pager, PlatformCell, SortTh, useFitBox, useNarrow } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
 // Status (CM) is blank (Pending) until CM picks one of these
@@ -283,17 +283,19 @@ export default function Ingest() {
             <SearchIcon />
             <input type="search" placeholder="Search program, party, source, folder, remarks…" style={{ textOverflow: 'ellipsis' }} value={filt.q} onChange={setF('q')} />
           </label>
-          <FilterSelect label="Status" value={filt.status} onChange={setF('status')}><Options list={STATUS_FILTER} blank="All" /></FilterSelect>
-          <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All" /></FilterSelect>
+          <FiltersMenu count={[filt.status, filt.platform].filter(Boolean).length} onClear={() => { setFilt((f) => ({ ...f, status: '', platform: '' })); setOffset(0); }}>
+            <FilterSelect label="Status" value={filt.status} onChange={setF('status')}><Options list={STATUS_FILTER} blank="All" /></FilterSelect>
+            <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All" /></FilterSelect>
+          </FiltersMenu>
           <DateRange title="Episode / Breakdate range" from={filt.from} to={filt.to} onChange={({ from, to }) => { setFilt((f) => ({ ...f, from, to })); setOffset(0); }} />
           {filt.approval ? (   // opened from the Dashboard's Pending Approval card: only requests nobody has approved yet; the chip clears it
             <button type="button" className="btn sm" title="Show every request again" onClick={() => { setFilt((f) => ({ ...f, approval: '' })); setOffset(0); }}>Awaiting approval ✕</button>
           ) : null}
           </div>
           <div className="wl-tabactions">
-            <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
-            {canDelete && picked.size ? <button type="button" className="btn danger" id="del-sel" onClick={removePicked} title="Delete the records ticked in the table">Delete Selected ({picked.size})</button> : null}
-            {canWrite ? <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({})}><PlusIcon /> New Ingest</button> : null}
+            {canWrite ? <button type="button" className="btn ibtn primary" id="new-btn" aria-label="New Ingest" title="New Ingest" onClick={() => setForm({})}><PlusIcon /></button> : null}
+            <button type="button" className="btn ibtn" id="export-btn" aria-label="Export to Excel" title="Export to Excel" onClick={exportXlsx}><DownloadIcon /></button>
+            {canDelete && picked.size ? <button type="button" className="btn ibtn danger" id="del-sel" onClick={removePicked} aria-label="Delete selected records" title={`Delete Selected (${picked.size})`}><TrashIcon /></button> : null}
           </div>
         </div>
         <div className={`table-wrap${narrow ? "" : " wl-fit"}`} id="tbl">

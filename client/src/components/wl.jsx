@@ -203,7 +203,7 @@ export function useFitBox(dep) {
       let below = 0;
       for (let n = el.nextElementSibling; n; n = n.nextElementSibling) if (getComputedStyle(n).position !== 'fixed') below += n.offsetHeight;
       const main = el.closest('main');
-      const pad = main ? parseFloat(getComputedStyle(main).paddingBottom) || 0 : 0;
+      const pad = main && !el.closest('.full') ? parseFloat(getComputedStyle(main).paddingBottom) || 0 : 0;
       el.style.maxHeight = `${Math.max(240, Math.round(window.innerHeight - top - below - pad - 2))}px`;
       const over = document.documentElement.scrollHeight - window.innerHeight;   // margins under the table that the sum above missed
       if (over > 0 && el.scrollHeight > el.clientHeight) el.style.maxHeight = `${Math.max(240, el.clientHeight - over)}px`;

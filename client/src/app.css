@@ -560,7 +560,7 @@ table.t.wl .stack .sub { margin: 0; }
 
 .rowmenu svg { width: 16px; height: 16px; flex: none; }
 
-.wl-card .pager { padding: 12px 16px; border-top: 1px solid var(--border); }
+.wl-card .pager { padding: 0 16px; min-height: 46px; border-top: 1px solid var(--border); }
 .pager .pg { min-width: 32px; justify-content: center; }
 .pager .pg.on { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
 .pg-gap { padding: 0 4px; color: var(--text-3); }
@@ -978,7 +978,7 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 /* PSD Daily Plug List footer: one slim row like the Workload Tracker's — the count, a compact Rows picker, then the page buttons */
 .rows-sel { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 13px; color: var(--text-2); }
 .rows-sel select { box-sizing: border-box; height: 30px; margin: 0; padding: 0 22px 0 8px; font-size: 13px; width: auto; min-width: 0; }
-.plug-list .pager { box-sizing: border-box; height: 54px; padding: 0; border-top: 1px solid var(--border); }
+.plug-list .pager { box-sizing: border-box; height: 46px; padding: 0; border-top: 1px solid var(--border); }
 
 /* Workload Tracker: one grid. The All / VGFX / VEDIT / Audio tabs sit in the bottom bar like a spreadsheet's sheet tabs; the count, Rows picker and page buttons are at the right. */
 .wl-tabbar.acts-only { justify-content: flex-end; }
@@ -1027,6 +1027,8 @@ table.t td[data-sel] { background: color-mix(in srgb, var(--accent) 16%, var(--s
 
 /* PSD Daily Plug List: like the Workload Tracker — the toolbar has the padding, the table runs edge to edge inside the card, the footer is separated by a line */
 .plug-list { padding: 0; }
+.plug-list.full { position: fixed; inset: 0; z-index: 400; overflow: auto; background: var(--surface); }
+.plug-bar .wl-presence { margin-left: 0; }
 .plug-list .plug-bar { padding: 12px 16px; margin: 0; }
 .plug-list .pager { border-top: 1px solid var(--border); padding: 0 16px; }
 .plug-list .empty { padding-left: 16px; padding-right: 16px; }
