@@ -485,7 +485,8 @@ router.get('/export', asyncH(async (req, res) => {
         const f = fieldsExt[k];
         cell.border = { right: thinGrid, bottom: thinGrid };   // grid lines, matching the web table (an explicit bottom line keeps consecutive filled priority cells separated)
         // Prioritised row: light-red fill on its Breakdate / Time cell(s), like the highlight in the web table
-        if (r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit')) {
+        // (the AUDIO sheet has no Breakdate / Time column, so there the Units Concerned cell carries the highlight)
+        if (r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit' || (k === 'plug_id' && !sh.cols.includes('breakdate_vgfx')))) {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PRIORITY_FILL } };
           cell.border = { right: thinGrid, bottom: { style: 'thin', color: { argb: 'FFD98080' } } };   // darker line so two prioritised rows in a row stay visibly separate
         }
@@ -855,7 +856,7 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
         const cellObj = row.getCell(Number(colNumber));
         // A prioritised row is exported with the light-red fill on its Breakdate / Time cell (there is no Priority column): read that fill back, so a
         // delete-everything-and-import round trip keeps the Priority flags (the Dashboard's Priority count and the red highlight).
-        if ((key === '__breakdate' || key === 'breakdate_vgfx' || key === 'breakdate_vedit') && cellObj.fill && cellObj.fill.fgColor && String(cellObj.fill.fgColor.argb || '').toUpperCase() === PRIORITY_FILL) { obj.is_priority = true; }
+        if ((key === '__breakdate' || key === 'breakdate_vgfx' || key === 'breakdate_vedit' || key === 'plug_id') && cellObj.fill && cellObj.fill.fgColor && String(cellObj.fill.fgColor.argb || '').toUpperCase() === PRIORITY_FILL) { obj.is_priority = true; }
         let val = cellObj.value;
         if (val == null || val === '') continue;
         hasAny = true;

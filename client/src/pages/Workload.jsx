@@ -1633,7 +1633,7 @@ export default function Workload() {
       case 'plug_id': {
         const [first, ...rest] = firstLineOf(val);
         return (
-          <td {...common}>
+          <td {...common} className={r.is_priority && !cols.includes('breakdate_vgfx') ? 'prio' : undefined}>
             <span className="strong">{first}</span>
             {rest.length ? <span className="dim-inline"> · {rest.join(' · ')}</span> : null}
           </td>
@@ -1674,7 +1674,7 @@ export default function Workload() {
     }
     const open = () => setEditing({ id: r.id, k });
     return cloneElement(td, {
-      className: 'editable', title: 'Click to edit', tabIndex: 0,
+      className: ['editable', td.props.className].filter(Boolean).join(' '), title: 'Click to edit', tabIndex: 0,
       onClick: (e) => { e.stopPropagation(); open(); },
       onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); open(); } },
     });
