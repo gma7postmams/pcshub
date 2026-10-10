@@ -231,9 +231,10 @@ async function parseRow(client, body, current, customCols = [], opts = {}) {
   { const t = UNIT_TEAMS[rec.units_concerned] || []; if (t.length === 1 && t[0] === 'AUDIO' && rec.remarks && body.others === undefined) { rec.others = rec.remarks; rec.remarks = null; } }   // (only when the sender did not give an Audio Remarks value at all)   // an Audio-only row's remarks live in the Audio Remarks field
   // PROG. NAME / PROJ. TITLE is open text: a title typed by hand (Excel mode, Import, the form) is saved as it is — it does not have to be in the dropdown
   // list or on that day's PSD Daily Plug List (picking from them is still the quick way, and a plug's own title is filled in below).
-  await fillFromPlugList(client, rec);
+  // body.noAutofill: the table's "clear cells" — blank PSD / Prog. Name / Platform stay blank instead of being filled in again
+  if (!body.noAutofill) await fillFromPlugList(client, rec);
   // Platform follows the Plug ID prefix unless one was chosen (only if that option exists and is active)
-  if (!rec.platform) {
+  if (!rec.platform && !body.noAutofill) {
     const auto = derivePlatform(rec.plug_id);
     if (auto) {
       const { rows } = await client.query(
@@ -647,6 +648,7 @@ router.patch('/:id', requireAction('workload.write'), asyncH(async (req, res) =>
     const merged = {};
     COLS.forEach((k) => { merged[k] = cur[k]; });
     merged[field] = req.body.value;
+    if (['psd', 'prog_name', 'platform'].includes(field) && !String(req.body.value ?? '').trim()) merged.noAutofill = true;   // clearing a cell on purpose: don't fill it in again from the plug list / Plug ID
     if (field === 'plug_id' && (!cur.platform || cur.platform === derivePlatform(cur.plug_id))) merged.platform = '';
     const rec = await parseRow(c, merged, cur, customCols);
     assertNotLocked(locks, rec.work_date);

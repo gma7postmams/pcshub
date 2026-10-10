@@ -1453,7 +1453,7 @@ export default function Workload() {
         changed = true;
         cellCount++;
       }
-      if (changed) { olds.push({ id: r.id, ...toPayload(r) }); list.push(row); }
+      if (changed) { olds.push({ id: r.id, ...toPayload(r) }); list.push(label === 'cleared' ? { ...row, noAutofill: true } : row); }
     }
     if (!list.length) { toast(note ? `Nothing changed. ${note}` : 'Nothing changed (the cells already hold that, or the rows are locked)', 'err'); return; }
     try {
