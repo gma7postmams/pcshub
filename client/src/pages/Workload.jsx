@@ -1982,7 +1982,6 @@ export default function Workload() {
                               ) : null}
                             </tr>
                           ))}
-                          {!cards ? <tr className="fill-row" aria-hidden="true">{Array.from({ length: (canWrite ? 2 : 0) + tableCols.length }, (_, n) => <td key={n} className={n === 0 && canWrite ? 'rn' : undefined} />)}</tr> : null}   {/* soaks up the spare height so the column lines run to the bottom of the box */}
                         </tbody>
                       </table>
                     )}
