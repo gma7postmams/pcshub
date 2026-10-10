@@ -401,8 +401,9 @@ export default function Workload() {
     document.addEventListener('keydown', esc);
     return () => { document.removeEventListener('fullscreenchange', on); document.removeEventListener('keydown', esc); try { if (document.fullscreenElement) document.exitFullscreen(); } catch (_) { /* leaving anyway */ } };
   }, []);
-  const [mode, setMode] = useState(() => readView(s.session_key).mode);   // Table or Excel, kept across a refresh while you stay signed in (phones always get the card list)
-  const isGrid = mode === 'excel' && !cards;   // Excel mode = the editable grid; Table mode = rows with the New / Edit form (the layout around both is the same)
+  const mode = 'table';   // Excel mode was removed: the Workload Tracker is the Table only (the grid code below is no longer reachable)
+  const setMode = () => {};
+  const isGrid = false;   // Excel mode = the editable grid; Table mode = rows with the New / Edit form (the layout around both is the same)
   const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('wl:rows')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
   const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', from: '', to: '' });
   const [stats, setStats] = useState(null);   // summary cards + tab badges
@@ -414,6 +415,7 @@ export default function Workload() {
   const [gridSel, setGridSel] = useState(null);   // { r0, c0, r1, c1 } — row/col INDICES into (grid.rows, cols); null = nothing selected
   const [form, setForm] = useState(null);   // null | { rec } (rec null = new)
   const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState(null);   // Table mode: the empty row Add Row put at the top, not saved yet
   const [editing, setEditing] = useState(null);   // { id, k } while one table cell is open for editing
   const [addingColumn, setAddingColumn] = useState(false);
   const [managingLocks, setManagingLocks] = useState(false);
@@ -594,14 +596,14 @@ export default function Workload() {
   // ---- click-to-edit: save ONE cell (PATCH writes only that column, so other people's edits to the row are kept) ----
   // Table mode: which key a cell of this column edits in this row (the merged Breakdate / Time column edits VGFX or VEDIT; Plug ID uses the form)
   const editKeyFor = (r, colKey) => {
-    if (colKey === 'plug_id') return null;
+    if (colKey === 'plug_id') return r.id === 'draft' ? colKey : null;
     if (colKey !== 'breakdate_vgfx') return colKey;
     const teams = meta.unitTeams[r.units_concerned] || [];
     return teams.includes('VGFX') ? 'breakdate_vgfx' : teams.includes('VEDIT') ? 'breakdate_vedit' : null;
   };
   // After Enter / Tab in a cell editor: open the editor of the next cell — below / above (Enter, Shift+Enter) or beside it (Tab, Shift+Tab, wrapping to the next row)
   const moveEdit = (r, k, dr, dc) => {
-    const rows = data && data.rows ? data.rows : [];
+    const rows = [...(draft ? [draft] : []), ...(data && data.rows ? data.rows : [])];
     let ri = rows.findIndex((x) => x.id === r.id);
     let ci = tableCols.findIndex((c) => c === k || (c === 'breakdate_vgfx' && k === 'breakdate_vedit'));
     if (ri < 0 || ci < 0) return;
@@ -615,6 +617,12 @@ export default function Workload() {
     }
   };
   const saveCell = async (r, k, value, move) => {
+    if (r.id === 'draft') {   // the new row only changes on screen until its Save button is pressed
+      setDraft((d) => (d ? setCellValue(d, k, value, false) : d));
+      setEditing((cur) => (cur && cur.id === 'draft' && cur.k === k ? null : cur));
+      if (move) moveEdit(r, k, move.dr, move.dc);
+      return;
+    }
     if (String(value ?? '') === String(r[k] ?? '')) { setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur)); if (move) moveEdit(r, k, move.dr, move.dc); return; }
     try {
       const out = await patch(`/api/workload/${r.id}`, { field: k, value });
@@ -626,6 +634,30 @@ export default function Workload() {
       if (['work_date', 'units_concerned', 'platform', 'plug_type'].includes(k)) load();   // may change the row's place, filters or the counts
       if (move) moveEdit(r, k, move.dr, move.dc);
     } catch (e) { toast(e.message, 'err'); throw e; }
+  };
+
+  // Add Row: an empty row at the top of the table (same start as Excel mode's: the top row's date, the tab's units); Save creates it
+  const addDraft = () => {
+    if (!canWrite) return;
+    if (draft) { setEditing({ id: 'draft', k: 'plug_id' }); return; }
+    const top = data && data.rows && data.rows.length ? data.rows[0].work_date : '';
+    setDraft({ id: 'draft', work_date: top || filt.from || isoDate(), units_concerned: filt.units || meta.tabDefaultUnits[tab] || '' });
+    setEditing({ id: 'draft', k: 'plug_id' });
+    requestAnimationFrame(() => { const box = document.getElementById('tbl'); if (box) box.scrollTop = 0; });
+  };
+  const saveDraft = async () => {
+    if (!draft) return;
+    try {
+      const ids = (await post('/api/workload/batch', { rows: [toPayload(draft)] })).createdIds || [];
+      const row = toPayload(draft);
+      let cid = ids;
+      pushTbl({ label: 'add row', undo: async () => { await post('/api/workload/bulk-delete', { ids: cid }); }, redo: async () => { cid = (await post('/api/workload/batch', { rows: [row] })).createdIds || []; } });
+      setDraft(null);
+      setEditing(null);
+      toast('Row added');
+      load();
+      loadStats();
+    } catch (e) { toast(e.message, 'err'); }
   };
 
   // ---- Excel export (sheets mirror the template: MAIN + AUDIO, or just the open team tab) ----
@@ -1512,7 +1544,7 @@ export default function Workload() {
         </td>
       );
     }
-    if (k === 'plug_id') {   // no free-text Plug ID: choose it from the PSD Daily Plug List in the edit form
+    if (k === 'plug_id' && r.id !== 'draft') {   // no free-text Plug ID: choose it from the PSD Daily Plug List in the edit form
       const openForm = () => setForm({ rec: r });
       return cloneElement(td, {
         className: 'editable', title: 'Click to choose the plug from the PSD Daily Plug List', tabIndex: 0,
@@ -1613,12 +1645,8 @@ export default function Workload() {
             <div className="wl-presence"><PresenceAvatars path="/workload" /></div>
             <div className="wl-iconbar">
               {canWrite ? <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
-              <div className="segmented" id="mode-seg">
-                <button type="button" className={mode === 'table' ? 'on' : ''} onClick={() => changeMode('table')}>Table</button>
-                <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
-              </div>
               {canWrite && isGrid ? <button type="button" className="btn ibtn" id="add-row" aria-label="Add row" title="Add row" onClick={addRow}><PlusIcon /></button> : null}
-              {canWrite && !isGrid ? <button type="button" className="btn ibtn primary" id="new-btn" aria-label="New Workload" title="New Workload" onClick={() => setForm({ rec: null })}><PlusIcon /></button> : null}
+              {canWrite ? <button type="button" className="btn ibtn primary" id="new-btn" aria-label="Add row" title="Add an empty row" onClick={addDraft}><PlusIcon /></button> : null}
               {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import from Excel" title="Import from Excel" disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}><UploadIcon /></button> : null}
               <button type="button" className="btn ibtn" id="export-btn" aria-label="Export to Excel" title="Export to Excel" onClick={exportXlsx}><DownloadIcon /></button>
               {canWrite && !isGrid && pickedCount ? (
@@ -1639,7 +1667,8 @@ export default function Workload() {
                 {full ? <ExitFullscreenIcon /> : <FullscreenIcon />}
               </button>
               <ToolMenu items={[
-                canWrite && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: () => (isGrid ? addRow() : setForm({ rec: null })) },
+                canWrite && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
+                canWrite && { id: 'new-form-menu', label: 'New Workload (form)', onClick: () => setForm({ rec: null }) },
                 s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
                 canWrite && isGrid && selRows.length > 0 && { id: 'priority-btn', label: allPrio ? 'Remove Priority' : 'Set Priority', onClick: togglePriority, keep: true },
@@ -1792,11 +1821,22 @@ export default function Workload() {
             }}>
               {!data ? <Empty>Loading…</Empty>
                 : data.error ? <Empty>{data.error}</Empty>
-                  : !data.rows.length ? <Empty>No workload items match these filters.</Empty>
+                  : !data.rows.length && !draft ? <Empty>No workload items match these filters.</Empty>
                     : (
                       <table className={`t wl v-${viewKey.toLowerCase()}${cards ? ' cards' : ''}`}>
                         <thead><tr>{canWrite && !cards ? <th className="rn" title={pageAllPicked ? 'Click to unselect all' : 'Select all rows on this page (Ctrl+A)'} onClick={() => (pageAllPicked ? clearPicks() : selectPage())} /> : null}{canWrite && cards ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
+                          {draft ? (
+                            <tr key="draft" className="draft-row" data-draft="1">
+                              {!cards ? <td className="rn" title="New row — not saved yet">＋</td> : null}
+                              {cards ? <td className="chk" /> : null}
+                              {tableCols.map((k) => (k === 'breakdate_vgfx' ? breakdateCell(draft) : cell(draft, k)))}
+                              <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
+                                <button type="button" className="btn primary" style={{ padding: "4px 10px" }} id="draft-save" onClick={saveDraft}>Save</button>{' '}
+                                <button type="button" className="btn" style={{ padding: "4px 10px" }} id="draft-discard" onClick={() => { setDraft(null); setEditing(null); }}>Discard</button>
+                              </td>
+                            </tr>
+                          ) : null}
                           {data.rows.map((r, idx) => (
                             <tr key={r.id} data-id={r.id}
                               className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}`.trim()}
