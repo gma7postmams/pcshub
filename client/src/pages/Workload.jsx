@@ -636,6 +636,21 @@ export default function Workload() {
     } catch (e) { toast(e.message, 'err'); throw e; }
   };
 
+  // Table mode: Set / Remove Priority on the selected rows (the ⋮ menu); one batch save, undoable
+  const toggleTablePriority = async () => {
+    const list = pickedRowsList.slice(0, 200);
+    if (!list.length) return;
+    const to = !pickedAllPrio;
+    const mk = (flag) => list.map((r) => ({ id: r.id, ...toPayload(r), is_priority: flag }));
+    const olds = list.map((r) => ({ id: r.id, ...toPayload(r) }));
+    try {
+      await post('/api/workload/batch', { rows: mk(to) });
+      pushTbl({ label: to ? 'set priority' : 'remove priority', undo: async () => { await post('/api/workload/batch', { rows: olds }); }, redo: async () => { await post('/api/workload/batch', { rows: mk(to) }); } });
+      toast(`${to ? 'Priority set on' : 'Priority removed from'} ${list.length} row${list.length === 1 ? '' : 's'}`);
+      load();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+
   // Add Row: an empty row at the top of the table (same start as Excel mode's: the top row's date, the tab's units); Save creates it
   const addDraft = () => {
     if (!canWrite) return;
@@ -1186,6 +1201,8 @@ export default function Workload() {
   const total = data && data.total ? data.total : 0;
   const isAdminUser = !!(s.user && s.user.role === 'Admin');
   const pageRows = data && data.rows ? data.rows : [];
+  const pickedRowsList = pageRows.filter((r) => (allMatching || picked.has(r.id)) && !isLocked(r.work_date, meta.locks));
+  const pickedAllPrio = pickedRowsList.length > 0 && pickedRowsList.every((r) => r.is_priority);
   const pickable = pageRows.filter((r) => !isLocked(r.work_date, meta.locks));   // a row in a locked period can't be deleted, so it can't be selected
   const pickedCount = allMatching ? total : picked.size;
   const pageAllPicked = !!pickable.length && pickable.every((r) => allMatching || picked.has(r.id));
@@ -1382,7 +1399,7 @@ export default function Workload() {
   tblMouse.current.down = (e) => {   // a click anywhere outside the table (and its bar / dialogs) drops the selection
     if (!(picked.size || allMatching)) return;
     const t = e.target;
-    if (t && t.closest && !t.closest('#tbl, #delete-selected-btn, .modal-backdrop, .xl-menu')) clearPicks();
+    if (t && t.closest && !t.closest('#tbl, #delete-selected-btn, .modal-backdrop, .xl-menu, .tpop')) clearPicks();
   };
   const saveGrid = async () => {
     const idx = [];
@@ -1646,7 +1663,7 @@ export default function Workload() {
             <div className="wl-iconbar">
               {canWrite ? <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
               {canWrite && isGrid ? <button type="button" className="btn ibtn" id="add-row" aria-label="Add row" title="Add row" onClick={addRow}><PlusIcon /></button> : null}
-              {canWrite ? <button type="button" className="btn ibtn primary" id="new-btn" aria-label="Add row" title="Add an empty row" onClick={addDraft}><PlusIcon /></button> : null}
+              {canWrite ? <button type="button" className="btn ibtn primary" id="new-btn" aria-label="New Workload" title="New Workload" onClick={() => setForm({ rec: null })}><PlusIcon /></button> : null}
               {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import from Excel" title="Import from Excel" disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}><UploadIcon /></button> : null}
               <button type="button" className="btn ibtn" id="export-btn" aria-label="Export to Excel" title="Export to Excel" onClick={exportXlsx}><DownloadIcon /></button>
               {canWrite && !isGrid && pickedCount ? (
@@ -1668,10 +1685,9 @@ export default function Workload() {
               </button>
               <ToolMenu items={[
                 canWrite && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
-                canWrite && { id: 'new-form-menu', label: 'New Workload (form)', onClick: () => setForm({ rec: null }) },
                 s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
-                canWrite && isGrid && selRows.length > 0 && { id: 'priority-btn', label: allPrio ? 'Remove Priority' : 'Set Priority', onClick: togglePriority, keep: true },
+                canWrite && !isGrid && pickedRowsList.length > 0 && { id: 'priority-btn', label: pickedAllPrio ? 'Remove Priority' : 'Set Priority', onClick: toggleTablePriority },
               ]} />
             </div>
           </div>
