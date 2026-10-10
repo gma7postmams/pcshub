@@ -590,7 +590,6 @@ export default function Workload() {
   // ---- click-to-edit: save ONE cell (PATCH writes only that column, so other people's edits to the row are kept) ----
   // Table mode: which key a cell of this column edits in this row (the merged Breakdate / Time column edits VGFX or VEDIT; Plug ID uses the form)
   const editKeyFor = (r, colKey) => {
-    if (colKey === 'plug_id') return r.id === 'draft' ? colKey : null;
     if (colKey !== 'breakdate_vgfx') return colKey;
     const teams = meta.unitTeams[r.units_concerned] || [];
     return teams.includes('VGFX') ? 'breakdate_vgfx' : teams.includes('VEDIT') ? 'breakdate_vedit' : null;
@@ -1645,14 +1644,6 @@ export default function Workload() {
           <CellEditor def={meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} />
         </td>
       );
-    }
-    if (k === 'plug_id' && r.id !== 'draft') {   // no free-text Plug ID: choose it from the PSD Daily Plug List in the edit form
-      const openForm = () => setForm({ rec: r });
-      return cloneElement(td, {
-        className: 'editable', title: 'Click to choose the plug from the PSD Daily Plug List', tabIndex: 0,
-        onClick: (e) => { e.stopPropagation(); openForm(); },
-        onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); openForm(); } },
-      });
     }
     const open = () => setEditing({ id: r.id, k });
     return cloneElement(td, {
