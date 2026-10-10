@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
-import { DownloadIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
+import { DownloadIcon, FillIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import { FilterSelect, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
 import { useSession } from '../context.jsx';
 import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
@@ -125,6 +125,9 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const internalClip = useRef(null);
   const lastPick = useRef(null);
   const drag = useRef(null);
+  const suppress = useRef(false);
+  const [cellSel, setCellSel] = useState(null);   // a block of cells picked by dragging { r0, c0, r1, c1 }
+  const cellDrag = useRef(null);
   const keysRef = useRef(null);
   const pasteRef = useRef(null);
 
@@ -382,6 +385,67 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     } catch (e) { toast(e.message, 'err'); }
   };
 
+  // ---- a block of cells: drag across cells (or Shift+click) to pick it; Ctrl+C copies, Delete clears, Ctrl+V pastes from its top-left cell ----
+  const cellAt = (el) => { const td = el && el.closest ? el.closest('.plug-list td[data-c]') : null; return td ? { r: Number(td.dataset.r), c: Number(td.dataset.c) } : null; };
+  const normCells = () => (cellSel ? { r0: Math.min(cellSel.r0, cellSel.r1), r1: Math.max(cellSel.r0, cellSel.r1), c0: Math.min(cellSel.c0, cellSel.c1), c1: Math.max(cellSel.c0, cellSel.c1) } : null);
+  const cellDown = (e) => {
+    if (e.button !== 0) return;
+    const t = e.target;
+    if (t.closest && t.closest('.plug-actions, .rn, .chk, .editing, input, select, textarea, button, a')) return;
+    const at = cellAt(t);
+    if (!at) return;
+    if (e.shiftKey && cellSel) { e.preventDefault(); setCellSel((cur) => (cur ? { ...cur, r1: at.r, c1: at.c } : cur)); suppress.current = true; setTimeout(() => { suppress.current = false; }, 150); return; }
+    if (picked.size) clearPicks();
+    setCellSel(null);
+    cellDrag.current = { r: at.r, c: at.c, moved: false };
+  };
+  const copyCells = async () => {
+    const n = normCells();
+    if (!n) return false;
+    const text = rows.slice(n.r0, n.r1 + 1).map((r) => EDIT_COLS.slice(n.c0, n.c1 + 1).map((k) => tsvCell(String(r[k] ?? ''))).join('\t')).join('\n');
+    internalClip.current = text;
+    const ok = await writeClipboard(text);
+    const cnt = (n.r1 - n.r0 + 1) * (n.c1 - n.c0 + 1);
+    toast(ok ? `Copied ${cnt} cell${cnt === 1 ? '' : 's'}` : 'Could not reach the clipboard', ok ? undefined : 'err');
+    return ok;
+  };
+  const writeCells = async (n, valueAt, label) => {
+    const olds = [];
+    const list = [];
+    for (let ri = n.r0; ri <= n.r1; ri++) {
+      const r = rows[ri];
+      if (!r) continue;
+      const row = { id: r.id, ...recOf(r) };
+      let changed = false;
+      for (let ci = n.c0; ci <= n.c1; ci++) {
+        const k = EDIT_COLS[ci];
+        const val = valueAt(ri - n.r0, ci - n.c0, k);
+        if (val === undefined) continue;
+        row[k] = k === 'plug_date' ? normDate(val) : String(val).replace(/\s*\n\s*/g, ' ').trim();
+        changed = true;
+      }
+      if (changed) { olds.push({ id: r.id, ...recOf(r) }); list.push(row); }
+    }
+    if (!list.length) { toast('Nothing to change (Date and Plug ID are required)', 'err'); return; }
+    try {
+      await batch(list);
+      pushH({ label, undo: async () => { await batch(olds); }, redo: async () => { await batch(list); } });
+      toast(`${label.charAt(0).toUpperCase()}${label.slice(1)}`);
+      reload();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const clearCells = async () => { const n = normCells(); if (n) await writeCells(n, (ri, ci, k) => (k === 'plug_date' || k === 'plug_id' ? undefined : ''), 'cells cleared'); };
+  const pasteCells = async (text) => {
+    const n = normCells();
+    if (!n) return;
+    const block = parseTsv(text);
+    if (!block.length) return;
+    const single = block.length === 1 && block[0].length === 1;
+    const big = { ...n };
+    if (!single) { big.r1 = Math.min(rows.length - 1, n.r0 + block.length - 1); big.c1 = Math.min(EDIT_COLS.length - 1, n.c0 + Math.max(...block.map((x) => x.length)) - 1); }
+    await writeCells(big, (ri, ci) => (single ? block[0][0] : (block[ri] && block[ri][ci] !== undefined ? block[ri][ci] : undefined)), 'cells pasted');
+  };
+
   // selecting rows with the row numbers (click, Shift+click a range, Ctrl+click to add, drag down)
   const selectRange = (a, b) => setPicked(new Set(rows.slice(Math.min(a, b), Math.max(a, b) + 1).map((x) => x.id)));
   const numDown = (e, r, idx) => {
@@ -389,6 +453,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     e.preventDefault();
     e.stopPropagation();
     if (cellEd) setCellEd(null);
+    setCellSel(null);
     if (document.activeElement && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) document.activeElement.blur();
     if (e.ctrlKey || e.metaKey) {
       setPicked((cur) => { const n = new Set(cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; });
@@ -421,6 +486,12 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   keysRef.current = (e) => {
     if (e.defaultPrevented || e.altKey || !keysOk(e)) return;
     const key = e.key.toLowerCase();
+    if (cellSel && !picked.size) {   // a block of cells is picked
+      if ((e.ctrlKey || e.metaKey) && key === 'c') { if (!(window.getSelection && String(window.getSelection()))) { e.preventDefault(); copyCells(); } return; }
+      if ((e.ctrlKey || e.metaKey) && key === 'x') { e.preventDefault(); copyCells().then((ok) => { if (ok) clearCells(); }); return; }
+      if (!e.ctrlKey && !e.metaKey && (key === 'delete' || key === 'backspace')) { e.preventDefault(); clearCells(); return; }
+      if (!e.ctrlKey && !e.metaKey && key === 'escape') { setCellSel(null); return; }
+    }
     if (e.ctrlKey || e.metaKey) {
       if (key === 'a') { e.preventDefault(); setPicked(new Set(rows.map((r) => r.id))); }
       else if (key === 'c') { if (picked.size && !(window.getSelection && String(window.getSelection()))) { e.preventDefault(); copyChosen(); } }
@@ -450,12 +521,23 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     const text = e.clipboardData && e.clipboardData.getData('text/plain');
     if (!text || !text.trim()) return;
     e.preventDefault();
-    pasteRows(text);
+    if (cellSel && !picked.size) pasteCells(text); else pasteRows(text);
   };
   useEffect(() => {
     const key = (e) => { if (keysRef.current) keysRef.current(e); };
     const paste = (e) => { if (pasteRef.current) pasteRef.current(e); };
     const move = (e) => {
+      const cd = cellDrag.current;
+      if (cd) {
+        if (!(e.buttons & 1)) { cellDrag.current = null; return; }
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        const td = el && el.closest ? el.closest('.plug-list td[data-c]') : null;
+        if (!td) return;
+        const at = { r: Number(td.dataset.r), c: Number(td.dataset.c) };
+        if (!cd.moved && (at.r !== cd.r || at.c !== cd.c)) { cd.moved = true; suppress.current = true; if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); setCellEd(null); }
+        if (cd.moved) { if (window.getSelection) window.getSelection().removeAllRanges(); setCellSel({ r0: cd.r, c0: cd.c, r1: at.r, c1: at.c }); }
+        return;
+      }
       const d = drag.current;
       if (!d) return;
       if (!(e.buttons & 1)) { drag.current = null; return; }
@@ -465,10 +547,10 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       const idx = tr.parentElement ? [...tr.parentElement.querySelectorAll('tr[data-id]')].indexOf(tr) : -1;
       if (idx >= 0 && rowsRef.current[idx]) setPicked(new Set(rowsRef.current.slice(Math.min(d.from, idx), Math.max(d.from, idx) + 1).map((x) => x.id)));
     };
-    const up = () => { drag.current = null; };
+    const up = () => { drag.current = null; if (cellDrag.current && cellDrag.current.moved) setTimeout(() => { suppress.current = false; }, 150); cellDrag.current = null; };
     const down = (e) => {   // a click outside the table (and its bar, menus and dialogs) drops the selection
       const t = e.target;
-      if (t && t.closest && !t.closest('.plug-list .table-wrap, .xl-menu, .modal-backdrop, .tpop, #delete-selected-btn')) clearPicksRef.current();
+      if (t && t.closest && !t.closest('.plug-list .table-wrap, .xl-menu, .modal-backdrop, .tpop, #delete-selected-btn')) { clearPicksRef.current(); setCellSel(null); }
     };
     window.addEventListener('keydown', key); window.addEventListener('paste', paste); window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up); window.addEventListener('mousedown', down);
@@ -481,6 +563,11 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   // the cells of one row; a click edits just that cell (read-only people see plain text)
   const editCell = (r, k, content, extra = {}) => {
     const td = { 'data-k': k, ...extra };
+    if (r.__i !== undefined) {
+      const ci = EDIT_COLS.indexOf(k); const n = normCells();
+      td['data-r'] = r.__i; td['data-c'] = ci;
+      if (n && r.__i >= n.r0 && r.__i <= n.r1 && ci >= n.c0 && ci <= n.c1) td['data-sel'] = '1';
+    }
     if (canWrite && cellEd && cellEd.id === r.id && cellEd.k === k) {
       return <td key={k} {...td} className={`editing ${extra.className || ''}`.trim()} onClick={(e) => e.stopPropagation()}><PlugCellEditor k={k} initial={r[k]} onSave={(v, move) => saveCell(r, k, v, move)} onCancel={() => setCellEd(null)} /></td>;
     }
@@ -489,7 +576,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       onClick={(e) => { e.stopPropagation(); setCellEd({ id: r.id, k }); }}
       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); setCellEd({ id: r.id, k }); } }}>{content}</td>;
   };
-  const dataCells = (r) => [
+  const dataCells = (r0, idx) => { const r = idx === undefined ? r0 : { ...r0, __i: idx }; return [
     editCell(r, 'plug_date', r.plug_date ? dateLabel(r.plug_date) : '', { 'data-label': 'Date', className: 'nowrap' }),
     editCell(r, 'plug_id', <>{r.plug_id}{r.is_additional ? <span className="chip c-orange plug-add" title="Listed under “Additional for …”">Added</span> : null}</>, { 'data-label': 'Plug ID', className: 'mono' }),
     editCell(r, 'prog_name', r.prog_name, { 'data-label': 'PROG. NAME / PROJ. TITLE' }),
@@ -497,7 +584,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     editCell(r, 'account_by', r.account_by, { 'data-label': 'Account By' }),
     <td key="requested_by" data-label="Requested By">{r.requested_by}</td>,
     <td key="in_workload" data-label="In Workload" className="plug-inwl">{r.id === 'draft' ? null : r.in_workload ? <span className="chip c-green">In workload</span> : <span className="dim">—</span>}</td>,
-  ];
+  ]; };
 
   return (
     <div className="plug-list">
@@ -535,7 +622,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
             ) : null}
             <ToolMenu items={[
               { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
-              canWorkload && { id: 'fill-blank-btn', label: filling ? 'Filling…' : 'Fill Blank Rows', disabled: filling, onClick: fillExisting },
+              canWorkload && { id: 'fill-blank-btn', label: filling ? 'Filling…' : 'Fill Blank Rows', icon: <FillIcon />, disabled: filling, onClick: fillExisting },
             ]} />
           </>
         ) : null}
@@ -548,7 +635,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
           </Empty>
         ) : (
           <>
-            <div className={`table-wrap${narrow ? '' : ' wl-fit'}`} onClickCapture={(e) => { if (canWrite && picked.size && !(e.target.closest && e.target.closest('.rn, .chk, .plug-actions'))) clearPicks(); }}>
+            <div className={`table-wrap${narrow ? '' : ' wl-fit'}`} onClickCapture={(e) => { if (suppress.current) { suppress.current = false; e.stopPropagation(); e.preventDefault(); return; } if (canWrite && picked.size && !(e.target.closest && e.target.closest('.rn, .chk, .plug-actions'))) clearPicks(); }}>
               <table className={`t wl plug-t${narrow ? ' cards' : ''}`}>
                 <thead>
                   <tr>
@@ -571,10 +658,10 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
                   ) : null}
                   {rows.length ? rows.map((r, i) => (
                     <tr key={r.id} data-id={r.id} className={`${r.in_workload ? 'done' : ''}${picked.has(r.id) ? ' picked' : ''}`.trim()}
-                      onContextMenu={canWrite ? (e) => rowMenu(e, r) : undefined}>
+                      onMouseDown={canWrite ? cellDown : undefined} onContextMenu={canWrite ? (e) => rowMenu(e, r) : undefined}>
                       {canWrite && !narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} title="Click to select the row (Shift-click a range, Ctrl-click to add; Ctrl+C copies, Ctrl+V pastes)">{offset + i + 1}</td> : null}
                       {canWrite && narrow ? <td className="chk"><input type="checkbox" checked={picked.has(r.id)} onChange={() => { setPicked((cur) => { const n = new Set(cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; }); lastPick.current = r.id; }} aria-label={`Select ${r.plug_id}`} /></td> : null}
-                      {dataCells(r)}
+                      {dataCells(r, i)}
                       {canWrite ? (
                         <td className="plug-actions" onClick={(e) => e.stopPropagation()}>
                           <RowMenu onEdit={() => setEditing(r)} onDelete={() => removePlug(r)} />

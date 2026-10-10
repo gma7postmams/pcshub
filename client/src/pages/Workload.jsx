@@ -421,6 +421,8 @@ export default function Workload() {
   const keysRef = useRef(null);
   const pasteRef = useRef(null);
   const tblMouse = useRef({});         // latest mouse handlers for dragging across rows (assigned every render)
+  const [cellSel, setCellSel] = useState(null);   // Table mode: a block of cells { r0, c0, r1, c1 } picked by dragging across them (Shift+click extends)
+  const cellDrag = useRef(null);
   const tblDrag = useRef(null);        // { idx, x, y, moved } while the mouse is down on a row
   const tblSuppress = useRef(false);   // swallow the click that ends a drag / Shift / Ctrl+click, so it doesn't open a cell editor
   const [tctx, setTctx] = useState(null);   // Table mode: right-click menu position { x, y } | null
@@ -1363,11 +1365,21 @@ export default function Workload() {
     e.stopPropagation();
     // an open cell editor (a dropdown, say) must not keep the keyboard: close it so Delete / arrows act on the rows
     if (editing) setEditing(null);
+    setCellSel(null);
     if (document.activeElement && document.activeElement !== document.body && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) document.activeElement.blur();
     rowDown(e, r, idx);
     if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !rowLocked(r)) { e.preventDefault(); setAllMatching(false); setPicked(new Set([r.id])); lastPick.current = r.id; }
   };
   tblMouse.current.move = (e) => {
+    const cd = cellDrag.current;
+    if (cd) {
+      if (!(e.buttons & 1)) { cellDrag.current = null; return; }
+      const at = cellAt(document.elementFromPoint(e.clientX, e.clientY));
+      if (!at) return;
+      if (!cd.moved && (at.r !== cd.r || at.c !== cd.c)) { cd.moved = true; tblSuppress.current = true; if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); setEditing(null); }
+      if (cd.moved) { if (window.getSelection) window.getSelection().removeAllRanges(); setCellSel({ r0: cd.r, c0: cd.c, r1: at.r, c1: at.c }); }
+      return;
+    }
     const d = tblDrag.current;
     if (!d) return;
     if (!(e.buttons & 1)) { tblDrag.current = null; return; }
@@ -1382,15 +1394,90 @@ export default function Workload() {
     setPicked(new Set(rangeIds(d.idx, now)));
   };
   tblMouse.current.up = () => {
+    const cd = cellDrag.current;
+    cellDrag.current = null;
+    if (cd && cd.moved) setTimeout(() => { tblSuppress.current = false; }, 150);
     const d = tblDrag.current;
     tblDrag.current = null;
     const box = document.getElementById('tbl');
     if (box) box.classList.remove('selecting');
     if (d && d.moved) setTimeout(() => { tblSuppress.current = false; }, 150);
   };
-  tblMouse.current.down = (e) => {   // a click anywhere outside the table (and its bar / dialogs) drops the selection
-    if (!(picked.size || allMatching)) return;
+  // ---- cell blocks: drag across cells (or Shift+click) to pick a block; Ctrl+C copies it, Delete clears it, Ctrl+V pastes from its top-left cell ----
+  const cellAt = (el) => {
+    const td = el && el.closest ? el.closest('#tbl td[data-c]') : null;
+    return td ? { r: Number(td.dataset.r), c: Number(td.dataset.c) } : null;
+  };
+  const cellDown = (e) => {
+    if (e.button !== 0) return;
     const t = e.target;
+    if (t.closest && t.closest('.actions-cell, .rn, .chk, .editing, .cell-editor-inline, input, select, textarea, button, a')) return;
+    const at = cellAt(t);
+    if (!at) return;
+    if (e.shiftKey && cellSel) {
+      e.preventDefault();
+      tblSuppress.current = true; setTimeout(() => { tblSuppress.current = false; }, 150);
+      setCellSel((cur) => (cur ? { ...cur, r1: at.r, c1: at.c } : cur));
+      return;
+    }
+    if (picked.size || allMatching) clearPicks();
+    setCellSel(null);
+    cellDrag.current = { r: at.r, c: at.c, x: e.clientX, y: e.clientY, moved: false };
+  };
+  const normCells = () => (cellSel ? { r0: Math.min(cellSel.r0, cellSel.r1), r1: Math.max(cellSel.r0, cellSel.r1), c0: Math.min(cellSel.c0, cellSel.c1), c1: Math.max(cellSel.c0, cellSel.c1) } : null);
+  const cellText = (r, k) => (k === 'breakdate_vgfx' ? bdText(r, meta.unitTeams) : r[k]);
+  const copyCells = async () => {
+    const n = normCells();
+    if (!n) return false;
+    const text = pageRows.slice(n.r0, n.r1 + 1).map((r) => tableCols.slice(n.c0, n.c1 + 1).map((k) => tsvCell(cellText(r, k))).join('\t')).join('\n');
+    internalClip.current = text;
+    const ok = await writeClipboard(text);
+    toast(ok ? `Copied ${(n.r1 - n.r0 + 1) * (n.c1 - n.c0 + 1)} cell${(n.r1 - n.r0 + 1) * (n.c1 - n.c0 + 1) === 1 ? '' : 's'}` : 'Could not reach the clipboard', ok ? undefined : 'err');
+    return ok;
+  };
+  // write values into the picked block (clear: blank, but never the required Work Date / Plug ID / Units); undoable
+  const writeCells = async (n, valueAt, label) => {
+    const olds = [];
+    const list = [];
+    for (let ri = n.r0; ri <= n.r1; ri++) {
+      const r = pageRows[ri];
+      if (!r || rowLocked(r)) continue;
+      let row = { id: r.id, ...toPayload(r) };
+      let changed = false;
+      for (let ci = n.c0; ci <= n.c1; ci++) {
+        const k = tableCols[ci];
+        const val = valueAt(ri - n.r0, ci - n.c0, k);
+        if (val === undefined) continue;
+        row = setCellValue(row, k, val, true);
+        changed = true;
+      }
+      if (changed) { olds.push({ id: r.id, ...toPayload(r) }); list.push(row); }
+    }
+    if (!list.length) { toast('Nothing to change (locked or required cells)', 'err'); return; }
+    try {
+      await post('/api/workload/batch', { rows: list });
+      pushTbl({ label, undo: async () => { await post('/api/workload/batch', { rows: olds }); }, redo: async () => { await post('/api/workload/batch', { rows: list }); } });
+      toast(`${label.charAt(0).toUpperCase()}${label.slice(1)}`);
+      load();
+      loadStats();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const REQUIRED_KEYS = ['work_date', 'plug_id', 'units_concerned'];
+  const clearCells = async () => { const n = normCells(); if (n) await writeCells(n, (ri, ci, k) => (REQUIRED_KEYS.includes(k) ? undefined : ''), 'cells cleared'); };
+  const pasteCells = async (text) => {
+    const n = normCells();
+    if (!n) return;
+    const block = parseTsvBlock(text);
+    if (!block.length) return;
+    const single = block.length === 1 && block[0].length === 1;
+    const bigger = { ...n };
+    if (!single) { bigger.r1 = Math.min(pageRows.length - 1, n.r0 + block.length - 1); bigger.c1 = Math.min(tableCols.length - 1, n.c0 + Math.max(...block.map((x) => x.length)) - 1); }
+    await writeCells(bigger, (ri, ci) => (single ? block[0][0] : (block[ri] && block[ri][ci] !== undefined ? block[ri][ci] : undefined)), 'cells pasted');
+  };
+  tblMouse.current.down = (e) => {   // a click anywhere outside the table (and its bar / dialogs) drops the selection
+    const t = e.target;
+    if (cellSel && t && t.closest && !t.closest('#tbl, .modal-backdrop, .xl-menu, .tpop')) setCellSel(null);
+    if (!(picked.size || allMatching)) return;
     if (t && t.closest && !t.closest('#tbl, #delete-selected-btn, .modal-backdrop, .xl-menu, .tpop')) clearPicks();
   };
   const saveGrid = async () => {
@@ -1449,6 +1536,12 @@ export default function Workload() {
   keysRef.current = (e) => {
     if (e.defaultPrevented || e.altKey || !tableKeysOk(e)) return;
     const key = e.key.toLowerCase();
+    if (cellSel && !picked.size) {   // a block of cells is picked
+      if ((e.ctrlKey || e.metaKey) && key === 'c') { if (!(window.getSelection && String(window.getSelection()))) { e.preventDefault(); copyCells(); } return; }
+      if ((e.ctrlKey || e.metaKey) && key === 'x') { e.preventDefault(); copyCells().then((ok) => { if (ok) clearCells(); }); return; }
+      if (!e.ctrlKey && !e.metaKey && (key === 'delete' || key === 'backspace')) { e.preventDefault(); clearCells(); return; }
+      if (!e.ctrlKey && !e.metaKey && key === 'escape') { setCellSel(null); return; }
+    }
     if (e.ctrlKey || e.metaKey) {
       if (key === 'a') {
         e.preventDefault();
@@ -1485,7 +1578,7 @@ export default function Workload() {
     const text = e.clipboardData && e.clipboardData.getData('text/plain');
     if (!text || !text.trim()) return;
     e.preventDefault();
-    pasteRows(text);
+    if (cellSel && !picked.size) pasteCells(text); else pasteRows(text);
   };
 
   const isAll = tab === 'ALL';
@@ -1848,7 +1941,7 @@ export default function Workload() {
                           {data.rows.map((r, idx) => (
                             <tr key={r.id} data-id={r.id}
                               className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}`.trim()}
-                              onMouseDown={canWrite ? (e) => rowDown(e, r, idx) : undefined}
+                              onMouseDown={canWrite ? cellDown : undefined}
                               onContextMenu={canWrite ? (e) => rowMenu(e, r) : undefined}
                               onClick={canWrite ? undefined : () => setForm({ rec: r })}>
                               {canWrite && !cards ? (
@@ -1861,7 +1954,7 @@ export default function Workload() {
                                     onChange={() => { setAllMatching(false); setPicked((cur) => { const n = new Set(allMatching ? pickable.map((x) => x.id) : cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; }); lastPick.current = r.id; }} />
                                 </td>
                               ) : null}
-                              {tableCols.map((k) => (k === 'breakdate_vgfx' ? breakdateCell(r) : cell(r, k)))}
+                              {tableCols.map((k, ci) => { const td = k === 'breakdate_vgfx' ? breakdateCell(r) : cell(r, k); const n = normCells(); return cloneElement(td, { 'data-r': idx, 'data-c': ci, 'data-sel': n && idx >= n.r0 && idx <= n.r1 && ci >= n.c0 && ci <= n.c1 ? '1' : undefined }); })}
                               {canWrite ? (
                                 <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
                                   <RowMenu

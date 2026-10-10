@@ -20,6 +20,7 @@ export const FileIcon = () => <svg {...base} strokeWidth="1.8"><path d="M14 3H7a
 export const UploadIcon = () => <svg {...base} strokeWidth="1.8"><path d="M12 15V3m0 0l-4 4m4-4l4 4M4 21h16" /></svg>;
 export const ColumnIcon = () => <svg {...base} strokeWidth="1.8"><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M14 4v16M18 9v6" /></svg>;
 export const LockIcon = () => <svg {...base} strokeWidth="1.8"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>;
+export const FillIcon = () => <svg {...base} strokeWidth="1.8"><rect x="4" y="4" width="16" height="6" rx="1.5" /><path d="M12 12v6m0 0l-3-3m3 3l3-3M5 21h14" /></svg>;
 export const FlagIcon = () => <svg {...base} strokeWidth="1.8"><path d="M5 21V4" /><path d="M5 4h11l-2 4 2 4H5" /></svg>;
 export const FilterIcon = () => <svg {...base} strokeWidth="1.8"><path d="M4 5h16l-6 8v6l-4-2v-4z" /></svg>;
 export const MoreHIcon = () => <svg {...base} strokeWidth="2.6"><circle cx="5" cy="12" r=".7" /><circle cx="12" cy="12" r=".7" /><circle cx="19" cy="12" r=".7" /></svg>;
