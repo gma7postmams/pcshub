@@ -226,14 +226,15 @@ function pageList(cur, pages) {
   return out;
 }
 /** "1–8 of 24" + Previous / 1 2 3 / Next */
-export function Pager({ total, offset, size, onOffset, lead }) {
+export function Pager({ total, offset, size, onOffset, lead, head }) {
   const pages = Math.max(1, Math.ceil(total / size));
   const cur = Math.floor(offset / size) + 1;
   return (
-    <div className="pager">
+    <div className={`pager${head ? ' pager-sheet' : ''}`}>
+      {head ? <>{head}<span className="grow" /></> : null}
       <span>{total ? `${offset + 1}–${Math.min(offset + size, total)} of ${total}` : ''}</span>
       {lead || null}
-      <span className="grow" />
+      {head ? null : <span className="grow" />}
       <button type="button" className="btn sm" disabled={cur <= 1} onClick={() => onOffset((cur - 2) * size)}>Previous</button>
       {pageList(cur, pages).map((n, i) => (n === '…'
         ? <span key={`gap${i}`} className="pg-gap">…</span>

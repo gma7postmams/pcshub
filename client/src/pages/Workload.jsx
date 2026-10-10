@@ -4,7 +4,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, LockIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, SortTh, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
+import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, SortTh, nextSort, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 
@@ -13,6 +13,7 @@ import PresenceAvatars from '../components/PresenceAvatars.jsx';
 // from /api/workload/meta (field types follow the red notes in the Sept 2026 template:
 // dropdown / Date / Open). Table mode = read + add/edit form; Excel mode = editable grid with batch save.
 const PAGE = 50;
+const ROW_SIZES = [25, 50, 100, 200];   // rows per page (the server saves at most 200 changed rows at once, so a page never holds more)
 const GRID_LIMIT = 200;
 const CARDS_BELOW = 900;   // window width under which table rows become cards
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
@@ -363,7 +364,17 @@ export default function Workload() {
   const [meta, setMeta] = useState(null);
   const [lookups, setLookups] = useState({ workload_platform: [], plug_type: [] });
   const [tab, setTab] = useState(() => readView(s.session_key).tab);   // kept across a refresh while you stay signed in
-  const [mode, setMode] = useState(() => readView(s.session_key).mode);   // Table or Excel: kept across a refresh while you stay signed in
+  // ONE editable grid (typing, drag-select, copy / cut / paste, undo, batch save) on every screen wide enough for it; phones and small tablets keep the card list.
+  const [winW, setWinW] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const on = () => setWinW(window.innerWidth);
+    window.addEventListener('resize', on);
+    return () => window.removeEventListener('resize', on);
+  }, []);
+  const cards = winW < CARDS_BELOW;
+  const isGrid = !cards;
+  const mode = isGrid ? 'excel' : 'table';
+  const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('wl:rows')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
   const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', from: '', to: '' });
   const [stats, setStats] = useState(null);   // summary cards + tab badges
   const [offset, setOffset] = useState(0);
@@ -474,17 +485,9 @@ export default function Workload() {
     };
   }, []);
   const viewKey = meta && tab === 'ALL' ? viewForUnits(meta, filt.units) : tab;   // which column set to show (see viewForUnits)
-  const isGrid = mode === 'excel';   // on the All tab the Excel grid holds the rows still waiting for a team (see load below); on a team tab, that team's rows
 
   // Rows are one line each (Remarks wraps), so a wide table scrolls sideways inside the card, like Excel.
   // Phones and small tablets show each row as a card instead.
-  const [winW, setWinW] = useState(() => window.innerWidth);
-  useEffect(() => {
-    const on = () => setWinW(window.innerWidth);
-    window.addEventListener('resize', on);
-    return () => window.removeEventListener('resize', on);
-  }, []);
-  const cards = mode === 'table' && winW < CARDS_BELOW;
 
   const loadMeta = useCallback(() => {
     Promise.all([get('/api/workload/meta'), get('/api/dropdowns?categories=workload_platform,plug_type')])
@@ -497,10 +500,10 @@ export default function Workload() {
     const p = new URLSearchParams(extra);
     if (tab !== 'ALL') p.set('team', tab);
     ['units', 'platform', 'plug_type', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
-    if (!isGrid && q) p.set('q', q);
-    if (!isGrid && sort.k && extra.limit !== undefined) { p.set('sort', sort.k); p.set('dir', sort.dir); }   // only the table's own list; counts and exports ignore it
+    if (q) p.set('q', q);
+    if (sort.k && extra.limit !== undefined) { p.set('sort', sort.k); p.set('dir', sort.dir); }   // only the table's own list; counts and exports ignore it
     return p;
-  }, [tab, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q, isGrid, sort.k, sort.dir]);
+  }, [tab, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q, sort.k, sort.dir]);
 
   // Tab badges (the counts next to All / VGFX / VEDIT / Audio) follow every filter except the team tab
   const loadStats = useCallback(async () => {
@@ -516,17 +519,16 @@ export default function Workload() {
     loadStats();
     try {
       if (isGrid) {
-        // All tab: the rows nobody has given a team yet — e.g. plugs just copied from the PSD Daily Plug List. A Units filter you choose still wins.
-        const d = await get(`/api/workload?${query({ limit: GRID_LIMIT, ...(tab === 'ALL' ? { units: meta.notSet } : {}) })}`);
+        const d = await get(`/api/workload?${query({ limit: size, offset })}`);
         hist.current = { past: [], future: [], tag: null };
         setGrid({ total: d.total, rows: d.rows.map((r) => ({ ...r, _key: `r${r.id}`, _dirty: false })) });
       } else {
-        setData(await get(`/api/workload?${query({ limit: PAGE, offset })}`));
+        setData(await get(`/api/workload?${query({ limit: size, offset })}`));
       }
     } catch (e) {
       (isGrid ? setGrid : setData)({ error: e.message, rows: [], total: 0 });
     }
-  }, [meta, isGrid, tab, query, offset, loadStats]);
+  }, [meta, isGrid, tab, query, offset, size, loadStats]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -542,7 +544,9 @@ export default function Workload() {
     || !!(await confirm('Discard unsaved changes?', `${dirtyCount} row(s) in the grid have unsaved changes. Leave without saving?`, { okText: 'Discard', danger: true }));
 
   const changeTab = async (t) => { if (t === tab || !(await okToLeave())) return; setTab(t); saveView(s.session_key, { t }); setOffset(0); };
-  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setMode(m); saveView(s.session_key, { m }); setOffset(0); };
+  const goOffset = async (o) => { if (o === offset || !(await okToLeave())) return; setOffset(o); };
+  const changeSize = async (e) => { const n = Number(e.target.value); if (n === size || !(await okToLeave())) return; try { localStorage.setItem('wl:rows', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
+  const sortBy = async (s2) => { if (!(await okToLeave())) return; setSort(s2); };
   const setF = (k) => async (e) => {
     const val = e.target.value;
     if (k !== 'q' && !(await okToLeave())) return;
@@ -1088,7 +1092,7 @@ export default function Workload() {
     try {
       await del(`/api/workload/${r.id}`);
       toast('Deleted');
-      if (data && data.rows.length === 1 && offset > 0) setOffset(Math.max(0, offset - PAGE)); // last row on this page
+      if (data && data.rows.length === 1 && offset > 0) setOffset(Math.max(0, offset - size)); // last row on this page
       else load();
     } catch (e) { toast(e.message, 'err'); }
   };
@@ -1123,7 +1127,7 @@ export default function Workload() {
     if (out.skipped) bits.push(`${out.skipped} skipped — in a locked period`);
     toast(bits.join(' — '), out.skipped ? 'err' : undefined);
     clearPicks();
-    if (offset > 0 && out.deleted >= pageRows.length) setOffset(Math.max(0, offset - PAGE)); else load();
+    if (offset > 0 && out.deleted >= pageRows.length) setOffset(Math.max(0, offset - size)); else load();
     loadStats();
   };
   const deleteSelected = async (verb = 'Delete') => {
@@ -1289,7 +1293,7 @@ export default function Workload() {
       const pager = el.parentElement && el.parentElement.querySelector('.pager');
       const main = el.closest('main');
       const pad = main ? parseFloat(getComputedStyle(main).paddingBottom) || 0 : 0;
-      const below = el.id === 'tbl' ? (pager ? pager.offsetHeight : 0) + pad + 2 : 80;
+      const below = el.id === 'tbl' || el.id === 'grid' ? (pager ? pager.offsetHeight : 0) + pad + 2 : 80;
       el.style.maxHeight = `${Math.max(240, Math.round(window.innerHeight - top - below))}px`;
     };
     fit();
@@ -1454,6 +1458,21 @@ export default function Workload() {
   };
 
   const tabCount = { ALL: stats && stats.total, VGFX: stats && stats.vgfx, VEDIT: stats && stats.vedit, AUDIO: stats && stats.audio };
+  // Bottom bar, like a spreadsheet: the All / VGFX / VEDIT / Audio tabs at the left, the count, Rows picker and page buttons at the right
+  const sheetTabs = (
+    <div className="tabs sheet-tabs" id="section-tabs">
+      {meta.tabs.map((t) => (
+        <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => changeTab(t.key)}>
+          {t.label}<span className="count">{tabCount[t.key] ?? '–'}</span>
+        </button>
+      ))}
+    </div>
+  );
+  const rowsPicker = (
+    <label className="rows-sel"><span>Rows</span>
+      <select value={size} onChange={changeSize} aria-label="Rows per page">{ROW_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}</select>
+    </label>
+  );
 
   return (
     <main className="container wide wl-page">
@@ -1468,19 +1487,17 @@ export default function Workload() {
       ) : null}
 
       <div className="card wl-card">
-        <div className="wl-tabbar">
-          <div className="tabs" id="section-tabs">
-            {meta.tabs.map((t) => (
-              <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => changeTab(t.key)}>
-                {t.label}<span className="count">{tabCount[t.key] ?? '–'}</span>
-              </button>
-            ))}
-          </div>
-          <div className="wl-tabactions">
-            <div className="segmented" id="mode-seg">
-              <button type="button" className={mode === 'table' ? 'on' : ''} onClick={() => changeMode('table')}>Table</button>
-              <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
+        <div className={`wl-tabbar${isGrid ? ' acts-only' : ''}`}>
+          {!isGrid ? (
+            <div className="tabs" id="section-tabs">
+              {meta.tabs.map((t) => (
+                <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => changeTab(t.key)}>
+                  {t.label}<span className="count">{tabCount[t.key] ?? '–'}</span>
+                </button>
+              ))}
             </div>
+          ) : null}
+          <div className="wl-tabactions">
             {canWrite ? (
               <>
                 <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} />
@@ -1495,7 +1512,7 @@ export default function Workload() {
                 <button type="button" className="btn" id="add-column-btn" onClick={() => setAddingColumn(true)}><ColumnIcon /> Add Column</button>
               </>
             ) : null}
-            {canWrite && isGrid && !isAll ? <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add Row</button> : null}
+            {canWrite && isGrid ? <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add Row</button> : null}
             {canWrite && isGrid && selRows.length ? <button type="button" className="btn" id="priority-btn" data-keep-sel onClick={togglePriority} title="Highlights the Breakdate / Time of the selected row(s)">{allPrio ? 'Remove Priority' : 'Set Priority'}</button> : null}
             {canWrite && isGrid && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? <button type="button" className="btn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}>Delete {selRows.filter((r) => !xlLocked(r)).length > 1 ? `${selRows.filter((r) => !xlLocked(r)).length} Rows` : 'Row'}</button> : null}
             {s.canPage('/admin') ? <button type="button" className="btn" id="lock-dates-btn" onClick={() => setManagingLocks(true)}><LockIcon /> Lock Dates</button> : null}
@@ -1516,12 +1533,10 @@ export default function Workload() {
         </div>
 
         <div className="wl-filters">
-          {!isGrid ? (
-            <label className="wl-search short">
-              <SearchIcon />
-              <input type="search" placeholder="Search plug ID, PSD, program, billable party, remarks…" value={filt.q} onChange={setF('q')} />
-            </label>
-          ) : null}
+          <label className="wl-search short">
+            <SearchIcon />
+            <input type="search" placeholder="Search plug ID, PSD, program, billable party, remarks…" value={filt.q} onChange={setF('q')} />
+          </label>
           <FilterSelect label="Units" value={filt.units} onChange={setF('units')}><Options list={[...meta.units, meta.notSet]} blank="All" /></FilterSelect>
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
           <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
@@ -1541,8 +1556,13 @@ export default function Workload() {
                         <tr>
                           <th className="rn" title="Select all" onMouseDown={(e) => startSel('all', 0, 0, e)} />
                           {tableCols.map((k, ci) => (
-                            <th key={k} className={`xl-colhead${colInSel(ci) ? ' hl' : ''}`} title="Click to select the column"
-                              data-c={ci} onMouseDown={(e) => startSel('col', 0, ci, e)}>{head(k)}</th>
+                            <th key={k} className={`xl-colhead${colInSel(ci) ? ' hl' : ''}${sort.k === k ? ' sorted' : ''}`} title="Click to select the column"
+                              data-c={ci} onMouseDown={(e) => startSel('col', 0, ci, e)}>
+                              {head(k)}
+                              <button type="button" className="xl-sort" aria-label={`Sort by ${head(k)}`} title="Click to sort" onMouseDown={(e) => e.stopPropagation()} onClick={() => sortBy(nextSort(sort, k))}>
+                                {sort.k === k ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}
+                              </button>
+                            </th>
                           ))}
                           {canWrite ? <th /> : null}
                         </tr>
@@ -1551,7 +1571,7 @@ export default function Workload() {
                         {grid.rows.length ? grid.rows.map((r, ri) => (
                           <tr key={r._key} data-ri={ri} className={`${r._dirty ? 'dirty' : ''}${r.is_priority ? ' prio-row' : ''}${xlLocked(r) ? ' locked-row' : ''}`.trim()}>
                             <td className={`rn${rowInSel(ri) ? ' hl' : ''}`} title={xlLocked(r) ? `Locked: ${lockNote(r.work_date, meta.locks)} — an Admin must unlock it first` : 'Click to select the whole row (Ctrl+C to copy)'}
-                              onMouseDown={(e) => startSel('row', ri, 0, e)}>{ri + 1}{r.is_priority ? <i className="prio-dot" title="Priority" /> : null}{xlLocked(r) ? <span className="row-lock"><LockIcon /></span> : null}</td>
+                              onMouseDown={(e) => startSel('row', ri, 0, e)}>{offset + ri + 1}{r.is_priority ? <i className="prio-dot" title="Priority" /> : null}{xlLocked(r) ? <span className="row-lock"><LockIcon /></span> : null}</td>
                             {tableCols.map((k, ci) => (
                               <td key={k} data-k={k} data-r={ri} data-c={ci} onMouseDown={cellMouseDown(ri, ci)} onBlur={() => { hist.current.tag = null; }}
                                 onFocus={(e) => { if (isTextTarget(e.target)) setGridSel((sel) => (sel && sel.r0 === ri && sel.r1 === ri && sel.c0 === ci && sel.c1 === ci ? sel : { r0: ri, c0: ci, r1: ri, c1: ci })); }}
@@ -1571,9 +1591,7 @@ export default function Workload() {
                             {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removeRow(r)} disabled={xlLocked(r)} title={xlLocked(r) ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}>{r._new ? 'Remove' : 'Delete'}</button></td> : null}
                           </tr>
                         )) : (() => {
-                          const text = isAll
-                            ? 'No rows are waiting for a team. Plugs copied from the PSD Daily Plug List show up here until you set their Units Concerned — pick VGFX, VEDIT or Audio to edit a team’s rows.'
-                            : `No ${meta.tabs.find((t) => t.key === tab).label} rows match these filters.${canWrite ? ' Use “Add Row” to start.' : ''}`;
+                          const text = `No ${isAll ? '' : `${meta.tabs.find((t) => t.key === tab).label} `}rows match these filters.${canWrite ? ' Use “Add Row” to start.' : ''}`;
                           return <tr><td colSpan={tableCols.length + 2} className="empty xl-empty"><div className="xl-empty-msg" title={text}>{text}</div></td></tr>;
                         })()}
                       </tbody>
@@ -1600,9 +1618,7 @@ export default function Workload() {
                 </FitMenu>
               );
             })() : null}
-            {grid && grid.total > GRID_LIMIT ? (
-              <div className="pager"><span>Showing the first {GRID_LIMIT} of {grid.total} rows — narrow the date range to edit the rest.</span></div>
-            ) : null}
+            <Pager total={grid ? grid.total || 0 : 0} offset={offset} size={size} onOffset={goOffset} head={sheetTabs} lead={rowsPicker} />
           </>
         ) : (
           <>
@@ -1645,7 +1661,7 @@ export default function Workload() {
                       </table>
                     )}
             </div>
-            <Pager total={total} offset={offset} size={PAGE} onOffset={setOffset} />
+            <Pager total={total} offset={offset} size={size} onOffset={setOffset} />
             {tctx ? (
               <FitMenu x={tctx.x} y={tctx.y} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
                 <button type="button" disabled={!tblHist.current.past.length} onClick={() => { setTctx(null); undoTbl(); }}>Undo<span>Ctrl+Z</span></button>

@@ -979,3 +979,13 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 .rows-sel { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 13px; color: var(--text-2); }
 .rows-sel select { box-sizing: border-box; height: 30px; margin: 0; padding: 0 22px 0 8px; font-size: 13px; width: auto; min-width: 0; }
 .plug-list .pager { box-sizing: border-box; height: 54px; padding: 0; border-top: 1px solid var(--border); }
+
+/* Workload Tracker: one grid. The All / VGFX / VEDIT / Audio tabs sit in the bottom bar like a spreadsheet's sheet tabs; the count, Rows picker and page buttons are at the right. */
+.wl-tabbar.acts-only { justify-content: flex-end; }
+.pager-sheet { padding-top: 0 !important; padding-bottom: 0 !important; min-height: 46px; }
+.pager-sheet .sheet-tabs { margin: 0; border: 0; overflow-x: auto; flex: 0 1 auto; align-self: stretch; }
+.pager-sheet .sheet-tabs button { display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; height: 100%; border-bottom: 0; border-top: 2px solid transparent; font-size: 13.5px; }
+.pager-sheet .sheet-tabs button.on { border-top-color: var(--accent); background: var(--surface-2, transparent); }
+th.xl-colhead { position: sticky; }
+.xl-sort { all: unset; cursor: pointer; margin-left: 4px; font-size: 9px; opacity: .4; }
+.xl-sort:hover, th.xl-colhead.sorted .xl-sort { opacity: .95; }

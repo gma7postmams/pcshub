@@ -252,7 +252,7 @@ async function parseRow(client, body, current, customCols = [], opts = {}) {
 }
 
 const colList = COLS.map((c) => `"${c}"`);
-const CUR_COLS = 'platform, plug_type, prog_name, audio_guide, work_date, is_priority';
+const CUR_COLS = 'id, units_concerned, platform, plug_type, prog_name, audio_guide, work_date, is_priority';
 
 async function insertRow(client, rec, userId) {
   const params = [...COLS.map((c) => rec[c]), !!rec.is_priority, JSON.stringify(rec.custom_fields || {}), userId];
