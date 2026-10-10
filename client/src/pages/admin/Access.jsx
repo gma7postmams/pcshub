@@ -11,7 +11,7 @@ export default function Access({ model, refreshModel, start = 'roles' }) {
   return (
     <>
       <div className="tabs sub-tabs" role="tablist">
-        {PARTS.map(([k, l, , hint]) => <button key={k} type="button" role="tab" aria-selected={part === k} className={part === k ? 'on' : ''} onClick={() => setPart(k)}>{l} <span className="dim">{hint}</span></button>)}
+        {PARTS.map(([k, l, , hint]) => <button key={k} type="button" role="tab" aria-selected={part === k} className={part === k ? 'on' : ''} onClick={() => setPart(k)}>{l}</button>)}
       </div>
       <Part model={model} refreshModel={refreshModel} />
     </>

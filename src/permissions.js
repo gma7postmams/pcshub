@@ -71,7 +71,7 @@ const DEFAULT_ROLE_ACTIONS = Object.assign(Object.create(null), {
     'knowledge.write',
     'plugs.write'
   ],
-  Editor:  ['ingest.write'],
+  Editor:  ['ingest.write', 'plugs.write'],   // plugs.write: edit the PSD Daily Plug List (page access still comes from the group)
   Ingest:  ['ingest.cm_complete'],   // Ingest Tracker only: Status (CM) and its NON-COMPLIANT reason, nothing else
   Viewer:  [],
 });

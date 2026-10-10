@@ -24,7 +24,7 @@ function PreviewCard({ preview, onCreate, busy }) {
   return (
     <div className="card mb-12">
       <div className="card-head">
-        <h2>Backup preview</h2>
+        <h2 className="sr-only">Backup preview</h2>
         <button type="button" className="btn primary sm" disabled={busy || !env.pgDump.ok || !env.storageWritable} onClick={onCreate}>Create backup</button>
       </div>
       <div className="card-pad">

@@ -29,7 +29,7 @@ export default function Overview({ go }) {
   ];
   return (
     <div className="card">
-      <div className="card-head"><h2>Overview</h2></div>
+      <div className="card-head"><h2 className="sr-only">Overview</h2></div>
       <div className="card-pad">
         {stale ? (
           <div className="alert warn mb-12">

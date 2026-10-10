@@ -80,7 +80,7 @@ export default function Users({ model }) {
   return (
     <div className="card">
       <div className="card-head">
-        <h2>Users <span className="dim">{filtered ? `${shown.length} of ${list.length}` : list.length}</span></h2>
+        <h2 className="sr-only">Users</h2>
         <div className="row">
           {picked.size ? (
             <>

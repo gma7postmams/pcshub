@@ -33,10 +33,9 @@ export default function Groups({ model }) {
   if (!list) return <Empty>Loading…</Empty>;
   return (
     <>
-      <div className="alert info mb-12">Users are enrolled in one group. The group decides which pages and sections they can open; their <strong>role</strong> decides what they can do there. Admin role opens everything.</div>
       <div className="card">
         <div className="card-head">
-          <h2>Groups <span className="dim">{list.length}</span></h2>
+          <h2 className="sr-only">Groups</h2>
           <button type="button" className="btn primary sm" id="add" onClick={() => setEditing({})}><PlusIcon /> Add group</button>
         </div>
         <div className="table-wrap">
@@ -72,6 +71,7 @@ export default function Groups({ model }) {
           )}
         </div>
       </div>
+      <div className="admin-note">Users are enrolled in one group. The group decides which pages and sections they can open; their <strong>role</strong> decides what they can do there. Admin role opens everything.</div>
       {editing ? <GroupForm g={editing.id ? editing : null} catalog={model.catalog} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} /> : null}
     </>
   );

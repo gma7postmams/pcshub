@@ -46,10 +46,15 @@ export default function Admin() {
   return (
     <main className="container wide wl-page">
       <h1 className="sr-only">Admin</h1>
-      <div className="tabs admin-tabs" id="tabs" ref={bar} role="tablist">
-        {TABS.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={tab === k} data-t={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
+      {/* Same shape as the Ingest and Workload pages: one white card, the tabs along its top edge, the content below. */}
+      <div className="card wl-card admin-card">
+        <div className="wl-tabbar">
+          <div className="tabs admin-tabs" id="tabs" ref={bar} role="tablist">
+            {TABS.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={tab === k} data-t={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
+          </div>
+        </div>
+        <div id="pane" className="admin-pane">{model ? <Tab model={model} refreshModel={refreshModel} go={setTab} /> : <Empty>Loading…</Empty>}</div>
       </div>
-      <div id="pane">{model ? <Tab model={model} refreshModel={refreshModel} go={setTab} /> : <Empty>Loading…</Empty>}</div>
     </main>
   );
 }

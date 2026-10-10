@@ -1081,3 +1081,32 @@ button.tag { padding: 1px 9px; cursor: pointer; }
   .filters input.narrow { flex: 1 1 90px; }
   .audit-diff { min-width: 0; width: 100%; }
 }
+
+/* ---- Admin: one white card, tabs along the top, content below (same pattern as Ingest / Workload) ---- */
+.admin-card { overflow: visible; }
+.admin-card .wl-tabbar { padding: 0 12px; }
+.admin-tabs { position: static; background: none; z-index: auto; }
+.admin-pane { min-width: 0; }
+/* Inside the card nothing is a second card: sections are told apart by a hairline, not a box */
+.admin-pane .card { background: none; border: 0; border-radius: 0; box-shadow: none; margin: 0; }
+.admin-pane .card + .card, .admin-pane .card-pad + .card { border-top: 1px solid var(--border); }
+.admin-pane .mb-12.card, .admin-pane .card.mb-12, .admin-pane .card.mt-16 { margin: 0; }
+.admin-pane .grid { padding: 12px; gap: 12px; }
+.admin-pane .grid > .card { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+/* Card headers are toolbars now: titles are screen-reader only; what is left sits on the right; an empty one disappears */
+.admin-pane .card-head { justify-content: flex-end; padding: 8px 12px; min-height: 0; }
+.admin-pane .card-head:not(:has(.btn, select, input, a, .hist-stats)) { display: none; }
+.admin-pane .grid > .card > .card-head { justify-content: space-between; }
+.admin-pane .card-head h2:not(.sr-only) { flex: 1; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-2); font-weight: 700; }
+.admin-pane > .card-pad, .admin-pane > .alert, .admin-pane > .backup-status { margin: 12px; }
+.admin-pane .filters { padding: 8px 12px; }
+.admin-pane .table-wrap { border: 0; }
+.admin-pane .sub-tabs { margin: 0; padding: 0 12px; border-bottom: 1px solid var(--border); }
+.admin-pane .sub-tabs button { padding: 10px 12px; font-size: 13px; }
+.admin-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.admin-note { padding: 10px 14px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--text-2); line-height: 1.5; }
+.admin-pane > .empty, .admin-pane > .card > .empty { padding: 24px; }
+@media (max-width: 720px) {
+  .admin-card .wl-tabbar { padding: 0 6px; }
+  .admin-pane .card-head { justify-content: flex-start; flex-wrap: wrap; }
+}

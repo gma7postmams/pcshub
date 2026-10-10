@@ -18,7 +18,7 @@ export default function Security({ go }) {
   return (
     <>
       <div className="card mb-12">
-        <div className="card-head"><h2>Where things stand</h2></div>
+        <div className="card-head"><h2 className="sr-only">Where things stand</h2></div>
         <div className="card-pad">
           {u.admins_without_2fa ? <div className="alert warn mb-12">{u.admins_without_2fa} active {u.admins_without_2fa === 1 ? 'Admin has' : 'Admins have'} no 2FA. <button type="button" className="linklike" onClick={() => go('users')}>Review users</button></div> : null}
           <div className="stat-grid">

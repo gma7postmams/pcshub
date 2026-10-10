@@ -54,7 +54,7 @@ export default function Dropdowns() {
 
   return (
     <>
-    <div className="row mb-12">
+    <div className="admin-bar">
       {picked.size ? <button type="button" className="btn danger sm" id="dd-del-sel" onClick={removePicked}>Delete selected ({picked.size})</button> : null}
       <span className="grow" />
       <a className="btn sm" href="/api/admin/dropdowns/export" download>Export JSON</a>

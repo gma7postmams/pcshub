@@ -356,6 +356,15 @@ ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS deleted_by INT REFERENCES users(id) ON DELETE SET NULL;
 ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS deleted_name TEXT;
 
+-- Editor can edit the PSD Daily Plug List. Existing databases get the action ONCE (flag in app_settings), so an Admin who later
+-- removes it from Editor in Admin > Access is not overruled on restart. New databases get it from the role defaults.
+INSERT INTO role_actions (role, action)
+SELECT 'Editor', 'plugs.write' FROM roles
+ WHERE name = 'Editor' AND actions_seeded
+   AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'editor_plugs_write_v1')
+ON CONFLICT DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('editor_plugs_write_v1', '1') ON CONFLICT (key) DO NOTHING;
+
 INSERT INTO app_settings (key, value) VALUES
   ('app_name', 'Promotional Content Hub'),
   ('tagline', 'Ingest · Approval · Workload · Backup and Restore'),

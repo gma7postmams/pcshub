@@ -120,7 +120,7 @@ export default function HistoryTab({ active, refreshKey, onRunning, onChanged, o
     <>
       <div className="card">
         <div className="card-head">
-          <h2>History</h2>
+          <h2 className="sr-only">History</h2>
           <div className="hist-stats">
             <div><span>Active Backups</span><strong>{hist.stored}</strong></div>
             <div><span>Deleted Backups</span><strong>{hist.counts.deleted}</strong></div>

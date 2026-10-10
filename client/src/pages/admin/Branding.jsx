@@ -81,7 +81,7 @@ export default function Branding() {
       </div>
 
       <div className="card mt-16">
-        <div className="card-head"><h2>Theme</h2><span className="dim">Applies to everyone. Each user picks Dark / Light / System in their Profile.</span></div>
+        <div className="card-head"><h2 title="Applies to everyone. Each user picks Dark / Light / System in their Profile.">Theme</h2></div>
         <div className="card-pad stack">
           <div className="theme-grid" id="tg">
             {b.themes.map((t) => (

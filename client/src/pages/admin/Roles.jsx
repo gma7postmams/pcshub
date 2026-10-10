@@ -33,12 +33,7 @@ export default function Roles({ model, refreshModel }) {
 
   return (
     <>
-      <div className="alert info mb-12">
-        Roles decide what a user can <strong>do</strong>. An action also needs the user&apos;s group to open the page it happens on
-        (e.g. filling Destination Folder / Approved by needs a role with that action <em>and</em> a group with the Ingest Tracker page).
-        Admin is fixed; the other built-in roles can have their actions changed; custom roles can be added, renamed and deleted (only when no user has them).
-      </div>
-      <div className="row mb-12"><span className="grow" /><button type="button" className="btn primary sm" id="role-new" onClick={() => setEditing({})}>New role</button></div>
+      <div className="admin-bar"><span className="grow" /><button type="button" className="btn primary sm" id="role-new" onClick={() => setEditing({})}>New role</button></div>
       <div className="card">
         <div className="table-wrap">
           <table className="t wl perm-matrix">
@@ -66,6 +61,11 @@ export default function Roles({ model, refreshModel }) {
             </tbody>
           </table>
         </div>
+      </div>
+      <div className="admin-note">
+        Roles decide what a user can <strong>do</strong>. An action also needs the user&apos;s group to open the page it happens on
+        (e.g. filling Destination Folder / Approved by needs a role with that action <em>and</em> a group with the Ingest Tracker page).
+        Admin is fixed; the other built-in roles can have their actions changed; custom roles can be added, renamed and deleted (only when no user has them).
       </div>
       {members ? <RoleMembers role={members} onClose={() => setMembers(null)} /> : null}
       {editing ? <RoleForm role={editing.name ? editing : null} actions={actions} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} /> : null}
