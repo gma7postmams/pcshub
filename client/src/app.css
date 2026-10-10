@@ -898,6 +898,11 @@ table.t.wl.cards td .sub, table.t.wl.cards td .cm-meta { white-space: normal; ov
 /* Workload Table / Excel mode: the table scrolls inside a box that ends near the bottom of the window (height set in Workload.jsx), so the sideways scroll
    bar is on screen at the top of the page, and the heading row stays put while the rows scroll. */
 .wl-fit { overflow: auto; }
+/* a short list still fills the box: the table is as tall as the box and a last, empty row takes the spare height, so the column lines run all the way down */
+.wl-fit > table.t.wl:not(.cards) { height: 100%; }
+table.t.wl tr.fill-row { height: 100%; }
+table.t.wl tr.fill-row td { padding: 0; cursor: default; }
+table.t.wl tbody tr.fill-row:hover td { background: transparent; }
 /* Units Concerned (and any pills in a Workload table cell) are centred in their cell, like every other column */
 table.t.wl .chips { justify-content: center; }
 
