@@ -14,7 +14,7 @@ const {
 } = require('./src/middleware');
 const { PAGE_BY_PATH, landingPath } = require('./src/permissions');
 const {
-  PROD, cookieSecure, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks, SESSION_IDLE_MS, API_RATE_LIMIT,
+  PROD, cookieSecure, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks, API_RATE_LIMIT,
 } = require('./src/config');
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
@@ -75,9 +75,11 @@ app.use(session({
     sameSite: 'lax',
     secure: cookieSecure,
     path: '/',
-    maxAge: SESSION_IDLE_MS,
+    maxAge: require('./src/security-settings').idleMs(),
   },
 }));
+// Idle sign-out is an Admin setting: each request renews the cookie and its store row with the current value.
+app.use((req, res, next) => { if (req.session) req.session.cookie.maxAge = require('./src/security-settings').idleMs(); next(); });
 
 // ---------- Static assets (React build) ----------
 // Pages are NOT served from here: index.html is only returned by the access-controlled page routes below.
@@ -200,6 +202,7 @@ const boot = process.env.MIGRATE_ON_START === 'false'
 
 boot
   .then(() => require('./src/roles').loadRoles(db))
+  .then(() => require('./src/security-settings').load())
   .then(() => require('./src/backup/service').recoverStale())
   .then(() => require('./src/backup/analysis').startupCleanup())
   .then(async () => {

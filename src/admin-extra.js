@@ -6,10 +6,8 @@ const v = require('./validate');
 const { asyncH, HttpError } = require('./middleware');
 const { audit } = require('./audit');
 const { ROLES } = require('./permissions');
-const cfg = require('./config');
 
-const MAX_FAILED = 5;      // keep in step with routes/auth.js
-const LOCK_MINUTES = 15;
+const settings = require('./security-settings');
 
 module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, auditWhere }) {
   // ---------- Users: one action for many people ----------
@@ -70,11 +68,11 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
     const [users, events, failed] = await Promise.all([
       db.query(`SELECT count(*) FILTER (WHERE is_active)::int AS active,
                        count(*) FILTER (WHERE is_active AND totp_enabled)::int AS twofa_on,
-                       count(*) FILTER (WHERE is_active AND twofa_required AND NOT totp_enabled)::int AS twofa_pending,
+                       count(*) FILTER (WHERE is_active AND (twofa_required OR (role='Admin' AND $1::boolean)) AND NOT totp_enabled)::int AS twofa_pending,
                        count(*) FILTER (WHERE is_active AND role='Admin' AND NOT totp_enabled)::int AS admins_without_2fa,
                        count(*) FILTER (WHERE locked_until > now())::int AS locked,
                        count(*) FILTER (WHERE must_change_password)::int AS must_change
-                  FROM users`),
+                  FROM users`, [settings.get().requireAdmin2fa]),
       db.query(`SELECT id, created_at, username, action, ip FROM audit_logs
                  WHERE action IN ('auth.login_failed','auth.locked','auth.login_blocked_locked','auth.2fa_failed','auth.reauth_failed','admin.user_signout','admin.user_reset_password','admin.user_reset_2fa')
                  ORDER BY created_at DESC, id DESC LIMIT 15`),
@@ -83,13 +81,44 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
     const sessions = await db.query(`SELECT count(*)::int AS n FROM user_sessions WHERE expire > now()`).catch(() => ({ rows: [{ n: null }] }));
     res.json({
       policy: {
-        minPasswordLength: 8, passwordRules: 'Letters and numbers, not a common password, no username or name inside it',
-        lockAfterFailures: MAX_FAILED, lockMinutes: LOCK_MINUTES,
-        idleSignOutHours: Math.round(cfg.SESSION_IDLE_MS / 3600000), maxSessionHours: Math.round(cfg.SESSION_MAX_MS / 3600000),
+        ...settings.get(), passwordRules: 'Letters and numbers, not a common password, no username or name inside it',
         loginRateLimit: parseInt(process.env.LOGIN_RATE_LIMIT, 10) || 20,
       },
+      limits: Object.fromEntries(Object.entries(settings.FIELDS).map(([k, f]) => [k, { min: f.min, max: f.max, def: f.def }])),
       users: users.rows[0], failedLogins7d: failed.rows[0].n, openSessions: sessions.rows[0].n, events: events.rows,
     });
+  }));
+
+  const LABEL = { minPasswordLength: 'Minimum password length', lockAfterFailures: 'Lock after wrong passwords', lockMinutes: 'Lock duration', idleSignOutHours: 'Idle sign-out', maxSessionHours: 'Longest session' };
+  // Change the rules. Every field is range-checked; the change is audited with before and after.
+  router.put('/security/settings', asyncH(async (req, res) => {
+    const b = req.body || {};
+    const prev = settings.get();
+    const next = {};
+    for (const [k, f] of Object.entries(settings.FIELDS)) {
+      const n = Number(b[k]);
+      if (!Number.isInteger(n) || n < f.min || n > f.max) throw new HttpError(400, `${LABEL[k]} must be a whole number from ${f.min} to ${f.max}`);
+      next[k] = n;
+    }
+    next.requireAdmin2fa = b.requireAdmin2fa === true;
+    // Turning it on while you have no 2FA yourself would lock you out of this very page.
+    if (next.requireAdmin2fa && !prev.requireAdmin2fa && !req.user.totp_enabled) {
+      throw new HttpError(400, 'Set up 2FA on your own account first (Profile), then turn this on');
+    }
+    if (next.maxSessionHours < next.idleSignOutHours) throw new HttpError(400, 'The longest session cannot be shorter than the idle sign-out time');
+    await db.tx(async (c) => {
+      await settings.save(next, c);
+      await audit(req, 'admin.security_update', 'app_settings', null, { from: prev, to: next }, c);
+    });
+    settings.apply(next);
+    res.json({ ok: true, policy: settings.get() });
+  }));
+
+  // Everyone except the person pressing the button must choose a new password at their next sign-in.
+  router.post('/security/force-password-change', asyncH(async (req, res) => {
+    const r = await db.query('UPDATE users SET must_change_password=TRUE, updated_at=now() WHERE is_active AND id <> $1', [req.user.id]);
+    await audit(req, 'admin.force_password_change', 'user', null, { users: r.rowCount });
+    res.json({ ok: true, users: r.rowCount });
   }));
 
   // ---------- Admin home ----------

@@ -59,8 +59,11 @@ const COMMON = new Set(['password', 'password1', 'password123', 'passw0rd', '123
  * Password policy: 8+ chars, letters and numbers, max 72 bytes (bcrypt limit — longer input is silently
  * truncated by bcrypt), not a common password, must not contain the username.
  */
+// Minimum length is an Admin setting (Admin > Security); 8 until it has loaded.
+const minLen = () => require('./security-settings').get().minPasswordLength;
+
 function password(v, { username, fullName } = {}) {
-  if (typeof v !== 'string' || v.length < 8) throw new HttpError(400, 'Password must be at least 8 characters');
+  if (typeof v !== 'string' || v.length < minLen()) throw new HttpError(400, `Password must be at least ${minLen()} characters`);
   if (Buffer.byteLength(v, 'utf8') > 72) throw new HttpError(400, 'Password must be at most 72 bytes');
   if (!/[A-Za-z]/.test(v) || !/[0-9]/.test(v)) throw new HttpError(400, 'Password must contain letters and numbers');
   const lc = v.toLowerCase();

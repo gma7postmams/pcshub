@@ -190,7 +190,7 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
           <div className="full dim" id="grp-hint">{hint}</div>
           {!u ? (
             <label className="f full"><span>Temporary password <span className="req">*</span></span>
-              <input name="password" type="text" autoComplete="new-password" placeholder="8+ chars, letters and numbers" value={f.password} onChange={set('password')} />
+              <input name="password" type="text" autoComplete="new-password" placeholder="Letters and numbers" value={f.password} onChange={set('password')} />
               <span className="dim mt-6">User must change it at first sign-in.</span></label>
           ) : null}
           <label className="check full"><input type="checkbox" name="is_active" checked={self ? true : f.is_active} disabled={self} onChange={set('is_active')} /> Active</label>

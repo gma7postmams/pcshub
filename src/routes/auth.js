@@ -11,8 +11,7 @@ const { twofaRequired } = require('../config');
 
 const router = express.Router();
 
-const MAX_FAILED = 5;
-const LOCK_MINUTES = 15;
+const settings = require('../security-settings');   // lock after N wrong passwords, for M minutes: set in Admin > Security
 // Dummy hash so timing is similar when the username does not exist
 const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', 12);
 // One message for every failure so responses never reveal whether a username exists, is locked or disabled
@@ -35,11 +34,11 @@ function save(req) {
 
 async function recordFailure(user) {
   const attempts = user.failed_attempts + 1;
-  const lock = attempts >= MAX_FAILED;
+  const lock = attempts >= settings.get().lockAfterFailures;
   await db.query(
     `UPDATE users SET failed_attempts=$2, locked_until=CASE WHEN $3 THEN now() + ($4 || ' minutes')::interval ELSE locked_until END
      WHERE id=$1`,
-    [user.id, lock ? 0 : attempts, lock, String(LOCK_MINUTES)]
+    [user.id, lock ? 0 : attempts, lock, String(settings.get().lockMinutes)]
   );
   return lock;
 }

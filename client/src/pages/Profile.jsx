@@ -74,7 +74,7 @@ export default function Profile() {
           <div className="card-head"><h2>Change password</h2></div>
           <form className="card-pad stack" id="pwf" autoComplete="off" onSubmit={changePassword}>
             <label className="f"><span>Current password</span><input name="current" type="password" autoComplete="current-password" value={pw.current} onChange={setPw('current')} /></label>
-            <label className="f"><span>New password</span><input name="password" type="password" autoComplete="new-password" placeholder="8+ chars, letters and numbers" value={pw.password} onChange={setPw('password')} /></label>
+            <label className="f"><span>New password</span><input name="password" type="password" autoComplete="new-password" placeholder="Letters and numbers" value={pw.password} onChange={setPw('password')} /></label>
             <label className="f"><span>Confirm new password</span><input name="confirm" type="password" autoComplete="new-password" value={pw.confirm} onChange={setPw('confirm')} /></label>
             <div><button className="btn primary">Update password</button></div>
             <div className="dim">Other sessions are signed out when you change your password.</div>

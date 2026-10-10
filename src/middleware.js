@@ -1,7 +1,7 @@
 const path = require('path');
 const db = require('./db');
 const { canPage, can, canSection } = require('./permissions');
-const { SESSION_MAX_MS, APP_ORIGINS, COOKIE_NAME, cookieSecure } = require('./config');
+const { APP_ORIGINS, COOKIE_NAME, cookieSecure } = require('./config');
 
 // React build output. Every page returns the same index.html, but only after the role/group check.
 const CLIENT_DIST = path.join(__dirname, '..', 'client', 'dist');
@@ -30,7 +30,7 @@ const loadUser = asyncH(async (req, res, next) => {
   if (!uid) return next();
   // Absolute lifetime: however active it is, a session ends SESSION_MAX_HOURS after sign-in.
   if (!req.session.createdAt) req.session.createdAt = Date.now();   // sessions from before this check existed start counting now
-  if (Date.now() - req.session.createdAt > SESSION_MAX_MS) return endSession(req, res, next);
+  if (Date.now() - req.session.createdAt > require('./security-settings').maxMs()) return endSession(req, res, next);
   const { rows } = await db.query(
     `SELECT u.id, u.username, u.full_name, u.email, u.role, u.group_id, g.name AS group_name,
             u.is_active, u.must_change_password, u.totp_enabled, u.twofa_required, u.appearance,

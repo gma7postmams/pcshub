@@ -105,6 +105,8 @@ const ACTION_LABELS = {
   'admin.dropdown_merge': 'Merged Dropdown Options',
   'admin.dropdown_bulk_add': 'Added Dropdown Options',
   'admin.audit_export': 'Exported Audit Log',
+  'admin.security_update': 'Changed Security Rules',
+  'admin.force_password_change': 'Forced Password Change',
 };
 
 function formatAction(action) {
@@ -266,6 +268,15 @@ function formatDetails(row) {
 
     case 'admin.dropdown_bulk_add':
       return `Added ${n(d.added, 'option')} to ${d.category}${d.skipped ? `, ${d.skipped} already existed` : ''}`;
+
+    case 'admin.security_update': {
+      const L = { minPasswordLength: 'min password', lockAfterFailures: 'lock after', lockMinutes: 'lock minutes', idleSignOutHours: 'idle hours', maxSessionHours: 'max session hours', requireAdmin2fa: 'Admin 2FA' };
+      const ch = Object.keys(L).filter((k) => d.from && d.to && d.from[k] !== d.to[k]).map((k) => `${L[k]}: ${d.from[k]} → ${d.to[k]}`);
+      return ch.length ? ch.join('; ') : 'Saved without changes';
+    }
+
+    case 'admin.force_password_change':
+      return `${n(d.users, 'user')} must choose a new password at next sign-in`;
 
     case 'admin.audit_export':
       return `Exported ${n(d.rows, 'entry', 'entries')}${d.truncated ? ' (stopped at the limit)' : ''}`;
