@@ -391,6 +391,14 @@ async function exportPalette(db_) {
   return { gridBorder: argb(border), headerFill: argb(headerFill), black: argb('000000'), pillFg };
 }
 
+// Script / Artwork-STB / Audio Guide dates are shown as MMDDYY (2026-10-10 -> 101026) in the web table and the Excel export; Import reads that back.
+const mdy = (iso) => `${iso.slice(5, 7)}${iso.slice(8, 10)}${iso.slice(2, 4)}`;
+const fromMdy = (t) => {
+  const m = /^\s*(\d{2})(\d{2})(\d{2})\s*$/.exec(t);
+  if (!m) return t;
+  const iso = `20${m[3]}-${m[1]}-${m[2]}`;
+  return validator.isDate(iso, { format: 'YYYY-MM-DD', strictMode: true }) ? iso : t;
+};
 router.get('/export', asyncH(async (req, res) => {
   const t0 = Date.now();
   const exportInfo = { format: 'xlsx', team: req.query.team || 'ALL', filters: { ...req.query, team: undefined } };
@@ -463,7 +471,7 @@ router.get('/export', asyncH(async (req, res) => {
         if (k === 'breakdate_vgfx') val = null;   // filled in below as two labelled lines (VGFX / VEDIT)
         else if (f.kind === 'date') val = asDate(val);
         else if (f.kind === 'datetime') { const t = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(val || ''); val = t ? new Date(Date.UTC(+t[1], +t[2] - 1, +t[3], +t[4], +t[5])) : null; }
-        else if ((k === 'audio_guide' || k === 'art_stb' || k === 'script') && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = asDate(val);   // a date becomes a real Excel date; text stays text
+        else if ((k === 'audio_guide' || k === 'art_stb' || k === 'script') && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = mdy(val);   // a date is written MMDDYY (101026), the same as the web table; text stays text
         else if (k !== 'remarks' && k !== 'others' && k !== 'audio_status') val = oneLineText(val);   // every field except the Remarks columns and Audio Status is one line, like the web table
         return { ...o, [k]: val };
       }, {}));
@@ -477,7 +485,6 @@ router.get('/export', asyncH(async (req, res) => {
         if (r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit')) {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8B4B4' } };
         }
-        if ((k === 'audio_guide' || k === 'art_stb' || k === 'script') && r[k] && /^\d{4}-\d{2}-\d{2}$/.test(r[k])) cell.numFmt = 'mmm d, yyyy';
 
         if (k === 'breakdate_vgfx') {
           // Same as the web table: one labelled line per involved team, VGFX on top, VEDIT below (each only if it has a time)
@@ -849,7 +856,7 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
         else { val = cellText(val);
           if (f.kind === 'date') obj[key] = val instanceof Date ? isoDate(val) : String(val);
           else if (f.kind === 'datetime') obj[key] = val instanceof Date ? isoDateTime(val) : String(val);
-          else if (key === 'audio_guide' || key === 'art_stb' || key === 'script') obj[key] = val instanceof Date ? isoDate(val) : String(val);   // an Excel date or text
+          else if (key === 'audio_guide' || key === 'art_stb' || key === 'script') obj[key] = val instanceof Date ? isoDate(val) : fromMdy(String(val));   // an Excel date, MMDDYY (as exported) or text
           else obj[key] = (key === 'remarks' || key === 'others') && obj[key] ? `${obj[key]}\n${String(val)}` : String(val); }   // an old file may have two columns for the same remarks: keep both texts
       }
       if (!hasAny) continue;
@@ -908,4 +915,4 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
 
 module.exports = router;
 // shared with the PSD Daily Plug List routes (src/routes/plugs.js), which make Workload rows from plugs
-module.exports.helpers = { UNITS, UNIT_TEAMS, canonUnit, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked, exportPalette };
+module.exports.helpers = { UNITS, UNIT_TEAMS, canonUnit, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked, exportPalette, hueOf };

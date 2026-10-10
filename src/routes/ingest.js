@@ -162,28 +162,76 @@ router.get('/export', asyncH(async (req, res) => {
     const m = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/.exec(t || '');
     return m ? `${m[1]} to ${m[2]}` : (t || '');
   };
+  // Styled like the Workload export (and like the web table): tinted header, vertical grid lines, centred cells, bold names, coloured Platform and
+  // Status (CM) text (Excel can't give a cell a pill background), the decision / approval time on a second line, nothing cropped.
+  const { exportPalette, hueOf } = require('./workload').helpers;
+  const pal = await exportPalette(db);
+  const grid = { style: 'thin', color: { argb: pal.gridBorder } };
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const nice = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); return m ? `${MON[+m[2] - 1]} ${+m[3]}, ${m[1]}` : String(iso || ''); };
+  const niceDay = (r) => {
+    const t = r.episode_break_date_text || (r.episode_date ? new Date(r.episode_date).toISOString().slice(0, 10) : '');
+    const m = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/.exec(t || '');
+    return m ? `${nice(m[1])} – ${nice(m[2])}` : (/^\d{4}-\d{2}-\d{2}/.test(t || '') ? nice(t) : (t || ''));
+  };
+  const niceTime = (ts) => { if (!ts) return ''; const d = new Date(ts); const h = d.getHours(); return `${nice(d.toISOString())} ${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`; };
+  const CM_HUE = { DONE: 'green', 'NON-COMPLIANT': 'red', PENDING: 'amber' };
+  const grey = { color: { argb: pal.pillFg('gray') }, size: 9 };
   const wb = new ExcelJS.Workbook();
   wb.creator = 'PromoHub';
   const ws = wb.addWorksheet('Ingest');
-  ws.columns = [
-    { header: 'PROG. NAME / PROJ. TITLE', key: 'program', width: 34 }, { header: 'Platform', key: 'platform', width: 16 },
-    { header: 'Billable Party', key: 'billable_party', width: 22 }, { header: 'Episode / Breakdate', key: 'ep', width: 24 },
-    { header: 'Source', key: 'source', width: 28 }, { header: 'No. of Materials', key: 'materials_count', width: 12 },
-    { header: 'Requested By', key: 'req', width: 22 }, { header: 'Destination Folder', key: 'destination_folder', width: 36 },
-    { header: 'Approved By', key: 'approved_by', width: 22 }, { header: 'Status (CM)', key: 'cm', width: 16 },
-    { header: 'Non-compliant reason', key: 'reason', width: 30 }, { header: 'Remarks', key: 'remarks', width: 36 },
-    { header: 'Updated', key: 'updated', width: 20 },
+  const COLS = [
+    { header: 'PROG. NAME / PROJ. TITLE', key: 'program' }, { header: 'Platform', key: 'platform' },
+    { header: 'Billable Party', key: 'billable_party' }, { header: 'Episode / Breakdate', key: 'ep' },
+    { header: 'Source', key: 'source', wrap: true }, { header: 'No. of Materials', key: 'materials_count' },
+    { header: 'Requested By', key: 'req' }, { header: 'Destination Folder', key: 'destination_folder', wrap: true },
+    { header: 'Approved By', key: 'approved_by' }, { header: 'Status (CM)', key: 'cm' }, { header: 'Updated', key: 'updated' },
   ];
-  for (const r of rows) {
-    ws.addRow({
-      program: r.program, platform: r.platform, billable_party: r.billable_party, ep: dayText(r), source: r.source,
-      materials_count: r.materials_count, req: r.requested_by_psd || r.requested_by_name || '', destination_folder: r.destination_folder,
-      approved_by: r.approved_by, cm: r.cm_status || 'PENDING', reason: r.cm_non_compliant_reason || '', remarks: r.remarks,
-      updated: r.updated_at ? new Date(r.updated_at).toISOString().replace('T', ' ').slice(0, 16) : '',
-    });
-  }
-  ws.getRow(1).font = { bold: true };
+  ws.columns = COLS.map((c) => ({ header: c.header, key: c.key, width: 20 }));
+  ws.getRow(1).eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: pal.black }, size: 11 };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pal.headerFill } };
+    cell.border = { bottom: grid, right: grid };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  });
   ws.views = [{ state: 'frozen', ySplit: 1 }];
+  const lens = COLS.map((c) => c.header.length);
+  const seen = (key, text) => { const i = COLS.findIndex((c) => c.key === key); String(text || '').split('\n').forEach((t) => { lens[i] = Math.max(lens[i], t.length); }); };
+  for (const r of rows) {
+    const status = r.cm_status || 'PENDING';
+    const row = ws.addRow({
+      program: r.program, platform: r.platform, billable_party: r.billable_party, ep: niceDay(r), source: r.source,
+      materials_count: r.materials_count, req: r.requested_by_psd || r.requested_by_name || '', destination_folder: r.destination_folder,
+      approved_by: r.approved_by, cm: status, updated: r.updated_at ? new Date(r.updated_at).toISOString().replace('T', ' ').slice(0, 16) : '',
+    });
+    row.alignment = { wrapText: false, vertical: 'middle', horizontal: 'center' };
+    COLS.forEach((c) => { row.getCell(c.key).border = { right: grid }; if (c.wrap) row.getCell(c.key).alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' }; });
+    row.getCell('program').font = { bold: true };
+    if (r.platform) { const fam = r.platform.replace(/\s*\(.*\)\s*$/, '') || r.platform; row.getCell('platform').font = { bold: true, color: { argb: pal.pillFg(hueOf(fam)) } }; }
+    if (r.destination_folder) row.getCell('destination_folder').font = { name: 'Consolas' };
+    // Status (CM): the decision in its colour, then when / by whom it was decided, then the non-compliant reason (like the web cell)
+    const lines = [{ text: status, font: { bold: true, color: { argb: pal.pillFg(CM_HUE[status] || 'amber') } } }];
+    if (r.cm_status) {
+      const when = `${niceTime(r.cm_decided_at)}${r.cm_decided_by_name ? ` · ${r.cm_decided_by_name}` : ''}`;
+      if (when.trim()) lines.push({ text: `\n${when}`, font: grey });
+      if (r.cm_status === 'NON-COMPLIANT' && r.cm_non_compliant_reason) lines.push({ text: `\n${r.cm_non_compliant_reason}`, font: grey });
+    }
+    row.getCell('cm').value = { richText: lines };
+    row.getCell('cm').alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+    if (r.approved_by) {
+      const t = niceTime(r.approved_at);
+      row.getCell('approved_by').value = { richText: [{ text: r.approved_by, font: { color: { argb: pal.black } } }, ...(t ? [{ text: `\n${t}`, font: grey }] : [])] };
+      row.getCell('approved_by').alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+    }
+    row.getCell('updated').font = { color: { argb: pal.pillFg('gray') } };
+    seen('program', r.program); seen('platform', r.platform); seen('billable_party', r.billable_party); seen('ep', niceDay(r));
+    seen('source', r.source && r.source.length > 45 ? 'x'.repeat(45) : r.source); seen('materials_count', r.materials_count);
+    seen('req', r.requested_by_psd || r.requested_by_name || ''); seen('destination_folder', r.destination_folder && r.destination_folder.length > 45 ? 'x'.repeat(45) : r.destination_folder);
+    seen('approved_by', `${r.approved_by || ''}\n${r.approved_by ? niceTime(r.approved_at) : ''}`);
+    seen('cm', `${status}\n${r.cm_status ? `${niceTime(r.cm_decided_at)}${r.cm_decided_by_name ? ` · ${r.cm_decided_by_name}` : ''}` : ''}`);
+    seen('updated', 'YYYY-MM-DD HH:MM');
+  }
+  ws.columns.forEach((column, i) => { column.width = Math.ceil(lens[i] * 1.15) + 3; });   // wide enough that nothing is cropped (long Source / Folder text wraps)
   ws.autoFilter = { from: 'A1', to: { row: 1, column: ws.columns.length } };
   const buffer = await wb.xlsx.writeBuffer();
   const filename = `Ingest_${new Date().toISOString().slice(0, 10)}.xlsx`;
