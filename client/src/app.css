@@ -1029,6 +1029,7 @@ table.t td[data-sel] { background: color-mix(in srgb, var(--accent) 16%, var(--s
 .plug-list { padding: 0; }
 .plug-list.full { position: fixed; inset: 0; z-index: 400; overflow: auto; background: var(--surface); }
 .plug-bar .wl-presence { margin-left: 0; }
-.plug-list .plug-bar { padding: 8px 12px; margin: 0; border-bottom: 1px solid var(--border); }   /* the same bar height and side padding as the Workload and Ingest toolbars */
+.plug-list .plug-bar { padding: 8px 12px; margin: 0; border-bottom: 1px solid var(--border); }
+.plug-list .plug-bar .wl-search { flex: 1 1 200px; min-width: 150px; max-width: 420px; }   /* the same width as the Workload Tracker's search box */   /* the same bar height and side padding as the Workload and Ingest toolbars */
 .plug-list .pager { border-top: 1px solid var(--border); padding: 0 16px; }
 .plug-list .empty { padding-left: 16px; padding-right: 16px; }
