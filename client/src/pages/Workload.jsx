@@ -1628,7 +1628,7 @@ export default function Workload() {
     switch (k) {
       case 'work_date': return <td {...common}><WorkDate value={val} />{isLocked(val, meta.locks) ? <span className="row-lock" title={`Locked: ${lockNote(val, meta.locks)}`}><LockIcon /></span> : null}</td>;
       case 'platform': return <td {...common}><PlatformCell value={val} /></td>;
-      case 'units_concerned': return <td {...common}>{val ? <UnitsPills value={val} unitTeams={meta.unitTeams} /> : <span className="chip c-gray unset" title="Copied from the PSD Daily Plug List — click to choose the team(s). It shows under All until then.">Set units</span>}</td>;
+      case 'units_concerned': return <td {...common} className={r.is_priority && !cols.includes('breakdate_vgfx') ? 'prio' : undefined}>{val ? <UnitsPills value={val} unitTeams={meta.unitTeams} /> : <span className="chip c-gray unset" title="Copied from the PSD Daily Plug List — click to choose the team(s). It shows under All until then.">Set units</span>}</td>;
       case 'plug_type': return <td {...common}><TypePill value={val} /></td>;
       case 'plug_id': {
         const [first, ...rest] = firstLineOf(val);
