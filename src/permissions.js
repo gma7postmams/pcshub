@@ -39,7 +39,7 @@ const CATALOG = [
 
 const FIXED_PAGES = [
   { key: 'admin', label: 'Admin', path: '/admin', roleOnly: 'Admin' },
-  { key: 'activity-history', label: 'Activity History', path: '/activity-history', always: true },
+  { key: 'activity-history', label: 'Activity History', path: '/activity-history', action: 'activity.view' },
   { key: 'profile', label: 'Profile', path: '/profile', always: true, inNav: false },
 ];
 
@@ -60,6 +60,7 @@ const DEFAULT_ROLE_ACTIONS = Object.assign(Object.create(null), {
     'workload.write',
     'knowledge.write',
     'plugs.write',
+    'activity.view',
     'admin'
   ],
 
@@ -69,9 +70,10 @@ const DEFAULT_ROLE_ACTIONS = Object.assign(Object.create(null), {
     'ingest.cm_complete',
     'workload.write',
     'knowledge.write',
-    'plugs.write'
+    'plugs.write',
+    'activity.view'
   ],
-  Editor:  ['ingest.write', 'plugs.write'],   // plugs.write: edit the PSD Daily Plug List (page access still comes from the group)
+  Editor:  ['ingest.write', 'plugs.write', 'activity.view'],   // plugs.write: edit the PSD Daily Plug List (page access still comes from the group)
   Ingest:  ['ingest.cm_complete'],   // Ingest Tracker only: Status (CM) and its NON-COMPLIANT reason, nothing else
   Viewer:  [],
 });
@@ -88,6 +90,7 @@ const ACTION_PAGE = Object.assign(Object.create(null), {
   'workload.write': 'workload',
   'knowledge.write': 'knowledge',
   'plugs.write': 'plugs',
+  'activity.view': null,
   'admin': null,
 });
 
@@ -124,6 +127,7 @@ function canPage(user, path) {
   const page = PAGE_BY_PATH[path];
   if (!page || !user) return false;
   if (page.always) return true;
+  if (page.action) return !!user && user.role !== 'Admin' && can(user, page.action);   // Admins read the Audit Log instead
   if (page.roleOnly) return user.role === page.roleOnly;
   return effectiveKeys(user).has(page.key);
 }
@@ -147,7 +151,7 @@ function allowedPages(user) {
 
   if (user && user.role === 'Admin') {
     pages.push({ key: 'admin', label: 'Admin', path: '/admin' });
-  } else {
+  } else if (can(user, 'activity.view')) {
     pages.push({
       key: 'activity-history',
       label: 'Activity History',

@@ -5,6 +5,7 @@ const validator = require('validator');
 const db = require('../db');
 const v = require('../validate');
 const { asyncH, HttpError } = require('../middleware');
+const { can } = require('../permissions');
 const { audit } = require('../audit');
 const totp = require('../totp');
 const { MODES } = require('../themes');
@@ -105,6 +106,7 @@ router.post('/2fa/enable', asyncH(async (req, res) => {
 }));
 
 router.get('/activity-history', asyncH(async (req, res) => {
+  if (!can(req.user, 'activity.view')) throw new HttpError(403, 'Activity History is not available for your role');
   const params = [req.user.id];
   const where = ['user_id = $1'];
 

@@ -11,6 +11,7 @@ const ACT = {
   'workload.write': 'Edit Workload',
   'knowledge.write': 'Upload / rename / delete Knowledge Base PDFs',
   'plugs.write': 'Edit PSD Daily Plug List',
+  'activity.view': 'See the Activity History page',
 };
 
 export default function Roles({ model, refreshModel }) {

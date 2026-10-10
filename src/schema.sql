@@ -365,6 +365,14 @@ SELECT 'Editor', 'plugs.write' FROM roles
 ON CONFLICT DO NOTHING;
 INSERT INTO app_settings (key, value) VALUES ('editor_plugs_write_v1', '1') ON CONFLICT (key) DO NOTHING;
 
+-- Activity History became a per-role switch (Admin > Roles). Keep it for Manager and Editor, as before; Viewer and Ingest start without it. Once.
+INSERT INTO role_actions (role, action)
+SELECT name, 'activity.view' FROM roles
+ WHERE name IN ('Manager','Editor') AND actions_seeded
+   AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'activity_view_v1')
+ON CONFLICT DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('activity_view_v1', '1') ON CONFLICT (key) DO NOTHING;
+
 INSERT INTO app_settings (key, value) VALUES
   ('app_name', 'Promotional Content Hub'),
   ('tagline', 'Ingest · Approval · Workload · Backup and Restore'),
