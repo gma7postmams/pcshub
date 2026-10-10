@@ -385,22 +385,13 @@ export default function Workload() {
     return () => window.removeEventListener('resize', on);
   }, []);
   const cards = winW < CARDS_BELOW;
-  // Full screen: the card covers the whole window (and the browser goes full screen where it allows) so the grid gets every pixel
+  // Full screen: the card covers the app's page (the app header is hidden) but the browser itself stays as it is — its tabs and address / search bar remain visible. Esc leaves it.
   const [full, setFull] = useState(false);
-  const toggleFull = () => {
-    const next = !full;
-    setFull(next);
-    try {
-      if (next) { const r = document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); if (r && r.catch) r.catch(() => {}); }
-      else if (document.fullscreenElement) document.exitFullscreen();
-    } catch (_) { /* the covering card works without browser full screen */ }
-  };
+  const toggleFull = () => setFull((f) => !f);
   useEffect(() => {
-    const on = () => { if (!document.fullscreenElement) setFull(false); };
-    const esc = (e) => { if (e.key === 'Escape' && !document.fullscreenElement) setFull(false); };
-    document.addEventListener('fullscreenchange', on);
+    const esc = (e) => { if (e.key === 'Escape' && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || '')) setFull(false); };
     document.addEventListener('keydown', esc);
-    return () => { document.removeEventListener('fullscreenchange', on); document.removeEventListener('keydown', esc); try { if (document.fullscreenElement) document.exitFullscreen(); } catch (_) { /* leaving anyway */ } };
+    return () => document.removeEventListener('keydown', esc);
   }, []);
   const mode = 'table';   // Excel mode was removed: the Workload Tracker is the Table only (the grid code below is no longer reachable)
   const setMode = () => {};
