@@ -1762,7 +1762,7 @@ export default function Workload() {
             <span className="grow" />
             <div className="wl-presence"><PresenceAvatars path="/workload" /></div>
             <div className="wl-iconbar">
-              {canWrite ? <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
+              {canWrite ? <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
               {canWrite && isGrid ? <button type="button" className="btn ibtn" id="add-row" aria-label="Add row" title="Add row" onClick={addRow}><PlusIcon /></button> : null}
               {canWrite ? <button type="button" className="btn ibtn primary" id="new-btn" aria-label="New Workload" title="New Workload" onClick={() => setForm({ rec: null })}><PlusIcon /></button> : null}
               {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import from Excel" title="Import from Excel" disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}><UploadIcon /></button> : null}
@@ -1807,7 +1807,7 @@ export default function Workload() {
           <div className="wl-tabactions">
             {canWrite ? (
               <>
-                <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} />
+                <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} />
                 <button type="button" className="btn" id="import-btn" disabled={importing} onClick={() => fileRef.current.click()}>
                   <UploadIcon /> {importing ? 'Importing…' : 'Import'}
                 </button>

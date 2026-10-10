@@ -611,7 +611,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
         {!canWrite ? <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button> : null}
         {canWrite ? (
           <>
-            <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files[0])} />
+            <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files[0])} />
             <button type="button" className="btn" disabled={importing} onClick={() => fileRef.current.click()}><UploadIcon /> {importing ? 'Importing…' : 'Import Plug List'}</button>
             <button type="button" className="btn" onClick={() => setAdding(true)}><PlusIcon /> Add Plug</button>
             <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button>
