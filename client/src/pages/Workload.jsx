@@ -1250,6 +1250,12 @@ export default function Workload() {
     }
     tblDrag.current = { idx, x: e.clientX, y: e.clientY, moved: false, last: idx, id: r.id };
   };
+  // the row number on the left selects the row, like the row numbers in Excel mode; dragging down over more numbers extends it
+  const numDown = (e, r, idx) => {
+    e.stopPropagation();
+    rowDown(e, r, idx);
+    if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !rowLocked(r)) { e.preventDefault(); setAllMatching(false); setPicked(new Set([r.id])); lastPick.current = r.id; }
+  };
   tblMouse.current.move = (e) => {
     const d = tblDrag.current;
     if (!d) return;
@@ -1527,6 +1533,7 @@ export default function Workload() {
               </div>
               {canWrite && isGrid ? <button type="button" className="btn ibtn" id="add-row" aria-label="Add row" title="Add row" onClick={addRow}><PlusIcon /></button> : null}
               {canWrite && !isGrid ? <button type="button" className="btn ibtn primary" id="new-btn" aria-label="New Workload" title="New Workload" onClick={() => setForm({ rec: null })}><PlusIcon /></button> : null}
+              {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import from Excel" title="Import from Excel" disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}><UploadIcon /></button> : null}
               <button type="button" className="btn ibtn" id="export-btn" aria-label="Export to Excel" title="Export to Excel" onClick={exportXlsx}><DownloadIcon /></button>
               {canWrite && !isGrid && pickedCount ? (
                 <button type="button" className="btn ibtn danger" id="delete-selected-btn" onClick={() => deleteSelected()}
@@ -1546,7 +1553,6 @@ export default function Workload() {
                 {full ? <ExitFullscreenIcon /> : <FullscreenIcon />}
               </button>
               <ToolMenu items={[
-                canWrite && { id: 'import-btn', label: importing ? 'Importing…' : 'Import from Excel', icon: <UploadIcon />, disabled: importing, onClick: () => fileRef.current && fileRef.current.click() },
                 s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
                 canWrite && isGrid && selRows.length > 0 && { id: 'priority-btn', label: allPrio ? 'Remove Priority' : 'Set Priority', onClick: togglePriority, keep: true },
@@ -1695,14 +1701,14 @@ export default function Workload() {
           <>
             <div className={`table-wrap${cards ? '' : ' wl-fit'}`} id="tbl" onClickCapture={(e) => {
               if (tblSuppress.current) { tblSuppress.current = false; e.stopPropagation(); e.preventDefault(); return; }   // the click that ended a drag / Shift / Ctrl+click
-              if (canWrite && (picked.size || allMatching) && !(e.target.closest && e.target.closest('.actions-cell, .chk'))) clearPicks();
+              if (canWrite && (picked.size || allMatching) && !(e.target.closest && e.target.closest('.actions-cell, .chk, .rn'))) clearPicks();
             }}>
               {!data ? <Empty>Loading…</Empty>
                 : data.error ? <Empty>{data.error}</Empty>
                   : !data.rows.length ? <Empty>No workload items match these filters.</Empty>
                     : (
                       <table className={`t wl v-${viewKey.toLowerCase()}${cards ? ' cards' : ''}`}>
-                        <thead><tr>{canWrite ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
+                        <thead><tr>{canWrite && !cards ? <th className="rn" title={pageAllPicked ? 'Click to unselect all' : 'Select all rows on this page (Ctrl+A)'} onClick={() => (pageAllPicked ? clearPicks() : selectPage())} /> : null}{canWrite && cards ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {data.rows.map((r, idx) => (
                             <tr key={r.id} data-id={r.id}
@@ -1710,7 +1716,11 @@ export default function Workload() {
                               onMouseDown={canWrite ? (e) => rowDown(e, r, idx) : undefined}
                               onContextMenu={canWrite ? (e) => rowMenu(e, r) : undefined}
                               onClick={canWrite ? undefined : () => setForm({ rec: r })}>
-                              {canWrite ? (
+                              {canWrite && !cards ? (
+                                <td className={`rn${allMatching || picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, idx)}
+                                  title={rowLocked(r) ? 'Locked period: cannot be selected' : 'Click to select the row (Shift-click a range, Ctrl-click to add; Ctrl+C copies, Ctrl+V pastes)'}>{offset + idx + 1}</td>
+                              ) : null}
+                              {canWrite && cards ? (
                                 <td className="chk">
                                   <input type="checkbox" checked={allMatching || picked.has(r.id)} disabled={rowLocked(r)} title={rowLocked(r) ? 'Locked period: cannot be selected' : undefined} aria-label={`Select row ${r.plug_id || r.id}`}
                                     onChange={() => { setAllMatching(false); setPicked((cur) => { const n = new Set(allMatching ? pickable.map((x) => x.id) : cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; }); lastPick.current = r.id; }} />

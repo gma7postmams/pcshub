@@ -266,6 +266,8 @@ The **PSD Daily Plug List** page (top navigation, right before the Workload Trac
 
 ### Table mode: selecting, deleting and keyboard shortcuts
 
+**Row numbers (Table mode, windows ≥ 900 px):** the tick boxes are replaced by a **row-number column**, like Excel mode. Click a number to select that row, **drag down** over more numbers or **Shift-click** for a range, **Ctrl/Cmd-click** to add or remove one; the corner cell above the numbers selects every row on the page (click again to clear). A selected row's number turns blue. **Ctrl+C** copies the selected rows as tab-separated text, **Ctrl+V** pastes rows as new ones (after a confirmation), Delete / the trash button removes them, right-click gives the Undo / Cut / Copy / Paste / Delete menu. Rows in a locked period can't be selected. (Phones keep the tick boxes on the cards.) The **Import from Excel** button now sits just left of **Export** in the toolbar.
+
 Table mode selects rows the way Excel mode selects cells — no tick boxes and no Select all button.
 
 - **Select rows**: press on a row and **drag** across the rows you want; **Shift+click** extends a range; **Ctrl/Cmd+click** adds or removes one row. A plain click on a cell still opens that cell for editing, and clicking outside the table (or pressing **Esc**) drops the selection. Rows in a locked period can't be selected.
