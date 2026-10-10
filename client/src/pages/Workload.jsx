@@ -1533,14 +1533,14 @@ export default function Workload() {
     const fit = () => {
       const el = document.querySelector('.wl-fit');
       if (!el) return;
-      el.style.maxHeight = 'none';
+      el.style.height = 'auto';
       const top = el.getBoundingClientRect().top + window.scrollY;
       // leave room for what sits under the table (the pager, the card's edge, the page's bottom padding) so the page itself never needs a scroll bar
       const pager = el.parentElement && el.parentElement.querySelector('.pager');
       const main = el.closest('main');
       const pad = el.closest('.wl-card.full') ? 0 : main ? parseFloat(getComputedStyle(main).paddingBottom) || 0 : 0;
       const below = el.id === 'tbl' || el.id === 'grid' ? (pager ? pager.offsetHeight : 0) + pad + 2 : 80;
-      el.style.maxHeight = `${Math.max(240, Math.round(window.innerHeight - top - below))}px`;
+      el.style.height = `${Math.max(240, Math.round(window.innerHeight - top - below))}px`;   // a fixed height (not a maximum): a short list (the Audio tab with 8 rows) still fills the window and the tabs / pager stay at the bottom
     };
     fit();
     window.addEventListener('resize', fit);
