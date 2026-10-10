@@ -1,6 +1,5 @@
 // Outgoing email (used for 2FA codes). SMTP login stays in the server's .env, never in the database or the Admin screens:
 //   SMTP_HOST, SMTP_PORT (587), SMTP_SECURE (true for port 465), SMTP_USER, SMTP_PASS, SMTP_FROM ("Name <address>")
-const nodemailer = require('nodemailer');
 
 let transport = null;
 const configured = () => Boolean(process.env.SMTP_HOST && process.env.SMTP_FROM);
@@ -8,6 +7,7 @@ const configured = () => Boolean(process.env.SMTP_HOST && process.env.SMTP_FROM)
 function get() {
   if (!transport) {
     const port = parseInt(process.env.SMTP_PORT, 10) || 587;
+    const nodemailer = require('nodemailer');   // loaded on first use, so the app still starts if `npm install` was missed
     transport = nodemailer.createTransport({
       host: process.env.SMTP_HOST, port,
       secure: process.env.SMTP_SECURE === 'true' || port === 465,
