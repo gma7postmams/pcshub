@@ -480,10 +480,11 @@ router.get('/export', asyncH(async (req, res) => {
       sh.cols.forEach((k) => {
         const cell = row.getCell(k);
         const f = fieldsExt[k];
-        cell.border = { right: thinGrid };   // vertical grid line, matching the web table
+        cell.border = { right: thinGrid, bottom: thinGrid };   // grid lines, matching the web table (an explicit bottom line keeps consecutive filled priority cells separated)
         // Prioritised row: light-red fill on its Breakdate / Time cell(s), like the highlight in the web table
         if (r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit')) {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8B4B4' } };
+          cell.border = { right: thinGrid, bottom: { style: 'thin', color: { argb: 'FFD98080' } } };   // darker line so two prioritised rows in a row stay visibly separate
         }
 
         if (k === 'breakdate_vgfx') {
