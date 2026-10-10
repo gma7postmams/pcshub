@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { ColumnIcon, DownloadIcon, LockIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, SortTh, nextSort, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
+import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FullscreenIcon, LockIcon, PlusIcon, SaveIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
+import { DateChip, DateRange, FilterSelect, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 
@@ -372,6 +372,23 @@ export default function Workload() {
     return () => window.removeEventListener('resize', on);
   }, []);
   const cards = winW < CARDS_BELOW;
+  // Full screen: the card covers the whole window (and the browser goes full screen where it allows) so the grid gets every pixel
+  const [full, setFull] = useState(false);
+  const toggleFull = () => {
+    const next = !full;
+    setFull(next);
+    try {
+      if (next) { const r = document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); if (r && r.catch) r.catch(() => {}); }
+      else if (document.fullscreenElement) document.exitFullscreen();
+    } catch (_) { /* the covering card works without browser full screen */ }
+  };
+  useEffect(() => {
+    const on = () => { if (!document.fullscreenElement) setFull(false); };
+    const esc = (e) => { if (e.key === 'Escape' && !document.fullscreenElement) setFull(false); };
+    document.addEventListener('fullscreenchange', on);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('fullscreenchange', on); document.removeEventListener('keydown', esc); try { if (document.fullscreenElement) document.exitFullscreen(); } catch (_) { /* leaving anyway */ } };
+  }, []);
   const isGrid = !cards;
   const mode = isGrid ? 'excel' : 'table';
   const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('wl:rows')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
@@ -1292,14 +1309,14 @@ export default function Workload() {
       // leave room for what sits under the table (the pager, the card's edge, the page's bottom padding) so the page itself never needs a scroll bar
       const pager = el.parentElement && el.parentElement.querySelector('.pager');
       const main = el.closest('main');
-      const pad = main ? parseFloat(getComputedStyle(main).paddingBottom) || 0 : 0;
+      const pad = el.closest('.wl-card.full') ? 0 : main ? parseFloat(getComputedStyle(main).paddingBottom) || 0 : 0;
       const below = el.id === 'tbl' || el.id === 'grid' ? (pager ? pager.offsetHeight : 0) + pad + 2 : 80;
       el.style.maxHeight = `${Math.max(240, Math.round(window.innerHeight - top - below))}px`;
     };
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
-  }, [hasMeta, mode, tab, cards, winW, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, !!data, !!grid]);
+  }, [hasMeta, mode, tab, cards, winW, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, !!data, !!grid, full]);
 
   if (!meta) return <main className="container wide"><Empty>Loading…</Empty></main>;
 
@@ -1486,7 +1503,48 @@ export default function Workload() {
         </div>
       ) : null}
 
-      <div className="card wl-card">
+      <div className={`card wl-card${full ? ' full' : ' '}`.trim()}>
+        {isGrid ? (
+          <div className="wl-filters wl-toolbar">
+            <label className="wl-search short">
+              <SearchIcon />
+              <input type="search" placeholder="Search plug ID, PSD, program, billable party, remarks…" value={filt.q} onChange={setF('q')} />
+            </label>
+            <FiltersMenu count={[filt.units, filt.platform, filt.plug_type].filter(Boolean).length} onClear={() => { setFilt((f) => ({ ...f, units: '', platform: '', plug_type: '' })); setOffset(0); }}>
+              <FilterSelect label="Units" value={filt.units} onChange={setF('units')}><Options list={[...meta.units, meta.notSet]} blank="All" /></FilterSelect>
+              <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
+              <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
+            </FiltersMenu>
+            <DateRange from={filt.from} to={filt.to} onChange={setRange} />
+            <span className="grow" />
+            <div className="wl-presence"><PresenceAvatars path="/workload" /></div>
+            <div className="wl-iconbar">
+              {canWrite ? <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
+              {canWrite ? <button type="button" className="btn ibtn" id="add-row" aria-label="Add row" title="Add row" onClick={addRow}><PlusIcon /></button> : null}
+              <button type="button" className="btn ibtn" id="export-btn" aria-label="Export to Excel" title="Export to Excel" onClick={exportXlsx}><DownloadIcon /></button>
+              {canWrite && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? (
+                <button type="button" className="btn ibtn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}
+                  aria-label="Delete selected rows" title={`Delete ${selRows.filter((r) => !xlLocked(r)).length > 1 ? `${selRows.filter((r) => !xlLocked(r)).length} rows` : 'row'}`}><TrashIcon /></button>
+              ) : null}
+              {canWrite ? (
+                <button type="button" className="btn ibtn primary" id="save-grid" disabled={saving || !dirtyCount} onClick={saveGrid}
+                  aria-label="Save changes" title={saving ? 'Saving…' : `Save changes${dirtyCount ? ` (${dirtyCount})` : ''}`}>
+                  <SaveIcon />{dirtyCount ? <i className="ib-badge">{dirtyCount}</i> : null}
+                </button>
+              ) : null}
+              <button type="button" className="btn ibtn" id="full-btn" aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen' : 'Full screen'} onClick={toggleFull}>
+                {full ? <ExitFullscreenIcon /> : <FullscreenIcon />}
+              </button>
+              <ToolMenu items={[
+                canWrite && { id: 'import-btn', label: importing ? 'Importing…' : 'Import from Excel', icon: <UploadIcon />, disabled: importing, onClick: () => fileRef.current && fileRef.current.click() },
+                s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
+                s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
+                canWrite && selRows.length > 0 && { id: 'priority-btn', label: allPrio ? 'Remove Priority' : 'Set Priority', onClick: togglePriority, keep: true },
+              ]} />
+            </div>
+          </div>
+        ) : (
+          <>
         <div className={`wl-tabbar${isGrid ? ' acts-only' : ''}`}>
           {!isGrid ? (
             <div className="tabs" id="section-tabs">
@@ -1543,6 +1601,9 @@ export default function Workload() {
           <DateRange from={filt.from} to={filt.to} onChange={setRange} />
           <div className="wl-presence"><PresenceAvatars path="/workload" /></div>
         </div>
+
+          </>
+        )}
 
         {isGrid ? (
           <>

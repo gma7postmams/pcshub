@@ -1,6 +1,6 @@
 import { Children, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { fmtDate, isoDate } from '../lib/util.js';
-import { CalendarIcon, ChevronDownIcon, CopyIcon, KebabIcon, PencilIcon, TrashIcon } from './Icons.jsx';
+import { CalendarIcon, ChevronDownIcon, CopyIcon, FilterIcon, KebabIcon, MoreHIcon, PencilIcon, TrashIcon } from './Icons.jsx';
 
 // Presentational pieces for the Workload Tracker (pills, summary cards, filters, row menu, pager).
 // Colours come from the app's theme variables (see .c-* in app.css), so they follow every theme and light/dark mode.
@@ -212,6 +212,60 @@ export function useFitBox(dep) {
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
   }, [dep]);
+}
+
+/** Click-outside / Escape handling shared by the two toolbar popovers */
+function useDismiss(open, setOpen, ref) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const away = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
+  }, [open, setOpen, ref]);
+}
+
+/** "Filters" button: opens a small panel holding the filter dropdowns (children). `count` = how many filters are on; `onClear` resets them. */
+export function FiltersMenu({ count, onClear, children }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useDismiss(open, setOpen, ref);
+  return (
+    <div className="tpop" ref={ref}>
+      <button type="button" className={`btn${count ? ' on' : ''}`} id="filters-btn" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <FilterIcon /> Filters{count ? <span className="count-pill">{count}</span> : null}
+      </button>
+      {open ? (
+        <div className="tpop-panel tpop-filters" role="dialog" aria-label="Filters">
+          {children}
+          {count ? <button type="button" className="btn sm" onClick={onClear}>Clear filters</button> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** "…" button: the less-used toolbar actions. items = [{ label, icon, onClick, disabled, danger, keep }] (falsy entries are skipped) */
+export function ToolMenu({ items }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useDismiss(open, setOpen, ref);
+  const list = items.filter(Boolean);
+  if (!list.length) return null;
+  return (
+    <div className="tpop" ref={ref}>
+      <button type="button" className="btn ibtn" id="more-btn" aria-label="More actions" title="More" aria-haspopup="menu" aria-expanded={open} data-keep-sel onClick={() => setOpen((o) => !o)}><MoreHIcon /></button>
+      {open ? (
+        <div className="tpop-panel tpop-menu" role="menu">
+          {list.map((it) => (
+            <button key={it.label} type="button" role="menuitem" id={it.id} className={it.danger ? 'danger' : ''} disabled={it.disabled} data-keep-sel={it.keep ? '' : undefined}
+              onClick={() => { setOpen(false); it.onClick(); }}>{it.icon}{it.label}</button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function pageList(cur, pages) {

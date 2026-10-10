@@ -989,3 +989,29 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 th.xl-colhead { position: sticky; }
 .xl-sort { all: unset; cursor: pointer; margin-left: 4px; font-size: 9px; opacity: .4; }
 .xl-sort:hover, th.xl-colhead.sorted .xl-sort { opacity: .95; }
+
+/* Workload Tracker toolbar: one row — search, Filters button, date range … avatars and icon buttons at the right */
+.wl-toolbar { flex-wrap: nowrap; align-items: center; padding: 8px 12px; }
+.wl-toolbar .wl-search.short { flex: 1 1 200px; min-width: 150px; max-width: 420px; }
+.wl-toolbar .grow { flex: 1 1 0; min-width: 0; }
+.wl-toolbar .wl-presence { margin-left: 0; }
+.wl-iconbar { display: flex; align-items: center; gap: 6px; flex: none; }
+.btn.ibtn { position: relative; width: 38px; height: 38px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.btn.ibtn svg { width: 18px; height: 18px; }
+.ib-badge { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--red); color: #fff; font: 700 11px/18px var(--font); font-style: normal; text-align: center; }
+.count-pill { margin-left: 6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--accent-contrast, #fff); font: 700 11px/18px var(--font); text-align: center; }
+.btn.on { border-color: var(--accent); }
+.tpop { position: relative; flex: none; }
+.tpop > .btn:not(.ibtn) { height: 38px; display: inline-flex; align-items: center; gap: 6px; }
+.tpop > .btn svg { width: 16px; height: 16px; }
+.tpop-panel { position: absolute; top: calc(100% + 6px); z-index: 70; padding: 10px; background: var(--surface); border: 1px solid var(--border-2); border-radius: 10px; box-shadow: var(--shadow); }
+.tpop-filters { left: 0; width: 280px; display: grid; gap: 10px; }
+.tpop-filters .fsel { width: 100%; }
+.tpop-menu { right: 0; min-width: 190px; display: grid; gap: 2px; padding: 6px; }
+.tpop-menu button { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font: 550 13.5px var(--font); text-align: left; cursor: pointer; white-space: nowrap; }
+.tpop-menu button:hover:not(:disabled) { background: var(--surface-3); }
+.tpop-menu button:disabled { opacity: .5; cursor: default; }
+.tpop-menu button.danger { color: var(--red); }
+.tpop-menu svg { width: 16px; height: 16px; flex: none; }
+/* Full screen: the card covers the whole window */
+.wl-card.full { position: fixed; inset: 0; z-index: 400; margin: 0; border-radius: 0; border: 0; overflow: auto; }
