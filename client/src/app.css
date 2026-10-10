@@ -1017,6 +1017,7 @@ th.xl-colhead { position: sticky; }
 .wl-card.full { position: fixed; inset: 0; z-index: 400; margin: 0; border-radius: 0; border: 0; overflow: auto; }
 
 /* Table mode: a row-number column instead of tick boxes, like Excel mode — click a number to select the row, drag / Shift-click for a range */
-table.t.wl:not(.cards) th.rn, table.t.wl:not(.cards) td.rn { width: 44px; min-width: 44px; text-align: center; padding: 0 4px; color: var(--text-3); font-size: 11.5px; font-weight: 500; cursor: pointer; user-select: none; background: var(--surface-3); }
-table.t.wl:not(.cards) th.rn:hover, table.t.wl:not(.cards) td.rn:hover { background: var(--border-2); }
+table.t.wl:not(.cards) th.rn, table.t.wl:not(.cards) td.rn { width: 34px; min-width: 34px; max-width: 34px; text-align: center; padding: 0 2px; font-size: 11.5px; cursor: pointer; user-select: none; }
+table.t.wl:not(.cards) td.rn { background: var(--surface); color: var(--text-3); font-weight: 500; }
+table.t.wl:not(.cards) th.rn:hover, table.t.wl:not(.cards) td.rn:hover { background: var(--surface-3); }
 table.t.wl:not(.cards) td.rn.hl { background: var(--accent); color: var(--accent-contrast, #fff); font-weight: 700; }

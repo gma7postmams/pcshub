@@ -411,6 +411,7 @@ export default function Workload() {
   const [allMatching, setAllMatching] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false);
   const lastPick = useRef(null);
+  const tblCursor = useRef(null);   // Table mode keyboard: the row (index on this page) the arrow keys move from
   const keysRef = useRef(null);
   const pasteRef = useRef(null);
   const tblMouse = useRef({});         // latest mouse handlers for dragging across rows (assigned every render)
@@ -1352,6 +1353,22 @@ export default function Workload() {
     }
     if (key === 'escape') clearPicks();
     else if ((key === 'delete' || key === 'backspace') && pickedCount) { e.preventDefault(); deleteSelected(); }
+    else if (['arrowdown', 'arrowup', 'home', 'end'].includes(key) && picked.size && pageRows.length) {
+      // like the arrow keys in Excel mode: move the selection one row (Shift extends it from where it started); Home / End jump to the first / last row
+      e.preventDefault();
+      const anchor = Math.max(0, pageRows.findIndex((r) => r.id === lastPick.current));
+      const cur = tblCursor.current != null && picked.has((pageRows[tblCursor.current] || {}).id) ? tblCursor.current : anchor;
+      const to = key === 'home' ? 0 : key === 'end' ? pageRows.length - 1 : Math.max(0, Math.min(pageRows.length - 1, cur + (key === 'arrowdown' ? 1 : -1)));
+      tblCursor.current = to;
+      setAllMatching(false);
+      if (e.shiftKey) setPicked(new Set(rangeIds(anchor, to)));
+      else { setPicked(new Set(rangeIds(to, to))); lastPick.current = pageRows[to].id; }
+      requestAnimationFrame(() => { const tr = document.querySelector(`#tbl tr[data-id="${pageRows[to].id}"]`); if (tr && tr.scrollIntoView) tr.scrollIntoView({ block: 'nearest' }); });
+    } else if ((key === 'enter' || key === 'f2') && picked.size === 1) {
+      e.preventDefault();
+      const r = pageRows.find((x) => picked.has(x.id));
+      if (r) setForm({ rec: r });   // the same Edit form the row menu opens (a locked period is refused by the server)
+    }
   };
   pasteRef.current = (e) => {
     if (!tableKeysOk(e)) return;
