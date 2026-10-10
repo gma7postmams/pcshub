@@ -392,6 +392,7 @@ async function exportPalette(db_) {
 }
 
 // Script / Artwork-STB / Audio Guide dates are shown as MMDDYY (2026-10-10 -> 101026) in the web table and the Excel export; Import reads that back.
+const PRIORITY_FILL = 'FFF8B4B4';   // the light red on a prioritised row's Breakdate / Time cell in the export (and read back by Import)
 const mdy = (iso) => `${iso.slice(5, 7)}${iso.slice(8, 10)}${iso.slice(2, 4)}`;
 const fromMdy = (t) => {
   const m = /^\s*(\d{2})(\d{2})(\d{2})\s*$/.exec(t);
@@ -483,7 +484,7 @@ router.get('/export', asyncH(async (req, res) => {
         cell.border = { right: thinGrid, bottom: thinGrid };   // grid lines, matching the web table (an explicit bottom line keeps consecutive filled priority cells separated)
         // Prioritised row: light-red fill on its Breakdate / Time cell(s), like the highlight in the web table
         if (r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit')) {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8B4B4' } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PRIORITY_FILL } };
           cell.border = { right: thinGrid, bottom: { style: 'thin', color: { argb: 'FFD98080' } } };   // darker line so two prioritised rows in a row stay visibly separate
         }
 
@@ -849,7 +850,11 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
       let hasAny = false;
       let breakdateRaw = null;
       for (const [colNumber, key] of Object.entries(colKeyAt)) {
-        let val = row.getCell(Number(colNumber)).value;
+        const cellObj = row.getCell(Number(colNumber));
+        // A prioritised row is exported with the light-red fill on its Breakdate / Time cell (there is no Priority column): read that fill back, so a
+        // delete-everything-and-import round trip keeps the Priority flags (the Dashboard's Priority count and the red highlight).
+        if ((key === '__breakdate' || key === 'breakdate_vgfx' || key === 'breakdate_vedit') && cellObj.fill && cellObj.fill.fgColor && String(cellObj.fill.fgColor.argb || '').toUpperCase() === PRIORITY_FILL) { obj.is_priority = true; }
+        let val = cellObj.value;
         if (val == null || val === '') continue;
         hasAny = true;
         const f = fieldsExt[key];
