@@ -967,7 +967,7 @@ table.t.xl.plug-xl td[data-k="requested_by"] input:disabled { opacity: 1; color:
 .plug-bar .wl-search { flex: 1 1 160px; min-width: 160px; }
 
 /* Ingest Tracker: search, filters and buttons share one row */
-.wl-tabbar.one-row { flex-wrap: nowrap; align-items: center; }
+.wl-tabbar.one-row { flex-wrap: nowrap; align-items: center; padding-left: 12px; padding-right: 12px; }
 .wl-tabbar.one-row .wl-filters { flex: 1 1 auto; min-width: 0; padding: 8px 0; border: 0; }
 .wl-tabbar.one-row .wl-tabactions { flex: 0 0 auto; flex-wrap: nowrap; }
 @media (max-width: 1000px) { .wl-tabbar.one-row { flex-wrap: wrap; } }
@@ -1029,6 +1029,6 @@ table.t td[data-sel] { background: color-mix(in srgb, var(--accent) 16%, var(--s
 .plug-list { padding: 0; }
 .plug-list.full { position: fixed; inset: 0; z-index: 400; overflow: auto; background: var(--surface); }
 .plug-bar .wl-presence { margin-left: 0; }
-.plug-list .plug-bar { padding: 12px 16px; margin: 0; }
+.plug-list .plug-bar { padding: 8px 12px; margin: 0; border-bottom: 1px solid var(--border); }   /* the same bar height and side padding as the Workload and Ingest toolbars */
 .plug-list .pager { border-top: 1px solid var(--border); padding: 0 16px; }
 .plug-list .empty { padding-left: 16px; padding-right: 16px; }
