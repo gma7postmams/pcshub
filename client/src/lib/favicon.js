@@ -13,7 +13,13 @@ function iconLink() {
   if (!link.dataset.defaultHref) link.dataset.defaultHref = link.getAttribute('href') || '';
   return link;
 }
-const setIcon = (href) => { const link = iconLink(); link.type = 'image/png'; link.removeAttribute('sizes'); link.href = href; };
+// The icon in use is also remembered (CURRENT_KEY) so /theme-boot.js can put it on the page straight away on the next load or refresh —
+// otherwise the built-in icon shows (and some browsers keep it) until the branding has been fetched.
+const CURRENT_KEY = 'favicon:current';
+const setIcon = (href, isDefault) => {
+  const link = iconLink(); link.type = 'image/png'; link.removeAttribute('sizes'); link.href = href;
+  try { if (isDefault) localStorage.removeItem(CURRENT_KEY); else localStorage.setItem(CURRENT_KEY, href); } catch (e) { /* storage unavailable */ }
+};
 
 /** Remove a solid background connected to the image edges. Returns true if one was found and removed. */
 function removeBackground(img, w, h) {
@@ -80,7 +86,7 @@ function build(image) {
 /** Point the tab icon at the branding logo (url), or back at the built-in icon when there is none. */
 export function applyFavicon(url) {
   const link = iconLink();
-  if (!url) { setIcon(link.dataset.defaultHref || '/icons/icon-192.png'); return; }
+  if (!url) { setIcon(link.dataset.defaultHref || '/icons/icon-192.png', true); return; }
   try { const hit = localStorage.getItem(CACHE_KEY(url)); if (hit) { setIcon(hit); return; } } catch (e) { /* storage unavailable */ }
   const image = new Image();
   image.onload = () => {
@@ -89,6 +95,6 @@ export function applyFavicon(url) {
     setIcon(href || url);
     if (href) { try { localStorage.setItem(CACHE_KEY(url), href); } catch (e) { /* full: fine */ } }
   };
-  image.onerror = () => setIcon(link.dataset.defaultHref || '/icons/icon-192.png');
+  image.onerror = () => setIcon(link.dataset.defaultHref || '/icons/icon-192.png', true);
   image.src = url;
 }
