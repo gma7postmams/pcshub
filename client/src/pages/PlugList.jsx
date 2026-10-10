@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
-import { DownloadIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
-import { FilterSelect, Pager, RowMenu, SortTh, useFitBox, useNarrow } from '../components/wl.jsx';
+import { DownloadIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
+import { FilterSelect, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
 import { useSession } from '../context.jsx';
-import PlugGrid from '../components/PlugGrid.jsx';
+import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
 
 // PSD Daily Plug List — the PSD's daily plug list (imported from their workbook: NO / PLUG ID / PROG NAME/PROJ TITLE / PSD / Account By),
@@ -46,11 +46,53 @@ const rangeLabel = (period, r, anchor) => {
   return 'All days';
 };
 const stored = (k, fallback, allowed) => { try { const v = localStorage.getItem(`plugs:${k}`); return allowed.includes(v) ? v : fallback; } catch (e) { return fallback; } };
-// Table / Excel is kept across a refresh only while you stay signed in (the same rule as the Workload Tracker): it is stored with the sign-in's key,
-// removed at logout, and a different sign-in finds nothing and opens in Table mode.
-const MODE_KEY = 'plugs:mode';
-const readMode = (key) => { try { const v = JSON.parse(localStorage.getItem(MODE_KEY)); return key && v && v.k === key && v.m === 'excel' ? 'excel' : 'table'; } catch (e) { return 'table'; } };
-const saveMode = (key, m) => { if (!key) return; try { localStorage.setItem(MODE_KEY, JSON.stringify({ k: key, m })); } catch (e) { /* storage unavailable */ } };
+const EDIT_COLS = ['plug_date', 'plug_id', 'prog_name', 'psd', 'account_by'];   // the cells you can edit / copy / paste; REQUESTED BY and IN WORKLOAD are set by the server
+const MAXLEN = { plug_id: 200, prog_name: 300, psd: 200, account_by: 100 };
+const recOf = (r) => ({ plug_date: r.plug_date, plug_id: r.plug_id || '', prog_name: r.prog_name || '', psd: r.psd || '', account_by: r.account_by || '' });
+async function writeClipboard(text) {   // the async API where the page may use it (https / localhost), else a hidden textarea + the copy command
+  try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; } } catch (e) { /* fall through */ }
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+  document.body.appendChild(ta);
+  const prev = document.activeElement;
+  ta.focus(); ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+  document.body.removeChild(ta);
+  if (prev && prev.focus) prev.focus({ preventScroll: true });
+  return ok;
+}
+function CellMenu({ x, y, children, ...rest }) {
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.maxHeight = `${window.innerHeight - 16}px`;
+    el.style.overflowY = 'auto';
+    const r = el.getBoundingClientRect();
+    el.style.left = `${Math.max(8, Math.min(x, window.innerWidth - r.width - 8))}px`;
+    el.style.top = `${Math.max(8, Math.min(y, window.innerHeight - r.height - 8))}px`;
+  }, [x, y]);
+  return <div ref={ref} className="xl-menu" style={{ left: x, top: y }} {...rest}>{children}</div>;
+}
+// One cell being edited: Enter saves and moves down (Shift+Enter up), Tab / Shift+Tab move sideways, Esc cancels, clicking away saves.
+function PlugCellEditor({ k, initial, onSave, onCancel }) {
+  const [val, setVal] = useState(initial ?? '');
+  const ref = useRef(null);
+  const done = useRef(false);
+  useEffect(() => { const el = ref.current; if (el) { el.focus(); if (el.setSelectionRange && k !== 'plug_date') el.setSelectionRange(el.value.length, el.value.length); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const finish = (move) => { if (done.current) return; done.current = true; onSave(val, move); };
+  const key = (e) => {
+    if (e.key === 'Escape') { done.current = true; onCancel(); return; }
+    if (e.key === 'Enter') { e.preventDefault(); finish({ dr: e.shiftKey ? -1 : 1, dc: 0 }); }
+    else if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); finish({ dr: 0, dc: e.shiftKey ? -1 : 1 }); }
+  };
+  return (
+    <div className="cell-editor" onClick={(e) => e.stopPropagation()}>
+      <input ref={ref} type={k === 'plug_date' ? 'date' : 'text'} value={val} maxLength={MAXLEN[k]} onChange={(e) => setVal(e.target.value)} onKeyDown={key} onBlur={() => finish(null)} />
+    </div>
+  );
+}
 const remember = (k, v) => { try { localStorage.setItem(`plugs:${k}`, v); } catch (e) { /* storage unavailable */ } };
 
 export default function PlugList({ canWrite, canWorkload, onCopied }) {
@@ -75,15 +117,16 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(null);      // the plug being edited
   const [filling, setFilling] = useState(false);
-  const [mode, setModeState] = useState(() => (canWrite ? readMode(session.session_key) : 'table'));   // Table or Excel (Excel is for people who can edit)
-  const isGrid = mode === 'excel' && canWrite;
-  const [gridDirty, setGridDirty] = useState(0);        // unsaved rows in the Excel grid
-  const tbRef = useRef(null);                            // the grid's Add Row / Save / Delete actions
-  const [, setTbSig] = useState('');
-  const registerToolbar = useCallback((tb) => { tbRef.current = tb; setTbSig(tb ? `${tb.dirtyCount}|${tb.saving}|${tb.selCount}|${tb.wholeRows}` : ''); }, []);
-  const okToLeave = async () => gridDirty === 0
-    || !!(await confirm('Discard unsaved changes?', `${gridDirty} row${gridDirty === 1 ? '' : 's'} in the grid ${gridDirty === 1 ? 'has' : 'have'} unsaved changes. Leave without saving?`, { okText: 'Discard', danger: true }));
-  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setModeState(m); saveMode(session.session_key, m); setPicked(new Set()); };
+  const okToLeave = async () => true;   // Excel mode (and its unsaved-grid prompt) is gone: the list is the Table only
+  const [draft, setDraft] = useState(null);          // the empty row Add Row put at the top, not saved yet
+  const [cellEd, setCellEd] = useState(null);        // { id, k } while one cell is open for editing
+  const [ctx, setCtx] = useState(null);              // right-click menu position
+  const hist = useRef({ past: [], future: [] });
+  const internalClip = useRef(null);
+  const lastPick = useRef(null);
+  const drag = useRef(null);
+  const keysRef = useRef(null);
+  const pasteRef = useRef(null);
 
   const range = rangeOf(period, anchor, custom);
   const limit = size === 'all' ? ALL_CAP : Number(size);
@@ -179,20 +222,282 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   };
 
   const rows = data ? data.rows : [];
-  useFitBox(`${isGrid}|${narrow}|${rows.length}|${days === null}|${!!data}|${size}`);
+  const rowsRef = useRef(rows); rowsRef.current = rows;
+  const clearPicksRef = useRef(() => {}); clearPicksRef.current = () => { setPicked(new Set()); lastPick.current = null; };
+  useFitBox(`table|${narrow}|${rows.length}|${days === null}|${!!data}|${size}`);
   const chosen = rows.filter((r) => picked.has(r.id));
+  const pickedCount = chosen.length;
   const allOn = !!rows.length && rows.every((r) => picked.has(r.id));
-  const toggle = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const removeChosen = async () => {
-    if (!chosen.length) return;
-    if (!(await confirm('Delete plugs', `Remove the ${chosen.length} selected plug${chosen.length === 1 ? '' : 's'} from the list? Workload rows already made from them are not touched.`, { okText: 'Delete', danger: true }))) return;
+  const clearPicks = () => { setPicked(new Set()); lastPick.current = null; };
+  const reload = async () => { await loadDays(); loadRows(); };
+  const batch = async (list) => post('/api/plugs/batch', { rows: list });
+
+  // undo / redo of what the table does straight on the server
+  const pushH = (entry) => { const h = hist.current; h.past.push(entry); if (h.past.length > 50) h.past.shift(); h.future = []; };
+  const step = async (from, to, verb) => {
+    const e = hist.current[from].pop();
+    if (!e) { toast(`Nothing to ${verb}`); return; }
+    try { await e[verb](); hist.current[to].push(e); toast(`${verb === 'undo' ? 'Undone' : 'Redone'}: ${e.label}`); } catch (err) { hist.current[from].push(e); toast(err.message, 'err'); }
+    clearPicks();
+    reload();
+  };
+  const undo = () => step('past', 'future', 'undo');
+  const redo = () => step('future', 'past', 'redo');
+
+  // delete / cut
+  const deleteChosen = async (verb = 'Delete') => {
+    const list = chosen;
+    if (!list.length) return;
+    if (!(await confirm(`${verb} plugs`, `${verb === 'Cut' ? 'Cut and remove' : 'Remove'} the ${list.length} selected plug${list.length === 1 ? '' : 's'} from the list? Workload rows already made from them are not touched.`, { okText: verb, danger: true }))) return;
+    const recs = list.map(recOf);
+    let ids = list.map((r) => r.id);
     try {
-      const out = await post('/api/plugs/delete-selected', { ids: chosen.map((r) => r.id) });
-      toast(`${out.deleted} plug${out.deleted === 1 ? '' : 's'} deleted`); setPicked(new Set()); await loadDays(); loadRows();
+      const out = await post('/api/plugs/delete-selected', { ids });
+      pushH({
+        label: `${verb.toLowerCase()} ${list.length} plug${list.length === 1 ? '' : 's'}`,
+        undo: async () => { ids = (await batch(recs)).addedIds || []; },
+        redo: async () => { await post('/api/plugs/delete-selected', { ids }); },
+      });
+      toast(`${out.deleted} plug${out.deleted === 1 ? '' : 's'} deleted`);
+      clearPicks();
+      reload();
     } catch (e) { toast(e.message, 'err'); }
   };
+  const removeChosen = () => deleteChosen('Delete');
+
+  // copy / cut / paste (tab-separated, so it also goes to and from a real Excel sheet)
+  const copyChosen = async () => {
+    if (!chosen.length) return false;
+    const text = chosen.map((r) => EDIT_COLS.map((k) => tsvCell(String(r[k] ?? ''))).join('\t')).join('\n');
+    internalClip.current = text;
+    const ok = await writeClipboard(text);
+    toast(ok ? `Copied ${chosen.length} plug${chosen.length === 1 ? '' : 's'}` : 'Could not reach the clipboard', ok ? undefined : 'err');
+    return ok;
+  };
+  const cutChosen = async () => { if (await copyChosen()) await deleteChosen('Cut'); };
+  const defaultDate = () => (period === 'day' ? anchor : (rows[0] && rows[0].plug_date) || range.from || isoDate());
+  // 'replace' (rows selected): the pasted rows overwrite the selected rows (one selected: it and the rows below it); extra pasted rows are added
+  // 'above' / 'below': new plugs on the selected row's day; 'new' (nothing selected): new plugs
+  const pasteRows = async (text, how) => {
+    if (!canWrite) return;
+    const block = parseTsv(text).filter((cells) => cells.some((c) => String(c).trim() !== ''));
+    if (!block.length) return;
+    if (block.length > 500) toast('Only the first 500 rows are pasted at a time', 'err');
+    const sel = chosen;
+    const mode = how || (sel.length ? 'replace' : 'new');
+    const anchorRow = mode === 'above' ? sel[0] : mode === 'below' ? sel[sel.length - 1] : null;
+    let targets = [];
+    if (mode === 'replace') {
+      if (sel.length === 1) { const i = rows.findIndex((x) => x.id === sel[0].id); targets = rows.slice(i, i + block.length); } else targets = sel;
+    }
+    const cellsOf = (base, cells) => {
+      const o = { ...base };
+      cells.forEach((raw, ci) => {
+        const k = EDIT_COLS[ci];
+        if (!k) return;
+        o[k] = k === 'plug_date' ? normDate(raw) : String(raw).replace(/\s*\n\s*/g, ' ').trim();
+      });
+      return o;
+    };
+    const olds = [];
+    const list = block.slice(0, 500).map((cells, i) => {
+      if (mode === 'replace' && i < targets.length) {
+        olds.push({ id: targets[i].id, ...recOf(targets[i]) });
+        const o = { id: targets[i].id, ...cellsOf(recOf(targets[i]), cells) };
+        if (!o.plug_date) o.plug_date = targets[i].plug_date;
+        return o;
+      }
+      const o = cellsOf({ plug_date: '', plug_id: '', prog_name: '', psd: '', account_by: '' }, cells);
+      if (!o.plug_date) o.plug_date = (anchorRow && anchorRow.plug_date) || defaultDate();
+      return o;
+    });
+    const nRep = olds.length;
+    const nNew = list.length - nRep;
+    const what = [nRep ? `replace ${nRep} row${nRep === 1 ? '' : 's'}` : '', nNew ? `add ${nNew} new row${nNew === 1 ? '' : 's'}${mode === 'above' ? ' above' : mode === 'below' ? ' below' : ''}` : ''].filter(Boolean).join(' and ');
+    try {
+      let ids = (await batch(list)).addedIds || [];
+      pushH({
+        label: `paste (${what})`,
+        undo: async () => { if (ids.length) await post('/api/plugs/delete-selected', { ids }); if (olds.length) await batch(olds); },
+        redo: async () => { ids = (await batch(list)).addedIds || []; },
+      });
+      toast(`Pasted: ${what}`);
+      clearPicks();
+      reload();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const menuPaste = async (how) => {
+    setCtx(null);
+    let text = null;
+    try { if (navigator.clipboard && navigator.clipboard.readText && window.isSecureContext) text = await navigator.clipboard.readText(); } catch (err) { text = null; }
+    if (text == null || text === '') text = internalClip.current;   // plain-http addresses can't read the clipboard: use what was last copied here
+    if (text == null || text === '') { toast('Nothing to paste yet — copy some rows first, or press Ctrl+V', 'err'); return; }
+    pasteRows(text, how);
+  };
+
+  // click a cell to edit just that cell (Plug ID, date, program, PSD, account by)
+  const moveEdit = (r, k, dr, dc) => {
+    const list = [...(draft ? [draft] : []), ...rows];
+    let ri = list.findIndex((x) => x.id === r.id);
+    let ci = EDIT_COLS.indexOf(k);
+    if (ri < 0 || ci < 0) return;
+    if (dc) { ci += dc; if (ci >= EDIT_COLS.length) { ci = 0; ri += 1; } else if (ci < 0) { ci = EDIT_COLS.length - 1; ri -= 1; } } else ri += dr;
+    if (ri < 0 || ri >= list.length) return;
+    setCellEd({ id: list[ri].id, k: EDIT_COLS[ci] });
+  };
+  const saveCell = async (r, k, raw, move) => {
+    const value = k === 'plug_date' ? normDate(raw) : String(raw ?? '').replace(/\s*\n\s*/g, ' ').trim();
+    const close = () => setCellEd((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur));
+    if (r.id === 'draft') { setDraft((d) => (d ? { ...d, [k]: value } : d)); close(); if (move) moveEdit(r, k, move.dr, move.dc); return; }
+    if (value === String(r[k] ?? '')) { close(); if (move) moveEdit(r, k, move.dr, move.dc); return; }
+    if (k === 'plug_id' && !value) { toast('Plug ID is required', 'err'); close(); return; }
+    const before = recOf(r);
+    const after = { ...before, [k]: value };
+    try {
+      await put(`/api/plugs/${r.id}`, after);
+      pushH({ label: 'cell edit', undo: async () => { await put(`/api/plugs/${r.id}`, before); }, redo: async () => { await put(`/api/plugs/${r.id}`, after); } });
+      setData((d) => (d && d.rows ? { ...d, rows: d.rows.map((x) => (x.id === r.id ? { ...x, [k]: value } : x)) } : d));
+      close();
+      if (k === 'plug_date') reload();
+      if (move) moveEdit(r, k, move.dr, move.dc);
+    } catch (e) { toast(e.message, 'err'); close(); }
+  };
+  const addDraft = () => {
+    if (!canWrite) return;
+    if (draft) { setCellEd({ id: 'draft', k: 'plug_id' }); return; }
+    setDraft({ id: 'draft', plug_date: defaultDate(), plug_id: '', prog_name: '', psd: '', account_by: '' });
+    setCellEd({ id: 'draft', k: 'plug_id' });
+    requestAnimationFrame(() => { const box = document.querySelector('.plug-list .wl-fit'); if (box) box.scrollTop = 0; });
+  };
+  const saveDraft = async () => {
+    if (!draft) return;
+    if (!String(draft.plug_id).trim()) { toast('Plug ID is required', 'err'); return; }
+    const rec = recOf(draft);
+    try {
+      let ids = (await batch([rec])).addedIds || [];
+      pushH({ label: 'add row', undo: async () => { await post('/api/plugs/delete-selected', { ids }); }, redo: async () => { ids = (await batch([rec])).addedIds || []; } });
+      setDraft(null); setCellEd(null);
+      toast('Plug added');
+      reload();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+
+  // selecting rows with the row numbers (click, Shift+click a range, Ctrl+click to add, drag down)
+  const selectRange = (a, b) => setPicked(new Set(rows.slice(Math.min(a, b), Math.max(a, b) + 1).map((x) => x.id)));
+  const numDown = (e, r, idx) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (cellEd) setCellEd(null);
+    if (document.activeElement && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) document.activeElement.blur();
+    if (e.ctrlKey || e.metaKey) {
+      setPicked((cur) => { const n = new Set(cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; });
+      lastPick.current = r.id;
+      return;
+    }
+    if (e.shiftKey && lastPick.current != null) {
+      const from = rows.findIndex((x) => x.id === lastPick.current);
+      if (from >= 0) { selectRange(from, idx); return; }
+    }
+    setPicked(new Set([r.id]));
+    lastPick.current = r.id;
+    drag.current = { from: idx };
+  };
+  const rowMenu = (e, r) => {
+    if (e.target.closest && e.target.closest('.cell-editor, input, select, textarea')) return;
+    e.preventDefault();
+    if (cellEd) setCellEd(null);
+    if (!picked.has(r.id)) { setPicked(new Set([r.id])); lastPick.current = r.id; }
+    setCtx({ x: e.clientX, y: e.clientY });
+  };
+
+  // the same keyboard shortcuts the Workload Tracker's table has (not while typing in a box, with a dialog open, or while a cell is being edited)
+  const keysOk = (e) => {
+    if (!canWrite) return false;
+    const el = e.target;
+    if (el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return false;
+    return !(document.querySelector('.modal-backdrop') || adding || editing || needYear || summary || cellEd);
+  };
+  keysRef.current = (e) => {
+    if (e.defaultPrevented || e.altKey || !keysOk(e)) return;
+    const key = e.key.toLowerCase();
+    if (e.ctrlKey || e.metaKey) {
+      if (key === 'a') { e.preventDefault(); setPicked(new Set(rows.map((r) => r.id))); }
+      else if (key === 'c') { if (picked.size && !(window.getSelection && String(window.getSelection()))) { e.preventDefault(); copyChosen(); } }
+      else if (key === 'x') { if (picked.size) { e.preventDefault(); cutChosen(); } }
+      else if (key === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+      else if (key === 'y') { e.preventDefault(); redo(); }
+      return;   // Ctrl+V arrives as a paste event
+    }
+    if (key === 'escape') clearPicks();
+    else if ((key === 'delete' || key === 'backspace') && pickedCount) { e.preventDefault(); deleteChosen(); }
+    else if (['arrowdown', 'arrowup', 'home', 'end'].includes(key) && picked.size && rows.length) {
+      e.preventDefault();
+      const anchorIdx = Math.max(0, rows.findIndex((r) => r.id === lastPick.current));
+      const sel = rows.map((r, i) => (picked.has(r.id) ? i : -1)).filter((i) => i >= 0);
+      const cur = sel.length ? (sel[sel.length - 1] === anchorIdx ? sel[0] : sel[sel.length - 1]) : anchorIdx;
+      const to = key === 'home' ? 0 : key === 'end' ? rows.length - 1 : Math.max(0, Math.min(rows.length - 1, cur + (key === 'arrowdown' ? 1 : -1)));
+      if (e.shiftKey) selectRange(anchorIdx, to); else { setPicked(new Set([rows[to].id])); lastPick.current = rows[to].id; }
+      requestAnimationFrame(() => { const tr = document.querySelector(`.plug-list tr[data-id="${rows[to].id}"]`); if (tr && tr.scrollIntoView) tr.scrollIntoView({ block: 'nearest' }); });
+    } else if ((key === 'enter' || key === 'f2') && picked.size === 1) {
+      e.preventDefault();
+      const r = rows.find((x) => picked.has(x.id));
+      if (r) setEditing(r);   // the Edit plug form
+    }
+  };
+  pasteRef.current = (e) => {
+    if (!keysOk(e)) return;
+    const text = e.clipboardData && e.clipboardData.getData('text/plain');
+    if (!text || !text.trim()) return;
+    e.preventDefault();
+    pasteRows(text);
+  };
+  useEffect(() => {
+    const key = (e) => { if (keysRef.current) keysRef.current(e); };
+    const paste = (e) => { if (pasteRef.current) pasteRef.current(e); };
+    const move = (e) => {
+      const d = drag.current;
+      if (!d) return;
+      if (!(e.buttons & 1)) { drag.current = null; return; }
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const tr = el && el.closest ? el.closest('.plug-list tr[data-id]') : null;
+      if (!tr) return;
+      const idx = tr.parentElement ? [...tr.parentElement.querySelectorAll('tr[data-id]')].indexOf(tr) : -1;
+      if (idx >= 0 && rowsRef.current[idx]) setPicked(new Set(rowsRef.current.slice(Math.min(d.from, idx), Math.max(d.from, idx) + 1).map((x) => x.id)));
+    };
+    const up = () => { drag.current = null; };
+    const down = (e) => {   // a click outside the table (and its bar, menus and dialogs) drops the selection
+      const t = e.target;
+      if (t && t.closest && !t.closest('.plug-list .table-wrap, .xl-menu, .modal-backdrop, .tpop, #delete-selected-btn')) clearPicksRef.current();
+    };
+    window.addEventListener('keydown', key); window.addEventListener('paste', paste); window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up); window.addEventListener('mousedown', down);
+    return () => { window.removeEventListener('keydown', key); window.removeEventListener('paste', paste); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); window.removeEventListener('mousedown', down); };
+  }, []);
+  useEffect(() => { if (!ctx) return undefined; const close = (e) => { if (e.type === 'mousedown' && e.target.closest && e.target.closest('.xl-menu')) return; setCtx(null); }; window.addEventListener('mousedown', close); window.addEventListener('scroll', close, true); window.addEventListener('keydown', close); return () => { window.removeEventListener('mousedown', close); window.removeEventListener('scroll', close, true); window.removeEventListener('keydown', close); }; }, [ctx]);
   const total = data ? data.total : 0;
   const viewLabel = `${rangeLabel(period, range, anchor)}${query ? ` · “${query}”` : ''}`;
+
+  // the cells of one row; a click edits just that cell (read-only people see plain text)
+  const editCell = (r, k, content, extra = {}) => {
+    const td = { 'data-k': k, ...extra };
+    if (canWrite && cellEd && cellEd.id === r.id && cellEd.k === k) {
+      return <td key={k} {...td} className={`editing ${extra.className || ''}`.trim()} onClick={(e) => e.stopPropagation()}><PlugCellEditor k={k} initial={r[k]} onSave={(v, move) => saveCell(r, k, v, move)} onCancel={() => setCellEd(null)} /></td>;
+    }
+    if (!canWrite) return <td key={k} {...td}>{content}</td>;
+    return <td key={k} {...td} className={`editable ${extra.className || ''}`.trim()} title="Click to edit" tabIndex={0}
+      onClick={(e) => { e.stopPropagation(); setCellEd({ id: r.id, k }); }}
+      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); setCellEd({ id: r.id, k }); } }}>{content}</td>;
+  };
+  const dataCells = (r) => [
+    editCell(r, 'plug_date', r.plug_date ? dateLabel(r.plug_date) : '', { 'data-label': 'Date', className: 'nowrap' }),
+    editCell(r, 'plug_id', <>{r.plug_id}{r.is_additional ? <span className="chip c-orange plug-add" title="Listed under “Additional for …”">Added</span> : null}</>, { 'data-label': 'Plug ID', className: 'mono' }),
+    editCell(r, 'prog_name', r.prog_name, { 'data-label': 'PROG. NAME / PROJ. TITLE' }),
+    editCell(r, 'psd', r.psd, { 'data-label': 'PSD' }),
+    editCell(r, 'account_by', r.account_by, { 'data-label': 'Account By' }),
+    <td key="requested_by" data-label="Requested By">{r.requested_by}</td>,
+    <td key="in_workload" data-label="In Workload" className="plug-inwl">{r.id === 'draft' ? null : r.in_workload ? <span className="chip c-green">In workload</span> : <span className="dim">—</span>}</td>,
+  ];
 
   return (
     <div className="plug-list">
@@ -211,88 +516,89 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
             <label className="plug-from">To <input type="date" value={custom.to} min={custom.from || undefined} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} /></label>
           </div>
         ) : null}
-        {!isGrid ? (
-          <label className="wl-search">
-            <SearchIcon />
-            <input type="search" placeholder="Search plugs…" title="Search plug ID, program, PSD" value={q} onChange={(e) => setQ(e.target.value)} />
-          </label>
-        ) : null}
+        <label className="wl-search">
+          <SearchIcon />
+          <input type="search" placeholder="Search plugs…" title="Search plug ID, program, PSD" value={q} onChange={(e) => setQ(e.target.value)} />
+        </label>
         <span className="grow" />
-        {canWrite ? (
-          <div className="segmented" id="mode-seg">
-            <button type="button" className={mode === 'table' ? 'on' : ''} onClick={() => changeMode('table')}>Table</button>
-            <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
-          </div>
-        ) : null}
         {!canWrite ? <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button> : null}
         {canWrite ? (
           <>
             <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files[0])} />
             <button type="button" className="btn" disabled={importing} onClick={() => fileRef.current.click()}><UploadIcon /> {importing ? 'Importing…' : 'Import Plug List'}</button>
-            {isGrid ? (
-              <>
-                <button type="button" className="btn" id="add-row" onClick={() => tbRef.current && tbRef.current.addRow()}><PlusIcon /> Add Row</button>
-                {tbRef.current && tbRef.current.selCount && tbRef.current.wholeRows ? <button type="button" className="btn danger" data-keep-sel onClick={() => tbRef.current.deleteRows()}>Delete {tbRef.current.selCount > 1 ? `${tbRef.current.selCount} Rows` : 'Row'}</button> : null}
-              </>
-            ) : <button type="button" className="btn" onClick={() => setAdding(true)}><PlusIcon /> Add Plug</button>}
+            <button type="button" className="btn" onClick={() => setAdding(true)}><PlusIcon /> Add Plug</button>
             <button type="button" className="btn" onClick={exportXlsx} disabled={!total}><DownloadIcon /> Export</button>
-            {canWorkload ? <button type="button" className="btn" disabled={filling} onClick={fillExisting}
-              title="Rows already in the Workload Tracker that have a Plug ID but a blank PSD or PROG. NAME / PROJ. TITLE get them from this list (anything typed is kept)">{filling ? 'Filling…' : 'Fill Blank Rows'}</button> : null}
-            {canWrite && !isGrid && chosen.length ? (
-              <button type="button" className="btn danger" id="delete-selected-btn" onClick={removeChosen} title="Delete the plugs ticked in the table">
-                Delete Selected ({chosen.length})
+            {pickedCount ? (
+              <button type="button" className="btn danger" id="delete-selected-btn" onClick={removeChosen} title="Delete the selected plugs">
+                <TrashIcon /> Delete Selected ({pickedCount})
               </button>
             ) : null}
-            {isGrid ? (
-              <button type="button" className="btn primary" id="save-grid" disabled={!tbRef.current || tbRef.current.saving || !gridDirty} onClick={() => tbRef.current && tbRef.current.save()}>
-                {tbRef.current && tbRef.current.saving ? 'Saving…' : `Save changes${gridDirty ? ` (${gridDirty})` : ''}`}
-              </button>
-            ) : null}
+            <ToolMenu items={[
+              { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
+              canWorkload && { id: 'fill-blank-btn', label: filling ? 'Filling…' : 'Fill Blank Rows', disabled: filling, onClick: fillExisting },
+            ]} />
           </>
         ) : null}
       </div>
 
       {data === null || days === null ? <Empty>Loading…</Empty>
-        : !totals.plugs && !isGrid ? (
+        : !totals.plugs ? (
           <Empty>
             No PSD Daily Plug List yet.{canWrite ? ' Use “Import Plug List” and pick the PSD’s daily plug list workbook (one sheet per day).' : ' Ask someone who can edit the Workload Tracker to import it.'}
           </Empty>
         ) : (
           <>
-            {isGrid && data ? (
-              <PlugGrid source={data} canWrite={canWrite} me={(session.user && (session.user.full_name || session.user.username)) || ''} defaultDate={period === 'day' ? anchor : ''} limit={limit} onDirty={setGridDirty} registerToolbar={registerToolbar}
-                onSaved={async () => { await loadDays(); loadRows(); }} />
-            ) : (
-            <div className={`table-wrap${narrow ? '' : ' wl-fit'}`}>
+            <div className={`table-wrap${narrow ? '' : ' wl-fit'}`} onClickCapture={(e) => { if (canWrite && picked.size && !(e.target.closest && e.target.closest('.rn, .chk, .plug-actions'))) clearPicks(); }}>
               <table className={`t wl plug-t${narrow ? ' cards' : ''}`}>
                 <thead>
                   <tr>
-                    {canWrite ? <th className="chk"><input type="checkbox" checked={allOn} disabled={!rows.length} onChange={() => setPicked(allOn ? new Set() : new Set(rows.map((r) => r.id)))} title="Select every plug on this page" /></th> : null}
+                    {canWrite && !narrow ? <th className="rn" title={allOn ? 'Click to unselect all' : 'Select every plug on this page (Ctrl+A)'} onClick={() => (allOn ? clearPicks() : setPicked(new Set(rows.map((r) => r.id))))} /> : null}
+                    {canWrite && narrow ? <th className="chk"><input type="checkbox" checked={allOn} disabled={!rows.length} onChange={() => setPicked(allOn ? new Set() : new Set(rows.map((r) => r.id)))} title="Select every plug on this page" /></th> : null}
                     <SortTh k="plug_date" sort={sort} onSort={setSort}>DATE</SortTh><SortTh k="plug_id" sort={sort} onSort={setSort}>PLUG ID</SortTh><SortTh k="prog_name" sort={sort} onSort={setSort}>PROG. NAME / PROJ. TITLE</SortTh><SortTh k="psd" sort={sort} onSort={setSort}>PSD</SortTh><SortTh k="account_by" sort={sort} onSort={setSort}>ACCOUNT BY</SortTh><SortTh k="requested_by" sort={sort} onSort={setSort}>REQUESTED BY</SortTh><SortTh k="in_workload" sort={sort} onSort={setSort} className="plug-inwl">IN WORKLOAD</SortTh>{canWrite ? <th className="plug-actions" /> : null}
                   </tr>
                 </thead>
                 <tbody>
+                  {draft ? (
+                    <tr key="draft" className="draft-row" data-draft="1">
+                      {!narrow ? <td className="rn" title="New row — not saved yet">＋</td> : <td className="chk" />}
+                      {dataCells(draft)}
+                      
+                      <td className="plug-actions nowrap" onClick={(e) => e.stopPropagation()}>
+                        <button type="button" className="btn primary" style={{ padding: '4px 10px' }} id="draft-save" onClick={saveDraft}>Save</button>{' '}
+                        <button type="button" className="btn" style={{ padding: '4px 10px' }} id="draft-discard" onClick={() => { setDraft(null); setCellEd(null); }}>Discard</button>
+                      </td>
+                    </tr>
+                  ) : null}
                   {rows.length ? rows.map((r, i) => (
-                    <tr key={r.id} className={r.in_workload ? 'done' : ''}>
-                      {canWrite ? <td className="chk"><input type="checkbox" checked={picked.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${r.plug_id}`} /></td> : null}
-                      <td data-label="Date" className="nowrap">{dateLabel(r.plug_date)}</td>
-                      <td data-k="plug_id" data-label="Plug ID" className="mono">{r.plug_id}{r.is_additional ? <span className="chip c-orange plug-add" title="Listed under “Additional for …”">Added</span> : null}</td>
-                      <td data-label="PROG. NAME / PROJ. TITLE">{r.prog_name}</td>
-                      <td data-label="PSD">{r.psd}</td>
-                      <td data-label="Account By">{r.account_by}</td>
-                      <td data-label="Requested By">{r.requested_by}</td>
-                      <td data-label="In Workload" className="plug-inwl">{r.in_workload ? <span className="chip c-green">In workload</span> : <span className="dim">—</span>}</td>
+                    <tr key={r.id} data-id={r.id} className={`${r.in_workload ? 'done' : ''}${picked.has(r.id) ? ' picked' : ''}`.trim()}
+                      onContextMenu={canWrite ? (e) => rowMenu(e, r) : undefined}>
+                      {canWrite && !narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} title="Click to select the row (Shift-click a range, Ctrl-click to add; Ctrl+C copies, Ctrl+V pastes)">{offset + i + 1}</td> : null}
+                      {canWrite && narrow ? <td className="chk"><input type="checkbox" checked={picked.has(r.id)} onChange={() => { setPicked((cur) => { const n = new Set(cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; }); lastPick.current = r.id; }} aria-label={`Select ${r.plug_id}`} /></td> : null}
+                      {dataCells(r)}
                       {canWrite ? (
                         <td className="plug-actions" onClick={(e) => e.stopPropagation()}>
                           <RowMenu onEdit={() => setEditing(r)} onDelete={() => removePlug(r)} />
                         </td>
                       ) : null}
                     </tr>
-                  )) : <tr><td colSpan={canWrite ? 9 : 7} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr>}
+                  )) : !draft ? <tr><td colSpan={canWrite ? 9 : 7} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr> : null}
                 </tbody>
               </table>
             </div>
-            )}
+            {ctx ? (
+              <CellMenu x={ctx.x} y={ctx.y} onContextMenu={(e) => e.preventDefault()}>
+                <button type="button" disabled={!hist.current.past.length} onClick={() => { setCtx(null); undo(); }}>Undo<span>Ctrl+Z</span></button>
+                <button type="button" disabled={!hist.current.future.length} onClick={() => { setCtx(null); redo(); }}>Redo<span>Ctrl+Y</span></button>
+                <hr />
+                <button type="button" disabled={!picked.size} onClick={() => { setCtx(null); cutChosen(); }}>Cut<span>Ctrl+X</span></button>
+                <button type="button" disabled={!picked.size} onClick={() => { setCtx(null); copyChosen(); }}>Copy<span>Ctrl+C</span></button>
+                <button type="button" onClick={() => menuPaste()}>{picked.size ? 'Paste (replace row)' : 'Paste'}<span>Ctrl+V</span></button>
+                <button type="button" disabled={!picked.size} onClick={() => menuPaste('above')}>Paste as new row above</button>
+                <button type="button" disabled={!picked.size} onClick={() => menuPaste('below')}>Paste as new row below</button>
+                <hr />
+                <button type="button" disabled={!pickedCount} onClick={() => { setCtx(null); deleteChosen(); }}>Delete {pickedCount > 1 ? `${pickedCount} rows` : 'row'}<span>Del</span></button>
+              </CellMenu>
+            ) : null}
             {(() => {
               const rowsSel = (
                 <label className="rows-sel"><span>Rows</span>

@@ -385,7 +385,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     });
     const filled = await backfillWorkload(db, { from: out.days[0], to: out.days[out.days.length - 1], userId: req.user.id });
     const copied = out.addedIds.length ? await autoCopy(req, 'p.id = ANY($1::bigint[])', [out.addedIds]) : null;
-    res.json({ ok: true, added: out.added, updated: out.updated, workloadRowsFilled: filled, copied });
+    res.json({ ok: true, added: out.added, updated: out.updated, addedIds: out.addedIds, workloadRowsFilled: filled, copied });
   }));
 
   router.put('/:id(\\d+)', requireAction('plugs.write'), asyncH(async (req, res) => {

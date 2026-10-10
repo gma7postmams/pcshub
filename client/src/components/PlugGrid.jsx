@@ -26,7 +26,7 @@ export function normDate(text) {
 }
 
 // Tab-separated text in / out, with Excel's quoting for cells that contain tabs, line breaks or quotes
-function parseTsv(text) {
+export function parseTsv(text) {
   const s = String(text ?? '').replace(/\r\n?/g, '\n');
   const out = [];
   let row = [];
@@ -42,7 +42,7 @@ function parseTsv(text) {
   if (cell !== '' || row.length) { row.push(cell); out.push(row); }
   return out;
 }
-const tsvCell = (x) => (/[\t\n"]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x);
+export const tsvCell = (x) => (/[\t\n"]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x);
 
 const fromServer = (r) => ({ _key: `s${r.id}`, id: r.id, plug_date: r.plug_date, plug_id: r.plug_id || '', prog_name: r.prog_name || '', psd: r.psd || '', account_by: r.account_by || '', requested_by: r.requested_by || '' });
 const isEmptyRow = (r) => COLS.every((k) => k === 'plug_date' || READONLY.has(k) || !String(r[k] ?? '').trim());
