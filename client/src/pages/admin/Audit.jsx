@@ -562,7 +562,7 @@ function formatDetails(row) {
 
 // Where "Open" takes you for a record type. Only pages that exist; others show no link.
 const RECORD_LINK = {
-  user: '/admin#users', group: '/admin#access', role: '/admin#access', dropdown_option: '/admin#dropdowns', backup: '/admin#backup',
+  user: '/admin#access/users', group: '/admin#access/groups', role: '/admin#access/roles', dropdown_option: '/admin#dropdowns', backup: '/admin#backup',
   ingest_record: '/ingest', approval_request: '/ingest', workload_item: '/workload', workload_plug: '/plug-list', knowledge_document: '/knowledge', knowledge_docs: '/knowledge',
 };
 const CATEGORIES = [['', 'Everything'], ['auth', 'Sign-ins'], ['ingest', 'Ingest'], ['approval', 'Approvals'], ['workload', 'Workload'], ['knowledge', 'Knowledge Base'], ['admin', 'Admin changes'], ['profile', 'Profile']];

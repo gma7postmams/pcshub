@@ -1,19 +1,19 @@
-import { useState } from 'react';
+import Users from './Users.jsx';
 import Roles from './Roles.jsx';
 import Groups from './Groups.jsx';
 
-// Roles (what a user can do) and Groups (which pages they can open) are two halves of one decision, so they live together.
-const PARTS = [['roles', 'Roles', Roles, 'What people can do'], ['groups', 'Groups', Groups, 'Which pages they can open']];
+// Who (Users), what they can do (Roles) and which pages they can open (Groups) are one decision, so they live together.
+const PARTS = [['users', 'Users', Users], ['roles', 'Roles', Roles], ['groups', 'Groups', Groups]];
 
-export default function Access({ model, refreshModel, start = 'roles' }) {
-  const [part, setPart] = useState(start);
-  const Part = (PARTS.find(([k]) => k === part) || PARTS[0])[2];
+export default function Access({ model, refreshModel, sub, onSub, go }) {
+  const part = PARTS.some(([k]) => k === sub) ? sub : 'users';
+  const Part = PARTS.find(([k]) => k === part)[2];
   return (
     <>
       <div className="tabs sub-tabs" role="tablist">
-        {PARTS.map(([k, l, , hint]) => <button key={k} type="button" role="tab" aria-selected={part === k} className={part === k ? 'on' : ''} onClick={() => setPart(k)}>{l}</button>)}
+        {PARTS.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={part === k} className={part === k ? 'on' : ''} onClick={() => onSub(k)}>{l}</button>)}
       </div>
-      <Part model={model} refreshModel={refreshModel} />
+      <Part model={model} refreshModel={refreshModel} go={go} />
     </>
   );
 }

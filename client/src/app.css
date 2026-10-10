@@ -1110,3 +1110,9 @@ button.tag { padding: 1px 9px; cursor: pointer; }
   .admin-card .wl-tabbar { padding: 0 6px; }
   .admin-pane .card-head { justify-content: flex-start; flex-wrap: wrap; }
 }
+
+/* Users: search, filters, bulk action, Apply, Delete and Add user all on one line */
+.users-bar { flex-wrap: wrap; }
+.users-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.users-actions select { width: auto; min-width: 170px; }
+@media (max-width: 720px) { .users-actions { margin-left: 0; width: 100%; } .users-actions select { flex: 1 1 140px; } }

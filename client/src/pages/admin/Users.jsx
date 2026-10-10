@@ -79,9 +79,15 @@ export default function Users({ model }) {
 
   return (
     <div className="card">
-      <div className="card-head">
-        <h2 className="sr-only">Users</h2>
-        <div className="row">
+      <div className="filters users-bar">
+      <h2 className="sr-only">Users</h2>
+        <input type="search" placeholder="Search name, username, email, role or group…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search users" />
+        <select aria-label="Filter by role" value={fRole} onChange={(e) => setFRole(e.target.value)}><option value="">All roles</option><Options list={model.roles} /></select>
+        <select aria-label="Filter by group" value={fGroup} onChange={(e) => setFGroup(e.target.value)}><option value="">All groups</option><option value="none">Not enrolled</option>{groups.map((g) => <option key={g.id} value={String(g.id)}>{g.name}</option>)}</select>
+        <select aria-label="Filter by status" value={fStatus} onChange={(e) => setFStatus(e.target.value)}><option value="">Any status</option><option value="active">Active</option><option value="disabled">Disabled</option><option value="locked">Locked</option><option value="never">Never signed in</option></select>
+        <select aria-label="Filter by 2FA" value={f2fa} onChange={(e) => setF2fa(e.target.value)}><option value="">Any 2FA</option><option value="on">2FA on</option><option value="off">2FA off</option></select>
+        {filtered ? <button type="button" className="btn sm ghost" onClick={clearFilters}>Clear</button> : null}
+        <span className="users-actions">
           {picked.size ? (
             <>
               <select className="sm" aria-label="Bulk action" value={bulk.action} onChange={(e) => setBulk({ action: e.target.value, value: '' })}>
@@ -95,15 +101,7 @@ export default function Users({ model }) {
             </>
           ) : null}
           <button type="button" className="btn primary sm" id="add" onClick={() => setEditing({})}><PlusIcon /> Add user</button>
-        </div>
-      </div>
-      <div className="filters">
-        <input type="search" placeholder="Search name, username, email, role or group…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search users" />
-        <select aria-label="Filter by role" value={fRole} onChange={(e) => setFRole(e.target.value)}><option value="">All roles</option><Options list={model.roles} /></select>
-        <select aria-label="Filter by group" value={fGroup} onChange={(e) => setFGroup(e.target.value)}><option value="">All groups</option><option value="none">Not enrolled</option>{groups.map((g) => <option key={g.id} value={String(g.id)}>{g.name}</option>)}</select>
-        <select aria-label="Filter by status" value={fStatus} onChange={(e) => setFStatus(e.target.value)}><option value="">Any status</option><option value="active">Active</option><option value="disabled">Disabled</option><option value="locked">Locked</option><option value="never">Never signed in</option></select>
-        <select aria-label="Filter by 2FA" value={f2fa} onChange={(e) => setF2fa(e.target.value)}><option value="">Any 2FA</option><option value="on">2FA on</option><option value="off">2FA off</option></select>
-        {filtered ? <button type="button" className="btn sm ghost" onClick={clearFilters}>Clear</button> : null}
+        </span>
       </div>
       <div className="table-wrap">
         <table className="t wl">
