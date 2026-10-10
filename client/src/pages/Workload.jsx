@@ -1219,29 +1219,59 @@ export default function Workload() {
     return ok;
   };
   const cutPicked = async () => { if (await copyPicked()) await deleteSelected('Cut'); };
-  // Paste rows (copied from here, Excel mode or a spreadsheet) as NEW Workload rows
-  const pasteRows = async (text) => {
+  // Paste rows (copied from here, Excel mode or a spreadsheet).
+  //  'replace' (rows selected): the pasted rows overwrite the selected rows (one row selected: it and the rows below it, as in Excel); extra pasted rows are added as new
+  //  'above' / 'below': new rows that take the date and units of the selected row;  'new' (nothing selected): new rows
+  const pasteRows = async (text, how) => {
     if (!canWrite) return;
     const block = parseTsvBlock(text).filter((cells) => cells.some((c) => String(c).trim() !== ''));
     if (!block.length) return;
     if (block.length > 200) toast('Only the first 200 rows are pasted at a time', 'err');
-    const rows = block.slice(0, 200).map((cells) => {
-      let row = {};
+    const sel = pageRows.filter((r) => (allMatching || picked.has(r.id)) && !rowLocked(r));
+    const mode = how || (sel.length ? 'replace' : 'new');
+    const anchor = mode === 'above' ? sel[0] : mode === 'below' ? sel[sel.length - 1] : null;
+    let targets = [];
+    if (mode === 'replace') {
+      if (sel.length === 1) {
+        const i = pageRows.findIndex((x) => x.id === sel[0].id);
+        targets = pageRows.slice(i, i + block.length).filter((r) => !rowLocked(r));
+      } else targets = sel;
+    }
+    const cellsOf = (base, cells) => {
+      let row = base;
       cells.forEach((raw, ci) => { if (tableCols[ci]) row = setCellValue(row, tableCols[ci], raw, true); });
-      if (!row.work_date) row.work_date = filt.from || isoDate();
-      if (!row.units_concerned && tab !== 'ALL') row.units_concerned = meta.tabDefaultUnits[tab];
       return row;
+    };
+    const fill = (row) => {
+      if (!row.work_date) row.work_date = (anchor && anchor.work_date) || filt.from || isoDate();
+      if (!row.units_concerned) { if (anchor && anchor.units_concerned) row.units_concerned = anchor.units_concerned; else if (tab !== 'ALL') row.units_concerned = meta.tabDefaultUnits[tab]; }
+      return row;
+    };
+    const cut = block.slice(0, 200);
+    const olds = [];
+    const rows = cut.map((cells, i) => {
+      if (mode === 'replace' && i < targets.length) {
+        olds.push({ id: targets[i].id, ...toPayload(targets[i]) });
+        return { id: targets[i].id, ...cellsOf(toPayload(targets[i]), cells) };
+      }
+      return fill(cellsOf({}, cells));
     });
-    const what = `${rows.length} row${rows.length === 1 ? '' : 's'}`;
-    if (!(await confirm(`Paste ${what}`, `Add ${what} from the clipboard to the Workload Tracker as new items?`, { okText: 'Paste' }))) return;
+    const nRep = olds.length;
+    const nNew = rows.length - nRep;
+    const what = [nRep ? `replace ${nRep} row${nRep === 1 ? '' : 's'}` : '', nNew ? `add ${nNew} new row${nNew === 1 ? '' : 's'}${mode === 'above' ? ' above' : mode === 'below' ? ' below' : ''}` : ''].filter(Boolean).join(' and ');
+    if (!(await confirm('Paste rows', `${what.charAt(0).toUpperCase()}${what.slice(1)} from the clipboard?`, { okText: 'Paste' }))) return;
     try {
       let ids = (await post('/api/workload/batch', { rows })).createdIds || [];
       pushTbl({
-        label: `paste ${what}`,
-        undo: async () => { await post('/api/workload/bulk-delete', { ids }); },
+        label: `paste (${what})`,
+        undo: async () => {
+          if (ids.length) await post('/api/workload/bulk-delete', { ids });
+          if (olds.length) await post('/api/workload/batch', { rows: olds });
+        },
         redo: async () => { ids = (await post('/api/workload/batch', { rows })).createdIds || []; },
       });
-      toast(`${what} pasted`);
+      toast(`Pasted: ${what}`);
+      clearPicks();
       load();
       loadStats();
     } catch (e) { toast(e.message, 'err'); }
@@ -1255,13 +1285,13 @@ export default function Workload() {
     if (!rowLocked(r) && !(allMatching || picked.has(r.id))) { setAllMatching(false); setPicked(new Set([r.id])); lastPick.current = r.id; }
     setTctx({ x: e.clientX, y: e.clientY });
   };
-  const menuPasteRows = async () => {
+  const menuPasteRows = async (how) => {
     setTctx(null);
     let text = null;
     try { if (navigator.clipboard && navigator.clipboard.readText && window.isSecureContext) text = await navigator.clipboard.readText(); } catch (err) { text = null; }
     if (text == null || text === '') text = internalClip.current;   // plain-http addresses can't read the clipboard: use what was last copied here
     if (text == null || text === '') { toast('Nothing to paste yet — copy some rows first, or press Ctrl+V', 'err'); return; }
-    pasteRows(text);
+    pasteRows(text, how);
   };
 
   // mouse: press on a row and drag over others to select them; Shift+click extends, Ctrl/Cmd+click adds or removes one row
@@ -1802,7 +1832,9 @@ export default function Workload() {
                 <hr />
                 <button type="button" disabled={!picked.size || allMatching} onClick={() => { setTctx(null); cutPicked(); }}>Cut<span>Ctrl+X</span></button>
                 <button type="button" disabled={!picked.size} onClick={() => { setTctx(null); copyPicked(); }}>Copy<span>Ctrl+C</span></button>
-                <button type="button" onClick={menuPasteRows}>Paste<span>Ctrl+V</span></button>
+                <button type="button" onClick={() => menuPasteRows()}>{picked.size ? 'Paste (replace row)' : 'Paste'}<span>Ctrl+V</span></button>
+                <button type="button" disabled={!picked.size} onClick={() => menuPasteRows('above')}>Paste as new row above</button>
+                <button type="button" disabled={!picked.size} onClick={() => menuPasteRows('below')}>Paste as new row below</button>
                 <hr />
                 <button type="button" disabled={!pickedCount} onClick={() => { setTctx(null); deleteSelected(); }}>Delete {pickedCount > 1 ? `${pickedCount} rows` : 'row'}<span>Del</span></button>
               </FitMenu>
