@@ -13,10 +13,11 @@ const FIELDS = {
   maxSessionHours: { key: 'sec_max_hours', def: env(process.env.SESSION_MAX_HOURS, 168), min: 1, max: 720 },
 };
 const ADMIN_2FA_KEY = 'sec_admin_2fa';
+const EMAIL_2FA_KEY = 'sec_email_2fa';
 
 let cur = null;
 const defaults = () => ({
-  ...Object.fromEntries(Object.entries(FIELDS).map(([k, f]) => [k, f.def])), requireAdmin2fa: false,
+  ...Object.fromEntries(Object.entries(FIELDS).map(([k, f]) => [k, f.def])), requireAdmin2fa: false, allowEmail2fa: false,
 });
 
 function normalise(raw) {
@@ -26,12 +27,13 @@ function normalise(raw) {
     if (Number.isFinite(n) && n >= f.min && n <= f.max) out[k] = n;
   }
   out.requireAdmin2fa = raw[ADMIN_2FA_KEY] === '1';
+  out.allowEmail2fa = raw[EMAIL_2FA_KEY] === '1';
   if (out.maxSessionHours < out.idleSignOutHours) out.maxSessionHours = out.idleSignOutHours;
   return out;
 }
 
 async function load() {
-  const keys = [...Object.values(FIELDS).map((f) => f.key), ADMIN_2FA_KEY];
+  const keys = [...Object.values(FIELDS).map((f) => f.key), ADMIN_2FA_KEY, EMAIL_2FA_KEY];
   const { rows } = await db.query('SELECT key, value FROM app_settings WHERE key = ANY($1)', [keys]);
   cur = normalise(Object.fromEntries(rows.map((r) => [r.key, r.value])));
   return cur;
@@ -41,7 +43,7 @@ async function load() {
 const get = () => cur || defaults();
 
 async function save(next, client = db) {
-  const rows = [...Object.entries(FIELDS).map(([k, f]) => [f.key, String(next[k])]), [ADMIN_2FA_KEY, next.requireAdmin2fa ? '1' : '0']];
+  const rows = [...Object.entries(FIELDS).map(([k, f]) => [f.key, String(next[k])]), [ADMIN_2FA_KEY, next.requireAdmin2fa ? '1' : '0'], [EMAIL_2FA_KEY, next.allowEmail2fa ? '1' : '0']];
   for (const [key, value] of rows) {
     await client.query(
       `INSERT INTO app_settings (key, value, updated_at) VALUES ($1,$2,now())
@@ -49,7 +51,7 @@ async function save(next, client = db) {
     );
   }
 }
-const apply = (next) => { cur = normalise({ ...Object.fromEntries(Object.entries(FIELDS).map(([k, f]) => [f.key, next[k]])), [ADMIN_2FA_KEY]: next.requireAdmin2fa ? '1' : '0' }); return cur; };
+const apply = (next) => { cur = normalise({ ...Object.fromEntries(Object.entries(FIELDS).map(([k, f]) => [f.key, next[k]])), [ADMIN_2FA_KEY]: next.requireAdmin2fa ? '1' : '0', [EMAIL_2FA_KEY]: next.allowEmail2fa ? '1' : '0' }); return cur; };
 
 const idleMs = () => get().idleSignOutHours * 3600 * 1000;
 const maxMs = () => Math.max(get().maxSessionHours, get().idleSignOutHours) * 3600 * 1000;

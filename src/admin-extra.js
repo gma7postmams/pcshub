@@ -86,6 +86,7 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
         ...settings.get(), passwordRules: 'Letters and numbers, not a common password, no username or name inside it',
         loginRateLimit: parseInt(process.env.LOGIN_RATE_LIMIT, 10) || 20,
       },
+      email: { configured: require('./mailer').configured(), from: process.env.SMTP_FROM || null },
       limits: Object.fromEntries(Object.entries(settings.FIELDS).map(([k, f]) => [k, { min: f.min, max: f.max, def: f.def }])),
       users: users.rows[0], failedLogins7d: failed.rows[0].n, openSessions: sessions.rows[0].n, events: events.rows,
     });
@@ -103,6 +104,8 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
       next[k] = n;
     }
     next.requireAdmin2fa = b.requireAdmin2fa === true;
+    next.allowEmail2fa = b.allowEmail2fa === true;
+    if (next.allowEmail2fa && !require('./mailer').configured()) throw new HttpError(400, 'Email is not set up on the server (SMTP settings in .env), so email codes cannot be switched on');
     // Turning it on while you have no 2FA yourself would lock you out of this very page.
     if (next.requireAdmin2fa && !prev.requireAdmin2fa && !req.user.totp_enabled) {
       throw new HttpError(400, 'Set up 2FA on your own account first (Profile), then turn this on');
@@ -114,6 +117,19 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
     });
     settings.apply(next);
     res.json({ ok: true, policy: settings.get() });
+  }));
+
+  // Send a test message to the signed-in Admin's own address, to prove the server's email settings work.
+  router.post('/security/test-email', asyncH(async (req, res) => {
+    const mailer = require('./mailer');
+    if (!mailer.configured()) throw new HttpError(400, 'Email is not set up on the server (SMTP settings in .env)');
+    if (!req.user.email) throw new HttpError(400, 'Your account has no email address (Admin > Access > Users)');
+    try { await mailer.send({ to: req.user.email, subject: 'Test email', text: 'Email sending works. This was sent from Admin > Security.' }); } catch (e) {
+      await audit(req, 'admin.test_email', 'app_settings', null, { outcome: 'failed', error: String(e.message).slice(0, 200) });
+      throw new HttpError(502, `Could not send: ${String(e.message).slice(0, 200)}`);
+    }
+    await audit(req, 'admin.test_email', 'app_settings', null, { outcome: 'sent' });
+    res.json({ ok: true, to: mailer.mask(req.user.email) });
   }));
 
   // Everyone except the person pressing the button must choose a new password at their next sign-in.

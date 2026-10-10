@@ -6,6 +6,7 @@
 const bcrypt = require('bcrypt');
 const db = require('./db');
 const totp = require('./totp');
+const emailCode = require('./email-code');
 const { HttpError } = require('./middleware');
 const { audit } = require('./audit');
 
@@ -51,13 +52,13 @@ const credsOf = (c) => (c && typeof c === 'object' && !Array.isArray(c) ? c : {}
 async function verify(req, log, creds) {
   const c = credsOf(creds);
   const password = typeof c.password === 'string' && c.password.length <= 200 ? c.password : '';
-  const { rows } = await db.query('SELECT password_hash, totp_enabled, totp_secret FROM users WHERE id=$1', [req.user.id]);
+  const { rows } = await db.query('SELECT password_hash, totp_enabled, totp_secret, twofa_method FROM users WHERE id=$1', [req.user.id]);
   const u = rows[0];
   const twofa = Boolean(u && u.totp_enabled);
-  if (!password) throw new HttpError(403, 'Confirm your password to continue', { reauth: true, twofa });   // nothing was guessed: just ask
+  if (!password) throw new HttpError(403, 'Confirm your password to continue', { reauth: true, twofa, method: u && u.twofa_method });   // nothing was guessed: just ask
   attempt(req.user.id);
   let ok = Boolean(u) && await bcrypt.compare(password, u.password_hash);
-  if (ok && twofa) ok = await totp.verifyAndConsume(db, req.user.id, u.totp_secret, c.code);
+  if (ok && twofa) ok = u.twofa_method === 'email' ? emailCode.check(req.session, req.user.id, 'reauth', c.code) : await totp.verifyAndConsume(db, req.user.id, u.totp_secret, c.code);
   if (!ok) {
     if (log) await audit(req, log.action, log.entity, log.id, log.details || { outcome: 'denied', reason: 'reauth_failed' });
     throw new HttpError(403, twofa ? 'Password or authentication code is incorrect' : 'Password is incorrect', { reauth: true, twofa });

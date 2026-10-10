@@ -6,6 +6,8 @@ const db = require('../db');
 const v = require('../validate');
 const { asyncH, HttpError } = require('../middleware');
 const { can } = require('../permissions');
+const emailCode = require('../email-code');
+const mailer = require('../mailer');
 const { audit } = require('../audit');
 const totp = require('../totp');
 const { MODES } = require('../themes');
@@ -20,6 +22,9 @@ router.put('/', asyncH(async (req, res) => {
   if (email && !validator.isEmail(email)) throw new HttpError(400, 'Invalid email');
   const { rows } = await db.query('SELECT full_name, email FROM users WHERE id=$1', [req.user.id]);
   const current = rows[0];
+  if (req.user.totp_enabled && req.user.twofa_method === 'email' && (current.email || '') !== (email || '')) {
+    throw new HttpError(400, 'Your email address receives your sign-in codes, so only an Admin can change it');
+  }
   await db.query('UPDATE users SET full_name=$2, email=$3, updated_at=now() WHERE id=$1', [req.user.id, full_name, email]);
 
   const details = {};
@@ -68,12 +73,43 @@ router.put('/appearance', asyncH(async (req, res) => {
 router.post('/2fa/setup', asyncH(async (req, res) => {
   if (!twofaRequired(req.user)) throw new HttpError(403, '2FA is turned on for an account by an Admin');
   if (req.user.totp_enabled) throw new HttpError(400, '2FA is already enabled');
+  if (req.user.twofa_method === 'email') throw new HttpError(400, 'Your account uses email codes. Use "Email me a code".');
   const { rows } = await db.query(`SELECT value FROM app_settings WHERE key='app_name'`);
   const issuer = (rows[0] && rows[0].value) || 'Promotional Content Hub';
   const secret = totp.generateSecret();
   req.session.totpSetup = totp.encrypt(secret); // sessions are stored in Postgres — keep it encrypted there too
   const qr = await QRCode.toDataURL(totp.keyUri(req.user.username, issuer, secret), { margin: 1, width: 220 });
   res.json({ secret, qr });
+}));
+
+// Email method: send a setup code to the account's address, then confirm it (with the password) to switch it on.
+const emailReady = (req) => {
+  if (!twofaRequired(req.user)) throw new HttpError(403, '2FA is turned on for an account by an Admin');
+  if (req.user.twofa_method !== 'email') throw new HttpError(400, 'Your account uses an authenticator app');
+  if (req.user.totp_enabled) throw new HttpError(400, '2FA is already enabled');
+  if (!require('../security-settings').get().allowEmail2fa || !mailer.configured()) throw new HttpError(400, 'Email codes are not available. Ask an Admin.');
+};
+router.post('/2fa/email/send', asyncH(async (req, res) => {
+  emailReady(req);
+  await emailCode.issue(req.session, req.user, 'enroll');
+  res.json({ ok: true, sentTo: mailer.mask(req.user.email) });
+}));
+router.post('/2fa/email/enable', asyncH(async (req, res) => {
+  emailReady(req);
+  const password = typeof req.body.password === 'string' ? req.body.password : '';
+  if (!password) throw new HttpError(400, 'Enter your password to turn on 2FA');
+  stepUp.attempt(req.user.id);
+  const { rows } = await db.query('SELECT password_hash FROM users WHERE id=$1', [req.user.id]);
+  if (password.length > 200 || !(await bcrypt.compare(password, rows[0].password_hash))) {
+    await audit(req, 'auth.reauth_failed', 'user', req.user.id, { for: 'profile.2fa_enable' });
+    throw new HttpError(400, 'Password is incorrect');
+  }
+  stepUp.succeed(req.user.id);
+  if (!emailCode.check(req.session, req.user.id, 'enroll', req.body.code)) throw new HttpError(400, 'That code is wrong or has expired');
+  await db.query('UPDATE users SET totp_secret=NULL, totp_enabled=TRUE, totp_last_step=NULL, updated_at=now() WHERE id=$1', [req.user.id]);
+  await db.query(`DELETE FROM user_sessions WHERE sid <> $1 AND (sess->>'userId')::int = $2`, [req.sessionID, req.user.id]);
+  await audit(req, 'profile.2fa_enable', 'user', req.user.id, { method: 'email' });
+  res.json({ ok: true });
 }));
 
 router.post('/2fa/enable', asyncH(async (req, res) => {

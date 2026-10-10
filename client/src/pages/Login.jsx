@@ -11,6 +11,7 @@ export default function Login() {
   const [token, setToken] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [mail, setMail] = useState(null);   // set when the code was emailed: the masked address
   const otpForm = useRef(null);
 
   useEffect(() => { document.title = `Sign in · ${branding.app_name}`; }, [branding.app_name]);
@@ -23,7 +24,7 @@ export default function Login() {
     setErr(''); setBusy(true);
     try {
       const r = await post('/api/auth/login', { username, password });
-      if (r.twofa) { setStep('otp'); setToken(''); } else go(r);
+      if (r.twofa) { setStep('otp'); setToken(''); setMail(r.method === 'email' ? r.sentTo : null); } else go(r);
     } catch (ex) { setErr(ex.message); } finally { setBusy(false); }
   };
 
@@ -35,6 +36,14 @@ export default function Login() {
     } catch (ex) {
       setErr(ex.message);
       if (ex.status === 401 && /expired|again/i.test(ex.message)) setStep('password');
+    } finally { setBusy(false); }
+  };
+
+  const resend = async () => {
+    setErr(''); setBusy(true);
+    try { const r = await post('/api/auth/2fa/resend', {}); setMail(r.sentTo); setToken(''); setErr(''); } catch (ex) {
+      setErr(ex.message);
+      if (ex.status === 401) setStep('password');
     } finally { setBusy(false); }
   };
 
@@ -63,12 +72,13 @@ export default function Login() {
           </form>
         ) : (
           <form id="otp-form" ref={otpForm} className="stack" onSubmit={submitOtp} autoComplete="off">
-            <p className="muted m-0">Enter the 6-digit code from your authenticator app.</p>
+            <p className="muted m-0">{mail ? `We emailed a 6-digit code to ${mail}. It works for 10 minutes.` : 'Enter the 6-digit code from your authenticator app.'}</p>
             <input
               name="token" className="otp-input" inputMode="numeric" maxLength={6} autoComplete="one-time-code" required autoFocus
               value={token} onChange={(e) => setToken(e.target.value.replace(/\D/g, '').slice(0, 6))}
             />
             <button className="btn primary" type="submit" disabled={busy}>Verify</button>
+            {mail ? <button className="btn ghost" type="button" id="resend" disabled={busy} onClick={resend}>Send the code again</button> : null}
             <button className="btn ghost" type="button" onClick={() => { setStep('password'); setErr(''); }}>Back</button>
           </form>
         )}

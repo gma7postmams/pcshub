@@ -7,6 +7,8 @@ const { asyncH, HttpError, requireAuth, clearSessionCookie } = require('../middl
 const { audit } = require('../audit');
 const { allowedPages, allowedActions, allowedSections, landingPath } = require('../permissions');
 const totp = require('../totp');
+const emailCode = require('../email-code');
+const mailer = require('../mailer');
 const { twofaRequired } = require('../config');
 
 const router = express.Router();
@@ -86,8 +88,17 @@ router.post('/login', loginLimiter, asyncH(async (req, res) => {
   if (user.totp_enabled) {
     await regenerate(req);
     req.session.pending2fa = { userId: user.id, at: Date.now(), tries: 0 };
+    if (user.twofa_method === 'email') {
+      try { await emailCode.issue(req.session, user, 'login'); } catch (e) {
+        await audit(req, 'auth.2fa_email_failed', 'user', user.id, { username: user.username, error: e.message });
+        delete req.session.pending2fa; await save(req);
+        throw e;
+      }
+      await save(req);
+      return res.json({ twofa: true, method: 'email', sentTo: mailer.mask(user.email) });
+    }
     await save(req);
-    return res.json({ twofa: true });
+    return res.json({ twofa: true, method: 'app' });
   }
 
   await completeLogin(req, user);
@@ -105,7 +116,9 @@ router.post('/2fa', loginLimiter, asyncH(async (req, res) => {
   if (!user || !user.is_active || !user.totp_enabled) throw new HttpError(401, 'Please sign in again.');
 
   // Valid AND not previously used (replay-protected)
-  const valid = await totp.verifyAndConsume(db, user.id, user.totp_secret, req.body.token);
+  const valid = user.twofa_method === 'email'
+    ? emailCode.check(req.session, user.id, 'login', req.body.token)
+    : await totp.verifyAndConsume(db, user.id, user.totp_secret, req.body.token);
   if (!valid) {
     p.tries += 1;
     if (p.tries >= 5) {
@@ -118,6 +131,26 @@ router.post('/2fa', loginLimiter, asyncH(async (req, res) => {
   }
   await completeLogin(req, user);
   res.json({ ok: true, mustChangePassword: user.must_change_password });
+}));
+
+// Send the sign-in code again (email method only). Needs the first step of this sign-in to be done.
+router.post('/2fa/resend', loginLimiter, asyncH(async (req, res) => {
+  const p = req.session.pending2fa;
+  if (!p || Date.now() - p.at > 5 * 60 * 1000) throw new HttpError(401, '2FA session expired. Please sign in again.');
+  const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [p.userId]);
+  const user = rows[0];
+  if (!user || !user.is_active || user.twofa_method !== 'email') throw new HttpError(400, 'Not available');
+  await emailCode.issue(req.session, user, 'login');
+  p.at = Date.now();
+  await save(req);
+  res.json({ ok: true, sentTo: mailer.mask(user.email) });
+}));
+
+// "Confirm it's you" prompts for email-method accounts: mail the code, then it is sent back with the password.
+router.post('/reauth-code', requireAuth, asyncH(async (req, res) => {
+  if (!req.user.totp_enabled || req.user.twofa_method !== 'email') throw new HttpError(400, 'Not available');
+  await emailCode.issue(req.session, req.user, 'reauth');
+  res.json({ ok: true, sentTo: mailer.mask(req.user.email) });
 }));
 
 router.post('/logout', asyncH(async (req, res) => {
@@ -134,7 +167,7 @@ router.get('/me', requireAuth, (req, res) => {
   res.json({
     user: {
       id: u.id, username: u.username, full_name: u.full_name, email: u.email,
-      role: u.role, group: u.group_name || null, totp_enabled: u.totp_enabled, must_change_password: u.must_change_password,
+      role: u.role, group: u.group_name || null, totp_enabled: u.totp_enabled, twofa_method: u.twofa_method, email_2fa_available: require('../security-settings').get().allowEmail2fa && mailer.configured(), must_change_password: u.must_change_password,
       totp_required: twofaRequired(u),
       appearance: u.appearance || 'system',
     },

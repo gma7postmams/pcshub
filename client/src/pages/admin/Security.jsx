@@ -30,7 +30,7 @@ export default function Security({ go }) {
           <div className="dim mt-12">To sign someone out of every device, open the person in Users and choose <strong>Sign out everywhere</strong>; to do it for several people, tick them and use the bulk action. Disabling an account also signs it out.</div>
         </div>
       </div>
-      <Rules policy={p} limits={d.limits} onSaved={load} />
+      <Rules policy={p} limits={d.limits} email={d.email} onSaved={load} />
       <div className="card">
         <div className="card-head"><h2>Recent security events</h2><button type="button" className="btn sm" onClick={load}>Refresh</button></div>
         <div className="table-wrap">
@@ -55,13 +55,13 @@ const NUM = [
 ];
 
 // The rules an Admin can change here. Range-checked on the server; every change is written to the Audit Log.
-function Rules({ policy, limits, onSaved }) {
+function Rules({ policy, limits, email, onSaved }) {
   const toast = useToast();
   const confirm = useConfirm();
   const [f, setF] = useState(policy);
   const [busy, setBusy] = useState(false);
   useEffect(() => setF(policy), [policy]);
-  const dirty = Object.keys(limits).some((k) => Number(f[k]) !== policy[k]) || f.requireAdmin2fa !== policy.requireAdmin2fa;
+  const dirty = Object.keys(limits).some((k) => Number(f[k]) !== policy[k]) || f.requireAdmin2fa !== policy.requireAdmin2fa || Boolean(f.allowEmail2fa) !== Boolean(policy.allowEmail2fa);
   const bad = Object.entries(limits).find(([k, l]) => !(Number(f[k]) >= l.min && Number(f[k]) <= l.max));
   const save = async () => {
     const weaker = f.minPasswordLength < policy.minPasswordLength || f.lockAfterFailures > policy.lockAfterFailures
@@ -70,10 +70,13 @@ function Rules({ policy, limits, onSaved }) {
     setBusy(true);
     try {
       await put('/api/admin/security/settings', {
-        ...Object.fromEntries(Object.keys(limits).map((k) => [k, Number(f[k])])), requireAdmin2fa: Boolean(f.requireAdmin2fa),
+        ...Object.fromEntries(Object.keys(limits).map((k) => [k, Number(f[k])])), requireAdmin2fa: Boolean(f.requireAdmin2fa), allowEmail2fa: Boolean(f.allowEmail2fa),
       });
       toast('Security rules saved'); onSaved();
     } catch (e) { toast(e.message, 'err'); } finally { setBusy(false); }
+  };
+  const testMail = async () => {
+    try { const r = await post('/api/admin/security/test-email', {}); toast(`Test email sent to ${r.to}`); } catch (e) { toast(e.message, 'err'); }
   };
   const force = async () => {
     if (!(await confirm('Everyone changes their password', 'Every other active user must choose a new password at their next sign-in. Use this after tightening the password rules, or after a suspected leak.', { okText: 'Require change', danger: true }))) return;
@@ -92,6 +95,11 @@ function Rules({ policy, limits, onSaved }) {
         </div>
         <label className="check mt-12"><input type="checkbox" checked={Boolean(f.requireAdmin2fa)} onChange={(e) => setF({ ...f, requireAdmin2fa: e.target.checked })} />
           {' '}Require 2FA for every Admin <span className="dim">— Admins without it must set it up at their next use</span></label>
+        <label className="check mt-12"><input type="checkbox" checked={Boolean(f.allowEmail2fa)} disabled={!email.configured && !f.allowEmail2fa} onChange={(e) => setF({ ...f, allowEmail2fa: e.target.checked })} />
+          {' '}Allow email codes for 2FA <span className="dim">— for accounts shared by a group, where an authenticator app is not practical. Pick the method per user in Access → Users.</span></label>
+        <div className="kv-row mt-12"><span className="kv-label">Email sending</span><span className="kv-value">
+          {email.configured ? <>Set up on the server{email.from ? ` (from ${email.from})` : ''}. <button type="button" className="linklike" onClick={testMail}>Send a test to my address</button></> : 'Not set up. Add the SMTP_ lines to the server\u2019s .env (see .env.example) and restart.'}
+        </span></div>
         <div className="kv-row mt-12"><span className="kv-label">Also always</span><span className="kv-value">{policy.passwordRules}. {policy.loginRateLimit} sign-in attempts per 15 minutes from one address (set in the server&apos;s .env).</span></div>
         <div className="row mt-12"><button type="button" className="btn sm danger" onClick={force}>Make everyone change their password</button><span className="dim">at their next sign-in</span></div>
       </div>

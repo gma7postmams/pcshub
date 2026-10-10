@@ -121,7 +121,7 @@ export default function Users({ model }) {
                   {locked(u) ? <> <span className="pill s-rejected">Locked</span></> : null}
                   {u.must_change_password ? <> <span className="pill s-pending">Must change pw</span></> : null}
                 </td>
-                <td>{u.totp_enabled ? <span className="yes">On</span> : u.twofa_required ? <span className="dim">Awaiting setup</span> : <span className="no">OFF</span>}</td>
+                <td>{u.totp_enabled ? <span className="yes">On{u.twofa_method === 'email' ? ' (email)' : ''}</span> : u.twofa_required ? <span className="dim">Awaiting setup</span> : <span className="no">OFF</span>}</td>
                 <td className="dim nowrap">{u.last_login_at ? fmtDateTime(u.last_login_at) : 'Never'}{u.sessions ? <div className="dim">{u.sessions} signed in</div> : null}</td>
                 <td className="right"><button type="button" className="btn sm" data-edit={u.id} onClick={() => setEditing(u)}>Manage</button></td>
               </tr>
@@ -147,6 +147,8 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
     role: u ? u.role : 'Viewer', group_id: u && u.group_id ? String(u.group_id) : '', is_active: u ? u.is_active : true,
   });
   const [temp, setTemp] = useState(null);
+  const [method, setMethod] = useState(u && u.twofa_method === 'email' ? 'email' : 'app');
+  const emailOk = s.user.email_2fa_available;
 
   const g = groups.find((x) => String(x.id) === f.group_id);
   const hint = f.role === 'Admin' ? 'Admin role opens every page regardless of group.'
@@ -202,13 +204,22 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
                 const r = await action('reset-password', null, ['Reset password', `Give ${u.full_name} a new temporary password? Their current password stops working now, every device is signed out, and they must choose a new password at their next sign-in. The new password is shown once.`, { okText: 'Reset' }]);
                 if (r) setTemp(r.temporary_password);
               }}>Reset password</button>
+              <select aria-label="2FA method" id="tfa-method" value={method} onChange={(e) => setMethod(e.target.value)}>
+                <option value="app">2FA by authenticator app</option>
+                <option value="email" disabled={!emailOk && method !== 'email'}>2FA by emailed code{emailOk ? '' : ' (not enabled)'}</option>
+              </select>
+              {u.twofa_required && method !== (u.twofa_method || 'app')
+                ? <button type="button" className="btn sm" id="tfa-switch"
+                  onClick={() => action('2fa', '2FA method changed', ['Change 2FA method', `Switch ${u.full_name} to ${method === 'email' ? 'emailed codes' : 'an authenticator app'}? They must set it up again at their next use.`, { okText: 'Change' }],
+                    { enabled: true, method })}>Change method</button>
+                : null}
               {u.twofa_required
                 ? <button type="button" className="btn sm" id="tfa-off"
                   onClick={() => action('2fa', '2FA disabled', ['Disable 2FA', `Turn 2FA off for ${u.full_name}? Their authenticator is removed.`, { okText: 'Disable 2FA', danger: true }],
                     { enabled: false })}>Disable 2FA</button>
                 : <button type="button" className="btn sm" id="tfa-on"
                   onClick={() => action('2fa', '2FA enabled', ['Enable 2FA', `Turn 2FA on for ${u.full_name}? They must set up an authenticator at their next use.`, { okText: 'Enable 2FA' }],
-                    { enabled: true })}>Enable 2FA</button>}
+                    { enabled: true, method })}>Enable 2FA</button>}
               <button type="button" className="btn sm" id="r2fa" disabled={!u.totp_enabled}
                 onClick={() => action('reset-2fa', '2FA reset', ['Reset 2FA', `Remove 2FA from ${u.full_name}? They can set it up again from Profile.`, { okText: 'Reset 2FA', danger: true }])}>Reset 2FA</button>
               <button type="button" className="btn sm" id="signout" disabled={!u.sessions} title={u.sessions ? undefined : 'Not signed in anywhere'}

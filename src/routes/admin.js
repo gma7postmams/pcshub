@@ -192,7 +192,7 @@ router.delete('/groups/:id', asyncH(async (req, res) => {
 router.get('/users', asyncH(async (req, res) => {
   const { rows } = await db.query(
     `SELECT u.id, u.username, u.full_name, u.email, u.role, u.group_id, g.name AS group_name, u.is_active,
-            u.totp_enabled, u.twofa_required, u.must_change_password, u.last_login_at, u.locked_until, u.created_at, u.failed_attempts,
+            u.totp_enabled, u.twofa_required, u.twofa_method, u.must_change_password, u.last_login_at, u.locked_until, u.created_at, u.failed_attempts,
             (SELECT count(*)::int FROM user_sessions s WHERE (s.sess->>'userId')::int = u.id AND s.expire > now()) AS sessions
        FROM users u LEFT JOIN groups g ON g.id = u.group_id
       ORDER BY u.is_active DESC, u.full_name`
@@ -329,14 +329,22 @@ router.post('/users/:id/2fa', asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   if (typeof req.body.enabled !== 'boolean') throw new HttpError(400, 'enabled must be true or false');
   const enabled = req.body.enabled;
-  if (!(await db.query('SELECT 1 FROM users WHERE id=$1', [id])).rowCount) throw new HttpError(404, 'User not found');
+  const cur = (await db.query('SELECT email, twofa_method FROM users WHERE id=$1', [id])).rows[0];
+  if (!cur) throw new HttpError(404, 'User not found');
+  const method = req.body.method === undefined ? cur.twofa_method : v.oneOf(req.body.method, ['app', 'email'], { field: 'Method' });
+  if (enabled && method === 'email') {
+    if (!require('../security-settings').get().allowEmail2fa || !require('../mailer').configured()) throw new HttpError(400, 'Email codes are not switched on (Admin > Security) or email is not set up on the server');
+    if (!cur.email) throw new HttpError(400, 'Add an email address to this account first');
+  }
+  // Changing the method of an account that already enrolled makes it enrol again with the new one.
+  const reenrol = enabled && method !== cur.twofa_method;
   const r = await db.query(
     enabled
-      ? 'UPDATE users SET twofa_required=TRUE, updated_at=now() WHERE id=$1 RETURNING username'
+      ? `UPDATE users SET twofa_required=TRUE, twofa_method=$2${reenrol ? ', totp_secret=NULL, totp_enabled=FALSE, totp_last_step=NULL' : ''}, updated_at=now() WHERE id=$1 RETURNING username`
       : 'UPDATE users SET twofa_required=FALSE, totp_secret=NULL, totp_enabled=FALSE, totp_last_step=NULL, updated_at=now() WHERE id=$1 RETURNING username',
-    [id]
+    enabled ? [id, method] : [id]
   );
-  await audit(req, enabled ? 'admin.user_2fa_enable' : 'admin.user_2fa_disable', 'user', id, { username: r.rows[0].username });
+  await audit(req, enabled ? 'admin.user_2fa_enable' : 'admin.user_2fa_disable', 'user', id, { username: r.rows[0].username, method: enabled ? method : undefined, reenrol: reenrol || undefined });
   res.json({ ok: true });
 }));
 

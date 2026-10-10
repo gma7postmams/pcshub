@@ -15,9 +15,14 @@ export default function Profile() {
   const [acct, setAcct] = useForm({ full_name: u.full_name, email: u.email || '' });
   const [pw, setPw, setPwAll] = useForm({ current: '', password: '', confirm: '' });
   const [setup, setSetup] = useState(null);   // { secret, qr }
+  const [emailSetup, setEmailSetup] = useState(null);   // { sentTo } when enrolling by email
+  const byEmail = u.twofa_method === 'email';
 
   const startSetup = async () => {
-    try { setSetup(await post('/api/profile/2fa/setup')); } catch (e) { toast(e.message, 'err'); }
+    try {
+      if (byEmail) setEmailSetup(await post('/api/profile/2fa/email/send', {}));
+      else setSetup(await post('/api/profile/2fa/setup'));
+    } catch (e) { toast(e.message, 'err'); }
   };
 
   useEffect(() => {
@@ -96,14 +101,26 @@ export default function Profile() {
           </div>
           <div className="card-pad stack">
             <p className="muted m-0">{u.totp_enabled
-              ? 'Your account requires a 6-digit code from your authenticator app at sign-in.'
-              : u.totp_required ? 'An Admin has turned on 2FA for your account. Set it up with an authenticator app to continue.'
+              ? (byEmail ? 'Your account requires a 6-digit code emailed to your account address at sign-in.' : 'Your account requires a 6-digit code from your authenticator app at sign-in.')
+              : u.totp_required ? (byEmail ? 'An Admin has turned on 2FA for your account. Set it up with a code sent to your email to continue.' : 'An Admin has turned on 2FA for your account. Set it up with an authenticator app to continue.')
                 : '2FA is off for your account. Only an Admin can turn it on or off.'}</p>
             {!u.totp_enabled && u.totp_required ? <div><button type="button" className="btn primary" id="tfa" disabled={forced} onClick={startSetup}>Set up 2FA</button></div> : null}
           </div>
         </div>
       </div>
 
+      {emailSetup ? (
+        <EmailSetupModal
+          sentTo={emailSetup.sentTo}
+          onClose={() => setEmailSetup(null)}
+          onEnabled={() => {
+            setEmailSetup(null);
+            toast('2FA enabled');
+            if (needs2fa) setTimeout(() => { window.location.href = '/'; }, 600);
+            else s.patchUser({ totp_enabled: true });
+          }}
+        />
+      ) : null}
       {setup ? (
         <SetupModal
           setup={setup}
@@ -117,6 +134,37 @@ export default function Profile() {
         />
       ) : null}
     </main>
+  );
+}
+
+function EmailSetupModal({ sentTo, onClose, onEnabled }) {
+  const toast = useToast();
+  const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [sent, setSent] = useState(sentTo);
+  const enable = async () => {
+    try { await post('/api/profile/2fa/email/enable', { code, password }); onEnabled(); } catch (e) { toast(e.message, 'err'); }
+  };
+  const again = async () => { try { setSent((await post('/api/profile/2fa/email/send', {})).sentTo); toast('Code sent'); } catch (e) { toast(e.message, 'err'); } };
+  return (
+    <Modal
+      title="Set up two-factor authentication"
+      size="sm"
+      onClose={onClose}
+      footer={<><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className="btn primary" id="en" disabled={code.length !== 6 || !password} onClick={enable}>Enable 2FA</button></>}
+    >
+      <div className="stack">
+        <p className="muted m-0">1. We emailed a 6-digit code to <strong>{sent}</strong>. Anyone who can read that mailbox will be able to sign in to this account, so use an address only the right people can open.</p>
+        <label className="f"><span>2. Enter the code</span>
+          <input id="tok" className="otp-input" inputMode="numeric" maxLength={6} autoComplete="one-time-code" value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} />
+        </label>
+        <div><button type="button" className="btn sm" onClick={again}>Send the code again</button></div>
+        <label className="f"><span>3. Confirm with your password</span>
+          <input id="tokpw" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        </label>
+      </div>
+    </Modal>
   );
 }
 

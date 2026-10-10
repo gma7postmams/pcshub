@@ -76,6 +76,8 @@ const ACTION_LABELS = {
   'profile.password_change': 'Password Changed',
 
   'auth.2fa_failed': '2FA Verification Failed',
+  'auth.2fa_email_failed': '2FA Email Not Sent',
+  'admin.test_email': 'Sent Test Email',
   'auth.reauth_failed': 'Identity Confirmation Failed',
   'profile.2fa_enable': 'Enabled 2FA',
   'profile.2fa_disable': 'Disabled 2FA',
