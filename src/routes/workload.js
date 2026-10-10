@@ -822,10 +822,11 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
   }
 
   // A row that appears on both sheets (a VGFX/VEDIT/Audio plug is exported to both) is one logical row, keyed
-  // by (Work Date, Plug ID) — merge instead of inserting it twice.
+  // by (Work Date, Plug ID, Units Concerned, nth repeat) — merge instead of inserting it twice.
   const merged = new Map();
   async function readSheet(ws) {
     const sheetInfo = { name: ws ? ws.name : null, rows: 0 };
+    const seenInSheet = new Map();
     importInfo.sheets.push(sheetInfo);
     if (!ws || ws.rowCount < 2) return;
     const headerRow = ws.getRow(1);
@@ -875,7 +876,13 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
           if (team && iso) obj[team === 'VGFX' ? 'breakdate_vgfx' : 'breakdate_vedit'] = iso;
         }
       }
-      const rowKey = `${obj.work_date || ''}|||${String(obj.plug_id || '').split('\n')[0].trim()}`;
+      // Same Work Date + Plug ID + Units Concerned = the same logical row on the other sheet. Date + Plug ID alone is not enough: the same plug can
+      // legitimately have two rows on one day (e.g. an Audio Guide row and an Audio TV row), and those must both come in. A true repeat within one sheet
+      // is counted (1st, 2nd, ...) so the Nth copy here still lines up with the Nth copy on the other sheet.
+      const baseKey = `${obj.work_date || ''}|||${String(obj.plug_id || '').split('\n')[0].trim()}|||${obj.units_concerned || ''}`;
+      const nth = (seenInSheet.get(baseKey) || 0) + 1;
+      seenInSheet.set(baseKey, nth);
+      const rowKey = `${baseKey}|||${nth}`;
       merged.set(rowKey, { ...(merged.get(rowKey) || {}), ...obj });
     }
   }
