@@ -1259,7 +1259,6 @@ export default function Workload() {
     const nRep = olds.length;
     const nNew = rows.length - nRep;
     const what = [nRep ? `replace ${nRep} row${nRep === 1 ? '' : 's'}` : '', nNew ? `add ${nNew} new row${nNew === 1 ? '' : 's'}${mode === 'above' ? ' above' : mode === 'below' ? ' below' : ''}` : ''].filter(Boolean).join(' and ');
-    if (!(await confirm('Paste rows', `${what.charAt(0).toUpperCase()}${what.slice(1)} from the clipboard?`, { okText: 'Paste' }))) return;
     try {
       let ids = (await post('/api/workload/batch', { rows })).createdIds || [];
       pushTbl({
@@ -1282,6 +1281,7 @@ export default function Workload() {
     const t = e.target;
     if (t.closest && t.closest('.editing, .cell-editor-inline, input, select, textarea')) return;   // inside an open editor keep the browser's own menu
     e.preventDefault();
+    if (editing) setEditing(null);
     if (!rowLocked(r) && !(allMatching || picked.has(r.id))) { setAllMatching(false); setPicked(new Set([r.id])); lastPick.current = r.id; }
     setTctx({ x: e.clientX, y: e.clientY });
   };
@@ -1299,6 +1299,7 @@ export default function Workload() {
     if (e.button !== 0) return;
     const t = e.target;
     if (t.closest && t.closest('.actions-cell, .editing, .cell-editor-inline, input, select, textarea, button, a')) return;
+    if (editing) setEditing(null);   // clicking another row closes an open cell editor
     const holdClick = () => { tblSuppress.current = true; setTimeout(() => { tblSuppress.current = false; }, 150); };
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
@@ -1319,6 +1320,9 @@ export default function Workload() {
   // the row number on the left selects the row, like the row numbers in Excel mode; dragging down over more numbers extends it
   const numDown = (e, r, idx) => {
     e.stopPropagation();
+    // an open cell editor (a dropdown, say) must not keep the keyboard: close it so Delete / arrows act on the rows
+    if (editing) setEditing(null);
+    if (document.activeElement && document.activeElement !== document.body && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) document.activeElement.blur();
     rowDown(e, r, idx);
     if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !rowLocked(r)) { e.preventDefault(); setAllMatching(false); setPicked(new Set([r.id])); lastPick.current = r.id; }
   };
@@ -1635,6 +1639,7 @@ export default function Workload() {
                 {full ? <ExitFullscreenIcon /> : <FullscreenIcon />}
               </button>
               <ToolMenu items={[
+                canWrite && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: () => (isGrid ? addRow() : setForm({ rec: null })) },
                 s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
                 canWrite && isGrid && selRows.length > 0 && { id: 'priority-btn', label: allPrio ? 'Remove Priority' : 'Set Priority', onClick: togglePriority, keep: true },
