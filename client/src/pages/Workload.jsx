@@ -527,7 +527,7 @@ export default function Workload() {
     if (tab !== 'ALL') p.set('team', tab);
     ['units', 'platform', 'plug_type', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
     if (q) p.set('q', q);
-    if (sort.k && extra.limit !== undefined) { p.set('sort', sort.k); p.set('dir', sort.dir); }   // only the table's own list; counts and exports ignore it
+    if (sort.k && extra.limit !== undefined) { p.set('sort', sort.k); p.set('dir', sort.dir); }   // only the table's own list and the export follow it; counts ignore it
     return p;
   }, [tab, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q, sort.k, sort.dir]);
 
@@ -671,7 +671,9 @@ export default function Workload() {
   // ---- Excel export (sheets mirror the template: MAIN + AUDIO, or just the open team tab) ----
   const exportXlsx = async () => {
     try {
-      const res = await fetch(`/api/workload/export?${query()}`, { credentials: 'same-origin', headers: { 'X-Requested-With': 'PromoHub' } });
+      const qs = query();
+      if (sort.k) { qs.set('sort', sort.k); qs.set('dir', sort.dir); }   // the export follows the order on screen
+      const res = await fetch(`/api/workload/export?${qs}`, { credentials: 'same-origin', headers: { 'X-Requested-With': 'PromoHub' } });
       if (!res.ok) {
         let msg = `Export failed (${res.status})`;
         try { msg = (await res.json()).error || msg; } catch (e) { /* not JSON */ }
