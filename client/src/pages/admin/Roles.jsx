@@ -19,6 +19,7 @@ export default function Roles({ model, refreshModel }) {
   const LABEL = keyLabels(model);
   const [roles, setRoles] = useState(null);
   const [editing, setEditing] = useState(null);   // a role, or {} for a new one
+  const [members, setMembers] = useState(null);     // role whose users are being shown
   const load = useCallback(async () => { setRoles(await get('/api/admin/roles')); if (refreshModel) refreshModel(); }, [refreshModel]);
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   if (!roles) return <Empty>Loading…</Empty>;
@@ -51,7 +52,7 @@ export default function Roles({ model, refreshModel }) {
                 </tr>
               ))}
               <tr><td>Open pages / sections</td><td className="dim">—</td>{roles.map((r) => <td key={r.name} className="dim">{r.name === 'Admin' ? 'All' : 'Per group'}</td>)}</tr>
-              <tr><td>Users</td><td className="dim">—</td>{roles.map((r) => <td key={r.name} className="dim">{r.users}</td>)}</tr>
+              <tr><td>Users</td><td className="dim">—</td>{roles.map((r) => <td key={r.name}>{r.users ? <button type="button" className="linklike" onClick={() => setMembers(r)} title="Who has this role">{r.users} {r.users === 1 ? 'user' : 'users'}</button> : <span className="dim">0</span>}</td>)}</tr>
               <tr><td /><td />{roles.map((r) => (
                 <td key={r.name} className="nowrap">
                   {r.name === 'Admin' ? <span className="dim">Fixed</span> : (
@@ -66,18 +67,43 @@ export default function Roles({ model, refreshModel }) {
           </table>
         </div>
       </div>
+      {members ? <RoleMembers role={members} onClose={() => setMembers(null)} /> : null}
       {editing ? <RoleForm role={editing.name ? editing : null} actions={actions} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} /> : null}
     </>
   );
 }
 
+function RoleMembers({ role, onClose }) {
+  const [users, setUsers] = useState(null);
+  useEffect(() => { get('/api/admin/users').then((l) => setUsers(l.filter((u) => u.role === role.name))); }, [role.name]);
+  return (
+    <Modal title={`Who has the ${role.name} role`} size="sm" onClose={onClose} footer={<button type="button" className="btn primary" onClick={onClose}>Close</button>}>
+      {!users ? <Empty>Loading…</Empty> : !users.length ? <p className="muted m-0">Nobody has this role.</p> : (
+        <ul className="plain-list">
+          {users.map((u) => (
+            <li key={u.id}><strong>{u.full_name}</strong> <span className="dim mono">{u.username}</span>
+              <div className="dim">{u.group_name || 'Not enrolled'}{u.is_active ? '' : ' · disabled'}</div></li>
+          ))}
+        </ul>
+      )}
+    </Modal>
+  );
+}
+
 function RoleForm({ role, actions, onClose, onSaved }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [f, set] = useForm({ name: role ? role.name : '', description: role ? role.description || '' : '' });
   const [acts, setActs] = useState(() => new Set(role ? role.actions : []));
   const [busy, setBusy] = useState(false);
   const tick = (a) => setActs((p) => { const n = new Set(p); if (n.has(a)) n.delete(a); else n.add(a); return n; });
   const save = async () => {
+    const removed = role ? role.actions.filter((a) => !acts.has(a)) : [];
+    if (removed.length && role.users > 0) {
+      const names = removed.map((a) => ACT[a] || a).join('; ');
+      if (!(await confirm('Remove actions from a role in use',
+        `${role.users} ${role.users === 1 ? 'user has' : 'users have'} the ${role.name} role. They will immediately lose: ${names}.`, { okText: 'Remove and save', danger: true }))) return;
+    }
     setBusy(true);
     try {
       const body = { ...f, actions: [...acts] };
@@ -91,7 +117,8 @@ function RoleForm({ role, actions, onClose, onSaved }) {
       <form className="stack" onSubmit={(e) => e.preventDefault()}>
         <label className="f"><span>Name</span><input name="name" maxLength={40} value={f.name} disabled={!!(role && role.is_builtin)} onChange={set('name')} /></label>
         <label className="f"><span>Description</span><input maxLength={300} value={f.description} onChange={set('description')} /></label>
-        <div className="f"><span>Can do</span>
+        {role && role.users ? <div className="alert info">{role.users} {role.users === 1 ? 'user has' : 'users have'} this role. Changes apply to them straight away.</div> : null}
+        <div className="f"><span>Can do <span className="dim">— {acts.size} of {actions.length}</span></span>
           {actions.map((a) => (
             <label className="check" key={a}><input type="checkbox" checked={acts.has(a)} onChange={() => tick(a)} /> {ACT[a] || a}</label>
           ))}

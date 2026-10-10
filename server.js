@@ -218,6 +218,8 @@ boot
     // Production default: localhost only — users reach the app through the HTTPS reverse proxy.
     const HOST = process.env.HOST || (PROD ? '127.0.0.1' : '0.0.0.0');
 
+    try { require('./src/backup/scheduler').start(); } catch (e) { console.error('[backup] scheduler not started:', e.message); }
+
     app.listen(PORT, HOST, () =>
       console.log(
         `Promotional Content Hub listening on ${HOST}:${PORT} (${PROD ? 'production' : 'development'})`

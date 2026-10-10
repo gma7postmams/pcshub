@@ -36,6 +36,25 @@ const analyzeLimiter = limiter(5);
 /** Password (plus the current 2FA code when enabled) must be re-entered every time for restore, delete and download. */
 const reauth = (req, action, id) => stepUp.verify(req, { action, entity: 'backup', id }, req.body);
 
+const scheduler = require('../backup/scheduler');
+
+// Last successful backup, whether it is stale, and the automatic schedule.
+router.get('/status', asyncH(async (req, res) => res.json(await scheduler.status())));
+
+router.put('/schedule', asyncH(async (req, res) => {
+  const b = req.body || {};
+  const mode = v.oneOf(b.mode, ['off', 'daily', 'weekly'], { field: 'Schedule' });
+  const time = typeof b.time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(b.time) ? b.time : null;
+  if (mode !== 'off' && !time) throw new HttpError(400, 'Enter a time like 02:00');
+  const keep = v.int(b.keep, { field: 'Keep', min: 1, max: cfg.MAX_BACKUPS });
+  const weekday = b.weekday == null ? 0 : v.int(b.weekday, { field: 'Day', min: 0, max: 6 });
+  const prev = await scheduler.getSchedule();
+  const next = { mode, time: time || prev.time, weekday, keep };
+  await scheduler.saveSchedule(next);
+  await audit(req, 'admin.backup_schedule', 'backup', null, { from: prev, to: next });
+  res.json(await scheduler.status());
+}));
+
 router.get('/preview', asyncH(async (req, res) => res.json(await svc.preview())));
 
 router.get('/', asyncH(async (req, res) => {

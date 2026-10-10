@@ -9,6 +9,8 @@ export default function Dropdowns() {
   const confirm = useConfirm();
   const [d, setD] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [merging, setMerging] = useState(null);   // option to merge away
+  const [adding, setAdding] = useState(null);      // category for Add many
   const fileRef = useRef(null);
   const [picked, setPicked] = useState(() => new Set());   // option ids ticked for batch delete
 
@@ -64,7 +66,8 @@ export default function Dropdowns() {
         const rows = d.rows.filter((r) => r.category === cat);
         return (
           <div className="card" key={cat}>
-            <div className="card-head"><h2>{LABEL[cat] || cat} <span className="dim">{rows.length}</span></h2></div>
+            <div className="card-head"><h2>{LABEL[cat] || cat} <span className="dim">{rows.length}</span></h2>
+              <button type="button" className="btn sm" data-bulk={cat} onClick={() => setAdding(cat)}>Add many</button></div>
             <AddForm cat={cat} onAdded={load} />
             <div className="table-wrap">
               <table className="t wl">
@@ -77,6 +80,7 @@ export default function Dropdowns() {
                       <td>{r.is_active ? <span className="yes">Yes</span> : <span className="no">NO</span>}</td>
                       <td className="right nowrap">
                         <button type="button" className="btn sm" onClick={() => setEditing(r)}>Edit</button>{' '}
+                        <button type="button" className="btn sm ghost" disabled={rows.length < 2} title="Move its records to another option and remove it" onClick={() => setMerging(r)}>Merge</button>{' '}
                         <button type="button" className="btn sm ghost" disabled={r.usage > 0} title={r.usage ? 'In use — deactivate instead' : undefined} onClick={() => remove(r)}>Delete</button>
                       </td>
                     </tr>
@@ -87,6 +91,8 @@ export default function Dropdowns() {
           </div>
         );
       })}
+      {merging ? <MergeOption r={merging} options={d.rows.filter((x) => x.category === merging.category && x.id !== merging.id)} onClose={() => setMerging(null)} onDone={() => { setMerging(null); load(); }} /> : null}
+      {adding ? <BulkAdd cat={adding} existing={d.rows.filter((x) => x.category === adding).map((x) => x.value.toLowerCase())} onClose={() => setAdding(null)} onDone={() => { setAdding(null); load(); }} /> : null}
       {editing ? <EditOption r={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} /> : null}
     </div>
     </>
@@ -122,6 +128,64 @@ function EditOption({ r, onClose, onSaved }) {
         <label className="check"><input type="checkbox" checked={f.is_active} onChange={set('is_active')} /> Active (shown in forms)</label>
         {r.usage ? <div className="alert info">Renaming updates the {r.usage} existing record(s) that use it.</div> : null}
       </form>
+    </Modal>
+  );
+}
+
+// Merge: every record using "from" is changed to "into", then "from" is removed. Used to clean up near-duplicates ("GMA 7" / "GMA7").
+function MergeOption({ r, options, onClose, onDone }) {
+  const toast = useToast();
+  const [into, setInto] = useState('');
+  const [busy, setBusy] = useState(false);
+  const target = options.find((o) => String(o.id) === into);
+  const go = async () => {
+    setBusy(true);
+    try {
+      const out = await post('/api/admin/dropdowns/merge', { from_id: r.id, into_id: Number(into) });
+      toast(`Merged: ${out.moved} ${out.moved === 1 ? 'record' : 'records'} moved to "${out.into}"`); onDone();
+    } catch (e) { toast(e.message, 'err'); setBusy(false); }
+  };
+  return (
+    <Modal title={`Merge "${r.value}"`} size="sm" onClose={() => { if (!busy) onClose(); }}
+      footer={<><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className="btn primary" disabled={!into || busy} onClick={go}>{busy ? 'Merging…' : 'Merge'}</button></>}>
+      <form className="stack" onSubmit={(e) => e.preventDefault()}>
+        <label className="f"><span>Merge into</span>
+          <select value={into} onChange={(e) => setInto(e.target.value)}>
+            <option value="">Choose the option to keep…</option>
+            {options.map((o) => <option key={o.id} value={String(o.id)}>{o.value}{o.is_active ? '' : ' (inactive)'}</option>)}
+          </select></label>
+        {target ? (
+          <div className="alert info">
+            {r.usage ? `${r.usage} ${r.usage === 1 ? 'record' : 'records'} using "${r.value}" will change to "${target.value}". ` : `No records use "${r.value}". `}
+            Then "{r.value}" is removed. This cannot be undone.
+          </div>
+        ) : null}
+      </form>
+    </Modal>
+  );
+}
+
+// Add many: paste a list, one option per line.
+function BulkAdd({ cat, existing, onClose, onDone }) {
+  const toast = useToast();
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const seen = new Set();
+  const lines = text.split(/\r?\n/).map((x) => x.replace(/\s+/g, ' ').trim()).filter((x) => { const k = x.toLowerCase(); if (!x || seen.has(k)) return false; seen.add(k); return true; });
+  const dup = lines.filter((x) => existing.includes(x.toLowerCase())).length;
+  const go = async () => {
+    setBusy(true);
+    try {
+      const out = await post('/api/admin/dropdowns/bulk', { category: cat, text });
+      toast(`${out.added} added${out.skipped.length ? `, ${out.skipped.length} already existed` : ''}`); onDone();
+    } catch (e) { toast(e.message, 'err'); setBusy(false); }
+  };
+  return (
+    <Modal title={`Add many — ${LABEL[cat] || cat}`} size="sm" onClose={() => { if (!busy) onClose(); }}
+      footer={<><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className="btn primary" disabled={busy || lines.length - dup < 1} onClick={go}>{busy ? 'Adding…' : `Add ${Math.max(0, lines.length - dup)}`}</button></>}>
+      <label className="f"><span>One option per line</span>
+        <textarea rows={10} autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder={'Paste a list, for example from Excel\nOne option per line'} /></label>
+      <div className="dim mt-6">{lines.length ? `${lines.length} ${lines.length === 1 ? 'option' : 'options'} found${dup ? `, ${dup} already in the list (skipped)` : ''}.` : 'Blank lines and repeats are ignored.'}</div>
     </Modal>
   );
 }

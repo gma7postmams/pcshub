@@ -1032,3 +1032,51 @@ table.t td[data-sel] { background: color-mix(in srgb, var(--accent) 16%, var(--s
 .plug-list .plug-bar { padding: 8px 12px; margin: 0; border-bottom: 1px solid var(--border); }   /* the same bar height and side padding as the Workload and Ingest toolbars */
 .plug-list .pager { border-top: 1px solid var(--border); padding: 0 16px; }
 .plug-list .empty { padding-left: 16px; padding-right: 16px; }
+
+/* Knowledge Base: tags, multi-upload list, Trash */
+.tag { display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px 1px 9px; border: 0; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font: 600 12px var(--font); cursor: default; }
+button.tag { padding: 1px 9px; cursor: pointer; }
+.tag button { width: 16px; height: 16px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; font-size: 14px; line-height: 1; cursor: pointer; }
+.doc-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.tagsin { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); }
+.tagsin input { flex: 1 1 100px; min-width: 80px; height: 26px; padding: 0 4px; border: 0; background: transparent; box-shadow: none; }
+.kb-tags { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.tag-filter { padding: 3px 10px; border: 1px solid var(--border-2); border-radius: 999px; background: var(--surface); color: var(--text-2); font: 600 12.5px var(--font); cursor: pointer; }
+.tag-filter i { font-style: normal; opacity: .6; margin-left: 2px; }
+.tag-filter.on { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+.kb-draft { display: flex; flex-direction: column; gap: 12px; max-height: 50vh; overflow: auto; }
+.kb-draft-row .doc-file { margin-top: 4px; }
+.linkbtn { all: unset; margin-left: 10px; color: var(--accent); cursor: pointer; font-size: 12.5px; }
+.linkbtn:hover { text-decoration: underline; }
+
+/* ---- Admin: tabs on phones, link-style buttons, bulk bar, audit detail, backup status ---- */
+.linklike { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.linklike:hover { filter: brightness(1.15); }
+.admin-tabs { scrollbar-width: none; -webkit-overflow-scrolling: touch; position: sticky; top: 0; background: var(--bg); z-index: 5; }
+.admin-tabs::-webkit-scrollbar { display: none; }
+.sub-tabs button .dim { font-weight: 400; font-size: 12px; margin-left: 4px; }
+.filters select, .row select.sm { min-width: 0; max-width: 100%; }
+.filters input.narrow { width: 96px; flex: 0 0 96px; }
+.stat.warn { border-color: var(--warn, #d9a21b); }
+.stat .linklike { font-size: inherit; }
+.plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.audit-t .exp { background: none; border: 0; color: var(--text-2); cursor: pointer; padding: 2px 6px; font-size: 13px; }
+.audit-open > td { border-bottom-color: transparent; }
+.audit-more > td { background: var(--surface-2, rgba(127,127,127,.07)); padding: 10px 14px 14px; }
+.audit-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 18px; margin: 0; }
+.audit-fields div { min-width: 0; }
+.audit-fields dt { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-2); }
+.audit-fields dd { margin: 0; word-break: break-word; }
+.audit-diff { width: auto; min-width: 320px; margin-bottom: 10px; }
+.audit-diff .was { color: var(--danger, #e05a5a); text-decoration: line-through; }
+.audit-diff .now { color: var(--success, #3fae6a); font-weight: 600; }
+.backup-status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.backup-status .grow { flex: 1 1 200px; }
+.sched-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; align-items: end; }
+@media (max-width: 720px) {
+  .admin-tabs button { padding: 12px 11px; font-size: 13.5px; }
+  .filters { flex-wrap: wrap; }
+  .filters > input, .filters > select { flex: 1 1 140px; }
+  .filters input.narrow { flex: 1 1 90px; }
+  .audit-diff { min-width: 0; width: 100%; }
+}

@@ -192,7 +192,8 @@ router.delete('/groups/:id', asyncH(async (req, res) => {
 router.get('/users', asyncH(async (req, res) => {
   const { rows } = await db.query(
     `SELECT u.id, u.username, u.full_name, u.email, u.role, u.group_id, g.name AS group_name, u.is_active,
-            u.totp_enabled, u.twofa_required, u.must_change_password, u.last_login_at, u.locked_until, u.created_at
+            u.totp_enabled, u.twofa_required, u.must_change_password, u.last_login_at, u.locked_until, u.created_at, u.failed_attempts,
+            (SELECT count(*)::int FROM user_sessions s WHERE (s.sess->>'userId')::int = u.id AND s.expire > now()) AS sessions
        FROM users u LEFT JOIN groups g ON g.id = u.group_id
       ORDER BY u.is_active DESC, u.full_name`
   );
@@ -673,21 +674,33 @@ function removeOldLogo(url) {
 }
 
 // ---------- Audit ----------
-router.get('/audit', asyncH(async (req, res) => {
+// Shared by the list and the Excel export. Filters: action text, category (auth / ingest / workload / knowledge / admin / profile),
+// user, entity type, record id, free text inside the details, and a date range.
+const AUDIT_CATEGORIES = ['auth', 'ingest', 'approval', 'workload', 'knowledge', 'admin', 'profile'];
+function auditWhere(q) {
   const params = [];
   const where = [];
   const add = (sql, val) => { params.push(val); where.push(sql.replace('?', `$${params.length}`)); };
-  if (req.query.action) add('action ILIKE ?', v.like(req.query.action, 60));
-  if (req.query.user) add('username ILIKE ?', v.like(req.query.user, 60));
-  if (req.query.from) add('created_at >= ?::date', v.date(req.query.from, { field: 'From' }));
-  if (req.query.to) add(`created_at < (?::date + 1)`, v.date(req.query.to, { field: 'To' }));
+  if (q.action) add('action ILIKE ?', v.like(q.action, 60));
+  if (q.category && AUDIT_CATEGORIES.includes(q.category)) add('action LIKE ?', `${q.category}.%`);
+  if (q.user) add('username ILIKE ?', v.like(q.user, 60));
+  if (q.entity) add('entity = ?', v.str(q.entity, { field: 'Entity', max: 40 }));
+  if (q.record) add('entity_id = ?', v.str(q.record, { field: 'Record', max: 40 }));
+  if (q.q) add('(details::text ILIKE ? OR action ILIKE ?)', v.like(q.q, 80));
+  if (q.from) add('created_at >= ?::date', v.date(q.from, { field: 'From' }));
+  if (q.to) add(`created_at < (?::date + 1)`, v.date(q.to, { field: 'To' }));
+  return { params, whereSql: where.length ? `WHERE ${where.join(' AND ')}` : '' };
+}
+router.get('/audit', asyncH(async (req, res) => {
+  const { params, whereSql } = auditWhere(req.query);
   const { limit, offset } = v.paging(req.query, { def: 50, max: 200 });
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const [cnt, list] = await Promise.all([
     db.query(`SELECT count(*)::int AS n FROM audit_logs ${whereSql}`, params),
     db.query(`SELECT * FROM audit_logs ${whereSql} ORDER BY created_at DESC, id DESC LIMIT ${limit} OFFSET ${offset}`, params),
   ]);
   res.json({ total: cnt.rows[0].n, rows: list.rows });
 }));
+
+require('../admin-extra')(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, auditWhere });
 
 module.exports = router;

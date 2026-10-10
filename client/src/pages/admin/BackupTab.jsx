@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { get, post } from '../../lib/api.js';
+import { get, post, put } from '../../lib/api.js';
 import { fmtBytes } from '../../lib/util.js';
 import { Empty, Modal, useToast } from '../../components/ui.jsx';
 
@@ -89,6 +89,38 @@ function CreateDialog({ preview, onClose, onStarted }) {
   );
 }
 
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+// Automatic backups: when, and how many to keep (the oldest are removed when there are more).
+function ScheduleCard({ onSaved }) {
+  const toast = useToast();
+  const [s, setS] = useState(null);
+  const [max, setMax] = useState(30);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { get('/api/admin/backups/status').then((st) => { setS(st.schedule); setMax(st.maxBackups); }).catch(() => {}); }, []);
+  if (!s) return null;
+  const set = (k) => (e) => setS((x) => ({ ...x, [k]: k === 'keep' || k === 'weekday' ? Number(e.target.value) : e.target.value }));
+  const save = async () => {
+    setBusy(true);
+    try { await put('/api/admin/backups/schedule', s); toast('Schedule saved'); onSaved(); } catch (e) { toast(e.message, 'err'); } finally { setBusy(false); }
+  };
+  return (
+    <div className="card mb-12">
+      <div className="card-head"><h2>Automatic backups</h2><button type="button" className="btn primary sm" disabled={busy} onClick={save}>Save schedule</button></div>
+      <div className="card-pad">
+        <div className="sched-grid">
+          <label className="f"><span>How often</span>
+            <select value={s.mode} onChange={set('mode')}><option value="off">Off</option><option value="daily">Every day</option><option value="weekly">Once a week</option></select></label>
+          {s.mode === 'weekly' ? <label className="f"><span>Day</span><select value={s.weekday} onChange={set('weekday')}>{DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}</select></label> : null}
+          {s.mode !== 'off' ? <label className="f"><span>Time (server)</span><input type="time" value={s.time} onChange={set('time')} /></label> : null}
+          <label className="f"><span>Keep the latest</span><input type="number" min={1} max={max} value={s.keep} onChange={set('keep')} /></label>
+        </div>
+        <div className="dim mt-12">Older backups beyond this number are deleted automatically (at most {max} can be kept). Scheduled backups appear in History marked as <em>Scheduled backup</em>.</div>
+      </div>
+    </div>
+  );
+}
+
 export default function BackupTab({ running, refreshKey, onStarted }) {
   const toast = useToast();
   const [preview, setPreview] = useState(null);
@@ -106,6 +138,7 @@ export default function BackupTab({ running, refreshKey, onStarted }) {
   return (
     <>
       <PreviewCard preview={preview} busy={running} onCreate={() => setCreating(true)} />
+      <ScheduleCard onSaved={loadPreview} />
       <StorageCard preview={preview} />
       {creating ? <CreateDialog preview={preview} onClose={() => setCreating(false)} onStarted={() => { setCreating(false); onStarted(); }} /> : null}
     </>

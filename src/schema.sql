@@ -350,6 +350,11 @@ CREATE TABLE IF NOT EXISTS knowledge_docs (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS knowledge_docs_created_idx ON knowledge_docs (created_at DESC);
+-- Tags (a document can have several) and a Trash: a deleted document keeps its file for 30 days and can be restored.
+ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS deleted_by INT REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS deleted_name TEXT;
 
 INSERT INTO app_settings (key, value) VALUES
   ('app_name', 'Promotional Content Hub'),

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { get } from '../../lib/api.js';
 import { fmtBytes, fmtDateTime } from '../../lib/util.js';
 import { Empty, useDebounced } from '../../components/ui.jsx';
@@ -83,7 +83,9 @@ const ACTION_LABELS = {
   'knowledge.seed': 'Seeded Knowledge Document',
   'knowledge.upload': 'Uploaded Knowledge Document',
   'knowledge.rename': 'Renamed Knowledge Document',
-  'knowledge.delete': 'Deleted Knowledge Document',
+  'knowledge.delete': 'Moved Knowledge Document to Trash',
+  'knowledge.restore': 'Restored Knowledge Document',
+  'knowledge.purge': 'Permanently Deleted Knowledge Document',
 
   'admin.workload_column_add': 'Added Workload Column',
   'admin.workload_column_delete': 'Deleted Workload Column',
@@ -96,6 +98,13 @@ const ACTION_LABELS = {
   'admin.backup_verify': 'Verified Backup',
   'admin.backup_analyze': 'Verified Backup',
   'admin.backup_restore': 'Restored Backup',
+  'admin.backup_schedule': 'Changed Backup Schedule',
+  'admin.backup_scheduled': 'Scheduled Backup',
+  'admin.user_bulk': 'Changed Several Users',
+  'admin.user_signout': 'Signed User Out',
+  'admin.dropdown_merge': 'Merged Dropdown Options',
+  'admin.dropdown_bulk_add': 'Added Dropdown Options',
+  'admin.audit_export': 'Exported Audit Log',
 };
 
 function formatAction(action) {
@@ -244,6 +253,28 @@ function formatDetails(row) {
         return `Account locked: ${d.username || 'user'}`;
       }
       return 'Login attempt failed';
+
+    case 'admin.user_bulk':
+      return `${({ activate: 'Activated', deactivate: 'Deactivated', role: `Set role to ${d.role}`, group: d.group_id ? 'Changed group' : 'Removed from group',
+        'reset-2fa': 'Reset 2FA for', 'sign-out': 'Signed out', unlock: 'Unlocked' })[d.action] || d.action} ${n(d.count, 'user')}${d.users && d.users.length ? `: ${d.users.slice(0, 5).join(', ')}${d.users.length > 5 ? '…' : ''}` : ''}`;
+
+    case 'admin.user_signout':
+      return `Signed ${d.username || 'user'} out of ${n(d.sessions, 'device')}`;
+
+    case 'admin.dropdown_merge':
+      return `Merged "${d.from}" into "${d.into}" (${d.category}) — ${n(d.moved, 'record')} updated`;
+
+    case 'admin.dropdown_bulk_add':
+      return `Added ${n(d.added, 'option')} to ${d.category}${d.skipped ? `, ${d.skipped} already existed` : ''}`;
+
+    case 'admin.audit_export':
+      return `Exported ${n(d.rows, 'entry', 'entries')}${d.truncated ? ' (stopped at the limit)' : ''}`;
+
+    case 'admin.backup_schedule':
+      return `Schedule: ${d.to && d.to.mode === 'off' ? 'off' : `${d.to && d.to.mode} at ${d.to && d.to.time}`}, keep ${d.to && d.to.keep}`;
+
+    case 'admin.backup_scheduled':
+      return d.outcome === 'failed' ? `Scheduled backup could not start: ${d.error || ''}` : `Scheduled ${d.mode || ''} backup started`;
 
     case 'admin.dropdown_create':
       return `Created ${d.category}: ${d.value}`;
@@ -412,13 +443,19 @@ function formatDetails(row) {
       return `Seeded knowledge document: ${d.filename || ''}`;
 
     case 'knowledge.upload':
-      return `Uploaded knowledge document: ${d.filename || ''}`;
+      return `Uploaded knowledge document: ${d.title || d.filename || ''}${Array.isArray(d.tags) && d.tags.length ? ` · tags: ${d.tags.join(', ')}` : ''}`;
 
     case 'knowledge.rename':
-      return `Renamed knowledge document to: ${d.title || ''}`;
+      return `${d.title ? `Renamed knowledge document to: ${d.title}` : 'Changed knowledge document'}${Array.isArray(d.tags) ? ` · tags: ${d.tags.join(', ') || 'none'}` : ''}`;
 
     case 'knowledge.delete':
-      return `Deleted knowledge document: ${d.title || d.filename || ''}`;
+      return `Moved knowledge document to Trash: ${d.title || d.filename || ''}`;
+
+    case 'knowledge.restore':
+      return `Restored knowledge document from Trash: ${d.title || d.filename || ''}`;
+
+    case 'knowledge.purge':
+      return `Permanently deleted knowledge document: ${d.title || d.filename || ''}`;
 
     case 'ingest.approve':
       return 'Approved ingest request';
@@ -512,19 +549,58 @@ function formatDetails(row) {
 
 
 
+// Where "Open" takes you for a record type. Only pages that exist; others show no link.
+const RECORD_LINK = {
+  user: '/admin#users', group: '/admin#access', role: '/admin#access', dropdown_option: '/admin#dropdowns', backup: '/admin#backup',
+  ingest_record: '/ingest', approval_request: '/ingest', workload_item: '/workload', workload_plug: '/plug-list', knowledge_document: '/knowledge', knowledge_docs: '/knowledge',
+};
+const CATEGORIES = [['', 'Everything'], ['auth', 'Sign-ins'], ['ingest', 'Ingest'], ['approval', 'Approvals'], ['workload', 'Workload'], ['knowledge', 'Knowledge Base'], ['admin', 'Admin changes'], ['profile', 'Profile']];
+
+const show = (x) => (x == null || x === '' ? '—' : typeof x === 'object' ? JSON.stringify(x) : String(x));
+/** Readable before / after: a {from, to} pair of objects becomes one row per changed field; everything else is a field list. */
+function Expanded({ row }) {
+  const d = row.details;
+  if (!d || typeof d !== 'object') return <span className="dim">No more detail was recorded.</span>;
+  const from = d.from && typeof d.from === 'object' ? d.from : null;
+  const to = d.to && typeof d.to === 'object' ? d.to : null;
+  if (from && to) {
+    const keys = [...new Set([...Object.keys(from), ...Object.keys(to)])].filter((k) => JSON.stringify(from[k]) !== JSON.stringify(to[k]));
+    const rest = Object.entries(d).filter(([k]) => k !== 'from' && k !== 'to');
+    return (
+      <>
+        <table className="t audit-diff">
+          <thead><tr><th>Field</th><th>Before</th><th>After</th></tr></thead>
+          <tbody>{keys.length ? keys.map((k) => <tr key={k}><td>{USER_FIELD_LABELS[k] || k}</td><td className="was">{show(from[k])}</td><td className="now">{show(to[k])}</td></tr>)
+            : <tr><td colSpan={3} className="dim">Nothing changed.</td></tr>}</tbody>
+        </table>
+        {rest.length ? <dl className="audit-fields">{rest.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{show(v)}</dd></div>)}</dl> : null}
+      </>
+    );
+  }
+  return <dl className="audit-fields">{Object.entries(d).map(([k, v]) => <div key={k}><dt>{USER_FIELD_LABELS[k] || k}</dt><dd>{show(v)}</dd></div>)}</dl>;
+}
+
 export default function Audit() {
   const isActivityHistory =
     window.location.pathname === '/activity-history';
 
-  const [f, setF] = useState({ action: '', user: '', from: '', to: '' });
+  const [f, setF] = useState({ action: '', category: '', user: '', q: '', record: '', from: '', to: '' });
   const [offset, setOffset] = useState(0);
   const [d, setD] = useState(null);
+  const [open, setOpen] = useState(() => new Set());
   const action = useDebounced(f.action);
   const user = useDebounced(f.user);
+  const q = useDebounced(f.q);
+  const record = useDebounced(f.record);
+
+  const params = () => {
+    const p = new URLSearchParams();
+    Object.entries({ action, category: f.category, user, q, record, from: f.from, to: f.to }).forEach(([k, v]) => { if (v) p.set(k, v); });
+    return p;
+  };
 
   useEffect(() => {
-    const p = new URLSearchParams({ limit: PAGE, offset });
-    Object.entries({ action, user, from: f.from, to: f.to }).forEach(([k, v]) => { if (v) p.set(k, v); });
+    const p = params(); p.set('limit', PAGE); p.set('offset', offset);
     const endpoint =
       window.location.pathname === '/activity-history'
         ? '/api/profile/activity-history'
@@ -532,13 +608,15 @@ export default function Audit() {
 
     get(`${endpoint}?${p}`)
       .then((data) => {
-        setD(data);
+        setD(data); setOpen(new Set());
       })
       .catch(() => setD({ rows: [], total: 0 }));
-  }, [action, user, f.from, f.to, offset]);
+  }, [action, f.category, user, q, record, f.from, f.to, offset]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (k) => (e) => { setF((x) => ({ ...x, [k]: e.target.value })); setOffset(0); };
   const total = d ? d.total : 0;
+  const any = Object.values(f).some(Boolean);
+  const toggle = (id) => setOpen((o) => { const n2 = new Set(o); if (n2.has(id)) n2.delete(id); else n2.add(id); return n2; });
 
   return (
     <div className="card">
@@ -549,59 +627,75 @@ export default function Audit() {
           placeholder={
             isActivityHistory
               ? 'Search activity'
-              : 'Action (e.g. ingest, approval, auth)'
+              : 'Action contains…'
           }
           value={f.action}
           onChange={set('action')}
         />
 
         {!isActivityHistory && (
-          <input
-            type="search"
-            placeholder="Username"
-            value={f.user}
-            onChange={set('user')}
-          />
+          <>
+            <select aria-label="Kind of activity" value={f.category} onChange={set('category')}>{CATEGORIES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+            <input type="search" placeholder="Username" value={f.user} onChange={set('user')} />
+            <input type="search" placeholder="Search inside details" value={f.q} onChange={set('q')} />
+            <input type="search" placeholder="Record #" value={f.record} onChange={set('record')} className="narrow" aria-label="Record number" />
+          </>
         )}
 
         <input
           type="date"
           value={f.from}
+          aria-label="From date"
           onChange={set('from')}
         />
 
         <input
           type="date"
           value={f.to}
+          aria-label="To date"
           onChange={set('to')}
         />
+        {any ? <button type="button" className="btn sm ghost" onClick={() => { setF({ action: '', category: '', user: '', q: '', record: '', from: '', to: '' }); setOffset(0); }}>Clear</button> : null}
+        {!isActivityHistory ? <a className="btn sm" href={`/api/admin/audit/export?${params()}`} download>Export to Excel</a> : null}
       </div>
 
 
       <div className="table-wrap">
         {!d ? <Empty>Loading…</Empty> : !d.rows.length ? <Empty>No audit entries.</Empty> : (
-          <table className="t wl">
-            <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Entity</th><th>Details</th><th>IP</th></tr></thead>
+          <table className="t wl audit-t">
+            <thead><tr><th className="chk" /><th>Time</th><th>User</th><th>Action</th><th>Entity</th><th>Details</th><th>IP</th></tr></thead>
             <tbody>
               {d.rows.map((r) => {
                 const details = r.details ? JSON.stringify(r.details) : '';
+                const isOpen = open.has(r.id);
+                const link = r.entity && RECORD_LINK[r.entity];
                 return (
-                  <tr key={r.id}>
-                    <td className="nowrap dim">{fmtDateTime(r.created_at)}</td>
-                    <td className="mono">{r.username || '—'}</td>
+                  <Fragment key={r.id}>
+                    <tr className={isOpen ? 'audit-open' : ''}>
+                      <td className="chk">
+                        {details ? <button type="button" className="exp" aria-expanded={isOpen} aria-label={isOpen ? 'Hide detail' : 'Show detail'} onClick={() => toggle(r.id)}>{isOpen ? '▾' : '▸'}</button> : null}
+                      </td>
+                      <td className="nowrap dim">{fmtDateTime(r.created_at)}</td>
+                      <td className="mono">{r.username || '—'}</td>
 
-                    <td>{formatAction(r.action)}</td>
+                      <td>{formatAction(r.action)}</td>
 
-                    <td className="nowrap">
-                      {formatEntity(r)}
-                    </td>
+                      <td className="nowrap">
+                        {formatEntity(r)}
+                        {r.entity_id ? (
+                          <> <button type="button" className="linklike mono" title="Show everything about this record" onClick={() => { if (!isActivityHistory) { setF((x) => ({ ...x, record: r.entity_id })); setOffset(0); } }}>#{r.entity_id}</button></>
+                        ) : null}
+                        {link && !isActivityHistory ? <> <a className="linklike" href={link}>Open</a></> : null}
+                      </td>
 
-                    <td title={details}>
-                      {formatDetails(r)}
-                    </td>
+                      <td title={details}>
+                        {formatDetails(r)}
+                      </td>
 
-                    <td className="mono dim">{r.ip || ''}</td>
-                  </tr>
+                      <td className="mono dim">{r.ip || ''}</td>
+                    </tr>
+                    {isOpen ? <tr className="audit-more"><td /><td colSpan={6}><Expanded row={r} /></td></tr> : null}
+                  </Fragment>
                 );
               })}
             </tbody>
