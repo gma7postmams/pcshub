@@ -117,7 +117,7 @@ async function tick() {
 let timer = null;
 function start() {
   if (timer || process.env.NODE_ENV === 'test') return;
-  timer = setInterval(tick, 60 * 1000);
+  timer = setInterval(() => { tick(); require('../retention').autoTick().catch((e) => console.error('[retention]', e.message)); }, 60 * 1000);
   timer.unref();
 }
 

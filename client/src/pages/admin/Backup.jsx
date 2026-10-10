@@ -3,11 +3,12 @@ import { get, post } from '../../lib/api.js';
 import { fmtBytes, fmtDateTime } from '../../lib/util.js';
 import BackupTab from './BackupTab.jsx';
 import RestoreTab from './RestoreTab.jsx';
+import RetentionTab from './RetentionTab.jsx';
 import HistoryTab from './HistoryTab.jsx';
 import ReauthDialog from './ReauthDialog.jsx';
 import { RestoreOverlay, RestoreResult } from './RestoreRunner.jsx';
 
-const TABS = [['backup', 'Backup'], ['restore', 'Restore'], ['history', 'History']];
+const TABS = [['backup', 'Backup'], ['restore', 'Restore'], ['history', 'History'], ['retention', 'Data retention']];
 
 const ago = (d) => {
   const m = Math.max(0, Math.round((Date.now() - new Date(d).getTime()) / 60000));
@@ -60,6 +61,8 @@ export default function Backup() {
       <div hidden={tab !== 'backup'}><BackupTab running={running} refreshKey={refreshKey} onStarted={() => { bump(); setTab('history'); }} /></div>
       <div hidden={tab !== 'restore'}><RestoreTab onRestoreStarted={setRunJob} /></div>
       <div hidden={tab !== 'history'}><HistoryTab active={tab === 'history'} refreshKey={refreshKey} onRunning={setRunning} onChanged={bump} onRollback={setRollbackFor} /></div>
+
+      <div hidden={tab !== 'retention'}><RetentionTab active={tab === 'retention'} /></div>
 
       {runJob ? <RestoreOverlay jobId={runJob} onFinished={onFinished} /> : null}
       {resultOpen ? <RestoreResult job={result} onClose={() => setResultOpen(false)} onRollback={setRollbackFor} /> : null}

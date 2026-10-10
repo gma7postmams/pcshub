@@ -8,6 +8,8 @@ const { audit } = require('./audit');
 const { ROLES } = require('./permissions');
 
 const settings = require('./security-settings');
+const retention = require('./retention');
+const stepUp = require('./reauth');
 
 module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, auditWhere }) {
   // ---------- Users: one action for many people ----------
@@ -218,5 +220,62 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
     });
     await wb.xlsx.write(res);
     res.end();
+  }));
+  // ---------- Data retention ----------
+  const parseDays = (x, label) => {
+    const n = x === '' || x == null ? 0 : Number(x);
+    if (!Number.isInteger(n) || (n !== 0 && (n < retention.MIN_DAYS || n > retention.MAX_DAYS))) {
+      throw new HttpError(400, `${label}: enter 0 (keep forever) or a whole number of days from ${retention.MIN_DAYS} to ${retention.MAX_DAYS}`);
+    }
+    return n;
+  };
+  const readDays = (src) => {
+    const out = {};
+    for (const [k, m] of Object.entries(retention.MODULES)) out[k] = parseDays(src[k], m.label);
+    return out;
+  };
+
+  router.get('/retention', asyncH(async (req, res) => {
+    const saved = await retention.getSettings();
+    // ?audit=90&ingest=365 … previews the effect of values that are not saved yet.
+    const trial = {};
+    for (const k of Object.keys(retention.MODULES)) trial[k] = req.query[k] !== undefined ? parseDays(req.query[k], retention.MODULES[k].label) : saved[k];
+    const [pv, archives, last] = await Promise.all([
+      retention.preview(trial), retention.listArchives(),
+      db.query(`SELECT created_at, username, details FROM audit_logs WHERE action='admin.retention_run' ORDER BY id DESC LIMIT 1`),
+    ]);
+    res.json({
+      settings: saved, preview: pv, archives, minDays: retention.MIN_DAYS, maxDays: retention.MAX_DAYS,
+      modules: Object.fromEntries(Object.entries(retention.MODULES).map(([k, m]) => [k, { label: m.label, basis: m.basis }])),
+      lastRun: last.rows[0] || null,
+    });
+  }));
+
+  router.put('/retention', asyncH(async (req, res) => {
+    const next = { ...readDays(req.body || {}), auto: req.body && req.body.auto === true };
+    const before = await retention.getSettings();
+    await retention.saveSettings(next);
+    await audit(req, 'admin.retention_update', 'retention', null, { before, after: next });
+    res.json({ settings: next });
+  }));
+
+  router.post('/retention/run', asyncH(async (req, res) => {
+    if (!req.body || req.body.confirm !== 'DELETE') throw new HttpError(400, 'Type DELETE to confirm');
+    await stepUp.verify(req, { action: 'admin.retention_run', entity: 'retention', id: null }, req.body);
+    const only = Array.isArray(req.body.modules) && req.body.modules.length
+      ? req.body.modules.filter((m) => retention.MODULES[m]) : null;
+    const saved = await retention.getSettings();
+    let results;
+    try { results = await retention.runAll(saved, only); } catch (e) { throw new HttpError(409, e.message); }
+    await audit(req, 'admin.retention_run', 'retention', null, { trigger: 'manual', settings: saved, results });
+    res.json({ results });
+  }));
+
+  router.get('/retention/archives/:name', asyncH(async (req, res) => {
+    const abs = retention.archivePath(req.params.name);
+    if (!abs) throw new HttpError(404, 'Archive not found');
+    try { await require('fs/promises').access(abs); } catch { throw new HttpError(404, 'Archive not found'); }
+    await audit(req, 'admin.retention_download', 'retention', null, { file: req.params.name });
+    res.download(abs, req.params.name);
   }));
 };

@@ -100,6 +100,9 @@ const ACTION_LABELS = {
   'admin.backup_restore': 'Restored Backup',
   'admin.backup_schedule': 'Changed Backup Schedule',
   'admin.backup_scheduled': 'Scheduled Backup',
+  'admin.retention_update': 'Changed Data Retention',
+  'admin.retention_run': 'Removed Old Records',
+  'admin.retention_download': 'Downloaded Retention Archive',
   'admin.user_bulk': 'Changed Several Users',
   'admin.user_signout': 'Signed User Out',
   'admin.dropdown_merge': 'Merged Dropdown Options',
@@ -286,6 +289,18 @@ function formatDetails(row) {
 
     case 'admin.backup_scheduled':
       return d.outcome === 'failed' ? `Scheduled backup could not start: ${d.error || ''}` : `Scheduled ${d.mode || ''} backup started`;
+
+    case 'admin.retention_update':
+      return 'Changed how long records are kept';
+
+    case 'admin.retention_run': {
+      const r = d.results || {};
+      const n = Object.entries(r).map(([k, x]) => `${k}: ${x.deleted}`).join(', ');
+      return `${d.trigger === 'scheduled' ? 'Scheduled' : 'Manual'} removal of old records${n ? ` (${n})` : ''}`;
+    }
+
+    case 'admin.retention_download':
+      return `Downloaded ${d.file || 'archive'}`;
 
     case 'admin.dropdown_create':
       return `Created ${d.category}: ${d.value}`;
