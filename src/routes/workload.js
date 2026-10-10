@@ -583,6 +583,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
     let created = 0;
     let updated = 0;
     const createdIds = [];
+    const results = [];   // what was stored for the auto-filled columns, so the table can tell a cleared PSD / Platform that was filled in again
     for (let i = 0; i < list.length; i++) {
       const row = list[i] || {};
       try {
@@ -595,6 +596,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           assertNotLocked(locks, rec.work_date);
           await updateRow(c, id, rec, req.user.id);
           await audit(req, 'workload.update', 'workload_item', id, rec, c);
+          results.push({ id, psd: rec.psd || '', prog_name: rec.prog_name || '', platform: rec.platform || '' });
           updated++;
         } else {
           const rec = await parseRow(c, row, null, customCols);
@@ -609,7 +611,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
         throw e;
       }
     }
-    return { created, updated, createdIds };
+    return { created, updated, createdIds, results };
   });
   res.json({ ok: true, ...out });
 }));

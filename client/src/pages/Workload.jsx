@@ -1457,9 +1457,26 @@ export default function Workload() {
     }
     if (!list.length) { toast(note ? `Nothing changed. ${note}` : 'Nothing changed (the cells already hold that, or the rows are locked)', 'err'); return; }
     try {
-      await post('/api/workload/batch', { rows: list });
+      const out = await post('/api/workload/batch', { rows: list });
+      // PSD / Prog. Name / Platform are filled in again by the server when the plug is on the PSD Daily Plug List (or the Plug ID gives the Platform): say so
+      const refilled = new Set();
+      if (label === 'cleared') {
+        const byId = new Map((out.results || []).map((x) => [x.id, x]));
+        for (let ri = n.r0; ri <= n.r1; ri++) {
+          const r = pageRows[ri];
+          const got = r && byId.get(r.id);
+          if (!got) continue;
+          for (let ci = n.c0; ci <= n.c1; ci++) {
+            const k = tableCols[ci];
+            if (['psd', 'prog_name', 'platform'].includes(k) && got[k] && String(cellText(r, k) ?? '') !== '' ) { refilled.add(k); cellCount--; }
+          }
+        }
+      }
+      const why = refilled.size ? `${[...refilled].map((k) => meta.fields[k].label).join(', ')} came back — filled in again from the PSD Daily Plug List / Plug ID, so it can't be left blank` : '';
+      const extra = [note, why].filter(Boolean).join('; ');
+      if (cellCount <= 0) { toast(`Nothing was cleared. ${extra}`.trim(), 'err'); load(); return; }
       pushTbl({ label, undo: async () => { await post('/api/workload/batch', { rows: olds }); }, redo: async () => { await post('/api/workload/batch', { rows: list }); } });
-      toast(`${cellCount} cell${cellCount === 1 ? '' : 's'} ${label}${note ? ` — ${note}` : ''}`);
+      toast(`${cellCount} cell${cellCount === 1 ? '' : 's'} ${label}${extra ? ` — ${extra}` : ''}`);
       load();
       loadStats();
     } catch (e) { toast(e.message, 'err'); }
