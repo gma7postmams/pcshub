@@ -901,8 +901,9 @@ table.t.wl.cards td .sub, table.t.wl.cards td .cm-meta { white-space: normal; ov
 /* a short list still fills the box: the table is as tall as the box and a last, empty row takes the spare height, so the column lines run all the way down */
 .wl-fit > table.t.wl:not(.cards) { height: 100%; }
 table.t.wl tr.fill-row { height: 100%; }
-table.t.wl tr.fill-row td { padding: 0; cursor: default; }
-table.t.wl tbody tr.fill-row:hover td { background: transparent; }
+table.t.wl tr.fill-row td { padding: 0; cursor: default; border-bottom: 0; background-image: linear-gradient(to bottom, transparent 50px, var(--border) 50px); background-size: 100% 51px; }   /* faint row lines at the normal row height */
+table.t.wl tr.fill-row td.rn { cursor: default; }
+table.t.wl tbody tr.fill-row:hover td { background-color: transparent; }
 /* Units Concerned (and any pills in a Workload table cell) are centred in their cell, like every other column */
 table.t.wl .chips { justify-content: center; }
 
