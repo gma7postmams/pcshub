@@ -389,8 +389,8 @@ export default function Workload() {
     document.addEventListener('keydown', esc);
     return () => { document.removeEventListener('fullscreenchange', on); document.removeEventListener('keydown', esc); try { if (document.fullscreenElement) document.exitFullscreen(); } catch (_) { /* leaving anyway */ } };
   }, []);
-  const isGrid = !cards;
-  const mode = isGrid ? 'excel' : 'table';
+  const [mode, setMode] = useState(() => readView(s.session_key).mode);   // Table or Excel, kept across a refresh while you stay signed in (phones always get the card list)
+  const isGrid = mode === 'excel' && !cards;   // Excel mode = the editable grid; Table mode = rows with the New / Edit form (the layout around both is the same)
   const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('wl:rows')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
   const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', from: '', to: '' });
   const [stats, setStats] = useState(null);   // summary cards + tab badges
@@ -561,6 +561,7 @@ export default function Workload() {
     || !!(await confirm('Discard unsaved changes?', `${dirtyCount} row(s) in the grid have unsaved changes. Leave without saving?`, { okText: 'Discard', danger: true }));
 
   const changeTab = async (t) => { if (t === tab || !(await okToLeave())) return; setTab(t); saveView(s.session_key, { t }); setOffset(0); };
+  const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setMode(m); saveView(s.session_key, { m }); setOffset(0); };
   const goOffset = async (o) => { if (o === offset || !(await okToLeave())) return; setOffset(o); };
   const changeSize = async (e) => { const n = Number(e.target.value); if (n === size || !(await okToLeave())) return; try { localStorage.setItem('wl:rows', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
   const sortBy = async (s2) => { if (!(await okToLeave())) return; setSort(s2); };
@@ -1504,7 +1505,7 @@ export default function Workload() {
       ) : null}
 
       <div className={`card wl-card${full ? ' full' : ' '}`.trim()}>
-        {isGrid ? (
+        {!cards ? (
           <div className="wl-filters wl-toolbar">
             <label className="wl-search short">
               <SearchIcon />
@@ -1520,13 +1521,22 @@ export default function Workload() {
             <div className="wl-presence"><PresenceAvatars path="/workload" /></div>
             <div className="wl-iconbar">
               {canWrite ? <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
-              {canWrite ? <button type="button" className="btn ibtn" id="add-row" aria-label="Add row" title="Add row" onClick={addRow}><PlusIcon /></button> : null}
+              <div className="segmented" id="mode-seg">
+                <button type="button" className={mode === 'table' ? 'on' : ''} onClick={() => changeMode('table')}>Table</button>
+                <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
+              </div>
+              {canWrite && isGrid ? <button type="button" className="btn ibtn" id="add-row" aria-label="Add row" title="Add row" onClick={addRow}><PlusIcon /></button> : null}
+              {canWrite && !isGrid ? <button type="button" className="btn ibtn primary" id="new-btn" aria-label="New Workload" title="New Workload" onClick={() => setForm({ rec: null })}><PlusIcon /></button> : null}
               <button type="button" className="btn ibtn" id="export-btn" aria-label="Export to Excel" title="Export to Excel" onClick={exportXlsx}><DownloadIcon /></button>
-              {canWrite && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? (
+              {canWrite && !isGrid && pickedCount ? (
+                <button type="button" className="btn ibtn danger" id="delete-selected-btn" onClick={() => deleteSelected()}
+                  aria-label="Delete selected rows" title={`Delete Selected (${pickedCount})`}><TrashIcon /></button>
+              ) : null}
+              {canWrite && isGrid && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? (
                 <button type="button" className="btn ibtn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}
                   aria-label="Delete selected rows" title={`Delete ${selRows.filter((r) => !xlLocked(r)).length > 1 ? `${selRows.filter((r) => !xlLocked(r)).length} rows` : 'row'}`}><TrashIcon /></button>
               ) : null}
-              {canWrite ? (
+              {canWrite && isGrid ? (
                 <button type="button" className="btn ibtn primary" id="save-grid" disabled={saving || !dirtyCount} onClick={saveGrid}
                   aria-label="Save changes" title={saving ? 'Saving…' : `Save changes${dirtyCount ? ` (${dirtyCount})` : ''}`}>
                   <SaveIcon />{dirtyCount ? <i className="ib-badge">{dirtyCount}</i> : null}
@@ -1539,14 +1549,14 @@ export default function Workload() {
                 canWrite && { id: 'import-btn', label: importing ? 'Importing…' : 'Import from Excel', icon: <UploadIcon />, disabled: importing, onClick: () => fileRef.current && fileRef.current.click() },
                 s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
-                canWrite && selRows.length > 0 && { id: 'priority-btn', label: allPrio ? 'Remove Priority' : 'Set Priority', onClick: togglePriority, keep: true },
+                canWrite && isGrid && selRows.length > 0 && { id: 'priority-btn', label: allPrio ? 'Remove Priority' : 'Set Priority', onClick: togglePriority, keep: true },
               ]} />
             </div>
           </div>
         ) : (
           <>
         <div className={`wl-tabbar${isGrid ? ' acts-only' : ''}`}>
-          {!isGrid ? (
+          {cards ? (
             <div className="tabs" id="section-tabs">
               {meta.tabs.map((t) => (
                 <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => changeTab(t.key)}>
@@ -1722,7 +1732,7 @@ export default function Workload() {
                       </table>
                     )}
             </div>
-            <Pager total={total} offset={offset} size={size} onOffset={setOffset} />
+            <Pager total={total} offset={offset} size={size} onOffset={cards ? setOffset : goOffset} head={cards ? undefined : sheetTabs} lead={cards ? undefined : rowsPicker} />
             {tctx ? (
               <FitMenu x={tctx.x} y={tctx.y} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
                 <button type="button" disabled={!tblHist.current.past.length} onClick={() => { setTctx(null); undoTbl(); }}>Undo<span>Ctrl+Z</span></button>
