@@ -16,7 +16,6 @@ const { audit } = require('../audit');
 const router = express.Router();
 
 const DIR = path.join(__dirname, '..', '..', 'uploads', 'knowledge');
-const SEED_DIR = path.join(__dirname, '..', '..', 'knowledge-seed');
 const MAX_MB = parseInt(process.env.KNOWLEDGE_MAX_MB, 10) || 25;
 const MAX_FILES = 20;   // several PDFs can be added at once; each gets its own name
 const TRASH_DAYS = 30;  // a deleted document stays in the Trash this long, then its file is removed
@@ -98,31 +97,6 @@ async function store(req, tmpPath, filename, size, hash, title, tags = []) {
   }
 }
 
-// First visit: put the reference PDFs shipped in knowledge-seed/ into the list once.
-// A settings flag means a deleted reference is not brought back.
-async function seedOnce(req) {
-  const claim = await db.query(
-    `INSERT INTO app_settings (key, value) VALUES ('knowledge_seeded', '1') ON CONFLICT (key) DO NOTHING RETURNING key`
-  );
-  if (!claim.rowCount) return;
-  let names = [];
-  try { names = fs.readdirSync(SEED_DIR).filter((f) => /\.pdf$/i.test(f)).sort(); } catch (e) { return; }
-  for (const name of names) {
-    try {
-      const tmp = path.join(DIR, `tmp-seed-${crypto.randomBytes(6).toString('hex')}`);
-      fs.copyFileSync(path.join(SEED_DIR, name), tmp);
-      if (!isPdf(tmp)) { rm(tmp); continue; }
-      const hash = sha256(tmp);
-      const dup = await db.query('SELECT 1 FROM knowledge_docs WHERE sha256=$1', [hash]);   // a seeded reference that was deleted is not brought back
-      if (dup.rowCount) { rm(tmp); continue; }
-      const row = await store({ user: null }, tmp, name, fs.statSync(tmp).size, hash, titleFrom(name));
-      await audit(req, 'knowledge.seed', 'knowledge_docs', row.id, { filename: name });
-    } catch (e) {
-      console.error('[knowledge] seed failed for', name, e.message);
-    }
-  }
-}
-
 // Ids are 32-bit in the database: an out-of-range number is simply a document that does not exist.
 router.param('id', (req, res, next, raw) => {
   try { req.params.id = v.id(raw); } catch (e) { return res.status(404).json({ error: 'Document not found' }); }
@@ -140,7 +114,6 @@ async function purgeOldTrash() {
 }
 
 router.get('/', asyncH(async (req, res) => {
-  await seedOnce(req);
   await purgeOldTrash();
   const { rows } = await db.query(`SELECT ${COLS} FROM knowledge_docs WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC`);
   res.json(rows);

@@ -387,35 +387,8 @@ INSERT INTO app_settings (key, value) VALUES
   ('logo_path', '')
 ON CONFLICT (key) DO NOTHING;
 
--- Starter dropdown values (only inserted if the category is empty)
-INSERT INTO dropdown_options (category, value, sort_order)
-SELECT 'platform', v, o FROM (VALUES
-  ('TV',1),('YouTube',2),('Facebook',3),('TikTok',4),('Instagram',5),('Website',6),('X',7)
-) AS t(v,o)
-WHERE NOT EXISTS (SELECT 1 FROM dropdown_options WHERE category = 'platform');
-
--- Workload Platform choices: the values the template's Platform formula produces, plus the older list.
--- Added once (flag in app_settings) so options an Admin later deletes are not brought back on restart.
-INSERT INTO dropdown_options (category, value, sort_order)
-SELECT 'workload_platform', v, o FROM (VALUES
-  ('GMA',1),('GTV',2),('HOA',3),('IHM',4),('DIGITAL',5),('GPTV',6),('GNTV',7),('GLTV',8),
-  ('INTL DIGITAL',9),('INTL MKTG',10),
-  ('REG/TDMD (SYNERGY)',11),('REG/TDMD (SPARKLE)',12),('REG/TDMD (GMA MUSIC)',13),('REG/TDMD (GMA PICTURES)',14),
-  ('REG/TDMD (RGMA)',15),('REG/TDMD (RTV LOCAL AIRING)',16),('REG/TDMD (PG_REGIONAL AIRING)',17),
-  ('REG/TDMD (PSD-DIGITAL)',18),
-  ('ALL 6 CHANNELS',19),('AFFORDABOX',20),('CORPORATE',21),('GMAI',22),('GMAIN',23),('GMA NOW',24),
-  ('HALLYPOP',25),('PINOY HITS',26),('PSD-DIGITAL',27),('RADIO',28)
-) AS t(v,o)
-WHERE NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'seed_workload_platform_v2')
-ON CONFLICT (category, value) DO NOTHING;
-INSERT INTO app_settings (key, value) VALUES ('seed_workload_platform_v2', '1') ON CONFLICT (key) DO NOTHING;
-
--- Plug Type choices (values seen in the Sept 2026 template); only inserted if the category is empty
-INSERT INTO dropdown_options (category, value, sort_order)
-SELECT 'plug_type', v, o FROM (VALUES
-  ('EPISODIC',1),('SEASONAL',2),('BUMPER',3),('POP-UP/POP LOGO',4),('RADIO',5)
-) AS t(v,o)
-WHERE NOT EXISTS (SELECT 1 FROM dropdown_options WHERE category = 'plug_type');
+-- Dropdown lists (Platform, Workload Platform, Plug Type) start EMPTY: an Admin fills them in under Settings / Administration > Dropdowns.
+-- Nothing is added here, so values an Admin deletes are never brought back on restart.
 
 -- Themes: older installs stored the Midnight accent as an explicit override; clear it so the theme's own accent applies
 INSERT INTO app_settings (key, value) VALUES ('theme', 'midnight') ON CONFLICT (key) DO NOTHING;
