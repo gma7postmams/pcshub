@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { get } from '../../lib/api.js';
 import { Empty } from '../../components/ui.jsx';
+import { useSession } from '../../context.jsx';
 import Overview from './Overview.jsx';
 import Access from './Access.jsx';
 import Dropdowns from './Dropdowns.jsx';
@@ -17,14 +18,18 @@ const TABS = [
 ];
 // Users, Roles and Groups are the Access tab's three parts. Old links (#users, #roles, #groups) still land on the right one.
 const ALIAS = { users: 'access/users', roles: 'access/roles', groups: 'access/groups' };
-const fromHash = () => {
+// An Admin (not System Admin) gets only these two tabs; the server enforces the same.
+const ADMIN_TABS = ['dropdowns', 'audit'];
+const fromHash = (tabs = TABS) => {
   const raw = window.location.hash.slice(1);
   const [t, sub = ''] = (ALIAS[raw] || raw).split('/');
-  return { tab: TABS.some(([k]) => k === t) ? t : 'overview', sub };
+  return { tab: tabs.some(([k]) => k === t) ? t : tabs[0][0], sub };
 };
 
 export default function Admin() {
-  const [loc, setLoc] = useState(fromHash);
+  const { user } = useSession();
+  const tabs = user.role === 'System Admin' ? TABS : TABS.filter(([k]) => ADMIN_TABS.includes(k));
+  const [loc, setLoc] = useState(() => fromHash(tabs));
   const { tab, sub } = loc;
   const setTab = useCallback((t) => { const [k, sb = ''] = (ALIAS[t] || t).split('/'); setLoc({ tab: k, sub: sb }); }, []);
   const setSub = useCallback((sb) => setLoc((l) => ({ ...l, sub: sb })), []);
@@ -34,7 +39,7 @@ export default function Admin() {
   const refreshModel = useCallback(() => get('/api/admin/access-model').then(setModel), []);
   useEffect(() => { refreshModel(); }, [refreshModel]);
   useEffect(() => {
-    const onHash = () => setLoc(fromHash());
+    const onHash = () => setLoc(fromHash(tabs));
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
@@ -45,7 +50,7 @@ export default function Admin() {
     if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest', inline: 'center' });
   }, [tab]);
 
-  const Tab = (TABS.find(([k]) => k === tab) || TABS[0])[2];
+  const Tab = (tabs.find(([k]) => k === tab) || tabs[0])[2];
   return (
     <main className="container wide wl-page">
       <h1 className="sr-only">Admin</h1>
@@ -53,7 +58,7 @@ export default function Admin() {
       <div className="card wl-card admin-card">
         <div className="wl-tabbar">
           <div className="tabs admin-tabs" id="tabs" ref={bar} role="tablist">
-            {TABS.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={tab === k} data-t={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
+            {tabs.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={tab === k} data-t={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
           </div>
         </div>
         <div id="pane" className="admin-pane">{model ? <Tab model={model} refreshModel={refreshModel} go={setTab} sub={sub} onSub={setSub} /> : <Empty>Loading…</Empty>}</div>

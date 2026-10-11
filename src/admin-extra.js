@@ -31,9 +31,9 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
       const { rows } = await c.query('SELECT id, username, full_name, role, is_active FROM users WHERE id = ANY($1::int[]) FOR UPDATE', [ids]);
       if (!rows.length) throw new HttpError(404, 'User not found');
       // At least one active Admin must stay after the change.
-      const loses = rows.filter((u) => u.role === 'Admin' && u.is_active && (action === 'deactivate' || (action === 'role' && role !== 'Admin')));
+      const loses = rows.filter((u) => u.role === 'System Admin' && u.is_active && (action === 'deactivate' || (action === 'role' && role !== 'System Admin')));
       if (loses.length) {
-        const left = await c.query(`SELECT count(*)::int AS n FROM users WHERE role='Admin' AND is_active AND id <> ALL($1::int[])`, [loses.map((u) => u.id)]);
+        const left = await c.query(`SELECT count(*)::int AS n FROM users WHERE role='System Admin' AND is_active AND id <> ALL($1::int[])`, [loses.map((u) => u.id)]);
         if (!left.rows[0].n) throw new HttpError(400, 'At least one active Admin must remain');
       }
       const target = rows.map((u) => u.id);
@@ -70,8 +70,8 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
     const [users, events, failed] = await Promise.all([
       db.query(`SELECT count(*) FILTER (WHERE is_active)::int AS active,
                        count(*) FILTER (WHERE is_active AND totp_enabled)::int AS twofa_on,
-                       count(*) FILTER (WHERE is_active AND (twofa_required OR (role='Admin' AND $1::boolean)) AND NOT totp_enabled)::int AS twofa_pending,
-                       count(*) FILTER (WHERE is_active AND role='Admin' AND NOT totp_enabled)::int AS admins_without_2fa,
+                       count(*) FILTER (WHERE is_active AND (twofa_required OR (role IN ('Admin','System Admin') AND $1::boolean)) AND NOT totp_enabled)::int AS twofa_pending,
+                       count(*) FILTER (WHERE is_active AND role IN ('Admin','System Admin') AND NOT totp_enabled)::int AS admins_without_2fa,
                        count(*) FILTER (WHERE locked_until > now())::int AS locked,
                        count(*) FILTER (WHERE must_change_password)::int AS must_change
                   FROM users`, [settings.get().requireAdmin2fa]),

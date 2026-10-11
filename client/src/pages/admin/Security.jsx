@@ -86,7 +86,7 @@ function Rules({ policy, limits, email, onSaved }) {
     <div className="card mb-12">
       <div className="card-head"><h2>Rules</h2><button type="button" className="btn primary sm" disabled={!dirty || busy || Boolean(bad)} onClick={save}>Save rules</button></div>
       <div className="card-pad">
-        <div className="sched-grid">
+        <div className="sched-grid top">
           {NUM.map(([k, label, unit, hint]) => (
             <label className="f" key={k}><span>{label} <span className="dim">({unit})</span></span>
               <input type="number" min={limits[k].min} max={limits[k].max} value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} aria-invalid={Number(f[k]) < limits[k].min || Number(f[k]) > limits[k].max} />

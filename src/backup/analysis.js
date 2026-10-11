@@ -55,7 +55,7 @@ const createScratch = async () => {
 };
 const dropScratch = (name) => withAdminClient((c) => c.query(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`));
 
-const activeAdmins = async (runner) => (await runner.query(`SELECT count(*)::int AS n FROM users WHERE role = 'Admin' AND is_active`)).rows[0].n;
+const activeAdmins = async (runner) => (await runner.query(`SELECT count(*)::int AS n FROM users WHERE role IN ('Admin','System Admin') AND is_active`)).rows[0].n;
 
 /** Called after the upload is on disk. Throws 409 when another backup operation holds the lock. */
 async function start(req, file, originalName) {

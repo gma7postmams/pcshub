@@ -16,7 +16,7 @@ const cfg = require('../backup/config');
 
 // Mounted behind requirePageAccess('/admin'); the role is re-checked here as defence in depth.
 const router = express.Router();
-router.use((req, res, next) => (req.user && req.user.role === 'Admin' ? next() : res.status(403).json({ error: 'Admin role required' })));
+router.use((req, res, next) => (req.user && req.user.role === 'System Admin' ? next() : res.status(403).json({ error: 'System Admin role required' })));
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 router.param('id', (req, res, next, id) => (UUID.test(id) ? next() : res.status(404).json({ error: 'Backup not found' })));

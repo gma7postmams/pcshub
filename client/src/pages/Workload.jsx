@@ -1194,7 +1194,7 @@ export default function Workload() {
   };
   // ---- Table mode: select rows by dragging across them (or Shift / Ctrl+click), with the same shortcuts as Excel mode ----
   const total = data && data.total ? data.total : 0;
-  const isAdminUser = !!(s.user && s.user.role === 'Admin');
+  const isAdminUser = !!(s.user && ['Admin', 'System Admin'].includes(s.user.role));
   const pageRows = data && data.rows ? data.rows : [];
   const pickedRowsList = pageRows.filter((r) => (allMatching || picked.has(r.id)) && !isLocked(r.work_date, meta.locks));
   const pickedAllPrio = pickedRowsList.length > 0 && pickedRowsList.every((r) => r.is_priority);

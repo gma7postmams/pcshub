@@ -15,7 +15,13 @@ const { loadRoles } = require('../roles');
 
 // Mounted behind requirePageAccess('/admin') => Admin role only; the role is re-checked here as defence in depth.
 const router = express.Router();
-router.use((req, res, next) => (req.user && req.user.role === 'Admin' ? next() : res.status(403).json({ error: 'Admin role required' })));
+// System Admin: everything here. Admin: only the Audit Log and the Dropdowns (and the access-model reference the Admin page loads).
+const ADMIN_ALLOWED = /^\/(audit|dropdowns)(\/|$)|^\/access-model$/;
+router.use((req, res, next) => {
+  const role = req.user && req.user.role;
+  if (role === 'System Admin' || (role === 'Admin' && ADMIN_ALLOWED.test(req.path))) return next();
+  res.status(403).json({ error: role === 'Admin' ? 'This needs the System Admin role' : 'System Admin role required' });
+});
 
 const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads', 'branding');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -42,7 +48,7 @@ router.get('/roles', asyncH(async (req, res) => {
             (SELECT count(*)::int FROM users u WHERE u.role = r.name) AS users
        FROM roles r ORDER BY r.rank DESC, r.name`
   );
-  res.json(rows.map((r) => (r.name === 'Admin' ? { ...r, actions: [...ALL_ACTIONS] } : r)));
+  res.json(rows.map((r) => (r.name === 'System Admin' ? { ...r, actions: [...ALL_ACTIONS] } : r.name === 'Admin' ? { ...r, actions: [...ROLE_ACTIONS.Admin] } : r)));
 }));
 
 function parseRole(body) {
@@ -81,7 +87,7 @@ router.put('/roles/:name', asyncH(async (req, res) => {
   const b = parseRole(req.body || {});
   const cur = await db.query('SELECT is_builtin FROM roles WHERE name=$1', [old]);
   if (!cur.rows.length) throw new HttpError(404, 'Role not found');
-  if (old === 'Admin') throw new HttpError(400, 'The Admin role is fixed and cannot be changed');
+  if (old === 'Admin' || old === 'System Admin') throw new HttpError(400, `The ${old} role is fixed and cannot be changed`);
   if (cur.rows[0].is_builtin && b.name !== old) throw new HttpError(400, 'Built-in roles cannot be renamed');
   const before = (await db.query('SELECT action FROM role_actions WHERE role=$1', [old])).rows.map((r) => r.action);
   const added = b.actions.filter((a) => !before.includes(a));
@@ -225,7 +231,7 @@ async function parseUser(body, { creating }) {
 
 async function assertAnotherAdmin(c, excludingId) {
   const { rows } = await c.query(
-    `SELECT count(*)::int AS n FROM users WHERE role='Admin' AND is_active AND id <> $1`, [excludingId]
+    `SELECT count(*)::int AS n FROM users WHERE role='System Admin' AND is_active AND id <> $1`, [excludingId]
   );
   if (rows[0].n === 0) throw new HttpError(400, 'At least one active Admin must remain');
 }
@@ -253,8 +259,8 @@ router.put('/users/:id', asyncH(async (req, res) => {
   await db.tx(async (c) => {
     const cur = await c.query('SELECT username, full_name, email, role, group_id, is_active FROM users WHERE id=$1 FOR UPDATE', [id]);
     if (!cur.rows.length) throw new HttpError(404, 'User not found');
-    const wasAdmin = cur.rows[0].role === 'Admin' && cur.rows[0].is_active;
-    const staysAdmin = u.role === 'Admin' && u.is_active;
+    const wasAdmin = cur.rows[0].role === 'System Admin' && cur.rows[0].is_active;
+    const staysAdmin = u.role === 'System Admin' && u.is_active;
     if (wasAdmin && !staysAdmin) await assertAnotherAdmin(c, id);
     await c.query(
       `UPDATE users SET full_name=$2, email=$3, role=$4, group_id=$5, is_active=$6, updated_at=now() WHERE id=$1`,
@@ -294,8 +300,8 @@ router.post('/users/delete', asyncH(async (req, res) => {
   const gone = await db.tx(async (c) => {
     const { rows } = await c.query('SELECT id, username, full_name, role, is_active FROM users WHERE id = ANY($1::int[]) FOR UPDATE', [ids]);
     if (!rows.length) throw new HttpError(404, 'User not found');
-    if (rows.some((u) => u.role === 'Admin' && u.is_active)) {
-      const left = await c.query(`SELECT count(*)::int AS n FROM users WHERE role='Admin' AND is_active AND id <> ALL($1::int[])`, [rows.map((u) => u.id)]);
+    if (rows.some((u) => u.role === 'System Admin' && u.is_active)) {
+      const left = await c.query(`SELECT count(*)::int AS n FROM users WHERE role='System Admin' AND is_active AND id <> ALL($1::int[])`, [rows.map((u) => u.id)]);
       if (left.rows[0].n === 0) throw new HttpError(400, 'At least one active Admin must remain');
     }
     await c.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = ANY($1::int[])`, [rows.map((u) => u.id)]);

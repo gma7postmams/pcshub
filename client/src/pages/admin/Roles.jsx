@@ -47,11 +47,11 @@ export default function Roles({ model, refreshModel }) {
                   {roles.map((r) => <td key={r.name}>{cell(r.actions.includes(a))}</td>)}
                 </tr>
               ))}
-              <tr><td>Open pages / sections</td><td className="dim">—</td>{roles.map((r) => <td key={r.name} className="dim">{r.name === 'Admin' ? 'All' : 'Per group'}</td>)}</tr>
+              <tr><td>Open pages / sections</td><td className="dim">—</td>{roles.map((r) => <td key={r.name} className="dim">{['Admin', 'System Admin'].includes(r.name) ? 'All' : 'Per group'}</td>)}</tr>
               <tr><td>Users</td><td className="dim">—</td>{roles.map((r) => <td key={r.name}>{r.users ? <button type="button" className="linklike" onClick={() => setMembers(r)} title="Who has this role">{r.users} {r.users === 1 ? 'user' : 'users'}</button> : <span className="dim">0</span>}</td>)}</tr>
               <tr><td /><td />{roles.map((r) => (
                 <td key={r.name} className="nowrap">
-                  {r.name === 'Admin' ? <span className="dim">Fixed</span> : (
+                  {['Admin', 'System Admin'].includes(r.name) ? <span className="dim">Fixed</span> : (
                     <>
                       <button type="button" className="btn sm" data-edit={r.name} onClick={() => setEditing(r)}>Edit</button>{' '}
                       {r.is_builtin ? null : <button type="button" className="btn sm ghost" disabled={r.users > 0} title={r.users ? 'Users have this role' : undefined} onClick={() => remove(r)}>Delete</button>}

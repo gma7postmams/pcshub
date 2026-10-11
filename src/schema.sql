@@ -34,8 +34,12 @@ CREATE TABLE IF NOT EXISTS roles (
 );
 
 INSERT INTO roles (name, description, rank) VALUES
+  ('System Admin',
+   'Full access to everything, including users, groups, roles, security, branding, backup and restore, data retention, dropdowns and the audit log',
+   5),
+
   ('Admin',
-   'Full access to all modules including users, groups, permissions, branding, audit, backup and restore administration',
+   'Every page and action in the app; in the Admin area only the Audit Log and the Dropdowns',
    4),
 
   ('Manager',
@@ -58,7 +62,7 @@ ON CONFLICT (name) DO NOTHING;
 -- Actions each role may perform (managed in Admin > Roles). Built-in roles are seeded from src/permissions.js once (see migrate.js).
 ALTER TABLE roles ADD COLUMN IF NOT EXISTS is_builtin BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE roles ADD COLUMN IF NOT EXISTS actions_seeded BOOLEAN NOT NULL DEFAULT false;
-UPDATE roles SET is_builtin = true WHERE name IN ('Admin','Manager','Editor','Ingest','Viewer');
+UPDATE roles SET is_builtin = true WHERE name IN ('System Admin','Admin','Manager','Editor','Ingest','Viewer');
 CREATE TABLE IF NOT EXISTS role_actions (
   role    TEXT NOT NULL REFERENCES roles(name) ON UPDATE CASCADE ON DELETE CASCADE,
   action  TEXT NOT NULL,
@@ -576,3 +580,11 @@ DELETE FROM group_permissions WHERE perm_key = 'dashboard.recent';
 
 -- The Reports page (and its CSV export) was removed. Drop its retired permission keys from every group.
 DELETE FROM group_permissions WHERE perm_key IN ('reports', 'reports.ingest', 'reports.export');
+
+-- System Admin role. Existing Admin accounts become System Admin ONCE, so nobody loses the Admin area; Admin is then free to give to people
+-- who should only see the Audit Log and manage Dropdowns.
+UPDATE users SET role = 'System Admin'
+ WHERE role = 'Admin' AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'system_admin_v1');
+UPDATE roles SET description = 'Every page and action in the app; in the Admin area only the Audit Log and the Dropdowns'
+ WHERE name = 'Admin' AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'system_admin_v1');
+INSERT INTO app_settings (key, value) VALUES ('system_admin_v1', '1') ON CONFLICT (key) DO NOTHING;

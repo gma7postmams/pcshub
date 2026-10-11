@@ -65,8 +65,8 @@ export default function Profile() {
             <dl className="kv">
               <dt>Role</dt><dd>{u.role} <span className="dim">— what you can do</span></dd>
               <dt>Group</dt><dd>
-                {u.group || (u.role === 'Admin'
-                  ? <span className="dim">Not needed (Admin role opens every page)</span>
+                {u.group || (['Admin', 'System Admin'].includes(u.role)
+                  ? <span className="dim">Not needed (this role opens every page)</span>
                   : <span className="dim">Not enrolled — ask an Admin</span>)}{' '}
                 <span className="dim">— what you can open</span>
               </dd>

@@ -702,7 +702,7 @@ router.post('/bulk-delete', requireAction('workload.write'), asyncH(async (req, 
   let mode;
   let filters = null;
   if (body.all) {
-    if (!req.user || req.user.role !== 'Admin') throw new HttpError(403, 'Only an Admin can delete all rows');
+    if (!req.user || !['Admin', 'System Admin'].includes(req.user.role)) throw new HttpError(403, 'Only an Admin can delete all rows');
     mode = 'all matching';
     filters = {};
     ['team', 'units', 'platform', 'plug_type', 'from', 'to', 'q'].forEach((k) => { if (body.filters && body.filters[k]) filters[k] = String(body.filters[k]).slice(0, 200); });

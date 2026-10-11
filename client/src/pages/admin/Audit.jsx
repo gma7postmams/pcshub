@@ -1,9 +1,8 @@
 import { Fragment, useEffect, useState } from 'react';
 import { get } from '../../lib/api.js';
 import { fmtBytes, fmtDateTime } from '../../lib/util.js';
-import { Empty, useDebounced } from '../../components/ui.jsx';
+import { Empty, Pager, usePageSize, useDebounced } from '../../components/ui.jsx';
 
-const PAGE = 50;
 
 const ACTION_LABELS = {
   'auth.login': 'User Login',
@@ -614,6 +613,7 @@ export default function Audit() {
 
   const [f, setF] = useState({ action: '', category: '', user: '', q: '', record: '', from: '', to: '' });
   const [offset, setOffset] = useState(0);
+  const [PAGE, setPage] = usePageSize(window.location.pathname === '/activity-history' ? 'activity' : 'audit');
   const [d, setD] = useState(null);
   const [open, setOpen] = useState(() => new Set());
   const action = useDebounced(f.action);
@@ -639,7 +639,7 @@ export default function Audit() {
         setD(data); setOpen(new Set());
       })
       .catch(() => setD({ rows: [], total: 0 }));
-  }, [action, f.category, user, q, record, f.from, f.to, offset]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [action, f.category, user, q, record, f.from, f.to, offset, PAGE]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (k) => (e) => { setF((x) => ({ ...x, [k]: e.target.value })); setOffset(0); };
   const total = d ? d.total : 0;
@@ -730,12 +730,7 @@ export default function Audit() {
           </table>
         )}
       </div>
-      <div className="pager">
-        <span>{total ? `${offset + 1}–${Math.min(offset + PAGE, total)} of ${total}` : ''}</span>
-        <span className="grow" />
-        <button type="button" className="btn sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</button>
-        <button type="button" className="btn sm" disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</button>
-      </div>
+      <Pager total={total} offset={offset} size={PAGE} onOffset={setOffset} onSize={setPage} />
     </div>
   );
 }

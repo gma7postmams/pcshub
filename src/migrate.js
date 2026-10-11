@@ -109,8 +109,8 @@ async function seedAdmin(db) {
   const username = (process.env.ADMIN_USERNAME || '').trim();
   const password = process.env.ADMIN_PASSWORD || '';
   if (!username || !password) {
-    const { rows } = await db.query(`SELECT 1 FROM users WHERE role='Admin' LIMIT 1`);
-    if (!rows.length) console.warn('[seed] No Admin exists and ADMIN_USERNAME/ADMIN_PASSWORD not set.');
+    const { rows } = await db.query(`SELECT 1 FROM users WHERE role='System Admin' LIMIT 1`);
+    if (!rows.length) console.warn('[seed] No System Admin exists and ADMIN_USERNAME/ADMIN_PASSWORD not set.');
     return;
   }
   const { rows } = await db.query('SELECT id FROM users WHERE lower(username)=lower($1)', [username]);
@@ -122,10 +122,10 @@ async function seedAdmin(db) {
   const hash = await bcrypt.hash(password, 12);
   await db.query(
     `INSERT INTO users (username, full_name, email, password_hash, role, must_change_password)
-     VALUES ($1,$2,$3,$4,'Admin',TRUE)`,
+     VALUES ($1,$2,$3,$4,'System Admin',TRUE)`,
     [username, process.env.ADMIN_FULLNAME || 'System Administrator', email, hash]
   );
-  console.log(`[seed] Admin user "${username}" created (password change required on first login).`);
+  console.log(`[seed] System Admin user "${username}" created (password change required on first login).`);
 }
 
 module.exports = { migrate };

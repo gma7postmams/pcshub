@@ -422,7 +422,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
 
   // ---- delete all: the selected day's list, or every day's (Admin only). Workload rows already made from plugs are not touched. ----
   router.post('/delete-all', requireAction('plugs.write'), asyncH(async (req, res) => {
-    if (!req.user || req.user.role !== 'Admin') throw new HttpError(403, 'Only an Admin can delete the whole plug list');
+    if (!req.user || !['Admin', 'System Admin'].includes(req.user.role)) throw new HttpError(403, 'Only an Admin can delete the whole plug list');
     const body = req.body || {};
     const scope = body.scope === 'all' ? 'all' : 'range';   // 'range' = what a view shows: ?from / ?to / ?q (a single day is from = to)
     let filters = null;

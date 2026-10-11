@@ -3,7 +3,7 @@ import { get, post, put } from '../../lib/api.js';
 import { fmtDateTime } from '../../lib/util.js';
 import { useSession } from '../../context.jsx';
 import { PlusIcon } from '../../components/Icons.jsx';
-import { Empty, Modal, Options, RoleBadge, useConfirm, useForm, useToast } from '../../components/ui.jsx';
+import { Empty, Modal, Options, Pager, RoleBadge, usePageSize, useConfirm, useForm, useToast } from '../../components/ui.jsx';
 import { keyLabels } from './labels.js';
 
 export default function Users({ model }) {
@@ -20,6 +20,9 @@ export default function Users({ model }) {
   const [f2fa, setF2fa] = useState('');
   const [bulk, setBulk] = useState({ action: '', value: '' });
   const [picked, setPicked] = useState(() => new Set());
+  const [size, setSize] = usePageSize('users');
+  const [offset, setOffset] = useState(0);
+  useEffect(() => { setOffset(0); }, [q, fRole, fGroup, fStatus, f2fa]);   // a new search starts on the first page
 
   const load = useCallback(async () => {
     const [u, g] = await Promise.all([get('/api/admin/users'), get('/api/admin/groups')]);
@@ -42,6 +45,7 @@ export default function Users({ model }) {
     if (f2fa === 'off' && u.totp_enabled) return false;
     return true;
   });
+  const pageRows = shown.slice(offset, offset + size);
   const filtered = Boolean(term || fRole || fGroup || fStatus || f2fa);
   const clearFilters = () => { setQ(''); setFRole(''); setFGroup(''); setFStatus(''); setF2fa(''); };
   const selectable = shown.filter((u) => u.id !== s.user.id);
@@ -108,14 +112,14 @@ export default function Users({ model }) {
           <thead><tr><th className="chk"><input type="checkbox" checked={allOn} disabled={!selectable.length} onChange={() => setPicked(allOn ? new Set() : new Set(selectable.map((u) => u.id)))} aria-label="Select all users" /></th><th>Name</th><th>Username</th><th>Role</th><th>Group</th><th>Status</th><th>2FA</th><th>Last login</th><th /></tr></thead>
           <tbody>
             {!shown.length ? <tr><td colSpan={9} className="empty">No users match your search or filters.</td></tr> : null}
-            {shown.map((u) => (
+            {pageRows.map((u) => (
               <tr key={u.id}>
                 <td className="chk"><input type="checkbox" checked={picked.has(u.id)} disabled={u.id === s.user.id} title={u.id === s.user.id ? 'You cannot delete yourself' : undefined} onChange={() => toggle(u.id)} aria-label={`Select ${u.full_name}`} /></td>
                 <td><strong>{u.full_name}</strong>{u.email ? <div className="dim">{u.email}</div> : null}</td>
                 <td className="mono">{u.username}</td>
                 <td><RoleBadge role={u.role} /></td>
                 <td>{u.group_name ? <span className="group-chip">{u.group_name}</span>
-                  : u.role === 'Admin' ? <span className="dim">— (full access)</span> : <span className="pill s-pending">Not enrolled</span>}</td>
+                  : (u.role === 'Admin' || u.role === 'System Admin') ? <span className="dim">— (every page)</span> : <span className="pill s-pending">Not enrolled</span>}</td>
                 <td>
                   {u.is_active ? <span className="pill s-approved">Active</span> : <span className="pill s-hold">Disabled</span>}
                   {locked(u) ? <> <span className="pill s-rejected">Locked</span></> : null}
@@ -129,6 +133,7 @@ export default function Users({ model }) {
           </tbody>
         </table>
       </div>
+      <Pager total={shown.length} offset={Math.min(offset, Math.max(0, (Math.ceil(shown.length / size) - 1) * size))} size={size} onOffset={setOffset} onSize={setSize} />
       {editing ? (
         <UserForm u={editing.id ? editing : null} groups={groups} model={model} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />
       ) : null}
@@ -151,7 +156,7 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
   const emailOk = s.user.email_2fa_available;
 
   const g = groups.find((x) => String(x.id) === f.group_id);
-  const hint = f.role === 'Admin' ? 'Admin role opens every page regardless of group.'
+  const hint = f.role === 'System Admin' ? 'System Admin: everything, including the whole Admin area.' : f.role === 'Admin' ? 'Admin opens every page regardless of group; in the Admin area only the Audit Log and Dropdowns.'
     : g ? `Opens: ${g.perms.filter((k) => !k.includes('.')).map((k) => LABEL[k] || k).join(', ') || 'no pages'} + Profile`
       : 'Not enrolled: user can only open Profile until assigned to a group.';
 

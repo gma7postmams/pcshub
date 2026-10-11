@@ -17,7 +17,7 @@ export default function PlugListPage() {
         <PlugList
           canWrite={s.can('plugs.write')}
           canWorkload={canWorkload}
-          isAdmin={!!(s.user && s.user.role === 'Admin')}
+          isAdmin={!!(s.user && ['Admin', 'System Admin'].includes(s.user.role))}
         />
       </div>
     </main>

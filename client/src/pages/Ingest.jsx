@@ -795,7 +795,7 @@ export default function Ingest() {
         <IngestDetail
           r={detail}
           canWrite={canWrite && (!detail.cm_status || s.can('ingest.cm_complete'))}
-          canDelete={canDelete && (!detail.cm_status || (detail.cm_status === 'DONE' && s.user.role === 'Admin'))}   // a CM-decided request is kept as history, except that an Admin can delete one that is DONE
+          canDelete={canDelete && (!detail.cm_status || (detail.cm_status === 'DONE' && ['Admin', 'System Admin'].includes(s.user.role)))}   // a CM-decided request is kept as history, except that an Admin can delete one that is DONE
           canApprove={canApprove && !detail.approved_by}
           approveReady={!!(detail.destination_folder && String(detail.destination_folder).trim())}
           canUnapprove={canApprove && !!detail.approved_by}

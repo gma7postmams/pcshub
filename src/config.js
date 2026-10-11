@@ -9,7 +9,7 @@ const COOKIE_NAME = cookieSecure ? '__Host-phub.sid' : 'phub.sid';
 // 2FA is off for everyone by default. An Admin turns it on (or off) per user; a user it is on for must enrol before using the app.
 // Also on for every Admin when Admin > Security > "Require 2FA for Admins" is switched on.
 function twofaRequired(user) {
-  return Boolean(user && (user.twofa_required || (user.role === 'Admin' && require('./security-settings').get().requireAdmin2fa)));
+  return Boolean(user && (user.twofa_required || (['Admin', 'System Admin'].includes(user.role) && require('./security-settings').get().requireAdmin2fa)));
 }
 
 // Trust proxy: required behind nginx/Traefik so rate limits and audit logs see real client IPs

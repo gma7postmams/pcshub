@@ -566,7 +566,7 @@ router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(asyn
 
 // A request with a CM decision is kept as a historical record — except that an Admin may delete one that is DONE (NON-COMPLIANT ones stay).
 function deleteBlock(cm, user) {
-  if (!cm || (cm === 'DONE' && user && user.role === 'Admin')) return null;
+  if (!cm || (cm === 'DONE' && user && ['Admin', 'System Admin'].includes(user.role))) return null;
   return cm === 'DONE' ? 'Only an Admin can delete a request that is DONE in CM' : 'CM-completed requests are preserved as historical records';
 }
 

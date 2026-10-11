@@ -13,12 +13,40 @@ export const Pill = ({ s, children }) => <span className={`pill ${PILL[s] || 's-
 // Admin / Manager / Editor / Viewer / Ingest have their own colours (app.css, .r-<name>); a role created later in Admin → Roles gets a colour of its own
 // from this palette, always the same one for the same name, so no role ever shows as a plain, colourless label.
 const ROLE_PALETTE = ['#0ea5e9', '#ec4899', '#f59e0b', '#6366f1', '#84cc16', '#14b8a6', '#f97316', '#a855f7'];
-const BUILT_IN_ROLES = ['Admin', 'Manager', 'Editor', 'Viewer', 'Ingest'];
+const BUILT_IN_ROLES = ['System Admin', 'Admin', 'Manager', 'Editor', 'Viewer', 'Ingest'];
 export const RoleBadge = ({ role }) => {
-  if (BUILT_IN_ROLES.includes(role)) return <span className={`role-badge r-${role}`}>{role}</span>;
+  if (BUILT_IN_ROLES.includes(role)) return <span className={`role-badge r-${String(role).replace(/\s+/g, '-')}`}>{role}</span>;
   const hue = ROLE_PALETTE[[...String(role)].reduce((a, c) => a + c.charCodeAt(0), 0) % ROLE_PALETTE.length];
   return <span className="role-badge r-custom" style={{ '--rc': hue }}>{role}</span>;
 };
+
+/** Previous / Next with a "rows per page" choice (20, 50 or 100). The choice is remembered per list (`name`). */
+export const PAGE_SIZES = [20, 50, 100];
+export function usePageSize(name, def = 20) {
+  const key = `pagesize:${name}`;
+  const [size, setSizeRaw] = useState(() => {
+    try { const n = Number(window.localStorage.getItem(key)); return PAGE_SIZES.includes(n) ? n : def; } catch { return def; }
+  });
+  const setSize = (n) => { setSizeRaw(n); try { window.localStorage.setItem(key, String(n)); } catch { /* remembering is optional */ } };
+  return [size, setSize];
+}
+export function Pager({ total, offset, size, onOffset, onSize }) {
+  const from = total ? offset + 1 : 0;
+  const to = Math.min(offset + size, total);
+  return (
+    <div className="pager">
+      <span>{total ? `${from}–${to} of ${total}` : ''}</span>
+      <span className="grow" />
+      <label className="pager-size">Rows per page{' '}
+        <select aria-label="Rows per page" value={size} onChange={(e) => { onSize(Number(e.target.value)); onOffset(0); }}>
+          {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </label>
+      <button type="button" className="btn sm" disabled={offset === 0} onClick={() => onOffset(Math.max(0, offset - size))}>Previous</button>
+      <button type="button" className="btn sm" disabled={offset + size >= total} onClick={() => onOffset(offset + size)}>Next</button>
+    </div>
+  );
+}
 
 export const Empty = ({ children }) => <div className="empty">{children}</div>;
 

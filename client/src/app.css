@@ -299,6 +299,7 @@ table.t td.num, table.t th.num { text-align: right; font-variant-numeric: tabula
 .pill.s-high { color: var(--amber); background: color-mix(in srgb, var(--amber) 13%, transparent); }
 .pill.s-normal { color: var(--text-2); background: var(--surface-3); }
 .role-badge { display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; line-height: 1.4; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }   /* same shape as the other pills / chips */
+.r-System-Admin { background: color-mix(in srgb, var(--red) 26%, transparent); color: var(--red); font-weight: 700; }
 .r-Admin { background: color-mix(in srgb, var(--red) 16%, transparent); color: var(--red); }
 .r-Manager { background: color-mix(in srgb, var(--purple) 16%, transparent); color: var(--purple); }
 .r-Editor { background: color-mix(in srgb, var(--blue) 16%, transparent); color: var(--blue); }
@@ -1124,3 +1125,8 @@ button.tag { padding: 1px 9px; cursor: pointer; }
 .ret-tbl th.num,.ret-tbl td.num{text-align:right}
 .ret-tbl thead th{font-weight:600;border-bottom:1px solid var(--border,#e5e7eb)}
 .ret-tbl tbody tr+tr td{border-top:1px solid var(--border,#eef0f3)}
+
+.pager-size { display: inline-flex; align-items: center; gap: 6px; }
+.pager-size select { height: 30px; padding: 0 6px; }
+.sched-grid.top { align-items: start; }
+.pager-size { white-space: nowrap; }

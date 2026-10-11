@@ -10,7 +10,12 @@
 //    (e.g. filling Destination Folder / Approved by requires Manager role + a group with the Ingest Tracker page).
 //  - Profile is always available. Admin page is Admin-role only (not group-assignable).
 
-const ROLES = ['Admin', 'Manager', 'Editor', 'Ingest', 'Viewer'];
+// System Admin: everything, including the whole Admin area. Admin: every page and action in the app, but in the Admin area only
+// the Audit Log and the Dropdowns. Everyone else: what their role and group allow.
+const SYSADMIN = 'System Admin';
+const ROLES = [SYSADMIN, 'Admin', 'Manager', 'Editor', 'Ingest', 'Viewer'];
+const isSysAdmin = (u) => Boolean(u && u.role === SYSADMIN);
+const isAdminish = (u) => Boolean(u && (u.role === 'Admin' || u.role === SYSADMIN));   // may delete whole lists, delete DONE ingest rows, opens every page
 
 // Pages (and their sections) that a group can be granted. Keys are stored in group_permissions.
 // A section is only effective if its page is also granted.
@@ -38,7 +43,7 @@ const CATALOG = [
 ];
 
 const FIXED_PAGES = [
-  { key: 'admin', label: 'Admin', path: '/admin', roleOnly: 'Admin' },
+  { key: 'admin', label: 'Admin', path: '/admin', roleOnly: ['Admin', 'System Admin'] },
   { key: 'activity-history', label: 'Activity History', path: '/activity-history', action: 'activity.view' },
   { key: 'profile', label: 'Profile', path: '/profile', always: true, inNav: false },
 ];
@@ -52,7 +57,7 @@ const SECTION_PAGE = dict(CATALOG.flatMap((p) => p.sections.map((s) => [s.key, p
 
 // Role -> actions
 const DEFAULT_ROLE_ACTIONS = Object.assign(Object.create(null), {
-  Admin: [
+  'System Admin': [
     'ingest.write',
     'ingest.delete',
     'ingest.approve',
@@ -62,6 +67,16 @@ const DEFAULT_ROLE_ACTIONS = Object.assign(Object.create(null), {
     'plugs.write',
     'activity.view',
     'admin'
+  ],
+  Admin: [
+    'ingest.write',
+    'ingest.delete',
+    'ingest.approve',
+    'ingest.cm_complete',
+    'workload.write',
+    'knowledge.write',
+    'plugs.write',
+    'activity.view'
   ],
 
   Manager: [
@@ -95,16 +110,18 @@ const ACTION_PAGE = Object.assign(Object.create(null), {
 });
 
 const ALL_ACTIONS = Object.keys(ACTION_PAGE);
-const BUILTIN_ROLES = ['Admin', 'Manager', 'Editor', 'Ingest', 'Viewer'];
+const BUILTIN_ROLES = ['System Admin', 'Admin', 'Manager', 'Editor', 'Ingest', 'Viewer'];
+const ADMIN_ONLY_ACTIONS = ['admin'];   // held by System Admin alone
 
 /** rows: [{ name, actions: string[] }]. Admin always holds every action; unknown actions are dropped. */
 function applyRoles(rows) {
   const names = rows.map((r) => r.name);
-  if (!names.includes('Admin')) names.unshift('Admin');
+  for (const n of ['Admin', SYSADMIN]) if (!names.includes(n)) names.unshift(n);
   ROLES.splice(0, ROLES.length, ...names);
   for (const k of Object.keys(ROLE_ACTIONS)) delete ROLE_ACTIONS[k];
-  for (const r of rows) ROLE_ACTIONS[r.name] = r.name === 'Admin' ? [...ALL_ACTIONS] : (r.actions || []).filter((a) => ALL_ACTIONS.includes(a));
-  if (!ROLE_ACTIONS.Admin) ROLE_ACTIONS.Admin = [...ALL_ACTIONS];
+  for (const r of rows) ROLE_ACTIONS[r.name] = (r.actions || []).filter((a) => ALL_ACTIONS.includes(a));
+  ROLE_ACTIONS[SYSADMIN] = [...ALL_ACTIONS];
+  ROLE_ACTIONS.Admin = ALL_ACTIONS.filter((a) => !ADMIN_ONLY_ACTIONS.includes(a));
 }
 
 function isValidKey(k) { return ALL_KEYS.includes(k); }
@@ -119,7 +136,7 @@ function normalizeKeys(keys) {
 /** user: { role, perms: string[] } */
 function effectiveKeys(user) {
   if (!user) return new Set();
-  if (user.role === 'Admin') return new Set(ALL_KEYS);
+  if (isAdminish(user)) return new Set(ALL_KEYS);
   return new Set(normalizeKeys(user.perms));
 }
 
@@ -127,8 +144,8 @@ function canPage(user, path) {
   const page = PAGE_BY_PATH[path];
   if (!page || !user) return false;
   if (page.always) return true;
-  if (page.action) return !!user && user.role !== 'Admin' && can(user, page.action);   // Admins read the Audit Log instead
-  if (page.roleOnly) return user.role === page.roleOnly;
+  if (page.action) return !!user && !isAdminish(user) && can(user, page.action);   // Admins read the Audit Log instead
+  if (page.roleOnly) return [].concat(page.roleOnly).includes(user.role);
   return effectiveKeys(user).has(page.key);
 }
 
@@ -149,7 +166,7 @@ function allowedPages(user) {
     .filter((p) => eff.has(p.key))
     .map(({ key, label, path }) => ({ key, label, path }));
 
-  if (user && user.role === 'Admin') {
+  if (isAdminish(user)) {
     pages.push({ key: 'admin', label: 'Admin', path: '/admin' });
   } else if (can(user, 'activity.view')) {
     pages.push({
@@ -184,6 +201,6 @@ function landingPath(user) {
 }
 
 module.exports = {
-  ROLES, CATALOG, FIXED_PAGES, ROLE_ACTIONS, DEFAULT_ROLE_ACTIONS, ALL_ACTIONS, BUILTIN_ROLES, applyRoles, ACTION_PAGE, PAGE_BY_PATH,
+  ROLES, SYSADMIN, isSysAdmin, isAdminish, CATALOG, FIXED_PAGES, ROLE_ACTIONS, DEFAULT_ROLE_ACTIONS, ALL_ACTIONS, BUILTIN_ROLES, applyRoles, ACTION_PAGE, PAGE_BY_PATH,
   normalizeKeys, canPage, canSection, can, allowedPages, allowedSections, allowedActions, landingPath,
 };

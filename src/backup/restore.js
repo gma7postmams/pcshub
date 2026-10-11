@@ -312,7 +312,7 @@ async function reinsertSnapshot(ownerDb, snap, req) {
 
   // Only the acting admin's session survives, and only if that account still exists as an active Admin.
   if (snap.session) {
-    const ok = await ownerDb.query(`SELECT 1 FROM users WHERE id=$1 AND role='Admin' AND is_active`, [snap.adminId]);
+    const ok = await ownerDb.query(`SELECT 1 FROM users WHERE id=$1 AND role IN ('Admin','System Admin') AND is_active`, [snap.adminId]);
     if (ok.rowCount) await ownerDb.query('INSERT INTO user_sessions SELECT * FROM jsonb_populate_recordset(null::user_sessions, $1::jsonb) ON CONFLICT DO NOTHING', [JSON.stringify([snap.session])]);
   }
 }
@@ -351,7 +351,7 @@ async function validate(ownerDb, backupSummary, meta) {
     add('Core tables readable', 'pass', `${tables.length} tables checked`);
   } catch (e) { add('Core tables readable', 'fail', trunc(e.message)); return checks; }
 
-  const admins = (await ownerDb.query(`SELECT count(*)::int AS n FROM users WHERE role='Admin' AND is_active`)).rows[0].n;
+  const admins = (await ownerDb.query(`SELECT count(*)::int AS n FROM users WHERE role IN ('Admin','System Admin') AND is_active`)).rows[0].n;
   add('Administrator access', admins > 0 ? 'pass' : 'fail', `${admins} active Admin account(s)`);
   add('Roles present', counts.roles >= 4 ? 'pass' : 'fail', `${counts.roles} roles`);
 
