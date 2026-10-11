@@ -39,7 +39,7 @@ INSERT INTO roles (name, description, rank) VALUES
    5),
 
   ('Admin',
-   'Every page and action in the app; in the Admin area only the Audit Log and the Dropdowns',
+   'Every page and action in the app; in Settings only the Audit Log, Dropdowns and Branding',
    4),
 
   ('Manager',
@@ -588,3 +588,8 @@ UPDATE users SET role = 'System Admin'
 UPDATE roles SET description = 'Every page and action in the app; in the Admin area only the Audit Log and the Dropdowns'
  WHERE name = 'Admin' AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'system_admin_v1');
 INSERT INTO app_settings (key, value) VALUES ('system_admin_v1', '1') ON CONFLICT (key) DO NOTHING;
+
+-- Admin can also manage Branding (its Admin-area page is named Settings). Only an untouched description is replaced; ONCE.
+UPDATE roles SET description = 'Every page and action in the app; in Settings only the Audit Log, Dropdowns and Branding'
+ WHERE name = 'Admin' AND description = 'Every page and action in the app; in the Admin area only the Audit Log and the Dropdowns' AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'admin_branding_v1');
+INSERT INTO app_settings (key, value) VALUES ('admin_branding_v1', '1') ON CONFLICT (key) DO NOTHING;

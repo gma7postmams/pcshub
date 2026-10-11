@@ -15,8 +15,8 @@ const { loadRoles } = require('../roles');
 
 // Mounted behind requirePageAccess('/admin') => Admin role only; the role is re-checked here as defence in depth.
 const router = express.Router();
-// System Admin: everything here. Admin: only the Audit Log and the Dropdowns (and the access-model reference the Admin page loads).
-const ADMIN_ALLOWED = /^\/(audit|dropdowns)(\/|$)|^\/access-model$/;
+// System Admin: everything here. Admin: only the Audit Log, the Dropdowns and Branding (and the access-model reference the Admin page loads).
+const ADMIN_ALLOWED = /^\/(audit|dropdowns|branding)(\/|$)|^\/access-model$/;
 router.use((req, res, next) => {
   const role = req.user && req.user.role;
   if (role === 'System Admin' || (role === 'Admin' && ADMIN_ALLOWED.test(req.path))) return next();

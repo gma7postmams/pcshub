@@ -19,7 +19,7 @@ const TABS = [
 // Users, Roles and Groups are the Access tab's three parts. Old links (#users, #roles, #groups) still land on the right one.
 const ALIAS = { users: 'access/users', roles: 'access/roles', groups: 'access/groups' };
 // An Admin (not System Admin) gets only these two tabs; the server enforces the same.
-const ADMIN_TABS = ['dropdowns', 'audit'];
+const ADMIN_TABS = ['dropdowns', 'branding', 'audit'];
 const fromHash = (tabs = TABS) => {
   const raw = window.location.hash.slice(1);
   const [t, sub = ''] = (ALIAS[raw] || raw).split('/');
@@ -53,7 +53,7 @@ export default function Admin() {
   const Tab = (tabs.find(([k]) => k === tab) || tabs[0])[2];
   return (
     <main className="container wide wl-page">
-      <h1 className="sr-only">Admin</h1>
+      <h1 className="sr-only">{user.role === 'System Admin' ? 'Administration' : 'Settings'}</h1>
       {/* Same shape as the Ingest and Workload pages: one white card, the tabs along its top edge, the content below. */}
       <div className="card wl-card admin-card">
         <div className="wl-tabbar">

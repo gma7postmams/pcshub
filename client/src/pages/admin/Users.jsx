@@ -156,7 +156,7 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
   const emailOk = s.user.email_2fa_available;
 
   const g = groups.find((x) => String(x.id) === f.group_id);
-  const hint = f.role === 'System Admin' ? 'System Admin: everything, including the whole Admin area.' : f.role === 'Admin' ? 'Admin opens every page regardless of group; in the Admin area only the Audit Log and Dropdowns.'
+  const hint = f.role === 'System Admin' ? 'System Admin: everything, including the whole Administration area.' : f.role === 'Admin' ? 'Admin opens every page regardless of group; in Settings only the Audit Log, Dropdowns and Branding.'
     : g ? `Opens: ${g.perms.filter((k) => !k.includes('.')).map((k) => LABEL[k] || k).join(', ') || 'no pages'} + Profile`
       : 'Not enrolled: user can only open Profile until assigned to a group.';
 

@@ -11,7 +11,7 @@
 //  - Profile is always available. Admin page is Admin-role only (not group-assignable).
 
 // System Admin: everything, including the whole Admin area. Admin: every page and action in the app, but in the Admin area only
-// the Audit Log and the Dropdowns. Everyone else: what their role and group allow.
+// the Audit Log, Dropdowns and Branding (the page is called Settings for Admin, Administration for System Admin). Everyone else: what their role and group allow.
 const SYSADMIN = 'System Admin';
 const ROLES = [SYSADMIN, 'Admin', 'Manager', 'Editor', 'Ingest', 'Viewer'];
 const isSysAdmin = (u) => Boolean(u && u.role === SYSADMIN);
@@ -168,7 +168,7 @@ function allowedPages(user) {
     .map(({ key, label, path }) => ({ key, label, path }));
 
   if (isAdminish(user)) {
-    pages.push({ key: 'admin', label: 'Admin', path: '/admin' });
+    pages.push({ key: 'admin', label: user.role === SYSADMIN ? 'Administration' : 'Settings', path: '/admin' });   // the same page, named for what the role can do there
   } else if (can(user, 'activity.view')) {
     pages.push({
       key: 'activity-history',
