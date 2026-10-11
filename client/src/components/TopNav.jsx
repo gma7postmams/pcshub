@@ -99,6 +99,7 @@ export default function TopNav() {
         ))}
       </nav>
       <div className="nav-right">
+        {s.maintenance && s.maintenance.on ? <span className="maint-pill" id="maint-pill" title={`Maintenance mode is ON: only site administrators can sign in. ${s.maintenance.message || ''}`.trim()}>Maintenance ON</span> : null}
         <button type="button" className="iconbtn" id="notif-btn" aria-label="Notifications" onClick={toggle('notif')}>
           <BellIcon />
           {notif.unread ? <span className="badge-count" id="notif-count">{notif.unread > 99 ? '99+' : notif.unread}</span> : null}

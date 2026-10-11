@@ -29,7 +29,7 @@ export async function api(method, url, body, { quiet = false } = {}) {
   if ((res.headers.get('content-type') || '').includes('application/json')) data = await res.json();
 
   if (res.status === 503 && data && data.maintenance) {
-    if (!window.__pcsRestoring) window.location.reload(); // shows the server's maintenance page
+    if (!window.__pcsRestoring && !url.startsWith('/api/auth/')) window.location.reload(); // shows the server's maintenance page (sign-in answers are shown on the sign-in page instead)
     throw new ApiError(data.error, 503, data);
   }
   if (res.status === 401 && !url.startsWith('/api/auth/') && !quiet) {

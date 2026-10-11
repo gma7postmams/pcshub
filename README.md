@@ -60,6 +60,15 @@ For front-end development, run `npm start` and `npm run dev:client` in two termi
 3. Start the app. It connects and creates its tables automatically. If it cannot connect, the log (`journalctl -u <service-name> -n 30`) names the problem.
 4. To check the connection by hand: `psql "$DATABASE_URL" -c "select 1"`.
 
+## Maintenance mode
+
+Closes the site to everyone except a System Admin, for upgrades and similar work. Everyone else sees an "Under maintenance" page, and their sign-in is refused with a message. The System Admin signs in as usual and sees a "Maintenance ON" badge in the top bar.
+
+- **Flag file (no restart):** `sudo sh -c 'echo "Back at 3 PM" > /var/www/pcshub/MAINTENANCE'` turns it on; the text is the message shown. `sudo rm /var/www/pcshub/MAINTENANCE` turns it off. It takes effect within a second.
+- **`.env` (restart needed):** set `MAINTENANCE_MODE=true` (and optionally `MAINTENANCE_MESSAGE`), then `sudo systemctl restart pcshub`. Set it back to `false` to end it.
+
+Either one being on is enough. People already signed in are not signed out: they see the maintenance page until it ends, then carry on.
+
 ## Notes
 
 - All settings come from `.env`; `.env.example` lists them with comments. Never commit your real `.env`.

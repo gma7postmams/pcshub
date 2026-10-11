@@ -8,6 +8,7 @@ const { audit } = require('../audit');
 const { allowedPages, allowedActions, allowedSections, landingPath } = require('../permissions');
 const totp = require('../totp');
 const emailCode = require('../email-code');
+const maintenanceMode = require('../maintenance-mode');
 const mailer = require('../mailer');
 const { twofaRequired } = require('../config');
 
@@ -55,6 +56,18 @@ async function completeLogin(req, user) {
   await save(req);
 }
 
+
+// While planned maintenance is on only a System Admin may sign in. Checked once the password is right (so nobody learns anything about an
+// account from the answer) and again before the 2FA step completes, in case maintenance started in between.
+const sentence = (t) => (/[.!?]$/.test(t) ? t : `${t}.`);
+const MAINTENANCE_NOTE = ' Only site administrators can sign in right now.';
+async function refuseDuringMaintenance(req, res, user) {
+  if (!maintenanceMode.enabled() || maintenanceMode.mayUse(user)) return false;
+  await audit(req, 'auth.login_blocked_maintenance', 'user', user.id, { username: user.username });
+  res.status(503).set({ 'Cache-Control': 'no-store', 'Retry-After': '300' }).json({ error: sentence(maintenanceMode.state().message) + MAINTENANCE_NOTE, maintenance: true });
+  return true;
+}
+
 router.post('/login', loginLimiter, asyncH(async (req, res) => {
   const username = typeof req.body.username === 'string' ? req.body.username.trim() : '';
   const password = typeof req.body.password === 'string' ? req.body.password : '';
@@ -85,6 +98,8 @@ router.post('/login', loginLimiter, asyncH(async (req, res) => {
     throw new HttpError(401, GENERIC_FAIL);
   }
 
+  if (await refuseDuringMaintenance(req, res, user)) return;
+
   if (user.totp_enabled) {
     await regenerate(req);
     req.session.pending2fa = { userId: user.id, at: Date.now(), tries: 0 };
@@ -114,6 +129,7 @@ router.post('/2fa', loginLimiter, asyncH(async (req, res) => {
   const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [p.userId]);
   const user = rows[0];
   if (!user || !user.is_active || !user.totp_enabled) throw new HttpError(401, 'Please sign in again.');
+  if (await refuseDuringMaintenance(req, res, user)) { delete req.session.pending2fa; await save(req); return; }
 
   // Valid AND not previously used (replay-protected)
   const valid = user.twofa_method === 'email'
@@ -175,6 +191,7 @@ router.get('/me', requireAuth, (req, res) => {
     sections: allowedSections(u),
     actions: allowedActions(u),
     landing: landingPath(u),
+    maintenance: maintenanceMode.state(),   // { on, message }: only a System Admin gets this far while it is on — the page shows a banner
     // A fingerprint of THIS sign-in (a one-way hash of the session id — the id itself is never sent to the page). It changes every time someone
     // signs in, so the page can keep a per-sign-in preference (the Dashboard's period menu) and forget it at sign-out.
     session_key: crypto.createHash('sha256').update(String(req.sessionID || '')).digest('hex').slice(0, 20),

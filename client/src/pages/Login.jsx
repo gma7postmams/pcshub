@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { post } from '../lib/api.js';
+import { get, post } from '../lib/api.js';
 import { useBranding } from '../context.jsx';
 import { BrandMark } from '../components/TopNav.jsx';
 
@@ -13,6 +13,8 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
   const [mail, setMail] = useState(null);   // set when the code was emailed: the masked address
   const otpForm = useRef(null);
+  const [maint, setMaint] = useState(null);   // set while planned maintenance is on: the message
+  useEffect(() => { get('/api/maintenance/status', { quiet: true }).then((r) => setMaint(r && r.planned ? r.planned.message : null)).catch(() => {}); }, []);
 
   useEffect(() => { document.title = `Sign in · ${branding.app_name}`; }, [branding.app_name]);
 
@@ -58,6 +60,7 @@ export default function Login() {
           <BrandMark branding={branding} />
           {branding.tagline ? <span className="tagline">{branding.tagline}</span> : null}
         </div>
+        {maint && !err ? <div className="alert warn mb-12" id="maint-note"><strong>Under maintenance.</strong> {/[.!?]$/.test(maint) ? maint : `${maint}.`} Only site administrators can sign in right now.</div> : null}
         {err ? <div className="alert err mb-12" id="err">{err}</div> : null}
 
         {step === 'password' ? (

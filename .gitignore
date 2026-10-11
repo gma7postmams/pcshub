@@ -6,6 +6,9 @@ client/node_modules/
 dist/
 client/dist/
 
+# Maintenance-mode flag file (create it on the server to turn maintenance on, delete it to turn it off)
+/MAINTENANCE
+
 # Environment files
 .env
 .env.*

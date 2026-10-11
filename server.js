@@ -105,6 +105,8 @@ app.use('/uploads/branding', express.static(path.join(__dirname, 'uploads', 'bra
 }));
 
 app.use(loadUser);
+// Planned maintenance (MAINTENANCE_MODE in .env, or a MAINTENANCE file): only a System Admin gets past this. See src/maintenance-mode.js.
+app.use(require('./src/maintenance-mode').guard);
 
 // Workload / Plug List imports and exports announce themselves through src/transfer-hook.js; this writes each one
 // (and each failure) to the audit log: who, file name and size, filters, row counts, duration. Never row contents.

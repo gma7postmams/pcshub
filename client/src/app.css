@@ -1130,3 +1130,7 @@ button.tag { padding: 1px 9px; cursor: pointer; }
 .pager-size select { height: 30px; padding: 0 6px; }
 .sched-grid.top { align-items: start; }
 .pager-size { white-space: nowrap; }
+
+/* Planned maintenance: a small badge in the top bar for the System Admin (the only person signed in while it is on); hover for the message */
+.maint-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; margin-right: 6px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--text); cursor: default; border: 1px solid color-mix(in srgb, var(--amber) 55%, transparent); background: color-mix(in srgb, var(--amber) 16%, var(--surface)); }
+.maint-pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); }
