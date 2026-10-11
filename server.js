@@ -13,6 +13,7 @@ const {
   loadUser, requireAuth, requirePageAccess, csrfGuard, errorHandler, CLIENT_DIST, INDEX_HTML,
 } = require('./src/middleware');
 const { PAGE_BY_PATH, landingPath } = require('./src/permissions');
+const live = require('./src/live');   // live updates for the trackers
 const {
   PROD, cookieSecure, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks, API_RATE_LIMIT,
 } = require('./src/config');
@@ -146,12 +147,13 @@ app.use('/api', (req, res, next) => {
 
 app.use('/api/profile',       requirePageAccess('/profile'),   require('./src/routes/profile'));
 app.use('/api/notifications', require('./src/routes/notifications'));
+app.use('/api/live',          require('./src/live'));   // pushes "the trackers changed" to every open browser (see src/live.js)
 app.use('/api/presence',      require('./src/routes/presence'));   // who is working right now (feeds the Dashboard's Active users)
 app.use('/api',               require('./src/routes/lookups'));
 app.use('/api/dashboard',     requirePageAccess('/dashboard'), require('./src/routes/dashboard'));
-app.use('/api/ingest',        requirePageAccess('/ingest'),    require('./src/routes/ingest'));
-app.use('/api/workload',      requirePageAccess('/workload'),  require('./src/routes/workload'));
-app.use('/api/plugs',         require('./src/routes/plugs')(require('./src/routes/workload').helpers));   // PSD Daily Plug List (page + API of its own)
+app.use('/api/ingest',        requirePageAccess('/ingest'),    live.track('ingest'),   require('./src/routes/ingest'));
+app.use('/api/workload',      requirePageAccess('/workload'),  live.track('workload'), require('./src/routes/workload'));
+app.use('/api/plugs',         live.track('plugs'), require('./src/routes/plugs')(require('./src/routes/workload').helpers));   // PSD Daily Plug List (page + API of its own)
 app.use('/api/knowledge',     requirePageAccess('/knowledge'), require('./src/routes/knowledge'));
 app.use('/api/admin/backups', requirePageAccess('/admin'),     require('./src/routes/backups'));
 app.use('/api/admin',         requirePageAccess('/admin'),     require('./src/routes/admin'));

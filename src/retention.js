@@ -132,6 +132,7 @@ async function runAll(settings, only) {
       results[k] = await runModule(k, settings[k]);
     }
   } finally { running = false; }
+  require('./live').publish(Object.keys(results).filter((k) => k !== 'audit'));   // open trackers drop the rows that were just archived
   return results;
 }
 

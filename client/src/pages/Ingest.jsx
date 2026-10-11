@@ -7,6 +7,7 @@ import { PlusIcon, SearchIcon, DownloadIcon, UploadIcon, TrashIcon, FullscreenIc
 import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
 import { Chip, DateChip, DateRange, FilterSelect, FiltersMenu, Pager, PlatformCell, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
+import { useLive } from '../lib/live.js';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
 // Status (CM) is blank (Pending) until CM picks one of these
@@ -197,13 +198,15 @@ export default function Ingest() {
     get('/api/dropdowns?categories=platform').then(setLookups);
   }, []);
 
-  const load = useCallback(async () => {
+  // quiet = a re-read because somebody else changed the list: keep the person's picked rows and the table as it is if the read fails
+  const fetchPage = useCallback(async (quiet) => {
     const p = new URLSearchParams({ limit: PAGE, offset });
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
     if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
-    setPicked(new Set());
-    try { setData(await get(`/api/ingest?${p}`)); } catch (e) { setData({ error: e.message, rows: [], total: 0 }); }
+    if (!quiet) setPicked(new Set());
+    try { setData(await get(`/api/ingest?${p}`)); } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
   }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
+  const load = useCallback(() => fetchPage(false), [fetchPage]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -279,6 +282,8 @@ export default function Ingest() {
     return () => document.removeEventListener('keydown', esc);
   }, []);
   const [draft, setDraft] = useState(null);          // the empty row Add Row put at the top, not saved yet
+  // other people's changes appear by themselves (not while a cell, form, detail or dialog is open here, so nothing is overwritten under your hands)
+  useLive(['ingest'], () => fetchPage(true), () => !!(editing || form || detail || reasonFor || draft || document.querySelector('.modal-backdrop')));
   const [ctx, setCtx] = useState(null);              // right-click menu position
   const [cellSel, setCellSel] = useState(null);      // a block of cells picked by dragging { r0, c0, r1, c1 }
   const hist = useRef({ past: [], future: [] });

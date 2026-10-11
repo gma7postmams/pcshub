@@ -1,3 +1,5 @@
+import { TAB } from './live.js';
+
 // API client. Same contract as before: JSON, same-origin cookies, CSRF header on every call.
 export class ApiError extends Error {
   constructor(message, status, data) {
@@ -11,7 +13,7 @@ export class ApiError extends Error {
     is just an error for that call and does NOT send the browser anywhere — otherwise such a call made from the very page that handles those
     states (Profile) would redirect to itself forever. */
 export async function api(method, url, body, { quiet = false } = {}) {
-  const opts = { method, headers: { 'X-Requested-With': 'PromoHub' }, credentials: 'same-origin' };
+  const opts = { method, headers: { 'X-Requested-With': 'PromoHub', 'X-Tab': TAB }, credentials: 'same-origin' };
   if (body instanceof FormData) opts.body = body;
   else if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';

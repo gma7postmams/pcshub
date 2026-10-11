@@ -3,6 +3,7 @@ import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
 import { DownloadIcon, ExitFullscreenIcon, FillIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
+import { useLive } from '../lib/live.js';
 import { FilterSelect, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
 import { useSession } from '../context.jsx';
 import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
@@ -150,7 +151,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const setPeriod = async (p) => { if (!(await okToLeave())) return; setPeriodState(p); remember('period', p); };
   const setSize = async (s) => { if (!(await okToLeave())) return; setSizeState(s); remember('size', s); };
 
-  const loadDays = useCallback(async () => {
+  const loadDays = useCallback(async (quiet) => {   // quiet = a re-read because somebody else changed the list: no error pop-up
     try {
       const out = await get('/api/plugs/dates');
       setDays(out.dates);
@@ -160,11 +161,11 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
         const today = isoDate();
         return (out.dates.find((x) => x.date === today) || out.dates[0] || {}).date || today;
       });
-    } catch (e) { setDays([]); toast(e.message, 'err'); }
+    } catch (e) { if (!quiet) { setDays([]); toast(e.message, 'err'); } }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { loadDays(); }, [loadDays]);
 
-  const loadRows = useCallback(async () => {
+  const loadRows = useCallback(async (quiet) => {
     if (!anchor) return;
     try {
       const p = new URLSearchParams({ used: '1', limit: String(limit), offset: String(offset), order: period === 'all' ? 'desc' : 'asc' });
@@ -173,9 +174,14 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       if (query) p.set('q', query);
       if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
       setData(await get(`/api/plugs?${p}`));
-    } catch (e) { setData({ rows: [], total: 0 }); toast(e.message, 'err'); }
+    } catch (e) { if (!quiet) { setData({ rows: [], total: 0 }); toast(e.message, 'err'); } }
   }, [anchor, range.from, range.to, query, limit, offset, period, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setData(null); setPicked(new Set()); loadRows(); }, [loadRows]);
+  // other people's changes appear by themselves (Workload changes too: the "In Workload" flag) — not while a cell, form or dialog is open here
+  useLive(['plugs'], () => { loadDays(true); return loadRows(true); }, () => {
+    const el = document.activeElement;
+    return !!(adding || editing || draft || cellEd || needYear || summary || filling || importing || document.querySelector('.modal-backdrop') || (el && el.closest && el.closest('td') && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)));
+  });
   const exportXlsx = async () => {   // the days and search on screen, in the sort on screen
     const p = new URLSearchParams({ order: period === 'all' ? 'desc' : 'asc' });
     if (range.from) p.set('from', range.from);

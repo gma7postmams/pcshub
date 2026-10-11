@@ -7,6 +7,7 @@ import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FlagIcon, FullscreenIcon,
 import { DateChip, DateRange, FilterSelect, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
+import { useLive } from '../lib/live.js';
 
 // Workload Tracker — ONE table. "Units Concerned" says which team(s) a plug is for; the tabs
 // (All / VGFX / VEDIT / Audio) are filters over it. Fields, per-tab columns and the Platform rules come
@@ -540,7 +541,8 @@ export default function Workload() {
     try { setStats(await get(`/api/workload/stats?${p}`)); } catch (e) { /* cards just stay as they were */ }
   }, [meta, query]);
 
-  const load = useCallback(async () => {
+  // quiet = a re-read because somebody else changed the list: if it fails the table stays as it is
+  const fetchRows = useCallback(async (quiet) => {
     if (!meta) return;
     loadStats();
     try {
@@ -552,14 +554,20 @@ export default function Workload() {
         setData(await get(`/api/workload?${query({ limit: size, offset })}`));
       }
     } catch (e) {
-      (isGrid ? setGrid : setData)({ error: e.message, rows: [], total: 0 });
+      if (!quiet) (isGrid ? setGrid : setData)({ error: e.message, rows: [], total: 0 });
     }
   }, [meta, isGrid, tab, query, offset, size, loadStats]);
+  const load = useCallback(() => fetchRows(false), [fetchRows]);
 
   useEffect(() => { load(); }, [load]);
 
   // ---- unsaved-change protection (Excel mode) ----
   const dirtyCount = isGrid && grid && grid.rows ? grid.rows.filter((r) => r._dirty).length : 0;
+  // other people's changes appear by themselves — but never while a cell, form or dialog is open here, a cell box has the cursor, or Excel-mode rows are unsaved
+  useLive(['workload'], () => fetchRows(true), () => {
+    const a = document.activeElement;
+    return !!(editing || form || draft || addingColumn || managingLocks || deletingAll || dirtyCount > 0 || document.querySelector('.modal-backdrop') || (a && a.closest && a.closest('td') && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)));
+  });
   useEffect(() => {
     if (!dirtyCount) return undefined;
     const warn = (e) => { e.preventDefault(); e.returnValue = ''; };

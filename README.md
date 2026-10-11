@@ -7,6 +7,7 @@ An internal web app for promotional content teams. Built with Node.js (Express),
 - **Ingest Tracker**: track ingest requests with an approval step, statuses, import and export.
 - **Workload Tracker**: plan and follow work by day and team, with custom columns.
 - **PSD Daily Plug List**: maintain the daily plug list, with Excel import.
+- **Live updates**: changes other people save on the three trackers appear on your screen by themselves, without a page refresh.
 - **Knowledge Base**: shared reference PDFs with tags and a trash bin.
 - **Dashboard**: workload and ingest numbers at a glance, fits the screen.
 - **Admin**: users, roles and groups, dropdown lists, branding, security rules, backup and restore, data retention and an audit log.

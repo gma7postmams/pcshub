@@ -1,0 +1,79 @@
+import { useEffect, useRef } from 'react';
+
+// Live updates: when somebody else saves on the Ingest Tracker, Workload Tracker or PSD Daily Plug List, the server pushes "that list changed"
+// (src/live.js) and the open page quietly re-reads it. The push carries no data, only the topic.
+//
+// Browsers allow only ~6 open connections per site (shared by every tab), and each tracker page already holds one for the "who is here" avatars.
+// So all tabs of this app share ONE live connection: the tab that gets the Web Lock owns the EventSource and relays what it hears to the other
+// tabs over a BroadcastChannel. When that tab closes the lock passes to another tab, which connects.
+
+/** This tab's id. api.js sends it as X-Tab, so the server can say who made a change and a tab can skip the echo of its own save. */
+export const TAB = Math.random().toString(36).slice(2, 12);
+
+const subs = new Set();
+let lastHeard = Date.now();
+let started = false;
+
+function deliver(m) {
+  if (m && m.t) lastHeard = Date.now();
+  subs.forEach((fn) => { try { fn(m); } catch (e) { /* one listener must not stop the rest */ } });
+}
+
+function start() {
+  if (started || typeof EventSource === 'undefined') return;
+  started = true;
+  let bc = null;
+  try { bc = new BroadcastChannel('pcshub-live'); bc.onmessage = (e) => deliver(e.data); } catch (e) { bc = null; }
+  const relay = (m) => { deliver(m); if (bc) { try { bc.postMessage(m); } catch (e) { /* closing */ } } };
+  const connect = () => {
+    let first = true;
+    const es = new EventSource('/api/live/stream');
+    es.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } relay(m); };
+    es.onopen = () => { if (!first) relay({ t: 'reconnect' }); first = false; };   // after a drop, changes may have been missed: every list re-reads
+  };
+  if (bc && navigator.locks && navigator.locks.request) navigator.locks.request('pcshub-live-stream', () => new Promise(() => connect()));   // never resolves: held until this tab closes
+  else connect();
+}
+
+/**
+ * Re-read a list when somebody else changes it.
+ *   topics   'ingest' | 'workload' | 'plugs'
+ *   refresh  function that re-reads the list quietly (keep the person's selection, no spinner)
+ *   busy     function; true while the person is in the middle of something (a cell open for editing, a form, unsaved rows). The refresh waits
+ *            until it turns false, so nothing is ever overwritten under their hands.
+ * Falls back to a re-read every 30 seconds while the live connection is silent (no message or keep-alive for 50 s), and on returning to the tab.
+ */
+export function useLive(topics, refresh, busy) {
+  const ref = useRef({});
+  ref.current = { refresh, busy };
+  const key = topics.join(',');
+  useEffect(() => {
+    start();
+    const mine = key.split(',');
+    let pending = false;
+    let timer = null;
+    let dead = false;
+    const run = () => {
+      if (dead || !pending || document.hidden) return;   // hidden: wait for the person to come back (onVis)
+      if (ref.current.busy && ref.current.busy()) { timer = setTimeout(run, 1000); return; }
+      pending = false;
+      Promise.resolve(ref.current.refresh && ref.current.refresh()).catch(() => {});
+    };
+    const want = () => { pending = true; clearTimeout(timer); timer = setTimeout(run, 300); };   // a burst of changes becomes one re-read
+    const onMsg = (m) => {
+      if (!m) return;
+      if (m.t === 'reconnect') { want(); return; }
+      if (!mine.includes(m.t)) return;
+      if (m.by && m.by === TAB) return;   // my own save: the page already shows it
+      want();
+    };
+    subs.add(onMsg);
+    const onVis = () => {
+      if (document.hidden) return;
+      if (pending || Date.now() - lastHeard > 50000) want();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    const poll = setInterval(() => { if (!document.hidden && Date.now() - lastHeard > 50000) want(); }, 30000);
+    return () => { dead = true; subs.delete(onMsg); clearTimeout(timer); clearInterval(poll); document.removeEventListener('visibilitychange', onVis); };
+  }, [key]);
+}
