@@ -48,7 +48,7 @@ router.get('/roles', asyncH(async (req, res) => {
             (SELECT count(*)::int FROM users u WHERE u.role = r.name) AS users
        FROM roles r ORDER BY r.rank DESC, r.name`
   );
-  res.json(rows.map((r) => (r.name === 'System Admin' ? { ...r, actions: [...ALL_ACTIONS] } : r.name === 'Admin' ? { ...r, actions: [...ROLE_ACTIONS.Admin] } : r)));
+  res.json(rows.map((r) => (r.name === 'System Admin' ? { ...r, actions: [...ALL_ACTIONS] } : r.name === 'Admin' ? { ...r, actions: r.actions.filter((a) => a !== 'admin') } : r)));
 }));
 
 function parseRole(body) {
@@ -87,7 +87,7 @@ router.put('/roles/:name', asyncH(async (req, res) => {
   const b = parseRole(req.body || {});
   const cur = await db.query('SELECT is_builtin FROM roles WHERE name=$1', [old]);
   if (!cur.rows.length) throw new HttpError(404, 'Role not found');
-  if (old === 'Admin' || old === 'System Admin') throw new HttpError(400, `The ${old} role is fixed and cannot be changed`);
+  if (old === 'System Admin') throw new HttpError(400, 'The System Admin role is fixed and cannot be changed');
   if (cur.rows[0].is_builtin && b.name !== old) throw new HttpError(400, 'Built-in roles cannot be renamed');
   const before = (await db.query('SELECT action FROM role_actions WHERE role=$1', [old])).rows.map((r) => r.action);
   const added = b.actions.filter((a) => !before.includes(a));

@@ -120,8 +120,9 @@ function applyRoles(rows) {
   ROLES.splice(0, ROLES.length, ...names);
   for (const k of Object.keys(ROLE_ACTIONS)) delete ROLE_ACTIONS[k];
   for (const r of rows) ROLE_ACTIONS[r.name] = (r.actions || []).filter((a) => ALL_ACTIONS.includes(a));
-  ROLE_ACTIONS[SYSADMIN] = [...ALL_ACTIONS];
-  ROLE_ACTIONS.Admin = ALL_ACTIONS.filter((a) => !ADMIN_ONLY_ACTIONS.includes(a));
+  ROLE_ACTIONS[SYSADMIN] = [...ALL_ACTIONS];                       // System Admin is fixed: always everything
+  const adminRow = rows.find((r) => r.name === 'Admin');          // Admin is editable (Admin > Roles), but never holds the Admin-area action
+  ROLE_ACTIONS.Admin = adminRow ? ROLE_ACTIONS.Admin.filter((a) => !ADMIN_ONLY_ACTIONS.includes(a)) : DEFAULT_ROLE_ACTIONS.Admin.filter((a) => !ADMIN_ONLY_ACTIONS.includes(a));
 }
 
 function isValidKey(k) { return ALL_KEYS.includes(k); }

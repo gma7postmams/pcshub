@@ -62,11 +62,18 @@ test('applyRoles: custom role, in-place update, Admin always full, unknown actio
   assert.ok(P.can(user('QA'), 'workload.write'));
   assert.equal(P.can(user('QA'), 'ingest.write'), false);
   assert.deepEqual(P.ROLE_ACTIONS['System Admin'], P.ALL_ACTIONS);
-  assert.deepEqual(P.ROLE_ACTIONS.Admin, P.ALL_ACTIONS.filter((a) => a !== 'admin'));
+  assert.deepEqual(P.ROLE_ACTIONS.Admin, P.DEFAULT_ROLE_ACTIONS.Admin);   // no row for Admin: its defaults
   assert.equal(P.can(user('Ingest'), 'ingest.cm_complete'), false);   // a role that no longer exists has no actions
 });
 
 test('prototype-ish names are not roles or actions', () => {
   assert.equal(P.can(user('__proto__'), 'ingest.write'), false);
   assert.equal(P.can(user('Editor'), 'constructor'), false);
+});
+
+test('Admin is editable but can never hold the Admin-area action; System Admin is fixed', () => {
+  P.applyRoles([{ name: 'System Admin', actions: [] }, { name: 'Admin', actions: ['ingest.write', 'admin'] }]);
+  assert.deepEqual(P.ROLE_ACTIONS.Admin, ['ingest.write']);
+  assert.deepEqual(P.ROLE_ACTIONS['System Admin'], P.ALL_ACTIONS);
+  assert.ok(P.canPage({ role: 'Admin', perms: [] }, '/workload'));   // pages still all
 });
