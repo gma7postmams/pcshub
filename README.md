@@ -33,12 +33,31 @@ For front-end development, run `npm start` and `npm run dev:client` in two termi
 
 1. **Get the code** onto the server and install: `npm ci --omit=dev`, then `npm run build`. (You can build on another machine and copy `client/dist/`.)
 2. **Configure**: copy `.env.example` to `.env`, fill in every required value, and restrict the file (`chmod 600 .env`).
-3. **Database**: create an empty PostgreSQL database and a login for the app, and set `DATABASE_URL`. Tables are created on first start.
+3. **Database**: create an empty PostgreSQL database and a login for the app, then point the app at it (see below). Tables are created on first start.
 4. **Run as a service**: use the example unit in `deploy/` with systemd, then enable and start it.
 5. **HTTPS**: put nginx in front using the example in `deploy/`, and set `TRUST_PROXY` and `APP_ORIGIN` in `.env` as described in `.env.example`.
 6. **First sign-in**: sign in with the seeded Admin, choose a new password, then set up groups, users and dropdown lists in Admin.
 
 **Upgrading**: pull the new code, run `npm install --omit=dev` and `npm run build`, then restart the service. Run `npm install` again whenever `package.json` changes.
+
+## Connect to the database
+
+1. Create a database and a login (run as the PostgreSQL admin, and choose your own strong password):
+
+   ```bash
+   sudo -u postgres psql -c "CREATE ROLE hub_user LOGIN PASSWORD 'choose-a-strong-password';"
+   sudo -u postgres psql -c "CREATE DATABASE hub OWNER hub_user;"
+   ```
+
+2. Put the connection string in `.env`:
+
+   ```
+   DATABASE_URL=postgresql://hub_user:choose-a-strong-password@localhost:5432/hub
+   ```
+
+   If the password contains special characters such as `@` or `#`, URL-encode them. Set `PGSSL=true` if the database is on another server and requires TLS.
+3. Start the app. It connects and creates its tables automatically. If it cannot connect, the log (`journalctl -u <service-name> -n 30`) names the problem.
+4. To check the connection by hand: `psql "$DATABASE_URL" -c "select 1"`.
 
 ## Notes
 
