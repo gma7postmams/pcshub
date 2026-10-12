@@ -54,7 +54,7 @@ async function issue(session, user, purpose, appName) {
   // The name in the subject and text: MAIL_APP_NAME if set; else the sender name in SMTP_FROM without a trailing "Notifications"
   // ("PULSE Notifications <..>" -> "PULSE"); else the app name from Admin > Branding.
   if (!appName) {
-    appName = String(process.env.MAIL_APP_NAME || '').trim() || mailer.senderName().replace(/\s+notifications?$/i, '').trim();
+    appName = mailer.shortName();
     if (!appName) {
       try { const r = await require('./db').query(`SELECT value FROM app_settings WHERE key='app_name'`); appName = r.rows[0] && r.rows[0].value; } catch (e) { /* fall through */ }
     }

@@ -29,10 +29,13 @@ const senderName = () => {
   return m ? m[1].trim() : '';
 };
 
+/** The short product name used in emails and in authenticator apps: MAIL_APP_NAME, else the sender name without a trailing "Notifications" ("PULSE"), else ''. */
+const shortName = () => String(process.env.MAIL_APP_NAME || '').trim() || senderName().replace(/\s+notifications?$/i, '').trim();
+
 /** j***@example.com — shown on the sign-in screen so the right mailbox is recognised without exposing it. */
 const mask = (email) => {
   const [a, d] = String(email || '').split('@');
   return d ? `${a.slice(0, 1)}***@${d}` : '';
 };
 
-module.exports = { configured, send, mask, senderName };
+module.exports = { configured, send, mask, senderName, shortName };

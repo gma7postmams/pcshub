@@ -74,8 +74,12 @@ router.post('/2fa/setup', asyncH(async (req, res) => {
   if (!twofaRequired(req.user)) throw new HttpError(403, '2FA is turned on for an account by an Admin');
   if (req.user.totp_enabled) throw new HttpError(400, '2FA is already enabled');
   if (req.user.twofa_method === 'email') throw new HttpError(400, 'Your account uses email codes. Use "Email me a code".');
-  const { rows } = await db.query(`SELECT value FROM app_settings WHERE key='app_name'`);
-  const issuer = (rows[0] && rows[0].value) || 'Promotional Content Hub';
+  // The name the authenticator app shows next to the username: the short name (PULSE), else the Branding app name.
+  let issuer = mailer.shortName();
+  if (!issuer) {
+    const { rows } = await db.query(`SELECT value FROM app_settings WHERE key='app_name'`);
+    issuer = (rows[0] && rows[0].value) || 'Promotional Content Hub';
+  }
   const secret = totp.generateSecret();
   req.session.totpSetup = totp.encrypt(secret); // sessions are stored in Postgres — keep it encrypted there too
   const qr = await QRCode.toDataURL(totp.keyUri(req.user.username, issuer, secret), { margin: 1, width: 220 });
