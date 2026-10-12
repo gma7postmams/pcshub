@@ -115,7 +115,7 @@ export default function TopNav() {
         <div className="dropdown" id="notif-dd" onClick={(e) => e.stopPropagation()}>
           <div className="dd-head">
             <strong className="grow">Notifications</strong>
-            <button type="button" className="btn sm ghost" onClick={async () => { await post('/api/notifications/read-all'); loadNotif(); }}>Mark all read</button>
+            <button type="button" className="btn sm ghost" onClick={async () => { await post('/api/notifications/read-all'); loadNotif(); }}>Mark all as read</button>
           </div>
           <div className="notif-list" id="notif-list">
             {!notif.rows ? <div className="empty">Loading…</div>
