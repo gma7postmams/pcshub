@@ -82,11 +82,50 @@ function parsePlugWorkbook(wb, year) {
         else if (/^prog.*(name|title)|^proj.*title/.test(t)) found.prog = c;
         else if (t === 'psd') found.psd = c;
         else if (t.startsWith('accountby')) found.acct = c;
+        else if (t.startsWith('requestedby')) found.req = c;
+        else if (t === 'date') found.date = c;
         else if (t === 'no') found.no = c;
       });
       if (found.plug) { headerRow = r; Object.assign(col, found); }
     }
     if (!headerRow) { warnings.push(`Sheet "${ws.name}": no PLUG ID column header found, skipped`); continue; }
+
+    if (col.date) {
+      // A flat list (the file this page's own Export makes): one table for all days, with a DATE column on every row.
+      const byDate = new Map();
+      const badDates = new Set();
+      for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+        const row = ws.getRow(r);
+        const plugId = textOf(row.getCell(col.plug).value).replace(/\s+/g, ' ').trim();
+        if (!plugId) continue;
+        const dv = row.getCell(col.date).value;
+        let date = '';
+        if (dv instanceof Date && !Number.isNaN(dv.getTime())) date = dv.toISOString().slice(0, 10);
+        else {
+          const tx = textOf(dv && dv.result !== undefined ? dv.result : dv).trim();
+          const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(tx);
+          if (iso) date = `${iso[1]}-${iso[2]}-${iso[3]}`;
+          else { const md2 = monthDayOfCell(dv); if (md2) date = `${year}-${pad(md2.month)}-${pad(md2.day)}`; }
+        }
+        const chk = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+        if (!chk || new Date(Date.UTC(+chk[1], +chk[2] - 1, +chk[3])).getUTCDate() !== +chk[3]) { badDates.add(r); continue; }
+        const prog = titleOf(row.getCell(col.prog || 0).value);
+        const psd = textOf(col.psd ? row.getCell(col.psd).value : '').replace(/\s+/g, ' ').trim();
+        const acct = textOf(col.acct ? row.getCell(col.acct).value : '').replace(/\s+/g, ' ').trim();
+        const reqBy = textOf(col.req ? row.getCell(col.req).value : '').replace(/\s+/g, ' ').trim();
+        if (!byDate.has(date)) byDate.set(date, { plugs: [], seen: new Set() });
+        const d = byDate.get(date);
+        const key = `${plugId}|${prog}|${psd}`.toUpperCase();
+        if (d.seen.has(key)) continue;
+        d.seen.add(key);
+        d.plugs.push({ seq: d.plugs.length + 1, list_no: null, plug_id: plugId.slice(0, 200), prog_name: prog.slice(0, 300), psd: psd.slice(0, 200), account_by: acct.slice(0, 100), requested_by: reqBy.slice(0, 200), is_additional: false });
+      }
+      if (badDates.size) warnings.push(`Sheet "${ws.name}": ${badDates.size} row(s) have no readable DATE, skipped`);
+      for (const [date, d] of [...byDate.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+        sheets.push({ sheet: ws.name, date, plugs: d.plugs, skippedNoId: 0, additional: 0 });
+      }
+      continue;
+    }
 
     // the sheet's date: a "Sept 28,Monday plug list" style line in the first rows, else the sheet's name ("Sept 28")
     let md = null;
@@ -319,14 +358,14 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
           const p = sh.plugs;
           const { rows } = await c.query(
             `INSERT INTO workload_plugs (plug_date, seq, list_no, plug_id, prog_name, psd, account_by, is_additional, source_file, created_by, requested_by)
-             SELECT $1::date, t.seq, t.list_no, t.plug_id, t.prog_name, t.psd, t.account_by, t.addl, $2, $3, $11
-               FROM unnest($4::int[], $5::int[], $6::text[], $7::text[], $8::text[], $9::text[], $10::bool[]) AS t(seq, list_no, plug_id, prog_name, psd, account_by, addl)
+             SELECT $1::date, t.seq, t.list_no, t.plug_id, t.prog_name, t.psd, t.account_by, t.addl, $2, $3, COALESCE(NULLIF(t.req, ''), $11)
+               FROM unnest($4::int[], $5::int[], $6::text[], $7::text[], $8::text[], $9::text[], $10::bool[], $12::text[]) AS t(seq, list_no, plug_id, prog_name, psd, account_by, addl, req)
              ON CONFLICT (plug_date, plug_id, prog_name, psd)
              DO UPDATE SET seq = EXCLUDED.seq, list_no = EXCLUDED.list_no, account_by = EXCLUDED.account_by,
                            is_additional = EXCLUDED.is_additional, source_file = EXCLUDED.source_file, updated_at = now()
              RETURNING (xmax = 0) AS inserted`,
             [sh.date, req.file.originalname || null, req.user.id, p.map((x) => x.seq), p.map((x) => x.list_no), p.map((x) => x.plug_id),
-              p.map((x) => x.prog_name), p.map((x) => x.psd), p.map((x) => x.account_by), p.map((x) => x.is_additional), whoIs(req)]
+              p.map((x) => x.prog_name), p.map((x) => x.psd), p.map((x) => x.account_by), p.map((x) => x.is_additional), whoIs(req), p.map((x) => x.requested_by || '')]
           );
           const added = rows.filter((r) => r.inserted).length;
           result.push({ sheet: sh.sheet, date: sh.date, plugs: p.length, added, existing: p.length - added, additional: sh.additional, skipped: sh.skippedNoId });
