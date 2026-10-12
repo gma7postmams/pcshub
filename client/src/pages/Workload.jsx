@@ -1206,11 +1206,12 @@ export default function Workload() {
   const pageRows = data && data.rows ? data.rows : [];
   const pickedRowsList = pageRows.filter((r) => (allMatching || picked.has(r.id)) && !isLocked(r.work_date, meta.locks));
   const pickedAllPrio = pickedRowsList.length > 0 && pickedRowsList.every((r) => r.is_priority);
-  const pickable = pageRows.filter((r) => !isLocked(r.work_date, meta.locks));   // a row in a locked period can't be deleted, so it can't be selected
+  const lockedForPick = (r) => canWrite && isLocked(r.work_date, meta.locks);   // a row in a locked period can't be deleted, so it can't be selected (a Viewer only copies, so for them nothing is locked)
+  const pickable = pageRows.filter((r) => !lockedForPick(r));
   const pickedCount = allMatching ? total : picked.size;
   const pageAllPicked = !!pickable.length && pickable.every((r) => allMatching || picked.has(r.id));
   const clearPicks = () => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; };
-  const rangeIds = (a, b) => pageRows.slice(Math.min(a, b), Math.max(a, b) + 1).filter((r) => !isLocked(r.work_date, meta.locks)).map((r) => r.id);
+  const rangeIds = (a, b) => pageRows.slice(Math.min(a, b), Math.max(a, b) + 1).filter((r) => !lockedForPick(r)).map((r) => r.id);
   const selectPage = () => { setAllMatching(false); setPicked(new Set(pickable.map((r) => r.id))); };
   const selectAllMatching = () => { setPicked(new Set(pickable.map((r) => r.id))); setAllMatching(true); };
   const toPayload = (r) => [...Object.keys(meta.fields), 'is_priority'].reduce((o, k) => ({ ...o, [k]: r[k] }), {});   // a row as the batch endpoint takes it (no id)
@@ -1334,7 +1335,7 @@ export default function Workload() {
     if (t.closest && t.closest('.editing, .cell-editor-inline, input, select, textarea')) return;   // inside an open editor keep the browser's own menu
     e.preventDefault();
     if (editing) setEditing(null);
-    if (!rowLocked(r) && !(allMatching || picked.has(r.id))) { setAllMatching(false); setPicked(new Set([r.id])); lastPick.current = r.id; }
+    if (!lockedForPick(r) && !(allMatching || picked.has(r.id))) { setAllMatching(false); setPicked(new Set([r.id])); lastPick.current = r.id; }
     setTctx({ x: e.clientX, y: e.clientY });
   };
   const menuPasteRows = async (how) => {
@@ -1356,7 +1357,7 @@ export default function Workload() {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       holdClick();
-      if (!rowLocked(r)) {
+      if (!lockedForPick(r)) {
         setAllMatching(false);
         setPicked((cur) => { const n = new Set(cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; });
         lastPick.current = r.id;
@@ -1377,7 +1378,7 @@ export default function Workload() {
     setCellSel(null);
     if (document.activeElement && document.activeElement !== document.body && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) document.activeElement.blur();
     rowDown(e, r, idx);
-    if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !rowLocked(r)) { e.preventDefault(); setAllMatching(false); setPicked(new Set([r.id])); lastPick.current = r.id; }
+    if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !lockedForPick(r)) { e.preventDefault(); setAllMatching(false); setPicked(new Set([r.id])); lastPick.current = r.id; }
   };
   tblMouse.current.move = (e) => {
     const cd = cellDrag.current;
@@ -1562,7 +1563,7 @@ export default function Workload() {
   // Table-mode shortcuts — the same ones Excel mode has: Ctrl/Cmd+A select all, +C copy, +X cut, +V paste, +Z undo, +Y redo, Delete, Esc
   // (ignored while typing in a field, with a cell editor or dialog open, and in Excel mode / the plug list, which have their own)
   const tableKeysOk = (e) => {
-    if (isGrid || !canWrite) return false;
+    if (isGrid) return false;   // a Viewer gets the copy / select shortcuts only (see below)
     const el = e.target;
     if (el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return false;
     return !(document.querySelector('.modal-backdrop') || form || addingColumn || managingLocks || deletingAll || editing);
@@ -1572,8 +1573,8 @@ export default function Workload() {
     const key = e.key.toLowerCase();
     if (cellSel && !picked.size) {   // a block of cells is picked
       if ((e.ctrlKey || e.metaKey) && key === 'c') { if (!(window.getSelection && String(window.getSelection()))) { e.preventDefault(); copyCells(); } return; }
-      if ((e.ctrlKey || e.metaKey) && key === 'x') { e.preventDefault(); copyCells().then((ok) => { if (ok) clearCells(); }); return; }
-      if (!e.ctrlKey && !e.metaKey && (key === 'delete' || key === 'backspace')) { e.preventDefault(); clearCells(); return; }
+      if (canWrite && (e.ctrlKey || e.metaKey) && key === 'x') { e.preventDefault(); copyCells().then((ok) => { if (ok) clearCells(); }); return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && (key === 'delete' || key === 'backspace')) { e.preventDefault(); clearCells(); return; }
       if (!e.ctrlKey && !e.metaKey && key === 'escape') { setCellSel(null); return; }
     }
     if (e.ctrlKey || e.metaKey) {
@@ -1583,13 +1584,13 @@ export default function Workload() {
       } else if (key === 'c') {
         if (picked.size && !(window.getSelection && String(window.getSelection()))) { e.preventDefault(); copyPicked(); }
       } else if (key === 'x') {
-        if (picked.size) { e.preventDefault(); cutPicked(); }
-      } else if (key === 'z') { e.preventDefault(); if (e.shiftKey) redoTbl(); else undoTbl(); }
-      else if (key === 'y') { e.preventDefault(); redoTbl(); }
+        if (canWrite && picked.size) { e.preventDefault(); cutPicked(); }
+      } else if (key === 'z') { if (canWrite) { e.preventDefault(); if (e.shiftKey) redoTbl(); else undoTbl(); } }
+      else if (key === 'y') { if (canWrite) { e.preventDefault(); redoTbl(); } }
       return;   // Ctrl+V arrives as a paste event (below)
     }
     if (key === 'escape') clearPicks();
-    else if ((key === 'delete' || key === 'backspace') && pickedCount) { e.preventDefault(); deleteSelected(); }
+    else if (canWrite && (key === 'delete' || key === 'backspace') && pickedCount) { e.preventDefault(); deleteSelected(); }
     else if (['arrowdown', 'arrowup', 'home', 'end'].includes(key) && picked.size && pageRows.length) {
       // like the arrow keys in Excel mode: move the selection one row (Shift extends it from where it started); Home / End jump to the first / last row
       e.preventDefault();
@@ -1608,7 +1609,7 @@ export default function Workload() {
     }
   };
   pasteRef.current = (e) => {
-    if (!tableKeysOk(e)) return;
+    if (!canWrite || !tableKeysOk(e)) return;   // pasting is for people who can edit
     const text = e.clipboardData && e.clipboardData.getData('text/plain');
     if (!text || !text.trim()) return;
     e.preventDefault();
@@ -1944,14 +1945,14 @@ export default function Workload() {
           <>
             <div className={`table-wrap${cards ? '' : ' wl-fit'}`} id="tbl" onClickCapture={(e) => {
               if (tblSuppress.current) { tblSuppress.current = false; e.stopPropagation(); e.preventDefault(); return; }   // the click that ended a drag / Shift / Ctrl+click
-              if (canWrite && (picked.size || allMatching) && !(e.target.closest && e.target.closest('.actions-cell, .chk, .rn'))) clearPicks();
+              if ((picked.size || allMatching) && !(e.target.closest && e.target.closest('.actions-cell, .chk, .rn'))) clearPicks();
             }}>
               {!data ? <Empty>Loading…</Empty>
                 : data.error ? <Empty>{data.error}</Empty>
                   : !data.rows.length && !draft ? <Empty>No workload items match these filters.</Empty>
                     : (
                       <table className={`t wl v-${viewKey.toLowerCase()}${cards ? ' cards' : ''}`}>
-                        <thead><tr>{canWrite && !cards ? <th className="rn" title={pageAllPicked ? 'Click to unselect all' : 'Select all rows on this page (Ctrl+A)'} onClick={() => (pageAllPicked ? clearPicks() : selectPage())} /> : null}{canWrite && cards ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
+                        <thead><tr>{!cards ? <th className="rn" title={pageAllPicked ? 'Click to unselect all' : 'Select all rows on this page (Ctrl+A)'} onClick={() => (pageAllPicked ? clearPicks() : selectPage())} /> : null}{canWrite && cards ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {draft ? (
                             <tr key="draft" className="draft-row" data-draft="1">
@@ -1967,12 +1968,12 @@ export default function Workload() {
                           {data.rows.map((r, idx) => (
                             <tr key={r.id} data-id={r.id}
                               className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}`.trim()}
-                              onMouseDown={canWrite ? cellDown : undefined}
-                              onContextMenu={canWrite ? (e) => rowMenu(e, r) : undefined}
-                              onClick={canWrite ? undefined : () => setForm({ rec: r })}>
-                              {canWrite && !cards ? (
+                              onMouseDown={cellDown}
+                              onContextMenu={(e) => rowMenu(e, r)}
+                              onClick={canWrite ? undefined : (e) => { if (!(e.target.closest && e.target.closest('.rn'))) setForm({ rec: r }); }}>
+                              {!cards ? (
                                 <td className={`rn${allMatching || picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, idx)}
-                                  title={rowLocked(r) ? 'Locked period: cannot be selected' : 'Click to select the row (Shift-click a range, Ctrl-click to add; Ctrl+C copies, Ctrl+V pastes)'}>{offset + idx + 1}</td>
+                                  title={lockedForPick(r) ? 'Locked period: cannot be selected' : canWrite ? 'Click to select the row (Shift-click a range, Ctrl-click to add; Ctrl+C copies, Ctrl+V pastes)' : 'Click to select the row (Shift-click a range, Ctrl-click to add; Ctrl+C copies)'}>{offset + idx + 1}</td>
                               ) : null}
                               {canWrite && cards ? (
                                 <td className="chk">
@@ -1999,16 +2000,20 @@ export default function Workload() {
             <Pager total={total} offset={offset} size={size} onOffset={cards ? setOffset : goOffset} head={cards ? undefined : sheetTabs} lead={cards ? undefined : rowsPicker} />
             {tctx ? (
               <FitMenu x={tctx.x} y={tctx.y} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
+                {canWrite ? <>
                 <button type="button" disabled={!tblHist.current.past.length} onClick={() => { setTctx(null); undoTbl(); }}>Undo<span>Ctrl+Z</span></button>
                 <button type="button" disabled={!tblHist.current.future.length} onClick={() => { setTctx(null); redoTbl(); }}>Redo<span>Ctrl+Y</span></button>
                 <hr />
                 <button type="button" disabled={!picked.size || allMatching} onClick={() => { setTctx(null); cutPicked(); }}>Cut<span>Ctrl+X</span></button>
-                <button type="button" disabled={!picked.size} onClick={() => { setTctx(null); copyPicked(); }}>Copy<span>Ctrl+C</span></button>
+                </> : null}
+                <button type="button" disabled={!picked.size && !cellSel} onClick={() => { setTctx(null); if (picked.size) copyPicked(); else copyCells(); }}>Copy<span>Ctrl+C</span></button>
+                {canWrite ? <>
                 <button type="button" onClick={() => menuPasteRows()}>{picked.size ? 'Paste (replace row)' : 'Paste'}<span>Ctrl+V</span></button>
                 <button type="button" disabled={!picked.size} onClick={() => menuPasteRows('above')}>Paste as new row above</button>
                 <button type="button" disabled={!picked.size} onClick={() => menuPasteRows('below')}>Paste as new row below</button>
                 <hr />
                 <button type="button" disabled={!pickedCount} onClick={() => { setTctx(null); deleteSelected(); }}>Delete {pickedCount > 1 ? `${pickedCount} rows` : 'row'}<span>Del</span></button>
+                </> : null}
               </FitMenu>
             ) : null}
           </>
