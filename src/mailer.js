@@ -18,9 +18,9 @@ function get() {
   return transport;
 }
 
-async function send({ to, subject, text }) {
+async function send({ to, subject, text, html, attachments }) {
   if (!configured()) throw new Error('Email is not set up on the server');
-  await get().sendMail({ from: process.env.SMTP_FROM, to, subject, text });
+  await get().sendMail({ from: process.env.SMTP_FROM, to, subject, text, html, attachments });
 }
 
 /** The display name in SMTP_FROM ("PULSE Notifications <no-reply@example.com>" -> "PULSE Notifications"), or '' when there is none. */

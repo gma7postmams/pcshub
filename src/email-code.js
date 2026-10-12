@@ -4,6 +4,8 @@
 const crypto = require('crypto');
 const mailer = require('./mailer');
 const { HttpError } = require('./middleware');
+const path = require('path');
+const fs = require('fs');
 
 const TTL_MS = 10 * 60 * 1000;
 const COOLDOWN_MS = 60 * 1000;
@@ -12,6 +14,36 @@ const MAX_SENDS = 5;
 const KEY = process.env.SESSION_SECRET || 'dev';
 
 const hash = (uid, purpose, code) => crypto.createHmac('sha256', KEY).update(`${uid}:${purpose}:${code}`).digest('hex');
+
+const esc = (x) => String(x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/** The Branding logo as an inline attachment (cid:logo), so it shows even where the app's address can't be reached. null if there is none. */
+function logoAttachment(logoPath) {
+  try {
+    const name = path.basename(String(logoPath || ''));
+    if (!name) return null;
+    const file = path.join(__dirname, '..', 'uploads', 'branding', name);
+    if (!fs.existsSync(file)) return null;
+    return { filename: name, path: file, cid: 'logo' };
+  } catch (e) { return null; }
+}
+
+/** The email in the same style as the other notification emails: logo, name, tagline, then the message. */
+function codeEmailHtml({ appName, tagline, hasLogo, what, code }) {
+  const f = 'font-family:Arial,Helvetica,sans-serif';
+  return `<!doctype html><html><body style="margin:0;padding:24px 12px;background:#f3f4f6">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+<table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:8px">
+<tr><td align="center" style="padding:28px 24px 8px">
+${hasLogo ? '<img src="cid:logo" alt="" height="90" style="display:block;margin:0 auto 6px;height:90px;width:auto;border:0">' : ''}
+<div style="${f};font-size:26px;font-weight:700;color:#1d4ed8;letter-spacing:1px">${esc(appName)}</div>
+${tagline ? `<div style="${f};font-size:14px;color:#6b7280;margin-top:2px">${esc(tagline)}</div>` : ''}
+</td></tr>
+<tr><td style="padding:18px 36px 8px;${f};font-size:17px;color:#374151">Your ${esc(appName)} ${esc(what)} code is:</td></tr>
+<tr><td align="center" style="padding:6px 36px 14px"><div style="${f};font-size:34px;font-weight:700;letter-spacing:8px;color:#111827">${esc(code)}</div></td></tr>
+<tr><td style="padding:0 36px 28px;${f};font-size:15px;line-height:1.5;color:#374151">It works once and expires in 10 minutes.<br>If you did not just try to sign in or confirm something, ignore this email and tell an Admin.</td></tr>
+</table></td></tr></table></body></html>`;
+}
 
 const SUBJECT = { login: 'sign-in', reauth: 'confirmation', enroll: 'two-step setup' };
 
@@ -33,11 +65,22 @@ async function issue(session, user, purpose, appName) {
   if (same && cur.sends >= MAX_SENDS) throw new HttpError(429, 'Too many codes requested. Sign in again to start over.');
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
   session.emailCode = { uid: user.id, purpose, h: hash(user.id, purpose, code), exp: Date.now() + TTL_MS, tries: 0, sentAt: Date.now(), sends: same ? cur.sends + 1 : 1 };
+  let tagline = '';
+  let logo = null;
+  try {
+    const r = await require('./db').query(`SELECT key, value FROM app_settings WHERE key IN ('app_name','logo_path')`);
+    const m = Object.fromEntries(r.rows.map((x) => [x.key, x.value]));
+    if (m.app_name && m.app_name !== appName) tagline = m.app_name;   // e.g. "PCS Updates, Logging & Status Environment" under "PULSE"
+    logo = logoAttachment(m.logo_path);
+  } catch (e) { /* plain email without the logo */ }
+  const what = SUBJECT[purpose] || 'verification';
   try {
     await mailer.send({
       to: user.email,
       subject: `${code} is your ${appName} code`,
-      text: `Your ${appName} ${SUBJECT[purpose] || 'verification'} code is ${code}\n\nIt works once and expires in 10 minutes. If you did not just try to sign in or confirm something, ignore this email and tell an Admin.`,
+      text: `Your ${appName} ${what} code is ${code}\n\nIt works once and expires in 10 minutes. If you did not just try to sign in or confirm something, ignore this email and tell an Admin.`,
+      html: codeEmailHtml({ appName, tagline, hasLogo: Boolean(logo), what, code }),
+      attachments: logo ? [logo] : undefined,
     });
   } catch (e) {
     delete session.emailCode;
