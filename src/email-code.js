@@ -37,7 +37,7 @@ function codeEmailHtml({ appName, tagline, hasLogo, what, code }) {
 <tr><td align="center" style="padding:28px 24px 8px">
 ${hasLogo ? '<img src="cid:logo" alt="" height="90" style="display:block;margin:0 auto 6px;height:90px;width:auto;border:0">' : ''}
 <div style="${f};font-size:26px;font-weight:700;color:#1d4ed8;letter-spacing:1px">${esc(appName)}</div>
-${tagline ? `<div style="${f};font-size:14px;color:#6b7280;margin-top:2px">${esc(tagline)}</div>` : ''}
+${tagline ? `<div style="${f};font-size:14px;color:#1d4ed8;margin-top:2px">${esc(tagline)}</div>` : ''}
 </td></tr>
 <tr><td style="padding:18px 36px 8px;${f};font-size:17px;color:#374151">Your ${esc(appName)} ${esc(what)} code is:</td></tr>
 <tr><td align="center" style="padding:6px 36px 14px"><div style="${f};font-size:34px;font-weight:700;letter-spacing:8px;color:#111827">${esc(code)}</div></td></tr>
