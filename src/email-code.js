@@ -17,9 +17,10 @@ const SUBJECT = { login: 'sign-in', reauth: 'confirmation', enroll: 'two-step se
 
 /** Create and email a new code. `session` is req.session. Throws HttpError when too soon, too many, or the mail fails. */
 async function issue(session, user, purpose, appName) {
-  // The name in the subject and text: the sender name in SMTP_FROM if there is one, else the app name from Admin > Branding.
+  // The name in the subject and text: MAIL_APP_NAME if set; else the sender name in SMTP_FROM without a trailing "Notifications"
+  // ("PULSE Notifications <..>" -> "PULSE"); else the app name from Admin > Branding.
   if (!appName) {
-    appName = mailer.senderName();
+    appName = String(process.env.MAIL_APP_NAME || '').trim() || mailer.senderName().replace(/\s+notifications?$/i, '').trim();
     if (!appName) {
       try { const r = await require('./db').query(`SELECT value FROM app_settings WHERE key='app_name'`); appName = r.rows[0] && r.rows[0].value; } catch (e) { /* fall through */ }
     }
