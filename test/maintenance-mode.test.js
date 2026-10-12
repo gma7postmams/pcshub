@@ -79,3 +79,42 @@ test('the message is escaped in the page', () => {
   assert.ok(!out.body.includes('<script>alert'));
   assert.match(out.body, /&lt;script&gt;/);
 });
+
+test('the in-app switch turns it on and reports itself as the source', () => {
+  mm.applyUi(true, 'Upgrading the database');
+  const d = mm.detail();
+  assert.equal(d.on, true);
+  assert.equal(d.message, 'Upgrading the database');
+  assert.deepEqual(d.sources, { ui: true, env: false, file: false });
+  mm.applyUi(false, '');
+  assert.equal(mm.enabled(), false);
+});
+
+test('the flag file or .env keeps it on after the in-app switch is turned off, and the file text wins the message', () => {
+  mm.applyUi(true, 'From the app');
+  fs.writeFileSync(FLAG, 'From the file'); mm.reset(); mm.applyUi(true, 'From the app');
+  assert.equal(mm.state().message, 'From the file');
+  mm.applyUi(false, '');
+  assert.equal(mm.enabled(), true);
+  assert.deepEqual(mm.detail().sources, { ui: false, env: false, file: true });
+  fs.unlinkSync(FLAG); mm.reset();
+  process.env.MAINTENANCE_MODE = 'true'; mm.reset();
+  assert.deepEqual(mm.detail().sources, { ui: false, env: true, file: false });
+});
+
+test('loadUi / saveUi round-trip through app_settings', async () => {
+  const rows = new Map();
+  const fake = {
+    query: async (sql, params) => {
+      if (/^\s*SELECT/i.test(sql)) return { rows: [...rows].filter(([k]) => params[0].includes(k)).map(([key, value]) => ({ key, value })) };
+      rows.set(params[0], params[1]); return { rows: [] };
+    },
+  };
+  await mm.saveUi(fake, true, 'Back at noon');
+  mm.reset();
+  await mm.loadUi(fake);
+  assert.deepEqual(mm.state(), { on: true, message: 'Back at noon' });
+  await mm.saveUi(fake, false, '');
+  await mm.loadUi(fake);
+  assert.equal(mm.enabled(), false);
+});

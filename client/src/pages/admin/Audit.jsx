@@ -11,6 +11,8 @@ const ACTION_LABELS = {
   'auth.locked': 'Account Locked',
   'auth.login_blocked_locked': 'Login Blocked (Locked Account)',
   'auth.login_blocked_maintenance': 'Login Blocked (Maintenance Mode)',
+  'admin.maintenance_on': 'Maintenance Mode Turned On',
+  'admin.maintenance_off': 'Maintenance Mode Turned Off',
 
   'ingest.create': 'Created Ingest Record',
   'ingest.export': 'Exported Ingest Records',
@@ -566,6 +568,12 @@ function formatDetails(row) {
 
     case 'auth.login_blocked_locked':
       return 'Login blocked because account is currently locked';     
+
+    case 'admin.maintenance_on':
+      return `Turned maintenance mode on${d.message ? `: “${d.message}”` : ''}`;
+
+    case 'admin.maintenance_off':
+      return 'Turned maintenance mode off';
 
     case 'auth.login_blocked_maintenance':
       return 'Sign-in refused because maintenance mode is on (only System Admins may sign in)';

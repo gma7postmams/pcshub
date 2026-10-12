@@ -9,12 +9,13 @@ import Branding from './Branding.jsx';
 import Audit from './Audit.jsx';
 import Backup from './Backup.jsx';
 import Security from './Security.jsx';
+import Maintenance from './Maintenance.jsx';
 
 
 const TABS = [
   ['overview', 'Overview', Overview], ['access', 'Access', Access],
   ['dropdowns', 'Dropdowns', Dropdowns], ['branding', 'Branding', Branding], ['backup', 'Backup and Restore', Backup],
-  ['security', 'Security', Security], ['audit', 'Audit Log', Audit],
+  ['security', 'Security', Security], ['maintenance', 'Maintenance', Maintenance], ['audit', 'Audit Log', Audit],
 ];
 // Users, Roles and Groups are the Access tab's three parts. Old links (#users, #roles, #groups) still land on the right one.
 const ALIAS = { users: 'access/users', roles: 'access/roles', groups: 'access/groups' };

@@ -64,10 +64,11 @@ For front-end development, run `npm start` and `npm run dev:client` in two termi
 
 Closes the site to everyone except a System Admin, for upgrades and similar work. Everyone else sees an "Under maintenance" page, and their sign-in is refused with a message. The System Admin signs in as usual and sees a "Maintenance ON" badge in the top bar.
 
+- **In the app (no restart):** as a System Admin open Administration → Maintenance, optionally type a message, and press **Turn on maintenance mode** (and **Turn off** to end it). Every change is written to the Audit Log.
 - **Flag file (no restart):** `sudo sh -c 'echo "Back at 3 PM" > /var/www/pcshub/MAINTENANCE'` turns it on; the text is the message shown. `sudo rm /var/www/pcshub/MAINTENANCE` turns it off. It takes effect within a second.
 - **`.env` (restart needed):** set `MAINTENANCE_MODE=true` (and optionally `MAINTENANCE_MESSAGE`), then `sudo systemctl restart pcshub`. Set it back to `false` to end it.
 
-Either one being on is enough. People already signed in are not signed out: they see the maintenance page until it ends, then carry on.
+Any one of the three being on is enough, so if it stays on after you turn it off in the app, check the flag file and `.env`. People already signed in are not signed out: they see the maintenance page until it ends, then carry on.
 
 ## Notes
 

@@ -140,6 +140,26 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
   }));
 
   // ---------- Admin home ----------
+  // ---------- Maintenance mode ----------
+  // Only a System Admin reaches this (routes/admin.js lets an Admin into the Audit Log, Dropdowns and Branding only).
+  // The in-app switch is one of three (see src/maintenance-mode.js); .env and the flag file can keep it on after this one is turned off.
+  const maintenance = require('./maintenance-mode');
+  const maintView = () => { const d = maintenance.detail(); return { on: d.on, message: d.message, uiMessage: d.uiMessage, sources: d.sources, flagFile: maintenance.FLAG_FILE, maxMessage: maintenance.MAX_MESSAGE }; };
+  router.get('/maintenance', (req, res) => res.json(maintView()));
+  router.put('/maintenance', asyncH(async (req, res) => {
+    const b = req.body || {};
+    if (typeof b.on !== 'boolean') throw new HttpError(400, 'Say whether maintenance mode is on or off');
+    const message = typeof b.message === 'string' ? b.message.trim() : '';
+    if (message.length > maintenance.MAX_MESSAGE) throw new HttpError(400, `The message can be at most ${maintenance.MAX_MESSAGE} characters`);
+    const before = maintenance.detail().sources.ui;
+    await db.tx(async (c) => {
+      await maintenance.saveUi(c, b.on, message);
+      await audit(req, b.on ? 'admin.maintenance_on' : 'admin.maintenance_off', 'app_settings', null, { message, was_on: before }, c);
+    });
+    maintenance.applyUi(b.on, message);
+    res.json(maintView());
+  }));
+
   router.get('/overview', asyncH(async (req, res) => {
     const [u, pending, failed, backup, online] = await Promise.all([
       db.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE is_active)::int AS active, count(*) FILTER (WHERE locked_until > now())::int AS locked,

@@ -8,32 +8,56 @@ const { isSysAdmin } = require('./permissions');
 //   2. a flag file:    create a file named MAINTENANCE in the app folder (or the path in MAINTENANCE_FILE) — noticed within a second, no restart
 //        sudo sh -c 'echo "Back at 3 PM" > /var/www/pcshub/MAINTENANCE'     (the file's text, if any, is the message shown)
 //        sudo rm /var/www/pcshub/MAINTENANCE
-// Either one being on is enough. (This is separate from src/backup/maintenance.js, which blocks everyone, admins included, while a backup is restored.)
+//   3. the switch in the app: Administration > Maintenance (System Admin) — stored in the database, no restart
+// Any one being on is enough. (This is separate from src/backup/maintenance.js, which blocks everyone, admins included, while a backup is restored.)
 const FLAG_FILE = process.env.MAINTENANCE_FILE ? path.resolve(process.env.MAINTENANCE_FILE) : path.join(__dirname, '..', 'MAINTENANCE');
 const DEFAULT_MESSAGE = 'The site is undergoing scheduled maintenance. Please check back shortly.';
 const TRUE = /^(1|true|on|yes)$/i;
 const MAX_MESSAGE = 300;
 
-let cache = { at: 0, value: { on: false, message: '' } };
+let cache = null;                       // { at, detail }
+let ui = { on: false, message: '' };   // the in-app switch (Administration > Maintenance), kept in app_settings
 
-/** { on, message } — re-read at most once a second so toggling the flag file is picked up without a restart. */
-function state() {
+/** Everything about the current state, including which switches are on: { on, message, uiMessage, sources: { ui, env, file } }. Re-read at most once a second. */
+function detail() {
   const now = Date.now();
-  if (now - cache.at < 1000) return cache.value;
-  let on = TRUE.test(String(process.env.MAINTENANCE_MODE || '').trim());
-  let message = String(process.env.MAINTENANCE_MESSAGE || '').trim();
-  let flagged = false;
-  try { flagged = fs.existsSync(FLAG_FILE); } catch (e) { flagged = false; }
-  if (flagged) {
-    on = true;
-    try { message = fs.readFileSync(FLAG_FILE, 'utf8').trim() || message; } catch (e) { /* present but unreadable: still on, default message */ }
-  }
-  cache = { at: now, value: { on, message: on ? (message || DEFAULT_MESSAGE).slice(0, MAX_MESSAGE) : '' } };
-  return cache.value;
+  if (cache && now - cache.at < 1000) return cache.detail;
+  const env = TRUE.test(String(process.env.MAINTENANCE_MODE || '').trim());
+  let file = false;
+  try { file = fs.existsSync(FLAG_FILE); } catch (e) { file = false; }
+  let fileText = '';
+  if (file) { try { fileText = fs.readFileSync(FLAG_FILE, 'utf8').trim(); } catch (e) { /* present but unreadable: still on */ } }
+  const on = env || file || ui.on;
+  // the flag file's text wins, then what was typed in the app, then MAINTENANCE_MESSAGE
+  const message = on ? (fileText || (ui.on && ui.message) || String(process.env.MAINTENANCE_MESSAGE || '').trim() || DEFAULT_MESSAGE).slice(0, MAX_MESSAGE) : '';
+  cache = { at: now, detail: { on, message, uiMessage: ui.message, sources: { ui: ui.on, env, file } } };
+  return cache.detail;
 }
-const enabled = () => state().on;
+/** { on, message } — what the page and the guard need. */
+const state = () => { const d = detail(); return { on: d.on, message: d.message }; };
+const enabled = () => detail().on;
 /** Tests (and nothing else) need to see a change straight away. */
-const reset = () => { cache = { at: 0, value: { on: false, message: '' } }; };
+const reset = () => { cache = null; ui = { on: false, message: '' }; };
+
+const UI_KEYS = ['maint_on', 'maint_message'];
+/** Read the in-app switch from the database (at start-up). */
+async function loadUi(db) {
+  const { rows } = await db.query('SELECT key, value FROM app_settings WHERE key = ANY($1)', [UI_KEYS]);
+  const m = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  ui = { on: m.maint_on === '1', message: String(m.maint_message || '').slice(0, MAX_MESSAGE) };
+  cache = null;
+  return ui;
+}
+/** Save the in-app switch (inside the caller's transaction) — call apply() once that has committed. */
+async function saveUi(client, on, message) {
+  for (const [key, value] of [['maint_on', on ? '1' : '0'], ['maint_message', message]]) {
+    await client.query(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES ($1,$2,now())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [key, value]
+    );
+  }
+}
+const applyUi = (on, message) => { ui = { on: Boolean(on), message: String(message || '').slice(0, MAX_MESSAGE) }; cache = null; };
 
 /** Who may use the site during maintenance. */
 const mayUse = (user) => isSysAdmin(user);
@@ -66,4 +90,4 @@ function guard(req, res, next) {
   return res.status(503).send('Service temporarily unavailable');
 }
 
-module.exports = { state, enabled, mayUse, guard, reset, FLAG_FILE, DEFAULT_MESSAGE };
+module.exports = { state, detail, enabled, mayUse, guard, reset, loadUi, saveUi, applyUi, FLAG_FILE, DEFAULT_MESSAGE, MAX_MESSAGE };

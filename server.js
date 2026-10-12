@@ -207,6 +207,7 @@ const boot = process.env.MIGRATE_ON_START === 'false'
 boot
   .then(() => require('./src/roles').loadRoles(db))
   .then(() => require('./src/security-settings').load())
+  .then(() => require('./src/maintenance-mode').loadUi(db))
   .then(() => require('./src/backup/service').recoverStale())
   .then(() => require('./src/backup/analysis').startupCleanup())
   .then(async () => {

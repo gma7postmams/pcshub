@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { get } from '../../lib/api.js';
 import { fmtBytes, fmtDateTime } from '../../lib/util.js';
 import { Empty } from '../../components/ui.jsx';
+import { useSession } from '../../context.jsx';
 
 const ago = (d) => {
   const m = Math.max(0, Math.round((Date.now() - new Date(d).getTime()) / 60000));
@@ -12,6 +13,7 @@ const ago = (d) => {
 };
 
 export default function Overview({ go }) {
+  const session = useSession();
   const [o, setO] = useState(null);
   const [b, setB] = useState(null);
   useEffect(() => {
@@ -31,6 +33,12 @@ export default function Overview({ go }) {
     <div className="card">
       <div className="card-head"><h2 className="sr-only">Overview</h2></div>
       <div className="card-pad">
+        {session && session.maintenance && session.maintenance.on ? (
+          <div className="alert warn mb-12" id="maint-overview">
+            <strong>Maintenance mode is ON.</strong> Only System Admins can sign in.{' '}
+            <button type="button" className="linklike" onClick={() => go('maintenance')}>Open Maintenance</button>
+          </div>
+        ) : null}
         {stale ? (
           <div className="alert warn mb-12">
             {o.lastBackup ? `The last successful backup was ${ago(o.lastBackup.at)}.` : 'There is no successful backup yet.'}{' '}
