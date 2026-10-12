@@ -48,8 +48,8 @@ ${PREHEADER}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
 <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:8px">
 <tr><td align="center" style="padding:28px 24px 8px">
-${hasLogo ? '<img src="cid:logo" alt="" height="130" style="display:block;margin:0 auto 6px;height:130px;width:auto;border:0">' : ''}
-<div style="${f};font-size:19px;line-height:1.3;font-weight:700;color:#1d4ed8">${esc(heading)}</div>
+${hasLogo ? '<img src="cid:logo" alt="" height="110" style="display:block;margin:0 auto 8px;height:110px;width:auto;border:0">' : ''}
+<div style="${f};font-size:20px;line-height:1.3;font-weight:700;color:#1d4ed8">${esc(heading)}</div>
 </td></tr>
 <tr><td style="padding:18px 36px 8px;${f};font-size:17px;color:#374151">Your ${esc(appName)} ${esc(what)} code is:</td></tr>
 <tr><td align="center" style="padding:6px 36px 14px"><div style="${f};font-size:34px;font-weight:700;letter-spacing:8px;color:#111827">${esc(code)}</div></td></tr>
@@ -78,7 +78,7 @@ async function issue(session, user, purpose, appName) {
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
   session.emailCode = { uid: user.id, purpose, h: hash(user.id, purpose, code), exp: Date.now() + TTL_MS, tries: 0, sentAt: Date.now(), sends: same ? cur.sends + 1 : 1 };
   const b = await brand();
-  const heading = b.name || appName;   // the big blue line: the full name from Administration → Branding ("PCS Updates, Logging & Status Environment")
+  const heading = String(process.env.MAIL_HEADING || '').trim() || b.name || appName;   // the big blue line: MAIL_HEADING in .env, else the app name from Administration → Branding
   const logo = b.logo;
   const what = SUBJECT[purpose] || 'verification';
   try {
