@@ -17,15 +17,24 @@ const hash = (uid, purpose, code) => crypto.createHmac('sha256', KEY).update(`${
 
 const esc = (x) => String(x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-/** The Branding logo as an inline attachment (cid:logo), so it shows even where the app's address can't be reached. null if there is none. */
-function logoAttachment(logoPath) {
+// The Branding name and logo, kept for a minute so each code email doesn't hit the database and re-read the logo file.
+let brandCache = { at: 0, name: '', logo: null };
+async function brand() {
+  if (Date.now() - brandCache.at < 60000) return brandCache;
+  let name = '';
+  let logo = null;
   try {
-    const name = path.basename(String(logoPath || ''));
-    if (!name) return null;
-    const file = path.join(__dirname, '..', 'uploads', 'branding', name);
-    if (!fs.existsSync(file)) return null;
-    return { filename: name, path: file, cid: 'logo' };
-  } catch (e) { return null; }
+    const r = await require('./db').query(`SELECT key, value FROM app_settings WHERE key IN ('app_name','logo_path')`);
+    const m = Object.fromEntries(r.rows.map((x) => [x.key, x.value]));
+    name = m.app_name || '';
+    const file = path.basename(String(m.logo_path || ''));
+    if (file) {
+      const full = path.join(__dirname, '..', 'uploads', 'branding', file);
+      if (fs.existsSync(full)) logo = { filename: file, content: fs.readFileSync(full), cid: 'logo' };   // inline attachment (cid:logo): shows even where the app's address can't be reached
+    }
+  } catch (e) { /* plain email without the logo */ }
+  brandCache = { at: Date.now(), name, logo };
+  return brandCache;
 }
 
 // Keeps the inbox list's preview line empty: mail programs show the first text of the body there, so a hidden run of blank characters comes first.
@@ -39,8 +48,8 @@ ${PREHEADER}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
 <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:8px">
 <tr><td align="center" style="padding:28px 24px 8px">
-${hasLogo ? '<img src="cid:logo" alt="" height="90" style="display:block;margin:0 auto 6px;height:90px;width:auto;border:0">' : ''}
-<div style="${f};font-size:26px;font-weight:700;color:#1d4ed8;letter-spacing:1px">${esc(appName)}</div>
+${hasLogo ? '<img src="cid:logo" alt="" height="130" style="display:block;margin:0 auto 6px;height:130px;width:auto;border:0">' : ''}
+<div style="${f};font-size:22px;font-weight:700;color:#1d4ed8;letter-spacing:1px">${esc(appName)}</div>
 ${tagline ? `<div style="${f};font-size:14px;color:#1d4ed8;margin-top:2px">${esc(tagline)}</div>` : ''}
 </td></tr>
 <tr><td style="padding:18px 36px 8px;${f};font-size:17px;color:#374151">Your ${esc(appName)} ${esc(what)} code is:</td></tr>
@@ -69,14 +78,9 @@ async function issue(session, user, purpose, appName) {
   if (same && cur.sends >= MAX_SENDS) throw new HttpError(429, 'Too many codes requested. Sign in again to start over.');
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
   session.emailCode = { uid: user.id, purpose, h: hash(user.id, purpose, code), exp: Date.now() + TTL_MS, tries: 0, sentAt: Date.now(), sends: same ? cur.sends + 1 : 1 };
-  let tagline = '';
-  let logo = null;
-  try {
-    const r = await require('./db').query(`SELECT key, value FROM app_settings WHERE key IN ('app_name','logo_path')`);
-    const m = Object.fromEntries(r.rows.map((x) => [x.key, x.value]));
-    if (m.app_name && m.app_name !== appName) tagline = m.app_name;   // e.g. "PCS Updates, Logging & Status Environment" under "PULSE"
-    logo = logoAttachment(m.logo_path);
-  } catch (e) { /* plain email without the logo */ }
+  const b = await brand();
+  const tagline = b.name && b.name !== appName ? b.name : '';   // e.g. "PCS Updates, Logging & Status Environment" under "PULSE"
+  const logo = b.logo;
   const what = SUBJECT[purpose] || 'verification';
   try {
     await mailer.send({
