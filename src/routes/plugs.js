@@ -38,8 +38,28 @@ function titleOf(val) {
   return textOf(val).replace(/\s+/g, ' ').trim();
 }
 function monthDay(text) {
-  const m = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*(\d{1,2})\b/i.exec(String(text || ''));
-  return m ? { month: MONTHS[m[1].toLowerCase()], day: Number(m[2]) } : null;
+  const t = String(text || '');
+  let m = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*(\d{1,2})\b/i.exec(t);   // "September 28", "Sept. 28"
+  if (m) return { month: MONTHS[m[1].toLowerCase()], day: Number(m[2]) };
+  m = /\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.exec(t);   // "28 September", "28th of Sept"
+  if (m) return { month: MONTHS[m[2].toLowerCase()], day: Number(m[1]) };
+  m = /\b(\d{1,2})[\/.-](\d{1,2})(?:[\/.-]\d{2,4})?\b/.exec(t);   // "9/28", "09-28-2026", "28/9/2026" (day first only when the first number can't be a month)
+  if (m) {
+    const a = Number(m[1]), b = Number(m[2]);
+    if (a >= 1 && a <= 12 && b >= 1 && b <= 31) return { month: a, day: b };
+    if (b >= 1 && b <= 12 && a >= 1 && a <= 31) return { month: b, day: a };
+  }
+  return null;
+}
+/** The month and day in a cell: text like "September 28,Monday Plug list", or a real Excel date / date number. */
+function monthDayOfCell(val) {
+  if (val instanceof Date) return Number.isNaN(val.getTime()) ? null : { month: val.getUTCMonth() + 1, day: val.getUTCDate() };
+  if (typeof val === 'object' && val && val.result !== undefined) return monthDayOfCell(val.result);
+  if (typeof val === 'number' && val > 36526 && val < 73050) {   // an Excel date serial (years 2000-2099)
+    const d = new Date(Math.round((val - 25569) * 86400000));
+    return { month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+  }
+  return monthDay(textOf(val));
 }
 
 /**
@@ -71,14 +91,20 @@ function parsePlugWorkbook(wb, year) {
     // the sheet's date: a "Sept 28,Monday plug list" style line in the first rows, else the sheet's name ("Sept 28")
     let md = null;
     let dayText = '';
+    const seenTop = [];
     for (let r = 1; r < headerRow && !md; r++) {
-      ws.getRow(r).eachCell((cell) => { if (!md) { const t = textOf(cell.value); const hit = monthDay(t); if (hit) { md = hit; dayText = t; } } });
+      ws.getRow(r).eachCell((cell) => {
+        if (md) return;
+        const hit = monthDayOfCell(cell.value);
+        if (hit) { md = hit; dayText = textOf(cell.value); }
+        else { const t = textOf(cell.value).trim() || (cell.value instanceof Date ? cell.value.toISOString().slice(0, 10) : ''); if (t && seenTop.length < 4) seenTop.push(t.slice(0, 40)); }
+      });
     }
     if (!md) { md = monthDay(ws.name); dayText = ''; }
     let hasData = false;
     for (let r = headerRow + 1; r <= ws.rowCount && !hasData; r++) hasData = !!textOf(ws.getRow(r).getCell(col.plug).value).trim();
     if (!md && !hasData) continue;   // a blank template sheet: nothing to import and nothing to warn about
-    if (!md) { warnings.push(`Sheet "${ws.name}": no date found (expected something like "September 28" in the DATE line or the sheet name), skipped`); continue; }
+    if (!md) { warnings.push(`Sheet "${ws.name}": no date found (expected something like "September 28" in the DATE line or the sheet name${seenTop.length ? `; the rows above the table say: ${seenTop.map((x) => `"${x}"`).join(', ')}` : '; there are no rows above the table'}), skipped`); continue; }
     const probe = new Date(Date.UTC(year, md.month - 1, md.day));
     if (probe.getUTCMonth() !== md.month - 1 || probe.getUTCDate() !== md.day) { warnings.push(`Sheet "${ws.name}": ${md.month}/${md.day} is not a real date, skipped`); continue; }
     const date = `${year}-${pad(md.month)}-${pad(md.day)}`;
