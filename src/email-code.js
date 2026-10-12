@@ -48,7 +48,7 @@ ${PREHEADER}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
 <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:8px">
 <tr><td align="center" style="padding:28px 24px 8px">
-${hasLogo ? '<img src="cid:logo" alt="" height="110" style="display:block;margin:0 auto 8px;height:110px;width:auto;border:0">' : ''}
+${hasLogo ? '<img src="cid:logo" alt="" height="80" style="display:block;margin:0 auto 8px;height:80px;width:auto;border:0">' : ''}
 <div style="${f};font-size:20px;line-height:1.3;font-weight:700;color:#000000">${esc(heading)}</div>
 </td></tr>
 <tr><td style="padding:18px 36px 8px;${f};font-size:17px;color:#374151">Your ${esc(appName)} ${esc(what)} code is:</td></tr>
