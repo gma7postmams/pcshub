@@ -11,6 +11,10 @@ const ACTION_LABELS = {
   'auth.locked': 'Account Locked',
   'auth.login_blocked_locked': 'Login Blocked (Locked Account)',
   'auth.login_blocked_maintenance': 'Login Blocked (Maintenance Mode)',
+  'admin.group_export': 'Exported Groups',
+  'admin.group_import': 'Imported Groups',
+  'admin.user_export': 'Exported Users',
+  'admin.user_import': 'Imported Users',
   'admin.maintenance_on': 'Maintenance Mode Turned On',
   'admin.maintenance_off': 'Maintenance Mode Turned Off',
 
@@ -568,6 +572,18 @@ function formatDetails(row) {
 
     case 'auth.login_blocked_locked':
       return 'Login blocked because account is currently locked';     
+
+    case 'admin.group_export':
+      return `Exported ${d.groups ?? 0} group(s) as JSON`;
+
+    case 'admin.group_import':
+      return `Imported groups from JSON: ${d.added ?? 0} added, ${d.existing ?? 0} already there`;
+
+    case 'admin.user_export':
+      return `Exported ${d.users ?? 0} user(s) as JSON (no passwords)`;
+
+    case 'admin.user_import':
+      return `Imported users from JSON: ${d.added ?? 0} added, ${d.existing ?? 0} already there, ${d.skipped ?? 0} skipped`;
 
     case 'admin.maintenance_on':
       return `Turned maintenance mode on${d.message ? `: “${d.message}”` : ''}`;

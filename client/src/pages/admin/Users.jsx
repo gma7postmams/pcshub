@@ -5,6 +5,7 @@ import { useSession } from '../../context.jsx';
 import { PlusIcon } from '../../components/Icons.jsx';
 import { Empty, Modal, Options, Pager, RoleBadge, usePageSize, useConfirm, useForm, useToast } from '../../components/ui.jsx';
 import { keyLabels } from './labels.js';
+import JsonTools from './JsonTools.jsx';
 
 export default function Users({ model }) {
   const s = useSession();
@@ -104,6 +105,7 @@ export default function Users({ model }) {
               <button type="button" className="btn danger sm" id="del-sel" onClick={removePicked}>Delete ({picked.size})</button>
             </>
           ) : null}
+          <JsonTools path="/api/admin/users" onDone={load} summary={(r) => `Imported: ${r.added} added, ${r.existing} already there${r.skipped ? `, ${r.skipped} skipped` : ''}`} />
           <button type="button" className="btn primary sm" id="add" onClick={() => setEditing({})}><PlusIcon /> Add user</button>
         </span>
       </div>

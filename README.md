@@ -82,3 +82,5 @@ npm test
 ```
 
 - **Sign-in card title:** the app name under the logo is 16.5 px (was 19 px), so a long name like "PCS Updates, Logging & Status Environment" fits on one line inside the white card (and wraps on a phone).
+
+- **Users and Groups: Export JSON / Import JSON** (Administration → Access → Users and Groups, System Admin only; same buttons as Dropdowns). *Export* downloads `users-DATE.json` / `groups-DATE.json`; a users file has username, full name, email, role, group name and active flag — never passwords, 2FA secrets or sessions. *Import* only **adds**: a group is matched by name and a user by username (case-insensitive), anything already there is left exactly as it is and counted, and nothing is ever deleted or changed. Import the **Groups** file first — a user whose group isn't there yet is skipped and the message says why. New users get a random password nobody knows and must choose their own at first sign-in, so give each person one with **Manage → Reset password**. Both actions are in the Audit Log (Exported / Imported Users / Groups). Roles are not included.

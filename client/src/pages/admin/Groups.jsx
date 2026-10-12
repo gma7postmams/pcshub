@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { del, get, post, put } from '../../lib/api.js';
 import { PlusIcon } from '../../components/Icons.jsx';
 import { Empty, Modal, useConfirm, useToast } from '../../components/ui.jsx';
+import JsonTools from './JsonTools.jsx';
 
 function PermChips({ perms, catalog }) {
   const pages = catalog.filter((p) => perms.includes(p.key));
@@ -36,6 +37,7 @@ export default function Groups({ model }) {
       <div className="card">
         <div className="card-head">
           <h2 className="sr-only">Groups</h2>
+          <JsonTools path="/api/admin/groups" onDone={load} summary={(r) => `Imported: ${r.added} added, ${r.existing} already there`} />
           <button type="button" className="btn primary sm" id="add" onClick={() => setEditing({})}><PlusIcon /> Add group</button>
         </div>
         <div className="table-wrap">

@@ -195,6 +195,117 @@ router.delete('/groups/:id', asyncH(async (req, res) => {
 }));
 
 // ---------- Users ----------
+// ---------- Groups and Users: JSON export / import (same idea as the Dropdowns') ----------
+// Nothing in a file ever deletes or changes something that already exists: Import only ADDS what is missing (a group by name,
+// a user by username) and says how many it left alone. Passwords, 2FA secrets and sessions are never exported.
+const sendJson = (res, name, obj) => {
+  res.set({
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Disposition': `attachment; filename="${name}-${new Date().toISOString().slice(0, 10)}.json"`,
+    'Cache-Control': 'no-store',
+  });
+  res.send(JSON.stringify(obj, null, 2));
+};
+const IMPORT_MAX = 5000;
+
+router.get('/groups/export', asyncH(async (req, res) => {
+  const { rows } = await db.query(
+    `SELECT g.name, g.description,
+            COALESCE((SELECT array_agg(gp.perm_key ORDER BY gp.perm_key) FROM group_permissions gp WHERE gp.group_id = g.id), '{}') AS perms
+       FROM groups g ORDER BY lower(g.name)`
+  );
+  await audit(req, 'admin.group_export', 'group', null, { groups: rows.length });
+  sendJson(res, 'groups', { app: 'promo-hub', type: 'groups', version: 1, exported_at: new Date().toISOString(),
+    groups: rows.map((r) => ({ name: r.name, description: r.description || '', perms: r.perms })) });
+}));
+
+router.post('/groups/import', asyncH(async (req, res) => {
+  const list = req.body && req.body.groups;
+  if (!Array.isArray(list)) throw new HttpError(400, 'Not a groups export file (missing "groups")');
+  if (list.length > IMPORT_MAX) throw new HttpError(400, `Too many groups (max ${IMPORT_MAX})`);
+  const plan = [];
+  const seen = new Set();
+  list.forEach((item, i) => {
+    if (!item || typeof item !== 'object') throw new HttpError(400, `Entry ${i + 1} is not a group`);
+    const g = parseGroup(item);
+    const key = g.name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    plan.push(g);
+  });
+  const out = { added: 0, existing: 0 };
+  await db.tx(async (c) => {
+    for (const g of plan) {
+      const cur = await c.query('SELECT 1 FROM groups WHERE lower(name)=lower($1)', [g.name]);
+      if (cur.rows.length) { out.existing += 1; continue; }
+      const r = await c.query('INSERT INTO groups (name, description) VALUES ($1,$2) RETURNING id', [g.name, g.description]);
+      await writePerms(c, r.rows[0].id, g.perms);
+      out.added += 1;
+    }
+    await audit(req, 'admin.group_import', 'group', null, out, c);
+  });
+  res.json({ ok: true, ...out });
+}));
+
+router.get('/users/export', asyncH(async (req, res) => {
+  const { rows } = await db.query(
+    `SELECT u.username, u.full_name, u.email, u.role, g.name AS group_name, u.is_active
+       FROM users u LEFT JOIN groups g ON g.id = u.group_id ORDER BY lower(u.username)`
+  );
+  await audit(req, 'admin.user_export', 'user', null, { users: rows.length });
+  sendJson(res, 'users', { app: 'promo-hub', type: 'users', version: 1, exported_at: new Date().toISOString(),
+    users: rows.map((r) => ({ username: r.username, full_name: r.full_name, email: r.email || '', role: r.role, group: r.group_name || '', active: r.is_active })) });
+}));
+
+// New users get a random password nobody knows and must choose their own at first sign-in, so give each person one with
+// Manage > Reset password. (Import the Groups file first: a user whose group is not there yet is skipped, and says so.)
+router.post('/users/import', asyncH(async (req, res) => {
+  const list = req.body && req.body.users;
+  if (!Array.isArray(list)) throw new HttpError(400, 'Not a users export file (missing "users")');
+  if (list.length > IMPORT_MAX) throw new HttpError(400, `Too many users (max ${IMPORT_MAX})`);
+  const out = { added: 0, existing: 0, skipped: 0, errors: [] };
+  const skip = (i, name, why) => { out.skipped += 1; if (out.errors.length < 20) out.errors.push(`${name || `Entry ${i + 1}`}: ${why}`); };
+  await db.tx(async (c) => {
+    const groups = new Map((await c.query('SELECT id, lower(name) AS n FROM groups')).rows.map((r) => [r.n, r.id]));
+    const seen = new Set();
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i];
+      if (!item || typeof item !== 'object') { skip(i, '', 'not a user'); continue; }
+      const username = typeof item.username === 'string' ? item.username.trim() : '';
+      if (!/^[A-Za-z0-9._-]{3,60}$/.test(username)) { skip(i, username, 'username must be 3–60 chars: letters, numbers, . _ -'); continue; }
+      if (seen.has(username.toLowerCase())) continue;
+      seen.add(username.toLowerCase());
+      let u;
+      try {
+        u = {
+          full_name: v.str(item.full_name, { field: 'Full name', max: 120, required: true }),
+          email: v.str(item.email, { field: 'Email', max: 200 }),
+          role: v.oneOf(item.role, ROLES, { field: 'Role' }),
+          is_active: item.active === undefined ? true : !!item.active,
+        };
+        if (u.email && !validator.isEmail(u.email)) throw new HttpError(400, 'Invalid email');
+      } catch (e) { skip(i, username, e.message); continue; }
+      const gname = typeof item.group === 'string' ? item.group.trim() : '';
+      let groupId = null;
+      if (gname) {
+        groupId = groups.get(gname.toLowerCase());
+        if (!groupId) { skip(i, username, `group "${gname}" does not exist (import the groups first)`); continue; }
+      }
+      const cur = await c.query('SELECT 1 FROM users WHERE lower(username)=lower($1)', [username]);
+      if (cur.rows.length) { out.existing += 1; continue; }
+      const hash = await bcrypt.hash(crypto.randomBytes(24).toString('base64url'), 12);
+      await c.query(
+        `INSERT INTO users (username, full_name, email, password_hash, role, group_id, is_active, must_change_password)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE)`,
+        [username, u.full_name, u.email, hash, u.role, groupId, u.is_active]
+      );
+      out.added += 1;
+    }
+    await audit(req, 'admin.user_import', 'user', null, { added: out.added, existing: out.existing, skipped: out.skipped }, c);
+  });
+  res.json({ ok: true, ...out });
+}));
+
 router.get('/users', asyncH(async (req, res) => {
   const { rows } = await db.query(
     `SELECT u.id, u.username, u.full_name, u.email, u.role, u.group_id, g.name AS group_name, u.is_active,
