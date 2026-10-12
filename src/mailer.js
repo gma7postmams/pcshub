@@ -23,10 +23,16 @@ async function send({ to, subject, text }) {
   await get().sendMail({ from: process.env.SMTP_FROM, to, subject, text });
 }
 
+/** The display name in SMTP_FROM ("PULSE Notifications <no-reply@example.com>" -> "PULSE Notifications"), or '' when there is none. */
+const senderName = () => {
+  const m = String(process.env.SMTP_FROM || '').match(/^\s*"?([^"<]+?)"?\s*<[^>]+>\s*$/);
+  return m ? m[1].trim() : '';
+};
+
 /** j***@example.com — shown on the sign-in screen so the right mailbox is recognised without exposing it. */
 const mask = (email) => {
   const [a, d] = String(email || '').split('@');
   return d ? `${a.slice(0, 1)}***@${d}` : '';
 };
 
-module.exports = { configured, send, mask };
+module.exports = { configured, send, mask, senderName };

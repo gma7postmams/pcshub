@@ -16,7 +16,15 @@ const hash = (uid, purpose, code) => crypto.createHmac('sha256', KEY).update(`${
 const SUBJECT = { login: 'sign-in', reauth: 'confirmation', enroll: 'two-step setup' };
 
 /** Create and email a new code. `session` is req.session. Throws HttpError when too soon, too many, or the mail fails. */
-async function issue(session, user, purpose, appName = 'Promotional Content Hub') {
+async function issue(session, user, purpose, appName) {
+  // The name in the subject and text: the sender name in SMTP_FROM if there is one, else the app name from Admin > Branding.
+  if (!appName) {
+    appName = mailer.senderName();
+    if (!appName) {
+      try { const r = await require('./db').query(`SELECT value FROM app_settings WHERE key='app_name'`); appName = r.rows[0] && r.rows[0].value; } catch (e) { /* fall through */ }
+    }
+    appName = appName || 'Promotional Content Hub';
+  }
   if (!user.email) throw new HttpError(400, 'This account has no email address. Ask an Admin to add one.');
   const cur = session.emailCode;
   const same = cur && cur.uid === user.id && cur.purpose === purpose;
