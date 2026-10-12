@@ -81,4 +81,4 @@ Any one of the three being on is enough, so if it stays on after you turn it off
 npm test
 ```
 
-- **Sign-in card title:** the app name under the logo is 16 px (was 19 px), so a long name like "PCS Updates, Logging & Status Environment" fits on one line inside the white card (and wraps on a phone).
+- **Sign-in card title:** the app name under the logo is 16.5 px (was 19 px), so a long name like "PCS Updates, Logging & Status Environment" fits on one line inside the white card (and wraps on a phone).
