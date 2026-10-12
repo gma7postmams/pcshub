@@ -79,5 +79,3 @@ Either one being on is enough. People already signed in are not signed out: they
 ```bash
 npm test
 ```
-
-- **Default app icon:** the built-in tab / install icon (`client/public/icons/icon-192.png`, `icon-512.png`, `maskable-512.png`) is the colourful pulse-and-play logo. A logo uploaded in Admin → Branding still replaces it in the tab. The service worker cache name was bumped (`phub-react-v2`) so browsers drop the old icon.
