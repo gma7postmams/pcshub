@@ -3,7 +3,7 @@
  * - Never caches /api/* or page HTML (per-user, access-controlled)
  * - Shows /offline.html when a navigation fails offline
  */
-const VERSION = 'phub-react-v1';
+const VERSION = 'phub-react-v2';
 const PRECACHE = ['/offline.html', '/theme-boot.js', '/icons/icon-192.png', '/icons/icon-512.png', '/manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
