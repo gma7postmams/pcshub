@@ -40,8 +40,8 @@ async function brand() {
 // Keeps the inbox list's preview line empty: mail programs show the first text of the body there, so a hidden run of blank characters comes first.
 const PREHEADER = `<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all">${'&#8204;&nbsp;'.repeat(150)}</div>`;
 
-/** The email in the same style as the other notification emails: logo, name, tagline, then the message. */
-function codeEmailHtml({ appName, tagline, hasLogo, what, code }) {
+/** The email in the same style as the other notification emails: logo, the full name in blue, then the message. */
+function codeEmailHtml({ appName, heading, hasLogo, what, code }) {
   const f = 'font-family:Arial,Helvetica,sans-serif';
   return `<!doctype html><html><body style="margin:0;padding:24px 12px;background:#f3f4f6">
 ${PREHEADER}
@@ -49,8 +49,7 @@ ${PREHEADER}
 <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:8px">
 <tr><td align="center" style="padding:28px 24px 8px">
 ${hasLogo ? '<img src="cid:logo" alt="" height="130" style="display:block;margin:0 auto 6px;height:130px;width:auto;border:0">' : ''}
-<div style="${f};font-size:22px;font-weight:700;color:#1d4ed8;letter-spacing:1px">${esc(appName)}</div>
-${tagline ? `<div style="${f};font-size:14px;color:#1d4ed8;margin-top:2px">${esc(tagline)}</div>` : ''}
+<div style="${f};font-size:19px;line-height:1.3;font-weight:700;color:#1d4ed8">${esc(heading)}</div>
 </td></tr>
 <tr><td style="padding:18px 36px 8px;${f};font-size:17px;color:#374151">Your ${esc(appName)} ${esc(what)} code is:</td></tr>
 <tr><td align="center" style="padding:6px 36px 14px"><div style="${f};font-size:34px;font-weight:700;letter-spacing:8px;color:#111827">${esc(code)}</div></td></tr>
@@ -79,7 +78,7 @@ async function issue(session, user, purpose, appName) {
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
   session.emailCode = { uid: user.id, purpose, h: hash(user.id, purpose, code), exp: Date.now() + TTL_MS, tries: 0, sentAt: Date.now(), sends: same ? cur.sends + 1 : 1 };
   const b = await brand();
-  const tagline = b.name && b.name !== appName ? b.name : '';   // e.g. "PCS Updates, Logging & Status Environment" under "PULSE"
+  const heading = b.name || appName;   // the big blue line: the full name from Administration → Branding ("PCS Updates, Logging & Status Environment")
   const logo = b.logo;
   const what = SUBJECT[purpose] || 'verification';
   try {
@@ -87,7 +86,7 @@ async function issue(session, user, purpose, appName) {
       to: user.email,
       subject: `${code} is your ${appName} code`,
       text: `Your ${appName} ${what} code is ${code}\n\nIt works once and expires in 10 minutes. If you did not just try to sign in or confirm something, ignore this email and tell an Admin.`,
-      html: codeEmailHtml({ appName, tagline, hasLogo: Boolean(logo), what, code }),
+      html: codeEmailHtml({ appName, heading, hasLogo: Boolean(logo), what, code }),
       attachments: logo ? [logo] : undefined,
     });
   } catch (e) {
