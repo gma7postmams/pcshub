@@ -28,10 +28,14 @@ function logoAttachment(logoPath) {
   } catch (e) { return null; }
 }
 
+// Keeps the inbox list's preview line empty: mail programs show the first text of the body there, so a hidden run of blank characters comes first.
+const PREHEADER = `<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all">${'&#8204;&nbsp;'.repeat(150)}</div>`;
+
 /** The email in the same style as the other notification emails: logo, name, tagline, then the message. */
 function codeEmailHtml({ appName, tagline, hasLogo, what, code }) {
   const f = 'font-family:Arial,Helvetica,sans-serif';
   return `<!doctype html><html><body style="margin:0;padding:24px 12px;background:#f3f4f6">
+${PREHEADER}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
 <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:8px">
 <tr><td align="center" style="padding:28px 24px 8px">
