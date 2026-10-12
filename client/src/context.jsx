@@ -3,7 +3,9 @@ import { get, put } from './lib/api.js';
 import { cachedMode, setMode, setPalette } from './lib/theme.js';
 import { applyFavicon } from './lib/favicon.js';
 
-const DEFAULT_BRANDING = { app_name: 'Promotional Content Hub', tagline: '', theme: 'midnight', accent_color: '', themes: [], logo_url: null };
+// The server writes the current Branding name into <meta name="app-name"> (src/app-shell.js), so even the fallback shows the right name.
+const metaName = () => { try { const m = document.querySelector('meta[name="app-name"]'); return (m && m.content) || ''; } catch (e) { return ''; } };
+const DEFAULT_BRANDING = { app_name: metaName() || 'Promotional Content Hub', tagline: '', theme: 'midnight', accent_color: '', themes: [], logo_url: null };
 
 // ---------- Branding (public — used by login too) ----------
 const BrandingCtx = createContext({ branding: DEFAULT_BRANDING, reload: () => {} });
@@ -20,6 +22,9 @@ export function BrandingProvider({ children }) {
     return b;
   }, []);
   useEffect(() => { reload(); }, [reload]);
+  // the offline page (served by the service worker, no server) reads the name from here
+  const appName = branding ? branding.app_name : null;
+  useEffect(() => { if (appName) { try { localStorage.setItem('phub-app-name', appName); } catch (e) { /* storage blocked */ } } }, [appName]);
   // the browser-tab icon follows the logo on the Branding page (transparent background); no logo = the built-in icon
   const logoUrl = branding ? branding.logo_url || '' : null;
   useEffect(() => { if (logoUrl !== null) applyFavicon(logoUrl); }, [logoUrl]);

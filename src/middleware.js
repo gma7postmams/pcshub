@@ -66,7 +66,7 @@ function requirePageAccess(pagePath) {
     if (isApi(req)) return res.status(403).json({ error: `${who(req.user)} cannot access ${pagePath}` });
     // Same app shell with a 403 status; the React app renders the 'Access locked' screen
     res.set('Cache-Control', 'no-store');
-    return res.status(403).sendFile(INDEX_HTML);
+    return require('./app-shell').sendApp(403)(req, res, next);
   };
 }
 

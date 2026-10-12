@@ -94,6 +94,7 @@ app.get('/sw.js', (req, res) => {
   res.set('Service-Worker-Allowed', '/');
   res.sendFile(path.join(CLIENT_DIST, 'sw.js'));
 });
+app.get('/manifest.webmanifest', require('./src/app-shell').manifest);   // name follows Administration > Branding
 // Hashed bundles never change → cache for a year
 app.use('/assets', express.static(path.join(CLIENT_DIST, 'assets'), { immutable: true, maxAge: '365d', index: false }));
 // The app shell is only handed out by the access-controlled page routes further down, never as a plain file
@@ -167,7 +168,7 @@ app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 // One React app. Each page URL is gated server-side (role + group) before index.html is returned,
 // so a locked page answers 403 even on a direct visit; the API behind it is gated the same way.
 const noStore = (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); };
-const sendApp = (req, res) => res.sendFile(INDEX_HTML);
+const sendApp = require('./src/app-shell').sendApp();   // index.html with the Branding name in the title
 
 app.get('/login', noStore, (req, res) => {
   if (req.user) return res.redirect(landingPath(req.user));
@@ -189,11 +190,11 @@ for (const page of Object.keys(PAGE_BY_PATH)) {
 }
 
 // Unknown URL: signed-in users get the app's 404 screen; others go to sign-in
-app.use((req, res) => {
+app.use((req, res, next) => {
   if (req.method !== 'GET' || !req.accepts('html')) return res.status(404).send('Not found');
   if (!req.user) return res.redirect('/login');
   res.set('Cache-Control', 'no-store');
-  return res.status(404).sendFile(INDEX_HTML);
+  return require('./src/app-shell').sendApp(404)(req, res, next);
 });
 app.use(errorHandler);
 

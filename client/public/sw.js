@@ -1,10 +1,10 @@
-/* Promotional Content Hub service worker
+/* Service worker
  * - Hashed build assets (/assets/*) and icons: cache-first (file names change on every build)
  * - Never caches /api/* or page HTML (per-user, access-controlled)
  * - Shows /offline.html when a navigation fails offline
  */
-const VERSION = 'phub-react-v1';
-const PRECACHE = ['/offline.html', '/theme-boot.js', '/icons/icon-192.png', '/icons/icon-512.png', '/manifest.webmanifest'];
+const VERSION = 'phub-react-v2';
+const PRECACHE = ['/offline.html', '/offline.js', '/theme-boot.js', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting()));
