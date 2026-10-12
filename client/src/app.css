@@ -270,6 +270,7 @@ input[type="file"] { height: auto; padding: 7px; }
 .filters input[type="search"] { min-width: 200px; flex: 1; }
 @media (max-width: 680px) { .filters input, .filters select { flex: 1 1 45%; min-width: 0; } }
 .check { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; color: var(--text-2); }
+.check-row { display: flex; }   /* one checkbox per line (e.g. Administration → Security rules) */
 
 /* ---------- Tables ---------- */
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }

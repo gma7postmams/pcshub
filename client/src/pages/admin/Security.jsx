@@ -93,9 +93,9 @@ function Rules({ policy, limits, email, onSaved }) {
               <span className="dim mt-6">{hint} Allowed {limits[k].min}–{limits[k].max}.</span></label>
           ))}
         </div>
-        <label className="check mt-12"><input type="checkbox" checked={Boolean(f.requireAdmin2fa)} onChange={(e) => setF({ ...f, requireAdmin2fa: e.target.checked })} />
+        <label className="check check-row mt-12"><input type="checkbox" checked={Boolean(f.requireAdmin2fa)} onChange={(e) => setF({ ...f, requireAdmin2fa: e.target.checked })} />
           {' '}Require 2FA for every Admin <span className="dim">— Admins without it must set it up at their next use</span></label>
-        <label className="check mt-12"><input type="checkbox" checked={Boolean(f.allowEmail2fa)} disabled={!email.configured && !f.allowEmail2fa} onChange={(e) => setF({ ...f, allowEmail2fa: e.target.checked })} />
+        <label className="check check-row mt-12"><input type="checkbox" checked={Boolean(f.allowEmail2fa)} disabled={!email.configured && !f.allowEmail2fa} onChange={(e) => setF({ ...f, allowEmail2fa: e.target.checked })} />
           {' '}Allow email codes for 2FA <span className="dim">— for accounts shared by a group, where an authenticator app is not practical. Pick the method per user in Access → Users.</span></label>
         <div className="kv-row mt-12"><span className="kv-label">Email sending</span><span className="kv-value">
           {email.configured ? <>Set up on the server{email.from ? ` (from ${email.from})` : ''}. <button type="button" className="linklike" onClick={testMail}>Send a test to my address</button></> : 'Not set up. Add the SMTP_ lines to the server\u2019s .env (see .env.example) and restart.'}
