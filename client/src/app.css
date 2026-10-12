@@ -110,6 +110,9 @@ h3 { font-size: 15px; }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 650; margin-right: 14px; white-space: nowrap; }
 .brand:hover { text-decoration: none; }
 .brand img { height: 30px; width: auto; max-width: 120px; object-fit: contain; border-radius: 6px; }
+/* Dark mode: a light tile behind the logo, so a logo with a black background still shows as a whole (not just its outline) */
+html[data-mode="dark"] .brand img { background: #f5f6fa; padding: 3px; box-sizing: border-box; height: 34px; }
+html[data-mode="dark"] .auth-card .brand img { height: 118px; padding: 6px; border-radius: 12px; }
 .brand .mark {
   width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
