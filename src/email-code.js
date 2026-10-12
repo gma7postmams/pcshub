@@ -4,8 +4,6 @@
 const crypto = require('crypto');
 const mailer = require('./mailer');
 const { HttpError } = require('./middleware');
-const path = require('path');
-const fs = require('fs');
 
 const TTL_MS = 10 * 60 * 1000;
 const COOLDOWN_MS = 60 * 1000;
@@ -17,62 +15,31 @@ const hash = (uid, purpose, code) => crypto.createHmac('sha256', KEY).update(`${
 
 const esc = (x) => String(x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-// The main colour of a PNG logo (the most common colourful pixel; white, grey, black and see-through pixels are ignored). '' for other formats.
-function logoColor(buf) {
-  try {
-    const { PNG } = require('pngjs');
-    const img = PNG.sync.read(buf);
-    const step = Math.max(1, Math.floor((img.width * img.height) / 40000));
-    const bins = new Map();
-    for (let i = 0; i < img.width * img.height; i += step) {
-      const r = img.data[i * 4], g = img.data[i * 4 + 1], b = img.data[i * 4 + 2], a = img.data[i * 4 + 3];
-      if (a < 160) continue;
-      const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
-      if (mx - mn < 40) continue;                    // white, grey or black: not a brand colour
-      const k = (r >> 5) << 6 | (g >> 5) << 3 | (b >> 5);
-      const e = bins.get(k) || { n: 0, r: 0, g: 0, b: 0 };
-      e.n++; e.r += r; e.g += g; e.b += b; bins.set(k, e);
-    }
-    let best = null;
-    for (const e of bins.values()) if (!best || e.n > best.n) best = e;
-    if (!best) return '';
-    const h = (v) => Math.round(v / best.n).toString(16).padStart(2, '0');
-    return '#' + h(best.r) + h(best.g) + h(best.b);
-  } catch (e) { return ''; }
-}
-
-// The Branding name and logo colour, kept for a minute so each code email doesn't hit the database and re-read the logo file.
-let brandCache = { at: 0, name: '', color: '' };
+// The Branding app name, kept for a minute so each code email doesn't hit the database.
+let brandCache = { at: 0, name: '' };
 async function brand() {
   if (Date.now() - brandCache.at < 60000) return brandCache;
   let name = '';
-  let color = '';
   try {
-    const r = await require('./db').query(`SELECT key, value FROM app_settings WHERE key IN ('app_name','logo_path')`);
-    const m = Object.fromEntries(r.rows.map((x) => [x.key, x.value]));
-    name = m.app_name || '';
-    const file = path.basename(String(m.logo_path || ''));
-    if (file) {
-      const full = path.join(__dirname, '..', 'uploads', 'branding', file);
-      if (fs.existsSync(full)) color = logoColor(fs.readFileSync(full));   // the logo itself is not sent; only its main colour is used for the heading
-    }
-  } catch (e) { /* heading stays black */ }
-  brandCache = { at: Date.now(), name, color };
+    const r = await require('./db').query(`SELECT value FROM app_settings WHERE key='app_name'`);
+    name = (r.rows[0] && r.rows[0].value) || '';
+  } catch (e) { /* fall back to the app name */ }
+  brandCache = { at: Date.now(), name };
   return brandCache;
 }
 
 // Keeps the inbox list's preview line empty: mail programs show the first text of the body there, so a hidden run of blank characters comes first.
 const PREHEADER = `<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all">${'&#8204;&nbsp;'.repeat(150)}</div>`;
 
-/** The email in the same style as the other notification emails: the full name as a coloured heading (no logo), then the message. */
-function codeEmailHtml({ appName, heading, color, what, code }) {
+/** The email in the same style as the other notification emails: the full name as a black heading (no logo), then the message. */
+function codeEmailHtml({ appName, heading, what, code }) {
   const f = 'font-family:Arial,Helvetica,sans-serif';
   return `<!doctype html><html><body style="margin:0;padding:24px 12px;background:#f3f4f6">
 ${PREHEADER}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
 <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:8px">
 <tr><td align="center" style="padding:28px 24px 8px">
-<div style="${f};font-size:20px;line-height:1.3;font-weight:700;color:${color}">${esc(heading)}</div>
+<div style="${f};font-size:20px;line-height:1.3;font-weight:700;color:#000000">${esc(heading)}</div>
 </td></tr>
 <tr><td style="padding:18px 36px 8px;${f};font-size:17px;color:#374151">Your ${esc(appName)} ${esc(what)} code is:</td></tr>
 <tr><td align="center" style="padding:6px 36px 14px"><div style="${f};font-size:34px;font-weight:700;letter-spacing:8px;color:#111827">${esc(code)}</div></td></tr>
@@ -101,15 +68,14 @@ async function issue(session, user, purpose, appName) {
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
   session.emailCode = { uid: user.id, purpose, h: hash(user.id, purpose, code), exp: Date.now() + TTL_MS, tries: 0, sentAt: Date.now(), sends: same ? cur.sends + 1 : 1 };
   const b = await brand();
-  const heading = String(process.env.MAIL_HEADING || '').trim() || b.name || appName;   // the big coloured line: MAIL_HEADING in .env, else the app name from Administration → Branding
-  const color = /^#[0-9a-f]{6}$/i.test(String(process.env.MAIL_HEADING_COLOR || '').trim()) ? String(process.env.MAIL_HEADING_COLOR).trim() : (b.color || '#000000');
+  const heading = String(process.env.MAIL_HEADING || '').trim() || b.name || appName;   // the big black line: MAIL_HEADING in .env, else the app name from Administration → Branding
   const what = SUBJECT[purpose] || 'verification';
   try {
     await mailer.send({
       to: user.email,
       subject: `${code} is your ${appName} code`,
       text: `Your ${appName} ${what} code is ${code}\n\nIt works once and expires in 10 minutes. If you did not just try to sign in or confirm something, ignore this email and tell an Admin.`,
-      html: codeEmailHtml({ appName, heading, color, what, code }),
+      html: codeEmailHtml({ appName, heading, what, code }),
     });
   } catch (e) {
     delete session.emailCode;
