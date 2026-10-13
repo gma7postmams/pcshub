@@ -376,6 +376,13 @@ SELECT 'Editor', 'plugs.write' FROM roles
 ON CONFLICT DO NOTHING;
 INSERT INTO app_settings (key, value) VALUES ('editor_plugs_write_v1', '1') ON CONFLICT (key) DO NOTHING;
 
+-- Knowledge Base: only Admin and System Admin upload, rename and delete documents now; Manager keeps open / download. Once, so an Admin who later
+-- gives Manager the action again in Administration > Roles is not overruled on restart.
+DELETE FROM role_actions
+ WHERE role = 'Manager' AND action = 'knowledge.write'
+   AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'knowledge_admin_only_v1');
+INSERT INTO app_settings (key, value) VALUES ('knowledge_admin_only_v1', '1') ON CONFLICT (key) DO NOTHING;
+
 -- Activity History became a per-role switch (Admin > Roles). Keep it for Manager and Editor, as before; Viewer and Ingest start without it. Once.
 INSERT INTO role_actions (role, action)
 SELECT name, 'activity.view' FROM roles

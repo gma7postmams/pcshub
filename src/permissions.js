@@ -95,10 +95,9 @@ const DEFAULT_ROLE_ACTIONS = Object.assign(Object.create(null), {
     'ingest.approve',
     'ingest.cm_complete',
     'workload.write',
-    'knowledge.write',
     'plugs.write',
     'activity.view'
-  ],
+  ],   // no knowledge.write: only Admin / System Admin add, change or delete Knowledge Base documents; everyone with the page can open and download them
   Editor:  ['ingest.write', 'plugs.write', 'activity.view'],   // plugs.write: edit the PSD Daily Plug List (page access still comes from the group)
   Ingest:  ['ingest.cm_complete'],   // Ingest Tracker only: Status (CM) and its NON-COMPLIANT reason, nothing else
   Viewer:  [],

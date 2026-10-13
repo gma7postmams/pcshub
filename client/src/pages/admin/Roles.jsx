@@ -9,7 +9,7 @@ const ACT = {
   'ingest.approve': 'Ingest: Destination Folder / Approved by',
   'ingest.cm_complete': 'Ingest: set Status (CM) and reason',
   'workload.write': 'Edit Workload',
-  'knowledge.write': 'Upload / rename / delete Knowledge Base PDFs',
+  'knowledge.write': 'Upload / rename / delete Knowledge Base documents',
   'plugs.write': 'Edit PSD Daily Plug List',
   'activity.view': 'See the Activity History page',
 };

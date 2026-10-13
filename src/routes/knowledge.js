@@ -10,7 +10,7 @@ const { audit } = require('../audit');
 
 // Mounted behind requirePageAccess('/knowledge') => any group that has the Knowledge Base page checked.
 // Anyone who can open the page can read/download the PDFs; uploading, renaming and deleting need the
-// 'knowledge.write' action (Admin and Manager roles, and the group must grant the Knowledge Base page).
+// 'knowledge.write' action (Admin and System Admin by default; adjustable per role in Administration > Roles, and the group must grant the Knowledge Base page).
 //
 // Documents (PDF, Word, PowerPoint) are stored on disk under uploads/knowledge/ with random names; the table keeps the real file name.
 const router = express.Router();

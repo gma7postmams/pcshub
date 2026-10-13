@@ -37,7 +37,7 @@ function TagsInput({ value, onChange, suggestions = [] }) {
 }
 
 // Knowledge Base — reference documents (PDF, Word, PowerPoint). Everyone with the page can open/download them;
-// Admin/Manager (knowledge.write) can add an item by name (document later) or drag & drop files, rename, replace the document and delete.
+// Admin / System Admin (knowledge.write) can add an item by name (document later) or upload files, rename, replace the document and delete.
 export default function Knowledge() {
   const s = useSession();
   const toast = useToast();

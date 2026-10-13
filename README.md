@@ -8,7 +8,7 @@ An internal web app for promotional content teams. Built with Node.js (Express),
 - **Workload Tracker**: plan and follow work by day and team, with custom columns.
 - **PSD Daily Plug List**: maintain the daily plug list, with Excel import.
 - **Live updates**: changes other people save on the three trackers appear on your screen by themselves, without a page refresh.
-- **Knowledge Base**: shared reference documents (PDF, Word, PowerPoint) with tags and a trash bin. An item can be created with just a name; its document is added (or replaced) later.
+- **Knowledge Base**: shared reference documents (PDF, Word, PowerPoint) with tags and a trash bin. Everyone with the page can open and download; only Admin and System Admin upload, rename or delete (adjustable per role in Administration → Roles). An item can be created with just a name and its document added later.
 - **Dashboard**: workload and ingest numbers at a glance, fits the screen.
 - **Admin**: users, roles and groups, dropdown lists, branding, security rules, backup and restore, data retention and an audit log.
 - **Sign-in protection**: optional two-factor authentication (authenticator app or emailed code), lockout after failed attempts, and session limits.
