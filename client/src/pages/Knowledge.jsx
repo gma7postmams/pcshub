@@ -106,13 +106,37 @@ export default function Knowledge() {
     }
   }, [busy, draft, load, toast]);
 
-  // An item with just a name: its document is added later (paperclip / upload button on its row)
-  const [blank, setBlank] = useState(null);   // { title, tags } while the "New item" form is open
+  // New item: a name (required), tags and, optionally, the document right away (Browse file). Without one the document is added later with the upload button on the row.
+  const [blank, setBlank] = useState(null);   // { title, tags, file } while the "New item" form is open
+  const blankFileRef = useRef(null);
+  const pickBlankFile = (file) => {
+    if (blankFileRef.current) blankFileRef.current.value = '';
+    if (!file) return;
+    const err = !(meta.exts || DEFAULT_EXTS).includes(extOf(file.name)) ? 'Not a PDF, Word or PowerPoint file' : file.size > meta.maxMb * 1024 * 1024 ? `Larger than ${meta.maxMb} MB` : !file.size ? 'The file is empty' : '';
+    if (err) { toast(`${file.name}: ${err}`, 'err'); return; }
+    setBlank((b) => ({ ...b, file, title: b.title.trim() ? b.title : titleFrom(file.name) }));   // an empty name takes the file's name
+  };
   const createBlank = async () => {
     if (!blank || busy) return;
     if (!blank.title.trim()) { toast('Give the item a name', 'err'); return; }
     setBusy(true);
-    try { await post('/api/knowledge', { title: blank.title.trim(), tags: blank.tags }); toast('Item added'); setBlank(null); await load(); } catch (e) { toast(e.message, 'err'); } finally { setBusy(false); }
+    try {
+      if (blank.file) {   // name + document in one go (same route as Upload, so the same checks apply)
+        const fd = new FormData();
+        fd.append('titles', JSON.stringify([blank.title.trim()]));
+        fd.append('tags', JSON.stringify(blank.tags));
+        fd.append('files', blank.file);
+        await post('/api/knowledge', fd);
+        toast('Item and document added');
+      } else {
+        await post('/api/knowledge', { title: blank.title.trim(), tags: blank.tags });
+        toast('Item added');
+      }
+      setBlank(null); await load();
+    } catch (e) {
+      const r = e.data && e.data.results && e.data.results[0];
+      toast(r && r.error ? r.error : e.message, 'err');
+    } finally { setBusy(false); }
   };
   const chooseDocFor = (d) => { attachFor.current = d; if (attachRef.current) { attachRef.current.value = ''; attachRef.current.click(); } };
   const attach = async (file) => {
@@ -184,7 +208,7 @@ export default function Knowledge() {
             </span>
           ) : null}
           {canWrite ? <button type="button" className="btn sm" id="kb-upload-btn" disabled={busy} onClick={() => inputRef.current && inputRef.current.click()}><UploadIcon /> {busy ? 'Uploading…' : 'Upload'}</button> : null}
-          {canWrite ? <button type="button" className="btn sm primary" id="kb-new-btn" onClick={() => setBlank({ title: '', tags: [] })}><PlusIcon /> New item</button> : null}
+          {canWrite ? <button type="button" className="btn sm primary" id="kb-new-btn" onClick={() => setBlank({ title: '', tags: [], file: null })}><PlusIcon /> New item</button> : null}
           {canWrite ? <button type="button" className="btn sm" id="kb-trash-btn" onClick={openTrash}><TrashIcon /> Trash</button> : null}
           {docs ? <span className="dim kb-count" aria-live="polite">{q.trim() && shown.length !== docs.length ? `${shown.length} of ${docs.length}` : docs.length} item{docs.length === 1 ? '' : 's'}</span> : null}
         </div>
@@ -230,12 +254,12 @@ export default function Knowledge() {
       {blank ? (
         <Modal
           title="New item"
-          size="sm"
+          size="md"
           onClose={() => { if (!busy) setBlank(null); }}
           footer={(
             <>
               <button type="button" className="btn" disabled={busy} onClick={() => setBlank(null)}>Cancel</button>
-              <button type="button" className="btn primary" id="kb-new-save" disabled={busy || !blank.title.trim()} onClick={createBlank}>{busy ? 'Saving…' : 'Add item'}</button>
+              <button type="button" className="btn primary" id="kb-new-save" disabled={busy || !blank.title.trim()} onClick={createBlank}>{busy ? 'Saving…' : blank.file ? 'Add item and document' : 'Add item'}</button>
             </>
           )}
         >
@@ -249,7 +273,14 @@ export default function Knowledge() {
             <span>Tags <span className="dim">(optional)</span></span>
             <TagsInput value={blank.tags} onChange={(tags) => setBlank({ ...blank, tags })} suggestions={allTags.map(([t]) => t)} />
           </label>
-          <p className="dim m-0 mt-12">No document needed now. Add the PDF, Word or PowerPoint file later with the upload button on the item's row.</p>
+          <div className="f mt-12">
+            <span>Document <span className="dim">(optional: PDF, Word or PowerPoint, up to {meta.maxMb} MB)</span></span>
+            <input ref={blankFileRef} type="file" accept={(meta.exts || DEFAULT_EXTS).join(',')} hidden onChange={(e) => pickBlankFile(e.target.files[0])} />
+            <div className="row">
+              <button type="button" className="btn sm" id="kb-new-browse" disabled={busy} onClick={() => blankFileRef.current && blankFileRef.current.click()}><UploadIcon /> {blank.file ? 'Change file' : 'Browse file'}</button>
+              {blank.file ? <span className="dim wrap-any" id="kb-new-file">{blank.file.name} · {size(blank.file.size)} <button type="button" className="linkbtn" disabled={busy} onClick={() => setBlank({ ...blank, file: null })}>Remove</button></span> : <span className="dim">None yet. You can add it later with the upload button on the item's row.</span>}
+            </div>
+          </div>
         </Modal>
       ) : null}
 
