@@ -933,7 +933,7 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
 // ---------- Fill from team workbook: the team's original per-day workbook (merged cells, banners, extra columns) fills the BLANK cells of
 // rows that are already in the tracker (e.g. copied from the PSD Daily Plug List), matched by Work Date + Plug ID. Nothing typed is
 // overwritten and no row or column is created. POST ?apply=1 saves; without it, the same work is done and reported but nothing is written. ----------
-const { readTeamWorkbook } = require('../workload-fill');
+const { readTeamWorkbook, plugKey } = require('../workload-fill');
 const FILL_FIELDS = ['units_concerned', 'psd', 'prog_name', 'breakdate_vgfx', 'breakdate_vedit', 'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats'];
 const isBlank = (x) => x == null || String(x).trim() === '';
 
@@ -957,7 +957,7 @@ router.post('/fill', requireAction('workload.write'), upload.single('file'), one
     const { rows: dbRows } = await db.query('SELECT * FROM workload_items WHERE work_date = ANY($1::date[]) ORDER BY work_date, id', [dates]);
     const groups = new Map();
     for (const r of dbRows) {
-      const k = `${r.work_date}|${String(r.plug_id || '').split('\n')[0].trim().toUpperCase()}`;
+      const k = `${r.work_date}|${plugKey(r.plug_id)}`;
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k).push(r);
     }

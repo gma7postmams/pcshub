@@ -98,6 +98,9 @@ function parseBreakdate(text, year) {
   return out;
 }
 
+/** The Plug ID itself: the team writes "PV_FIREWA_092926_LN015 - 24p" / "... - 24p, 4k" in the cell; the tracker and the plug list keep only the ID. */
+const plugKey = (t) => String(t || '').split('\n')[0].trim().split(/\s+/)[0].replace(/[,;:]+$/, '').toUpperCase();
+
 const unitsOf = (teams) => (teams.includes('VGFX') && teams.includes('VEDIT') ? 'VGFX/VEDIT' : teams.includes('VGFX') ? 'VGFX Only' : teams.includes('VEDIT') ? 'VEDIT Only' : null);
 
 const HEADERS = [
@@ -139,7 +142,7 @@ function readTeamWorkbook(wb, nowYear = new Date().getFullYear()) {
     let lastUnit = null;
     for (let r = hdr + 1; r <= ws.rowCount; r++) {
       const row = ws.getRow(r);
-      const pid = cellStr(row.getCell(plugCol)).split('\n')[0].trim().toUpperCase();
+      const pid = plugKey(cellStr(row.getCell(plugCol)));
       if (!pid || pid === 'PLUG ID') continue;
       const e = { sheet: name, row: r };
       for (const k of ['psd', 'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats', 'prog_name']) {
@@ -168,4 +171,4 @@ function readTeamWorkbook(wb, nowYear = new Date().getFullYear()) {
   return { entries, sheets, skipped };
 }
 
-module.exports = { readTeamWorkbook, parseBreakdate, parseTime, sheetDate, cellStr };
+module.exports = { plugKey, readTeamWorkbook, parseBreakdate, parseTime, sheetDate, cellStr };
