@@ -105,7 +105,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const [days, setDays] = useState(null);            // [{ date, n }] newest first (the latest 366 days with a list); null = loading
   const [totals, setTotals] = useState({ plugs: 0, days: 0, first: '', last: '' });   // across every day
   const [period, setPeriodState] = useState(() => stored('period', 'day', PERIODS.map((p) => p.value)));
-  const [size, setSizeState] = useState(() => stored('size', 'all', SIZES.map((s) => s.value)));
+  const [size, setSizeState] = useState(() => stored('size2', 'all', SIZES.map((s) => s.value)));
   const [anchor, setAnchor] = useState('');          // the day / a day of the week / of the month being looked at
   const [custom, setCustom] = useState({ from: '', to: '' });
   const [q, setQ] = useState('');
@@ -152,7 +152,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const offset = pageState.key === viewKey ? pageState.offset : 0;
   const setOffset = async (o) => { if (!(await okToLeave())) return; setPageState({ key: viewKey, offset: o }); };
   const setPeriod = async (p) => { if (!(await okToLeave())) return; setPeriodState(p); remember('period', p); };
-  const setSize = async (s) => { if (!(await okToLeave())) return; setSizeState(s); remember('size', s); };
+  const setSize = async (s) => { if (!(await okToLeave())) return; setSizeState(s); remember('size2', s); };
 
   const loadDays = useCallback(async (quiet) => {   // quiet = a re-read because somebody else changed the list: no error pop-up
     try {

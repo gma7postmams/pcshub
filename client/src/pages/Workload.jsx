@@ -398,7 +398,7 @@ export default function Workload() {
   const mode = 'table';   // Excel mode was removed: the Workload Tracker is the Table only (the grid code below is no longer reachable)
   const setMode = () => {};
   const isGrid = false;   // Excel mode = the editable grid; Table mode = rows with the New / Edit form (the layout around both is the same)
-  const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('wl:rows')); return ROW_SIZES.includes(n) ? n : ALL_ROWS; } catch (_) { return ALL_ROWS; } });   // rows per page, remembered
+  const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('wl:rows2')); return ROW_SIZES.includes(n) ? n : ALL_ROWS; } catch (_) { return ALL_ROWS; } });   // rows per page, remembered
   const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', from: '', to: '' });
   const [stats, setStats] = useState(null);   // summary cards + tab badges
   const [offset, setOffset] = useState(0);
@@ -584,7 +584,7 @@ export default function Workload() {
   const changeTab = async (t) => { if (t === tab || !(await okToLeave())) return; setTab(t); saveView(s.session_key, { t }); setOffset(0); };
   const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setMode(m); saveView(s.session_key, { m }); setOffset(0); };
   const goOffset = async (o) => { if (o === offset || !(await okToLeave())) return; setOffset(o); };
-  const changeSize = async (e) => { const n = Number(e.target.value); if (n === size || !(await okToLeave())) return; try { localStorage.setItem('wl:rows', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
+  const changeSize = async (e) => { const n = Number(e.target.value); if (n === size || !(await okToLeave())) return; try { localStorage.setItem('wl:rows2', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
   const sortBy = async (s2) => { if (!(await okToLeave())) return; setSort(s2); };
   const setF = (k) => async (e) => {
     const val = e.target.value;
