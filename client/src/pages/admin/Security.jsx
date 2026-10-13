@@ -4,7 +4,7 @@ import { fmtDateTime } from '../../lib/util.js';
 import { Empty, useConfirm, useToast } from '../../components/ui.jsx';
 
 const EVENT = {
-  'auth.login_failed': 'Failed sign-in', 'auth.locked': 'Account locked', 'auth.login_blocked_locked': 'Sign-in blocked (locked)', 'auth.2fa_failed': 'Wrong 2FA code',
+  'auth.login_failed': 'Failed sign-in', 'auth.locked': 'Account locked', 'auth.password_reset_self': 'Password reset by the user (Forgot password)', 'auth.login_blocked_locked': 'Sign-in blocked (locked)', 'auth.2fa_failed': 'Wrong 2FA code',
   'auth.reauth_failed': 'Wrong password on a sensitive action', 'admin.user_signout': 'Signed out by an Admin', 'admin.user_reset_password': 'Password reset for', 'admin.user_reset_2fa': '2FA reset for',
 };
 

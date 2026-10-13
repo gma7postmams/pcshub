@@ -9,6 +9,8 @@ const ACTION_LABELS = {
   'auth.logout': 'User Logout',
   'auth.login_failed': 'Failed Login',
   'auth.locked': 'Account Locked',
+  'auth.password_forgot': 'Password Reset Code Requested',
+  'auth.password_reset_self': 'Password Reset (Forgot Password)',
   'auth.login_blocked_locked': 'Login Blocked (Locked Account)',
   'auth.login_blocked_maintenance': 'Login Blocked (Maintenance Mode)',
   'admin.group_export': 'Exported Groups',

@@ -10,6 +10,7 @@ const totp = require('../totp');
 const emailCode = require('../email-code');
 const maintenanceMode = require('../maintenance-mode');
 const mailer = require('../mailer');
+const v = require('../validate');
 const { twofaRequired } = require('../config');
 
 const router = express.Router();
@@ -124,6 +125,44 @@ router.post('/login', loginLimiter, asyncH(async (req, res) => {
 
   await completeLogin(req, user);
   res.json({ ok: true, mustChangePassword: user.must_change_password });
+}));
+
+// Forgot password, by email code (no link, so no address has to be trusted): 1) the person gives their username or email and a 6-digit code is emailed
+// (the answer is the same whether or not such an account exists); 2) they enter the code with a new password. The code lives in their session, works
+// once for 10 minutes and allows 5 tries. Nothing changes until the code is right.
+router.post('/forgot', loginLimiter, asyncH(async (req, res) => {
+  if (!mailer.configured()) throw new HttpError(503, 'Resetting a password by email is not set up. Ask an Administrator to reset your password.');
+  const who = typeof req.body.username === 'string' ? req.body.username.trim() : '';
+  if (!who || who.length > 120) throw new HttpError(400, 'Enter your username or email address');
+  const { rows } = await db.query('SELECT * FROM users WHERE lower(username)=lower($1) OR lower(email)=lower($1) LIMIT 2', [who]);
+  const user = rows.length === 1 ? rows[0] : null;   // two accounts on one address: nothing is sent, ask an Admin
+  if (user && user.is_active && user.email) {
+    try {
+      await emailCode.issue(req.session, user, 'reset');
+      req.session.pwReset = { uid: user.id, at: Date.now() };
+      await save(req);
+      await audit(req, 'auth.password_forgot', 'user', user.id, { username: user.username });
+    } catch (e) { console.error('[forgot] could not send the code:', e.message); }   // never tells the caller (it would show the account exists)
+  }
+  res.json({ ok: true });
+}));
+
+router.post('/forgot/verify', loginLimiter, asyncH(async (req, res) => {
+  const p = req.session.pwReset;
+  if (!p || Date.now() - p.at > 15 * 60 * 1000) { delete req.session.pwReset; throw new HttpError(401, 'That reset has expired. Start again with Forgot password.'); }
+  const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [p.uid]);
+  const user = rows[0];
+  if (!user || !user.is_active) throw new HttpError(401, 'That reset has expired. Start again with Forgot password.');
+  const pw = v.password(req.body.password, { username: user.username, fullName: user.full_name });   // checked first, so a weak password does not use up the code
+  if (!emailCode.check(req.session, user.id, 'reset', req.body.code)) { await save(req); throw new HttpError(401, 'That code is not right, or it has expired.'); }
+  const hash = await bcrypt.hash(pw, 12);
+  await db.query('UPDATE users SET password_hash=$2, must_change_password=FALSE, failed_attempts=0, locked_until=NULL, updated_at=now() WHERE id=$1', [user.id, hash]);
+  await db.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = $1`, [user.id]);
+  delete req.session.pwReset;
+  await save(req);
+  req.user = { id: user.id, username: user.username };
+  await audit(req, 'auth.password_reset_self', 'user', user.id, { username: user.username });
+  res.json({ ok: true });
 }));
 
 router.post('/2fa', loginLimiter, asyncH(async (req, res) => {

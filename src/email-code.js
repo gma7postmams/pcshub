@@ -47,7 +47,7 @@ ${PREHEADER}
 </table></td></tr></table></body></html>`;
 }
 
-const SUBJECT = { login: 'sign-in', reauth: 'confirmation', enroll: 'two-step setup' };
+const SUBJECT = { login: 'sign-in', reauth: 'confirmation', enroll: 'two-step setup', reset: 'password reset' };
 
 /** Create and email a new code. `session` is req.session. Throws HttpError when too soon, too many, or the mail fails. */
 async function issue(session, user, purpose, appName) {

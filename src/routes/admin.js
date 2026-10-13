@@ -423,22 +423,39 @@ router.post('/users/delete', asyncH(async (req, res) => {
   res.json({ ok: true, deleted: gone });
 }));
 
+// Reset a password. mode: 'generate' (random; shown once), 'manual' (the Admin types it; `password`), 'email' (random, emailed to the user and never shown).
+// Either way the user must choose their own password at the next sign-in, every device is signed out and a lock is cleared.
 router.post('/users/:id/reset-password', asyncH(async (req, res) => {
   const id = v.id(req.params.id);
-  const target = (await db.query('SELECT username, full_name FROM users WHERE id=$1', [id])).rows[0];
+  const target = (await db.query('SELECT username, full_name, email FROM users WHERE id=$1', [id])).rows[0];
   if (!target) throw new HttpError(404, 'User not found');
-  const temp = req.body.password ? v.password(req.body.password, { username: target.username, fullName: target.full_name })
+  const mailer = require('../mailer');
+  const mode = ['generate', 'manual', 'email'].includes(req.body.mode) ? req.body.mode : (req.body.password ? 'manual' : 'generate');
+  if (mode === 'email') {
+    if (!mailer.configured()) throw new HttpError(400, 'Email is not set up on the server, so a password cannot be emailed.');
+    if (!target.email) throw new HttpError(400, 'This account has no email address. Add one to the user first.');
+  }
+  const temp = mode === 'manual' ? v.password(req.body.password, { username: target.username, fullName: target.full_name })
     : `${crypto.randomBytes(12).toString('base64url')}${crypto.randomInt(10, 99)}`;
   const hash = await bcrypt.hash(temp, 12);
-  const r = await db.query(
-    `UPDATE users SET password_hash=$2, must_change_password=TRUE, failed_attempts=0, locked_until=NULL, updated_at=now()
-      WHERE id=$1`, [id, hash]
-  );
-  if (!r.rowCount) throw new HttpError(404, 'User not found');
+  await db.tx(async (c) => {
+    const r = await c.query(
+      `UPDATE users SET password_hash=$2, must_change_password=TRUE, failed_attempts=0, locked_until=NULL, updated_at=now()
+        WHERE id=$1`, [id, hash]
+    );
+    if (!r.rowCount) throw new HttpError(404, 'User not found');
+    if (mode === 'email') {   // sent before the change is committed: if the email cannot be sent, the old password stays
+      try { await require('../password-mail').sendTemporaryPassword(target, temp); } catch (e) {
+        console.error('[reset-password] email failed:', e.message);
+        throw new HttpError(503, 'The email could not be sent, so the password was not changed. Check the email settings.');
+      }
+    }
+  });
   await db.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = $1`, [id]);
-  await audit(req, 'admin.user_reset_password', 'user', id, { username: target.username });
-  res.json({ ok: true, temporary_password: temp });
+  await audit(req, 'admin.user_reset_password', 'user', id, { username: target.username, via: mode });
+  res.json(mode === 'email' ? { ok: true, emailed: true, sentTo: mailer.mask(target.email) } : { ok: true, temporary_password: temp });
 }));
+
 
 // Only an Admin can turn 2FA on or off for an account. On: the user must enrol an authenticator at next use.
 // Off: their authenticator is removed too, so they sign in with the password alone again.

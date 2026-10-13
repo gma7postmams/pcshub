@@ -1,0 +1,29 @@
+// Emails about passwords: the temporary password an Admin sends from Administration > Access > Users.
+const mailer = require('./mailer');
+
+const esc = (x) => String(x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+async function appName() {
+  let n = mailer.shortName();
+  if (!n) {
+    try { const r = await require('./db').query(`SELECT value FROM app_settings WHERE key='app_name'`); n = r.rows[0] && r.rows[0].value; } catch (e) { /* fall through */ }
+  }
+  return n || 'Promotional Content Hub';
+}
+
+/** Email the new temporary password to `user` ({ full_name, username, email }). Throws if it cannot be sent. */
+async function sendTemporaryPassword(user, temp) {
+  const app = await appName();
+  const f = 'font-family:Arial,Helvetica,sans-serif';
+  const text = `Hello ${user.full_name || user.username},\n\nAn Administrator reset your ${app} password.\n\nUsername: ${user.username}\nTemporary password: ${temp}\n\nSign in with it and you will be asked to choose a new password. If you did not expect this, tell an Administrator.`;
+  const html = `<!doctype html><html><body style="margin:0;padding:24px 12px;background:#f3f4f6"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+<table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:8px">
+<tr><td align="center" style="padding:28px 24px 8px;${f};font-size:20px;font-weight:700;color:#000000">${esc(app)}</td></tr>
+<tr><td style="padding:18px 36px 8px;${f};font-size:16px;line-height:1.5;color:#374151">Hello ${esc(user.full_name || user.username)}, an Administrator reset your password.<br>Username: <strong>${esc(user.username)}</strong></td></tr>
+<tr><td align="center" style="padding:6px 36px 14px"><div style="${f};font-size:22px;font-weight:700;letter-spacing:1px;color:#111827;background:#f3f4f6;border-radius:6px;padding:12px 16px;display:inline-block">${esc(temp)}</div></td></tr>
+<tr><td style="padding:0 36px 28px;${f};font-size:15px;line-height:1.5;color:#374151">Sign in with this temporary password and you will be asked to choose a new one.<br>If you did not expect this, tell an Administrator.</td></tr>
+</table></td></tr></table></body></html>`;
+  await mailer.send({ to: user.email, subject: `Your ${app} temporary password`, text, html });
+}
+
+module.exports = { sendTemporaryPassword };

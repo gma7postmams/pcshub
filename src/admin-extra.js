@@ -76,7 +76,7 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
                        count(*) FILTER (WHERE must_change_password)::int AS must_change
                   FROM users`, [settings.get().requireAdmin2fa]),
       db.query(`SELECT id, created_at, username, action, ip, details->>'username' AS target FROM audit_logs
-                 WHERE action IN ('auth.login_failed','auth.locked','auth.login_blocked_locked','auth.2fa_failed','auth.reauth_failed','admin.user_signout','admin.user_reset_password','admin.user_reset_2fa')
+                 WHERE action IN ('auth.login_failed','auth.locked','auth.login_blocked_locked','auth.2fa_failed','auth.reauth_failed','admin.user_signout','admin.user_reset_password','admin.user_reset_2fa','auth.password_reset_self')
                  ORDER BY created_at DESC, id DESC LIMIT 15`),
       db.query(`SELECT count(*)::int AS n FROM audit_logs WHERE action IN ('auth.login_failed','auth.locked') AND created_at > now() - interval '7 days'`),
     ]);
