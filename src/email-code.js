@@ -97,4 +97,4 @@ function check(session, userId, purpose, input) {
   return false;
 }
 
-module.exports = { issue, check };
+module.exports = { issue, check, brand, PREHEADER, esc };
