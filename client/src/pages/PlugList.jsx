@@ -112,6 +112,9 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const query = useDebounced(q, 250);
   const [data, setData] = useState(null);            // { rows, total }; null = loading
   const [picked, setPicked] = useState(() => new Set());   // ticked rows (Table mode) for Delete selected
+  const [allMatching, setAllMatching] = useState(false);   // Admin: "Select all N": every plug the view matches, on every page
+  const [deletingAll, setDeletingAll] = useState(false);
+  const isAdminUser = !!(session.user && ['Admin', 'System Admin'].includes(session.user.role));
   const [importing, setImporting] = useState(false);
   // Full screen: the list covers the app's page (the browser's own tabs and address bar stay); Esc or the button leaves it
   const [full, setFull] = useState(false);
@@ -176,7 +179,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       setData(await get(`/api/plugs?${p}`));
     } catch (e) { if (!quiet) { setData({ rows: [], total: 0 }); toast(e.message, 'err'); } }
   }, [anchor, range.from, range.to, query, limit, offset, period, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setData(null); setPicked(new Set()); loadRows(); }, [loadRows]);
+  useEffect(() => { setData(null); setPicked(new Set()); setAllMatching(false); loadRows(); }, [loadRows]);
   // other people's changes appear by themselves (Workload changes too: the "In Workload" flag) — not while a cell, form or dialog is open here
   useLive(['plugs'], () => { loadDays(true); return loadRows(true); }, () => {
     const el = document.activeElement;
@@ -240,12 +243,12 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
 
   const rows = data ? data.rows : [];
   const rowsRef = useRef(rows); rowsRef.current = rows;
-  const clearPicksRef = useRef(() => {}); clearPicksRef.current = () => { setPicked(new Set()); lastPick.current = null; };
+  const clearPicksRef = useRef(() => {}); clearPicksRef.current = () => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; };
   useFitBox(`table|${narrow}|${rows.length}|${days === null}|${!!data}|${size}|${full}`);
   const chosen = rows.filter((r) => picked.has(r.id));
   const pickedCount = chosen.length;
   const allOn = !!rows.length && rows.every((r) => picked.has(r.id));
-  const clearPicks = () => { setPicked(new Set()); lastPick.current = null; };
+  const clearPicks = () => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; };
   const reload = async () => { await loadDays(); loadRows(); };
   const batch = async (list) => post('/api/plugs/batch', { rows: list });
 
@@ -262,18 +265,25 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const redo = () => step('future', 'past', 'redo');
 
   // delete / cut
+  // the server deletes at most 1000 ticked plugs per request, so a long selection goes in several requests
+  const deleteIds = async (ids) => {
+    let deleted = 0;
+    for (let i = 0; i < ids.length; i += 1000) deleted += (await post('/api/plugs/delete-selected', { ids: ids.slice(i, i + 1000) })).deleted || 0;
+    return { deleted };
+  };
   const deleteChosen = async (verb = 'Delete') => {
+    if (allMatching) { setDeletingAll(true); return; }
     const list = chosen;
     if (!list.length) return;
     if (!(await confirm(`${verb} plugs`, `${verb === 'Cut' ? 'Cut and remove' : 'Remove'} the ${list.length} selected plug${list.length === 1 ? '' : 's'} from the list? Workload rows already made from them are not touched.`, { okText: verb, danger: true }))) return;
     const recs = list.map(recOf);
     let ids = list.map((r) => r.id);
     try {
-      const out = await post('/api/plugs/delete-selected', { ids });
+      const out = await deleteIds(ids);
       pushH({
         label: `${verb.toLowerCase()} ${list.length} plug${list.length === 1 ? '' : 's'}`,
         undo: async () => { ids = (await batch(recs)).addedIds || []; },
-        redo: async () => { await post('/api/plugs/delete-selected', { ids }); },
+        redo: async () => { await deleteIds(ids); },
       });
       toast(`${out.deleted} plug${out.deleted === 1 ? '' : 's'} deleted`);
       clearPicks();
@@ -507,7 +517,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       if (!e.ctrlKey && !e.metaKey && key === 'escape') { setCellSel(null); return; }
     }
     if (e.ctrlKey || e.metaKey) {
-      if (key === 'a') { e.preventDefault(); setPicked(new Set(rows.map((r) => r.id))); }
+      if (key === 'a') { e.preventDefault(); if (isAdminUser && allOn && total > rows.length) setAllMatching(true); else setPicked(new Set(rows.map((r) => r.id))); }   // Admin, again: every matching plug on every page
       else if (key === 'c') { if (picked.size && !(window.getSelection && String(window.getSelection()))) { e.preventDefault(); copyChosen(); } }
       else if (key === 'x') { if (picked.size) { e.preventDefault(); cutChosen(); } }
       else if (key === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
@@ -564,7 +574,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     const up = () => { drag.current = null; if (cellDrag.current && cellDrag.current.moved) setTimeout(() => { suppress.current = false; }, 150); cellDrag.current = null; };
     const down = (e) => {   // a click outside the table (and its bar, menus and dialogs) drops the selection
       const t = e.target;
-      if (t && t.closest && !t.closest('.plug-list .table-wrap, .xl-menu, .modal-backdrop, .tpop, #delete-selected-btn')) { clearPicksRef.current(); setCellSel(null); }
+      if (t && t.closest && !t.closest('.plug-list .table-wrap, .xl-menu, .modal-backdrop, .tpop, #delete-selected-btn, .sel-banner')) { clearPicksRef.current(); setCellSel(null); }
     };
     window.addEventListener('keydown', key); window.addEventListener('paste', paste); window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up); window.addEventListener('mousedown', down);
@@ -628,8 +638,8 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
           {canWrite ? <button type="button" className="btn ibtn primary" id="add-plug-btn" aria-label="Add Plug" title="Add Plug" onClick={() => setAdding(true)}><PlusIcon /></button> : null}
           {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import Plug List" title={importing ? 'Importing…' : 'Import Plug List'} disabled={importing} onClick={() => fileRef.current.click()}><UploadIcon /></button> : null}
           <button type="button" className="btn ibtn" id="export-btn" aria-label="Export to Excel" title="Export to Excel" onClick={exportXlsx} disabled={!total}><DownloadIcon /></button>
-          {canWrite && pickedCount ? (
-            <button type="button" className="btn ibtn danger" id="delete-selected-btn" onClick={removeChosen} aria-label="Delete selected plugs" title={`Delete Selected (${pickedCount})`}><TrashIcon /></button>
+          {canWrite && (pickedCount || allMatching) ? (
+            <button type="button" className="btn ibtn danger" id="delete-selected-btn" onClick={removeChosen} aria-label="Delete selected plugs" title={`Delete Selected (${allMatching ? total : pickedCount})`}><TrashIcon /></button>
           ) : null}
           <button type="button" className="btn ibtn" id="full-btn" aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen' : 'Full screen'} onClick={() => setFull((f) => !f)}>
             {full ? <ExitFullscreenIcon /> : <FullscreenIcon />}
@@ -637,6 +647,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
           {canWrite ? (
             <ToolMenu items={[
               { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
+              isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
               canWorkload && { id: 'fill-blank-btn', label: filling ? 'Filling…' : 'Fill Blank Rows', icon: <FillIcon />, disabled: filling, onClick: fillExisting },
             ]} />
           ) : null}
@@ -650,6 +661,13 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
           </Empty>
         ) : (
           <>
+            {canWrite && isAdminUser && ((allOn && total > rows.length) || allMatching) ? (
+              <div className="sel-banner" role="status">
+                {allMatching
+                  ? <>All <strong>{total}</strong> plug{total === 1 ? '' : 's'} in this view are selected. <button type="button" className="linklike" onClick={clearPicks}>Clear selection</button></>
+                  : <>All <strong>{rows.length}</strong> on this page are selected. <button type="button" className="linklike" id="select-all-matching" onClick={() => setAllMatching(true)}>Select all {total} in this view</button></>}
+              </div>
+            ) : null}
             <div className={`table-wrap${narrow ? '' : ' wl-fit'}`} onClickCapture={(e) => { if (suppress.current) { suppress.current = false; e.stopPropagation(); e.preventDefault(); return; } if (canWrite && picked.size && !(e.target.closest && e.target.closest('.rn, .chk, .plug-actions'))) clearPicks(); }}>
               <table className={`t wl plug-t${narrow ? ' cards' : ''}`}>
                 <thead>
@@ -739,6 +757,17 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
         </Modal>
       ) : null}
 
+      {deletingAll ? (
+        <DeleteAllPlugs
+          viewTotal={total}
+          listTotal={totals.plugs}
+          hasView={!!(range.from || range.to || query)}
+          viewText={[range.from && range.to && range.from === range.to ? `Day: ${fmtDate(range.from)}` : (range.from || range.to) && `Dates: ${range.from ? fmtDate(range.from) : '…'} → ${range.to ? fmtDate(range.to) : '…'}`, query && `Search: “${query}”`].filter(Boolean)}
+          view={{ from: range.from || undefined, to: range.to || undefined, q: query || undefined }}
+          onClose={() => setDeletingAll(false)}
+          onDone={async (n) => { setDeletingAll(false); clearPicks(); toast(`${n} plug${n === 1 ? '' : 's'} deleted`); await loadDays(); loadRows(); }} />
+      ) : null}
+
       {adding || editing ? (
         <PlugModal date={period === 'day' ? anchor : ''} plug={editing} onClose={() => { setAdding(false); setEditing(null); }}
           onSaved={async (d, out) => {
@@ -753,6 +782,38 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
           }} />
       ) : null}
     </div>
+  );
+}
+
+// Admin: delete every plug the current view shows (its days and search), or the whole list. Typed DELETE to confirm.
+function DeleteAllPlugs({ viewTotal, listTotal, hasView, viewText, view, onClose, onDone }) {
+  const toast = useToast();
+  const [scope, setScope] = useState('view');   // 'view' | 'all'
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const wholeList = scope === 'all' || !hasView;   // a view with no days or search narrowing it IS the whole list
+  const n = wholeList ? listTotal : viewTotal;
+  const go = async () => {
+    setBusy(true);
+    try {
+      const out = await post('/api/plugs/delete-all', wholeList ? { scope: 'all' } : { scope: 'range', ...view });
+      onDone(out.deleted);
+    } catch (e) { toast(e.message, 'err'); setBusy(false); }
+  };
+  return (
+    <Modal title="Delete all plugs" onClose={() => { if (!busy) onClose(); }}
+      footer={(<><span className="grow" /><button type="button" className="btn" disabled={busy} onClick={onClose}>Cancel</button>
+        <button type="button" className="btn danger" disabled={busy || typed.trim() !== 'DELETE' || !n} onClick={go}>Delete {n} plug{n === 1 ? '' : 's'}</button></>)}>
+      {hasView ? (
+        <div className="stack" style={{ marginBottom: 10 }}>
+          <label className="check"><input type="radio" name="dp-scope" checked={scope === 'view'} onChange={() => setScope('view')} /> {' '}This view: <strong>{viewTotal}</strong> plug{viewTotal === 1 ? '' : 's'} ({viewText.join(', ')})</label>
+          <label className="check"><input type="radio" name="dp-scope" checked={scope === 'all'} onChange={() => setScope('all')} /> {' '}The whole list, every day: <strong>{listTotal}</strong> plug{listTotal === 1 ? '' : 's'}</label>
+        </div>
+      ) : <p>This permanently deletes the <strong>whole list</strong>, every day: <strong>{listTotal}</strong> plug{listTotal === 1 ? '' : 's'}.</p>}
+      <p>Workload rows already made from these plugs are not touched. It cannot be undone — consider an Export first.</p>
+      <label className="f"><span>Type <strong>DELETE</strong> to confirm</span>
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" onKeyDown={(e) => { if (e.key === 'Enter' && typed.trim() === 'DELETE' && !busy && n) go(); }} /></label>
+    </Modal>
   );
 }
 
