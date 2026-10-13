@@ -86,7 +86,7 @@ function build(image) {
 /** Point the tab icon at the branding logo (url), or back at the built-in icon when there is none. */
 export function applyFavicon(url) {
   const link = iconLink();
-  if (!url) { setIcon(link.dataset.defaultHref || '/icons/icon-192.png', true); return; }
+  if (!url) { setIcon(link.dataset.defaultHref || '/icons/icon-192.png?v=3', true); return; }
   try { const hit = localStorage.getItem(CACHE_KEY(url)); if (hit) { setIcon(hit); return; } } catch (e) { /* storage unavailable */ }
   const image = new Image();
   image.onload = () => {
@@ -95,6 +95,6 @@ export function applyFavicon(url) {
     setIcon(href || url);
     if (href) { try { localStorage.setItem(CACHE_KEY(url), href); } catch (e) { /* full: fine */ } }
   };
-  image.onerror = () => setIcon(link.dataset.defaultHref || '/icons/icon-192.png', true);
+  image.onerror = () => setIcon(link.dataset.defaultHref || '/icons/icon-192.png?v=3', true);
   image.src = url;
 }

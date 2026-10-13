@@ -38,9 +38,9 @@ function template() {
 async function indexHtml() {
   const { name, logo } = await branding();
   return template()
-    .replace(/(<link rel="apple-touch-icon" href=")[^"]*(")/, (m, a, b) => `${a}${logo || '/icons/icon-192.png'}${b}`)
+    .replace(/(<link rel="apple-touch-icon" href=")[^"]*(")/, (m, a, b) => `${a}${logo || '/icons/icon-192.png?v=3'}${b}`)
     .replace(/<title>[^<]*<\/title>/, `<title>${esc(name)}</title>`)
-    .replace('</head>', `<meta name="app-name" content="${esc(name)}">\n<meta name="apple-mobile-web-app-title" content="${esc(shortName(name))}">\n</head>`);
+    .replace('</head>', `<meta name="app-name" content="${esc(name)}">\n<meta name="apple-mobile-web-app-title" content="${esc(shortName(require('./mailer').shortName() || name))}">\n</head>`);
 }
 
 /** Express handler: the app shell, optionally with a status code. */
@@ -60,8 +60,9 @@ async function manifest(req, res, next) {
     if (logo) {
       base.icons = ['any', 'maskable'].flatMap((purpose) => [192, 512].map((n) => ({ src: logo, sizes: `${n}x${n}`, type: 'image/png', purpose })));
     }
-    base.name = name;
-    base.short_name = shortName(name);
+    const app = require('./mailer').shortName() || name;   // installed-app name: the short product name (PULSE) when set, else the Branding name
+    base.name = app;
+    base.short_name = shortName(app);
     if (tagline) base.description = tagline;
     res.set('Cache-Control', 'no-cache').type('application/manifest+json').send(JSON.stringify(base));
   } catch (e) { next(e); }
