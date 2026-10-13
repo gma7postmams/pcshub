@@ -100,7 +100,14 @@ function parseBreakdate(text, year) {
 }
 
 /** The Plug ID itself: the team writes "PV_FIREWA_092926_LN015 - 24p" / "... - 24p, 4k" in the cell; the tracker and the plug list keep only the ID. */
-const plugKey = (t) => String(t || '').split('\n')[0].trim().split(/\s+/)[0].replace(/[,;:]+$/, '').toUpperCase();
+const plugKey = (t) => String(t || '').split('\n')[0].trim().split(/\s+/)[0].replace(/[,;:-]+$/, '').toUpperCase();
+/** The same ID without its length part: the plug list often has "PH_REDBAL_BALIMA_LNXX" where the team's workbook has "PH_REDBAL_BALIMA_LN060". */
+const looseKey = (pid) => String(pid || '').replace(/_LN[A-Z0-9/]*$/, '').replace(/_+$/, '');
+
+const UNIT_RADIO = 'Audio - RADIO';
+const UNIT_TV = 'Audio - TV';
+const UNIT_GUIDE = 'Audio \u2013 AUDIO GUIDE';
+const AUDIO_HEADERS = [['psd', /^PSD$/i], ['length', /^LENGTH$/i], ['others', /^(DETAILS|OTHERS|REMARKS)$/i], ['audio_status', /^STATUS$/i]];
 
 const unitsOf = (teams) => (teams.includes('VGFX') && teams.includes('VEDIT') ? 'VGFX/VEDIT' : teams.includes('VGFX') ? 'VGFX Only' : teams.includes('VEDIT') ? 'VEDIT Only' : null);
 
@@ -108,6 +115,45 @@ const HEADERS = [
   ['psd', /^PSD$/i], ['breakdate', /^BREAK\s*DATE/i], ['vo', /^VO$/i], ['script', /^SCRIPT$/i], ['art_stb', /^ART/i],
   ['audio_guide', /^AUDIO\s*GUIDE/i], ['remarks', /^REMARKS?$/i], ['total_mats', /^TOTAL\s*MATS?/i], ['prog_name', /^PROG/i],
 ];
+
+
+/**
+ * An Audio (_ojo) sheet: tables of Plug ID / PSD / Length / Details / Status under a RADIO or TV heading, then ASSIGNED / DONE /
+ * resched-cancelled tables. Each plug gives its Length, Remarks (Details), Status and PSD, and, for a plug that no main sheet lists,
+ * its Units Concerned: Audio Guide when the details say so, else RADIO / TV from the heading above it.
+ */
+function readAudioSheet(ws, name, year, audio, sheets, skipped) {
+  const day = sheetDay(ws);
+  if (!day) { skipped.push(name); return; }
+  const date = `${year}-${pad(day.mon + 1)}-${pad(day.day)}`;
+  let cols = null;
+  let section = null;
+  let plugs = 0;
+  for (let r = 1; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r);
+    const a = cellStr(row.getCell(1)).toUpperCase();
+    const b = cellStr(row.getCell(2));
+    if (/^PLUG\s*ID$/i.test(b)) {
+      cols = {};
+      for (let c = 1; c <= 8; c++) { const h = cellStr(row.getCell(c)).replace(/\s+/g, ' '); const hit = h && AUDIO_HEADERS.find(([k, re]) => !cols[k] && re.test(h)); if (hit) cols[hit[0]] = c; }
+      continue;
+    }
+    if (!b && (a === 'RADIO' || a === 'TV')) { section = a; continue; }
+    if (/^(ASSIGNED|DONE|RESCHED)/i.test(b)) { section = null; continue; }
+    const pid = plugKey(b);
+    if (!cols || !pid || /^(NO|N\/A)$/.test(pid)) continue;
+    const e = { sheet: name, row: r, audio: true };
+    for (const [k] of AUDIO_HEADERS) if (cols[k]) { const t = cellStr(row.getCell(cols[k])); if (t) e[k] = t; }
+    const guide = /audio\s*guide/i.test(`${e.others || ''} ${e.audio_status || ''}`);
+    e.units_concerned = guide ? UNIT_GUIDE : section === 'RADIO' || /\.RAD$/.test(pid) ? UNIT_RADIO : section === 'TV' ? UNIT_TV : null;
+    if (!e.units_concerned) delete e.units_concerned;
+    const k = `${date}|${pid}`;
+    if (!audio.has(k)) audio.set(k, []);
+    audio.get(k).push(e);
+    plugs++;
+  }
+  sheets.push({ name, date, plugs });
+}
 
 /**
  * wb = an exceljs Workbook. Returns { entries: Map('YYYY-MM-DD|PLUGID' -> [entry, ...]), sheets: [{ name, date, plugs }], skipped: [names] }.
@@ -119,10 +165,12 @@ function readTeamWorkbook(wb, nowYear = new Date().getFullYear()) {
   const sheets = [];
   const skipped = [];
   const year = workbookYear(wb.worksheets.map(sheetDay).filter(Boolean), nowYear);
+  const audio = new Map();   // the Audio (_ojo) sheets: 'YYYY-MM-DD|PLUGID' -> [entry]
   const votes = new Map();   // Plug ID -> the units its own Breakdate lines gave, on any day
   for (const ws of wb.worksheets) {
     const name = ws.name || '';
-    if (/ojo|^temp$|filter\s*pool/i.test(name)) { skipped.push(name); continue; }
+    if (/ojo/i.test(name)) { readAudioSheet(ws, name, year, audio, sheets, skipped); continue; }
+    if (/^temp$|filter\s*pool/i.test(name)) { skipped.push(name); continue; }
     const day = sheetDay(ws);
     const date = day ? `${year}-${pad(day.mon + 1)}-${pad(day.day)}` : null;
     // header row = the one with a "PLUG ID" cell in the first rows
@@ -174,7 +222,7 @@ function readTeamWorkbook(wb, nowYear = new Date().getFullYear()) {
   // a Plug ID whose other days all name the same team(s) lends that to a day that does not name any
   const unitByPlug = new Map();
   for (const [pid, set] of votes) if (set.size === 1) unitByPlug.set(pid, [...set][0]);
-  return { entries, sheets, skipped, unitByPlug };
+  return { entries, audio, sheets, skipped, unitByPlug };
 }
 
-module.exports = { plugKey, readTeamWorkbook, parseBreakdate, parseTime, sheetDay, workbookYear, cellStr };
+module.exports = { plugKey, looseKey, readTeamWorkbook, parseBreakdate, parseTime, sheetDay, workbookYear, cellStr };

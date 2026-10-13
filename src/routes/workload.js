@@ -933,9 +933,22 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
 // ---------- Fill from team workbook: the team's original per-day workbook (merged cells, banners, extra columns) fills the BLANK cells of
 // rows that are already in the tracker (e.g. copied from the PSD Daily Plug List), matched by Work Date + Plug ID. Nothing typed is
 // overwritten and no row or column is created. POST ?apply=1 saves; without it, the same work is done and reported but nothing is written. ----------
-const { readTeamWorkbook, plugKey } = require('../workload-fill');
-const FILL_FIELDS = ['units_concerned', 'psd', 'prog_name', 'breakdate_vgfx', 'breakdate_vedit', 'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats'];
+const { readTeamWorkbook, plugKey, looseKey } = require('../workload-fill');
+const FILL_FIELDS = ['units_concerned', 'psd', 'prog_name', 'breakdate_vgfx', 'breakdate_vedit', 'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats', 'length', 'others', 'audio_status'];
 const isBlank = (x) => x == null || String(x).trim() === '';
+
+// A Plug ID the plug list gives without its length ("PH_REDBAL_BALIMA_LNXX") matches the workbook's one with a length ("..._LN060") when that is the only plug of that name that day.
+const looseIndex = (map) => {
+  const m = new Map();
+  for (const k of map.keys()) { const lk = `${k.slice(0, 10)}|${looseKey(k.slice(11))}`; if (!m.has(lk)) m.set(lk, new Set()); m.get(lk).add(k); }
+  return m;
+};
+const resolveKey = (map, idx, k) => {
+  if (map.has(k)) return { list: map.get(k), loose: false, key: k };
+  if (/_LN\d/.test(k)) return null;   // the plug list gave a real length: it must match exactly
+  const set = idx.get(`${k.slice(0, 10)}|${looseKey(k.slice(11))}`);
+  return set && set.size === 1 ? { list: map.get([...set][0]), loose: true, key: [...set][0] } : null;
+};
 
 router.post('/fill', requireAction('workload.write'), upload.single('file'), oneImportAtATime, asyncH(async (req, res) => {
   const t0 = Date.now();
@@ -948,7 +961,7 @@ router.post('/fill', requireAction('workload.write'), upload.single('file'), one
     await assertSafeXlsx(req.file.buffer, req.file.originalname);
     const wb = new ExcelJS.Workbook();
     try { await wb.xlsx.load(req.file.buffer); } catch (e) { throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)'); }
-    const { entries, sheets, unitByPlug } = readTeamWorkbook(wb);
+    const { entries, audio, sheets, unitByPlug } = readTeamWorkbook(wb);
     const defUnits = ['VGFX Only', 'VEDIT Only', 'VGFX/VEDIT'].includes(String(req.query.units || '')) ? String(req.query.units) : null;   // optional: Units Concerned for a plug whose lines never name a team
     if (!sheets.length) throw new HttpError(400, 'No daily sheets found. Expected sheets such as "SEP 10_main", each with a "DATE: SEP 10, Thursday" line and a PLUG ID header row.');
 
@@ -963,25 +976,35 @@ router.post('/fill', requireAction('workload.write'), upload.single('file'), one
       groups.get(k).push(r);
     }
 
-    const summary = { matched: 0, updated: 0, unchanged: 0, locked: 0, noMatch: 0, cells: 0, byField: {}, unitsSet: 0, unitsFromOtherDays: 0, unitsDefaulted: 0, priorityOn: 0, errors: [], noMatchSample: [], days: dates.length, sheets: sheets.length };
+    const summary = { matched: 0, updated: 0, unchanged: 0, locked: 0, noMatch: 0, cells: 0, byField: {}, unitsSet: 0, unitsFromOtherDays: 0, unitsDefaulted: 0, unitsFromAudio: 0, looseMatched: 0, priorityOn: 0, errors: [], noMatchSample: [], days: dates.length, sheets: sheets.length };
     const plan = [];   // { id, set: { col: value }, rec }
+    const mainIdx = looseIndex(entries);
+    const audioIdx = looseIndex(audio);
     for (const [k, rows] of groups) {
-      const list = entries.get(k);
-      if (!list) {
+      const m = resolveKey(entries, mainIdx, k);
+      const au = resolveKey(audio, audioIdx, k);
+      if (!m && !au) {
         summary.noMatch += rows.length;
         if (summary.noMatchSample.length < 15) summary.noMatchSample.push(`${k.slice(0, 10)} ${rows[0].plug_id.split('\n')[0]}`);
         continue;
       }
       for (let i = 0; i < rows.length; i++) {
         const cur = rows[i];
-        const e = list[Math.min(i, list.length - 1)];
+        const e = m ? m.list[Math.min(i, m.list.length - 1)] : {};
+        const a = au ? au.list[Math.min(i, au.list.length - 1)] : null;
         summary.matched++;
+        if ((m && m.loose) || (!m && au && au.loose)) summary.looseMatched++;
         if (locks.some((l) => cur.work_date >= l.from_date && cur.work_date <= l.to_date)) { summary.locked++; continue; }
         const want = { ...e };
         if (e.note) want.remarks = [e.remarks, e.note].filter(Boolean).join('\n');
         let unitHow = null;
-        if (!want.units_concerned) {
-          const other = unitByPlug.get(k.slice(11));
+        if (a) {   // the Audio sheet: Length, Remarks, Status, and (for a plug no main sheet lists) the unit
+          for (const f of ['length', 'others', 'audio_status']) if (a[f]) want[f] = a[f];
+          if (!want.psd && a.psd) want.psd = a.psd;
+          if (!m && a.units_concerned) { want.units_concerned = a.units_concerned; unitHow = 'audio'; }
+        }
+        if (m && !want.units_concerned) {
+          const other = unitByPlug.get(m.key.slice(11));
           if (other) { want.units_concerned = other; unitHow = 'other'; } else if (defUnits) { want.units_concerned = defUnits; unitHow = 'default'; }
         }
         const body = {};
@@ -1011,7 +1034,7 @@ router.post('/fill', requireAction('workload.write'), upload.single('file'), one
           if (c === 'is_priority') { summary.priorityOn++; continue; }
           summary.cells++;
           summary.byField[c] = (summary.byField[c] || 0) + 1;
-          if (c === 'units_concerned') { summary.unitsSet++; if (unitHow === 'other') summary.unitsFromOtherDays++; else if (unitHow === 'default') summary.unitsDefaulted++; }
+          if (c === 'units_concerned') { summary.unitsSet++; if (unitHow === 'other') summary.unitsFromOtherDays++; else if (unitHow === 'default') summary.unitsDefaulted++; else if (unitHow === 'audio') summary.unitsFromAudio++; }
         }
       }
     }
