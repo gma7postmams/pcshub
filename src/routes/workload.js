@@ -943,11 +943,13 @@ const looseIndex = (map) => {
   for (const k of map.keys()) { const lk = `${k.slice(0, 10)}|${looseKey(k.slice(11))}`; if (!m.has(lk)) m.set(lk, new Set()); m.get(lk).add(k); }
   return m;
 };
-const resolveKey = (map, idx, k) => {
+const resolveKey = (map, idx, k, claimed) => {
   if (map.has(k)) return { list: map.get(k), loose: false, key: k };
-  if (/_LN\d/.test(k)) return null;   // the plug list gave a real length: it must match exactly
   const set = idx.get(`${k.slice(0, 10)}|${looseKey(k.slice(11))}`);
-  return set && set.size === 1 ? { list: map.get([...set][0]), loose: true, key: [...set][0] } : null;
+  if (!set || set.size !== 1) return null;
+  const ck = [...set][0];
+  if (claimed.has(ck)) return null;   // that exact plug is another row's own: never borrow it
+  return { list: map.get(ck), loose: true, key: ck };
 };
 
 router.post('/fill', requireAction('workload.write'), upload.single('file'), oneImportAtATime, asyncH(async (req, res) => {
@@ -961,7 +963,8 @@ router.post('/fill', requireAction('workload.write'), upload.single('file'), one
     await assertSafeXlsx(req.file.buffer, req.file.originalname);
     const wb = new ExcelJS.Workbook();
     try { await wb.xlsx.load(req.file.buffer); } catch (e) { throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)'); }
-    const { entries, audio, sheets, unitByPlug } = readTeamWorkbook(wb);
+    const { entries, audio, byPlug, sheets, unitByPlug } = readTeamWorkbook(wb);
+    const otherDays = req.query.otherDays !== '0';   // a plug dated on a day its own sheet is missing may use the nearest day that lists it
     const defUnits = ['VGFX Only', 'VEDIT Only', 'VGFX/VEDIT'].includes(String(req.query.units || '')) ? String(req.query.units) : null;   // optional: Units Concerned for a plug whose lines never name a team
     if (!sheets.length) throw new HttpError(400, 'No daily sheets found. Expected sheets such as "SEP 10_main", each with a "DATE: SEP 10, Thursday" line and a PLUG ID header row.');
 
@@ -976,13 +979,29 @@ router.post('/fill', requireAction('workload.write'), upload.single('file'), one
       groups.get(k).push(r);
     }
 
-    const summary = { matched: 0, updated: 0, unchanged: 0, locked: 0, noMatch: 0, cells: 0, byField: {}, unitsSet: 0, unitsFromOtherDays: 0, unitsDefaulted: 0, unitsFromAudio: 0, looseMatched: 0, priorityOn: 0, errors: [], noMatchSample: [], days: dates.length, sheets: sheets.length };
+    const summary = { matched: 0, updated: 0, unchanged: 0, locked: 0, noMatch: 0, cells: 0, byField: {}, unitsSet: 0, unitsFromOtherDays: 0, unitsDefaulted: 0, unitsFromAudio: 0, looseMatched: 0, otherDayMatched: 0, priorityOn: 0, errors: [], noMatchSample: [], days: dates.length, sheets: sheets.length };
     const plan = [];   // { id, set: { col: value }, rec }
     const mainIdx = looseIndex(entries);
+    const byLoose = new Map();
+    for (const pid of byPlug.keys()) { const lk = looseKey(pid); if (!byLoose.has(lk)) byLoose.set(lk, []); byLoose.get(lk).push(pid); }
     const audioIdx = looseIndex(audio);
     for (const [k, rows] of groups) {
-      const m = resolveKey(entries, mainIdx, k);
-      const au = resolveKey(audio, audioIdx, k);
+      let m = resolveKey(entries, mainIdx, k, groups);
+      const au = resolveKey(audio, audioIdx, k, groups);
+      let otherDay = false;
+      if (!m && !au && otherDays) {   // no sheet for that day lists it: the nearest day that does (its Breakdate and Priority belong to that day, so they are not copied)
+        const pid = k.slice(11);
+        const pids = byPlug.has(pid) ? [pid] : (byLoose.get(looseKey(pid)) || []);
+        const cand = pids.length === 1 && (pids[0] === pid || !groups.has(`${k.slice(0, 10)}|${pids[0]}`)) ? byPlug.get(pids[0]) : null;
+        if (cand) {
+          const t = Date.parse(k.slice(0, 10));
+          const best = cand.slice().sort((x, y) => Math.abs(Date.parse(x.date) - t) - Math.abs(Date.parse(y.date) - t) || x.date.localeCompare(y.date))[0];
+          const e0 = { ...best.list[0] };
+          delete e0.breakdate_vgfx; delete e0.breakdate_vedit; delete e0.is_priority; delete e0.note;
+          m = { list: [e0], loose: pids[0] !== pid, key: `${best.date}|${pids[0]}` };
+          otherDay = true;
+        }
+      }
       if (!m && !au) {
         summary.noMatch += rows.length;
         if (summary.noMatchSample.length < 15) summary.noMatchSample.push(`${k.slice(0, 10)} ${rows[0].plug_id.split('\n')[0]}`);
@@ -993,7 +1012,7 @@ router.post('/fill', requireAction('workload.write'), upload.single('file'), one
         const e = m ? m.list[Math.min(i, m.list.length - 1)] : {};
         const a = au ? au.list[Math.min(i, au.list.length - 1)] : null;
         summary.matched++;
-        if ((m && m.loose) || (!m && au && au.loose)) summary.looseMatched++;
+        if (otherDay) summary.otherDayMatched++; else if ((m && m.loose) || (!m && au && au.loose)) summary.looseMatched++;
         if (locks.some((l) => cur.work_date >= l.from_date && cur.work_date <= l.to_date)) { summary.locked++; continue; }
         const want = { ...e };
         if (e.note) want.remarks = [e.remarks, e.note].filter(Boolean).join('\n');

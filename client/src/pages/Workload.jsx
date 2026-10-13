@@ -2099,13 +2099,14 @@ function FillModal({ onClose, onDone }) {
   const [res, setRes] = useState(null);
   const [busy, setBusy] = useState(false);
   const [defUnits, setDefUnits] = useState('');
+  const [otherDays, setOtherDays] = useState(true);
   const run = async (apply) => {
     if (!file) return;
     const fd = new FormData();
     fd.append('file', file);
     setBusy(true);
     try {
-      const out = await post(`/api/workload/fill?${apply ? 'apply=1&' : ''}units=${encodeURIComponent(defUnits)}`, fd);
+      const out = await post(`/api/workload/fill?${apply ? 'apply=1&' : ''}units=${encodeURIComponent(defUnits)}&otherDays=${otherDays ? 1 : 0}`, fd);
       if (apply) { toast(`${out.updated} row${out.updated === 1 ? '' : 's'} filled (${out.cells} cell${out.cells === 1 ? '' : 's'})`); onDone(out); return; }
       setRes(out);
     } catch (e) { toast(e.message, 'err'); } finally { setBusy(false); }
@@ -2117,6 +2118,7 @@ function FillModal({ onClose, onDone }) {
         {res && res.updated ? <button type="button" className="btn primary" id="fill-apply" disabled={busy} onClick={() => run(true)}>{busy ? 'Saving…' : `Fill ${res.updated} row${res.updated === 1 ? '' : 's'}`}</button>
           : <button type="button" className="btn primary" id="fill-check" disabled={busy || !file} onClick={() => run(false)}>{busy ? 'Reading…' : 'Check file'}</button>}</>)}>
       <p>Pick the team's per-day workload workbook (the one with sheets like <em>SEP 10_main</em>). Its blank-cell values fill the rows you already have, matched by Work Date and Plug ID. Anything already typed is kept and no rows or columns are added. The Audio (_ojo) sheets fill Length, Remarks and Status, and the unit of audio-only plugs.</p>
+      <label className="check-row" style={{ marginTop: 8 }}><input id="fill-otherdays" type="checkbox" checked={otherDays} onChange={(e) => { setOtherDays(e.target.checked); setRes(null); }} /> <span>If a plug's own day isn't in the workbook, use the same plug from the nearest day that lists it (not its Breakdate)</span></label>
       <label className="f" style={{ marginTop: 8 }}><span>Units Concerned for plugs the workbook doesn't name a team for (e.g. “NEW OCTOBER TEMPLATE”, “WAITING FOR LOCAL”)</span>
         <select id="fill-units" value={defUnits} onChange={(e) => { setDefUnits(e.target.value); setRes(null); }}>
           <option value="">Leave blank</option><option value="VGFX/VEDIT">VGFX/VEDIT</option><option value="VGFX Only">VGFX Only</option><option value="VEDIT Only">VEDIT Only</option>
@@ -2129,6 +2131,7 @@ function FillModal({ onClose, onDone }) {
           <p className="dim">{res.unchanged} matched row{res.unchanged === 1 ? ' is' : 's are'} already complete{res.locked ? `, ${res.locked} in a locked period (left alone)` : ''}. {res.noMatch} row{res.noMatch === 1 ? '' : 's'} on those days {res.noMatch === 1 ? 'was' : 'were'} not found in the workbook{res.noMatchSample.length ? ` (e.g. ${res.noMatchSample.slice(0, 5).join(', ')})` : ''}.</p>
           {res.errorCount ? <p className="dim">{res.errorCount} row{res.errorCount === 1 ? '' : 's'} skipped: {res.errors[0]}</p> : null}
           {res.unitsSet ? <p className="dim">Units Concerned: {res.unitsSet - res.unitsFromOtherDays - res.unitsDefaulted - res.unitsFromAudio} from the row's own Breakdate{res.unitsFromOtherDays ? `, ${res.unitsFromOtherDays} from the same plug on another day` : ''}{res.unitsFromAudio ? `, ${res.unitsFromAudio} from the Audio sheets` : ''}{res.unitsDefaulted ? `, ${res.unitsDefaulted} set to ${defUnits}` : ''}.</p> : null}
+          {res.otherDayMatched ? <p className="dim">{res.otherDayMatched} row{res.otherDayMatched === 1 ? '' : 's'} filled from the same plug on another day (their own day has no sheet entry).</p> : null}
           {res.looseMatched ? <p className="dim">{res.looseMatched} row{res.looseMatched === 1 ? '' : 's'} matched by plug name without the length (e.g. …_LNXX in the plug list, …_LN060 in the workbook).</p> : null}
           {res.updated ? null : <p>Nothing to fill.</p>}
         </div>

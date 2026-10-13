@@ -100,7 +100,7 @@ function parseBreakdate(text, year) {
 }
 
 /** The Plug ID itself: the team writes "PV_FIREWA_092926_LN015 - 24p" / "... - 24p, 4k" in the cell; the tracker and the plug list keep only the ID. */
-const plugKey = (t) => String(t || '').split('\n')[0].trim().split(/\s+/)[0].replace(/[,;:-]+$/, '').toUpperCase();
+const plugKey = (t) => String(t || '').split('\n')[0].trim().split(/\s+/)[0].replace(/[,;:-]+$/, '').replace(/-(?=LN\d)/, '_').toUpperCase();   // "PV_X_092726-LN015" (a dash typed for the underscore) is the same ID
 /** The same ID without its length part: the plug list often has "PH_REDBAL_BALIMA_LNXX" where the team's workbook has "PH_REDBAL_BALIMA_LN060". */
 const looseKey = (pid) => String(pid || '').replace(/_LN[A-Z0-9/]*$/, '').replace(/_+$/, '');
 
@@ -222,7 +222,14 @@ function readTeamWorkbook(wb, nowYear = new Date().getFullYear()) {
   // a Plug ID whose other days all name the same team(s) lends that to a day that does not name any
   const unitByPlug = new Map();
   for (const [pid, set] of votes) if (set.size === 1) unitByPlug.set(pid, [...set][0]);
-  return { entries, audio, sheets, skipped, unitByPlug };
+  // every day a plug is listed, by Plug ID: lets a plug dated on a day its own sheet is missing use the nearest day that has it
+  const byPlug = new Map();
+  for (const [k, list] of entries) {
+    const pid = k.slice(11);
+    if (!byPlug.has(pid)) byPlug.set(pid, []);
+    byPlug.get(pid).push({ date: k.slice(0, 10), list });
+  }
+  return { entries, audio, byPlug, sheets, skipped, unitByPlug };
 }
 
 module.exports = { plugKey, looseKey, readTeamWorkbook, parseBreakdate, parseTime, sheetDay, workbookYear, cellStr };
