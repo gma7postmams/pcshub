@@ -766,7 +766,7 @@ const upload = multer({
     destination: UPLOAD_DIR,
     filename: (req, file, cb) => cb(null, `logo-${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ALLOWED_LOGO[file.mimetype]}`),
   }),
-  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 2 * 1024 * 1024, files: 2 },
   fileFilter: (req, file, cb) => {
     if (ALLOWED_LOGO[file.mimetype]) return cb(null, true);
     cb(new HttpError(400, 'Logo must be PNG, JPEG or WebP'));
@@ -781,25 +781,30 @@ function sniff(buf) {
   return null;
 }
 
-router.post('/branding/logo', upload.single('logo'), asyncH(async (req, res) => {
-  if (!req.file) throw new HttpError(400, 'No file uploaded');
-  const fd = fs.openSync(req.file.path, 'r');
-  const head = Buffer.alloc(12);
-  fs.readSync(fd, head, 0, 12, 0);
-  fs.closeSync(fd);
-  if (sniff(head) !== req.file.mimetype) {
-    fs.unlinkSync(req.file.path);
+// The browser sends the logo plus `icon`: a square 512 px PNG it drew from the logo for the installed-app (PWA) icon.
+router.post('/branding/logo', upload.fields([{ name: 'logo', maxCount: 1 }, { name: 'icon', maxCount: 1 }]), asyncH(async (req, res) => {
+  const logo = req.files && req.files.logo && req.files.logo[0];
+  const icon = req.files && req.files.icon && req.files.icon[0];
+  const drop = () => [logo, icon].forEach((f) => { if (f) fs.unlink(f.path, () => {}); });
+  const head = (f) => { const fd = fs.openSync(f.path, 'r'); const h = Buffer.alloc(12); fs.readSync(fd, h, 0, 12, 0); fs.closeSync(fd); return h; };
+  if (!logo) { drop(); throw new HttpError(400, 'No file uploaded'); }
+  if (sniff(head(logo)) !== logo.mimetype || (icon && (icon.mimetype !== 'image/png' || sniff(head(icon)) !== 'image/png'))) {
+    drop();
     throw new HttpError(400, 'File content does not match its type');
   }
   const key = logoKey(req);
-  const url = `/uploads/branding/${req.file.filename}`;
-  const prev = await db.query(`SELECT value FROM app_settings WHERE key=$1`, [key]);
-  await db.query(
-    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1,$2,now())
-     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [key, url]
-  );
-  removeOldLogo(prev.rows[0] && prev.rows[0].value);
-  await audit(req, 'admin.branding_logo', 'app_settings', null, { file: req.file.filename, size: req.file.size, mode: key === 'logo_dark_path' ? 'dark' : 'light' });
+  const iconKey = key === 'logo_dark_path' ? 'logo_dark_icon_path' : 'logo_icon_path';
+  const url = `/uploads/branding/${logo.filename}`;
+  const iconUrl = icon ? `/uploads/branding/${icon.filename}` : '';
+  const prev = await db.query(`SELECT key, value FROM app_settings WHERE key IN ($1,$2)`, [key, iconKey]);
+  for (const [k, v] of [[key, url], [iconKey, iconUrl]]) {
+    await db.query(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES ($1,$2,now())
+       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [k, v]
+    );
+  }
+  prev.rows.forEach((r) => removeOldLogo(r.value));
+  await audit(req, 'admin.branding_logo', 'app_settings', null, { file: logo.filename, size: logo.size, mode: key === 'logo_dark_path' ? 'dark' : 'light' });
   res.json({ ok: true, logo_url: url });
 }));
 
@@ -808,9 +813,10 @@ const logoKey = (req) => (req.query.mode === 'dark' ? 'logo_dark_path' : 'logo_p
 
 router.delete('/branding/logo', asyncH(async (req, res) => {
   const key = logoKey(req);
-  const prev = await db.query(`SELECT value FROM app_settings WHERE key=$1`, [key]);
-  await db.query(`UPDATE app_settings SET value='', updated_at=now() WHERE key=$1`, [key]);
-  removeOldLogo(prev.rows[0] && prev.rows[0].value);
+  const iconKey = key === 'logo_dark_path' ? 'logo_dark_icon_path' : 'logo_icon_path';
+  const prev = await db.query(`SELECT value FROM app_settings WHERE key IN ($1,$2)`, [key, iconKey]);
+  await db.query(`UPDATE app_settings SET value='', updated_at=now() WHERE key IN ($1,$2)`, [key, iconKey]);
+  prev.rows.forEach((r) => removeOldLogo(r.value));
   await audit(req, 'admin.branding_logo_remove', 'app_settings', null, { mode: key === 'logo_dark_path' ? 'dark' : 'light' });
   res.json({ ok: true });
 }));

@@ -10,10 +10,11 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 
 async function branding() {
   try {
-    const { rows } = await db.query(`SELECT key, value FROM app_settings WHERE key IN ('app_name','tagline','logo_path','logo_dark_path')`);
+    const { rows } = await db.query(`SELECT key, value FROM app_settings WHERE key IN ('app_name','tagline','logo_icon_path','logo_dark_icon_path')`);
     const s = Object.fromEntries(rows.map((r) => [r.key, r.value]));
-    // An uploaded logo (the light-mode one, else the dark-mode one) becomes the installed-app icon; with none, the built-in PULSE icons are used.
-    const logo = [s.logo_path, s.logo_dark_path].find((u) => u && u.startsWith('/uploads/branding/')) || '';
+    // The square icon the browser drew from the uploaded logo (light-mode one, else dark-mode one) is the installed-app icon. No icon (no logo, or one
+    // uploaded before icons were made) means the built-in PULSE icons: a logo that is not square must never be used as is, it would be stretched.
+    const logo = [s.logo_icon_path, s.logo_dark_icon_path].find((u) => u && u.startsWith('/uploads/branding/')) || '';
     return { name: (s.app_name || '').trim() || DEFAULT_NAME, tagline: (s.tagline || '').trim(), logo };
   } catch (e) { return { name: DEFAULT_NAME, tagline: '', logo: '' }; }
 }
@@ -57,8 +58,7 @@ async function manifest(req, res, next) {
     const base = JSON.parse(fs.readFileSync(INDEX_HTML.replace(/index\.html$/, 'manifest.webmanifest'), 'utf8'));
     const { name, tagline, logo } = await branding();
     if (logo) {
-      const type = { '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp' }[require('path').extname(logo).toLowerCase()] || 'image/png';
-      base.icons = [192, 512].map((n) => ({ src: logo, sizes: `${n}x${n}`, type, purpose: 'any' }));
+      base.icons = ['any', 'maskable'].flatMap((purpose) => [192, 512].map((n) => ({ src: logo, sizes: `${n}x${n}`, type: 'image/png', purpose })));
     }
     base.name = name;
     base.short_name = shortName(name);

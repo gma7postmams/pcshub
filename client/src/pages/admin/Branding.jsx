@@ -3,6 +3,7 @@ import { api, del, get, put } from '../../lib/api.js';
 import { mix, setPalette, THEME_PREVIEW } from '../../lib/theme.js';
 import { useBranding } from '../../context.jsx';
 import { Empty, useToast } from '../../components/ui.jsx';
+import { makeAppIcon } from '../../lib/appicon.js';
 
 function Swatch({ themeKey }) {
   const c = THEME_PREVIEW[themeKey] || THEME_PREVIEW.midnight;
@@ -62,6 +63,8 @@ export default function Branding() {
     if (!file) { toast('Choose a file first', 'err'); return false; }
     const fd = new FormData();
     fd.append('logo', file);
+    const icon = await makeAppIcon(file, mode);   // square app icon for the installed app
+    if (icon) fd.append('icon', icon, 'icon.png');
     try { await api('POST', `/api/admin/branding/logo?mode=${mode}`, fd); toast(`${mode === 'dark' ? 'Dark mode' : 'Light mode'} logo uploaded`); await reload(); await load(); return true; } catch (ex) { toast(ex.message, 'err'); return false; }
   };
   const removeLogo = async (mode) => {
