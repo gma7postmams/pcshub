@@ -21,6 +21,8 @@ function run(req) {
     type() { return this; },
     json(b) { out.body = b; return this; },
     send(b) { out.body = b; return this; },
+    redirect(c, u) { out.status = c; out.location = u; return this; },
+    clearCookie() { return this; },
   };
   mm.guard({ method: 'GET', accepts: () => true, ...req }, res, () => { out.next = true; });
   return out;
@@ -52,17 +54,17 @@ test('an empty flag file uses MAINTENANCE_MESSAGE, then the default message', ()
   assert.equal(mm.state().message, mm.DEFAULT_MESSAGE);
 });
 
-test('only a System Admin gets through; pages and the API answer 503 for everyone else', () => {
+test('only a System Admin gets through; pages go to the sign-in page and the API answers 503 for everyone else', () => {
   fs.writeFileSync(FLAG, 'x'); mm.reset();
   assert.equal(run({ path: '/ingest', user: { role: 'System Admin' } }).next, true);
   for (const role of ['Admin', 'Manager', 'Editor', 'Viewer']) {
     const page = run({ path: '/ingest', user: { role } });
-    assert.equal(page.next, false); assert.equal(page.status, 503); assert.match(page.body, /Under maintenance/);
+    assert.equal(page.next, false); assert.equal(page.status, 302); assert.equal(page.location, '/login');   // the sign-in page shows the maintenance notice
     const api = run({ path: '/api/ingest', user: { role } });
     assert.equal(api.status, 503); assert.equal(api.body.maintenance, true);
   }
   const anon = run({ path: '/' });
-  assert.equal(anon.status, 503); assert.equal(anon.headers['Retry-After'], '300');
+  assert.equal(anon.status, 302); assert.equal(anon.location, '/login'); assert.equal(anon.headers['Retry-After'], '300');
 });
 
 test('the sign-in page, sign-in routes, branding and the status check stay reachable', () => {
@@ -73,11 +75,10 @@ test('the sign-in page, sign-in routes, branding and the status check stay reach
   assert.equal(run({ path: '/api/ingest' }).next, false);
 });
 
-test('the message is escaped in the page', () => {
-  fs.writeFileSync(FLAG, '<script>alert(1)</script>'); mm.reset();
-  const out = run({ path: '/' });
-  assert.ok(!out.body.includes('<script>alert'));
-  assert.match(out.body, /&lt;script&gt;/);
+test('a non-page request (not HTML) gets a plain 503', () => {
+  fs.writeFileSync(FLAG, 'x'); mm.reset();
+  const out = run({ path: '/something.css', accepts: () => false });
+  assert.equal(out.status, 503);
 });
 
 test('the in-app switch turns it on and reports itself as the source', () => {
