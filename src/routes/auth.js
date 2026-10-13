@@ -18,7 +18,12 @@ const settings = require('../security-settings');   // lock after N wrong passwo
 // Dummy hash so timing is similar when the username does not exist
 const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', 12);
 // One message for every failure so responses never reveal whether a username exists, is locked or disabled
-const GENERIC_FAIL = 'Invalid username or password, or the account is temporarily locked.';
+const GENERIC_FAIL = 'Incorrect username or password.';
+// Said when the account exists and is locked (a different answer from a wrong password, so people know to wait or ask an Admin to unlock it)
+const lockedMessage = (until) => {
+  const mins = Math.max(1, Math.ceil((new Date(until) - Date.now()) / 60000));
+  return `This account is locked after too many wrong passwords. Try again in ${mins} ${mins === 1 ? 'minute' : 'minutes'}, or ask an Administrator to unlock it.`;
+};
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -86,11 +91,12 @@ router.post('/login', loginLimiter, asyncH(async (req, res) => {
   const ok = await bcrypt.compare(password, user.password_hash); // always run: same timing for locked accounts
   if (user.locked_until && new Date(user.locked_until) > new Date()) {
     await audit(req, 'auth.login_blocked_locked', 'user', user.id, { username });
-    throw new HttpError(401, GENERIC_FAIL);
+    throw new HttpError(401, lockedMessage(user.locked_until), { locked: true });
   }
   if (!ok) {
     const locked = await recordFailure(user);
     await audit(req, locked ? 'auth.locked' : 'auth.login_failed', 'user', user.id, { username });
+    if (locked) throw new HttpError(401, lockedMessage(new Date(Date.now() + settings.get().lockMinutes * 60000)), { locked: true });   // this wrong password was the one that locked it
     throw new HttpError(401, GENERIC_FAIL);
   }
   if (!user.is_active) {

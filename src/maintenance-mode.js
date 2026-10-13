@@ -86,7 +86,13 @@ function guard(req, res, next) {
   if (OPEN.some((re) => re.test(req.path))) return next();
   res.set({ 'Cache-Control': 'no-store', 'Retry-After': '300' });
   if (req.path.startsWith('/api/')) return res.status(503).json({ error: m.message, maintenance: true });
-  if (req.method === 'GET' && req.accepts('html')) return res.status(503).type('html').send(page(req, m.message));
+  if (req.method === 'GET' && req.accepts('html')) {
+    // No separate black page any more: everyone goes to the sign-in page, which shows the "Under maintenance" notice and an Administrator Sign In button.
+    // Someone who was already signed in is signed out first (they could not use anything anyway).
+    const toLogin = () => res.redirect(302, '/login');
+    if (req.session && req.user) return req.session.destroy(() => { require('./middleware').clearSessionCookie(res); toLogin(); });
+    return toLogin();
+  }
   return res.status(503).send('Service temporarily unavailable');
 }
 

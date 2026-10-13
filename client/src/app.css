@@ -1152,3 +1152,8 @@ td.editing { box-shadow: inset 0 0 0 2px var(--accent, #4f7cff); }
 .pa.clickable { cursor: pointer; }
 td.peer-flash { animation: peer-flash 1.8s ease-out; }
 @keyframes peer-flash { 0%,40% { box-shadow: inset 0 0 0 3px var(--peer, #4f8cff), 0 0 0 4px color-mix(in srgb, var(--peer, #4f8cff) 45%, transparent); } 100% { box-shadow: inset 0 0 0 2px var(--peer, #4f8cff); } }
+
+/* Sign-in page during planned maintenance: a notice instead of the black page, and the form behind an "Administrator Sign In" button */
+.maint-tag { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; color: var(--text-2); font-size: 13.5px; }
+.maint-tag .maint-badge { display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 700; font-size: 12.5px; letter-spacing: .02em; color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); }
+.auth-card #admin-signin { width: 100%; }

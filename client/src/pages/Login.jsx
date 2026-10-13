@@ -14,6 +14,7 @@ export default function Login() {
   const [mail, setMail] = useState(null);   // set when the code was emailed: the masked address
   const otpForm = useRef(null);
   const [maint, setMaint] = useState(null);   // set while planned maintenance is on: the message
+  const [adminForm, setAdminForm] = useState(false);   // during maintenance the form stays hidden until "Administrator Sign In" is clicked
   useEffect(() => { get('/api/maintenance/status', { quiet: true }).then((r) => setMaint(r && r.planned ? r.planned.message : null)).catch(() => {}); }, []);
 
   useEffect(() => { document.title = `Sign in · ${branding.app_name}`; }, [branding.app_name]);
@@ -60,10 +61,12 @@ export default function Login() {
           <BrandMark branding={branding} />
           {branding.tagline ? <span className="tagline">{branding.tagline}</span> : null}
         </div>
-        {maint && !err ? <div className="alert warn mb-12" id="maint-note"><strong>Under maintenance.</strong> {/[.!?]$/.test(maint) ? maint : `${maint}.`} Only site administrators can sign in right now.</div> : null}
+        {maint ? <div className="maint-tag mb-12" id="maint-note"><span className="maint-badge">Under maintenance</span><p className="m-0">{/[.!?]$/.test(maint) ? maint : `${maint}.`}</p></div> : null}
         {err ? <div className="alert err mb-12" id="err">{err}</div> : null}
 
-        {step === 'password' ? (
+        {step === 'password' && maint && !adminForm ? (
+          <button className="btn primary" type="button" id="admin-signin" onClick={() => setAdminForm(true)}>Administrator Sign In</button>
+        ) : step === 'password' ? (
           <form id="login-form" className="stack" onSubmit={submitPassword} autoComplete="on">
             <label className="f"><span>Username</span>
               <input name="username" autoComplete="username" required autoFocus maxLength={60} value={username} onChange={(e) => setUsername(e.target.value)} />

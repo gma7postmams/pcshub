@@ -5,7 +5,7 @@ import { Empty, useConfirm, useToast } from '../../components/ui.jsx';
 
 const EVENT = {
   'auth.login_failed': 'Failed sign-in', 'auth.locked': 'Account locked', 'auth.login_blocked_locked': 'Sign-in blocked (locked)', 'auth.2fa_failed': 'Wrong 2FA code',
-  'auth.reauth_failed': 'Wrong password on a sensitive action', 'admin.user_signout': 'Signed out by an Admin', 'admin.user_reset_password': 'Password reset', 'admin.user_reset_2fa': '2FA reset',
+  'auth.reauth_failed': 'Wrong password on a sensitive action', 'admin.user_signout': 'Signed out by an Admin', 'admin.user_reset_password': 'Password reset for', 'admin.user_reset_2fa': '2FA reset for',
 };
 
 export default function Security({ go }) {
@@ -37,7 +37,7 @@ export default function Security({ go }) {
           <table className="t wl">
             <thead><tr><th>Time</th><th>Who</th><th>Event</th><th>IP</th></tr></thead>
             <tbody>{d.events.length ? d.events.map((e) => (
-              <tr key={e.id}><td className="nowrap dim">{fmtDateTime(e.created_at)}</td><td className="mono">{e.username || '—'}</td><td>{EVENT[e.action] || e.action}</td><td className="mono dim">{e.ip || ''}</td></tr>
+              <tr key={e.id}><td className="nowrap dim">{fmtDateTime(e.created_at)}</td><td className="mono">{e.username || '—'}</td><td>{EVENT[e.action] || e.action}{e.action.startsWith('admin.') && e.target ? <> — <strong className="mono">{e.target}</strong></> : null}</td><td className="mono dim">{e.ip || ''}</td></tr>
             )) : <tr><td colSpan={4} className="empty">Nothing to report.</td></tr>}</tbody>
           </table>
         </div>
