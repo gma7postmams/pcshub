@@ -1162,3 +1162,5 @@ td.peer-flash { animation: peer-flash 1.8s ease-out; }
 .rp-opt{display:flex;align-items:flex-start;gap:10px;padding:8px 0;cursor:pointer;font-size:14px}
 .rp-opt input[type=radio]{width:16px;height:16px;min-width:16px;margin:2px 0 0;padding:0;flex:none}
 .rp-opt .dim{display:block;font-size:12.5px}
+.rp-sep{border:0;border-top:1px solid var(--border,#e2e8f0);margin:4px 0;width:100%}
+.rp-opt input[type=checkbox]{width:16px;height:16px;min-width:16px;margin:2px 0 0;flex:none}

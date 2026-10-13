@@ -155,7 +155,8 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
   });
   const [temp, setTemp] = useState(null);
   const [resetOpen, setResetOpen] = useState(false);   // the Reset password window
-  const [rpMode, setRpMode] = useState('generate');   // 'generate' | 'manual' | 'email'
+  const [rpMode, setRpMode] = useState('generate');   // 'generate' | 'manual'
+  const [rpEmail, setRpEmail] = useState(false);
   const [rpPw, setRpPw] = useState('');
   const [rpBusy, setRpBusy] = useState(false);
   const [method, setMethod] = useState(u && u.twofa_method === 'email' ? 'email' : 'app');
@@ -211,7 +212,7 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
           <>
             <h3 className="mt-16 mb-12">Security</h3>
             <div className="row">
-              <button type="button" className="btn sm" id="rpw" onClick={() => { setRpMode('generate'); setRpPw(''); setResetOpen(true); }}>Reset password</button>
+              <button type="button" className="btn sm" id="rpw" onClick={() => { setRpMode('generate'); setRpPw(''); setRpEmail(false); setResetOpen(true); }}>Reset password</button>
               <select aria-label="2FA method" id="tfa-method" value={method} onChange={(e) => setMethod(e.target.value)}>
                 <option value="app">2FA by authenticator app</option>
                 <option value="email" disabled={!emailOk && method !== 'email'}>2FA by emailed code{emailOk ? '' : ' (not enabled)'}</option>
@@ -244,29 +245,29 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
       {resetOpen && u ? (
         <Modal title={`Reset password — ${u.full_name}`} size="sm" onClose={() => setResetOpen(false)}
           footer={<><button type="button" className="btn" onClick={() => setResetOpen(false)}>Cancel</button>
-            <button type="button" className="btn primary" id="rp-go" disabled={rpBusy || (rpMode === 'manual' && !rpPw) || (rpMode === 'email' && !u.email)} onClick={async () => {
+            <button type="button" className="btn primary" id="rp-go" disabled={rpBusy || (rpMode === 'manual' && !rpPw)} onClick={async () => {
               setRpBusy(true);
-              const r = await action('reset-password', null, null, rpMode === 'manual' ? { mode: 'manual', password: rpPw } : { mode: rpMode });
+              const r = await action('reset-password', null, null, { mode: rpMode, email: rpEmail, ...(rpMode === 'manual' ? { password: rpPw } : {}) });
               setRpBusy(false);
               if (!r) return;
-              setResetOpen(false); onSaved();
-              if (r.emailed) toast(`Temporary password emailed to ${r.sentTo}`);
-              else if (rpMode === 'manual') toast('Temporary password set');
-              else setTemp(r.temporary_password);
-            }}>Reset password</button></>}>
+              setResetOpen(false);
+              if (r.temporary_password) setTemp({ pw: r.temporary_password, sentTo: r.sentTo });   // list refreshes when this is closed
+              else { onSaved(); toast(r.emailed ? `Temporary password set and emailed to ${r.sentTo}` : 'Temporary password set'); }
+}}>Reset password</button></>}>
           <p className="m-0">Their current password stops working now, every device is signed out, and they must choose their own password at their next sign-in.</p>
           <div className="stack mt-12">
             <label className="rp-opt"><input type="radio" name="rpmode" value="generate" checked={rpMode === 'generate'} onChange={() => setRpMode('generate')} /><span>Generate a temporary password <span className="dim">— shown once, for you to pass on</span></span></label>
             <label className="rp-opt"><input type="radio" name="rpmode" value="manual" checked={rpMode === 'manual'} onChange={() => setRpMode('manual')} /><span>Type a temporary password myself</span></label>
             {rpMode === 'manual' ? <input id="rp-manual" type="text" autoComplete="new-password" placeholder="Letters and numbers" value={rpPw} onChange={(e) => setRpPw(e.target.value)} /> : null}
-            <label className="rp-opt"><input type="radio" name="rpmode" value="email" disabled={!u.email} checked={rpMode === 'email'} onChange={() => setRpMode('email')} /><span>Email a temporary password to the user <span className="dim">{u.email ? `— ${u.email}` : '— this account has no email address'}</span></span></label>
+            <hr className="rp-sep" />
+            <label className="rp-opt"><input type="checkbox" id="rp-email" disabled={!u.email} checked={rpEmail && !!u.email} onChange={(e) => setRpEmail(e.target.checked)} /><span>Also email it to the user <span className="dim">{u.email ? `— ${u.email}` : '— this account has no email address'}</span></span></label>
           </div>
         </Modal>
       ) : null}
       {temp ? (
-        <Modal title="Temporary password" size="sm" onClose={() => setTemp(null)} footer={<button type="button" className="btn primary" onClick={() => setTemp(null)}>Done</button>}>
-          <p className="muted m-0">Share this securely. It is shown once.</p>
-          <div className="secret mt-12">{temp}</div>
+        <Modal title="Temporary password" size="sm" onClose={() => { setTemp(null); onSaved(); }} footer={<button type="button" className="btn primary" onClick={() => { setTemp(null); onSaved(); }}>Done</button>}>
+          <p className="muted m-0">{temp.sentTo ? `Also emailed to ${temp.sentTo}. ` : ''}Share this securely. It is shown once.</p>
+          <div className="secret mt-12">{temp.pw}</div>
         </Modal>
       ) : null}
     </>

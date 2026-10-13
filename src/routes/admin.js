@@ -430,8 +430,9 @@ router.post('/users/:id/reset-password', asyncH(async (req, res) => {
   const target = (await db.query('SELECT username, full_name, email FROM users WHERE id=$1', [id])).rows[0];
   if (!target) throw new HttpError(404, 'User not found');
   const mailer = require('../mailer');
-  const mode = ['generate', 'manual', 'email'].includes(req.body.mode) ? req.body.mode : (req.body.password ? 'manual' : 'generate');
-  if (mode === 'email') {
+  const mode = req.body.mode === 'manual' || (req.body.mode !== 'generate' && req.body.password) ? 'manual' : 'generate';
+  const sendMail = req.body.email === true || req.body.mode === 'email';   // optional with either way of choosing the password
+  if (sendMail) {
     if (!mailer.configured()) throw new HttpError(400, 'Email is not set up on the server, so a password cannot be emailed.');
     if (!target.email) throw new HttpError(400, 'This account has no email address. Add one to the user first.');
   }
@@ -444,7 +445,7 @@ router.post('/users/:id/reset-password', asyncH(async (req, res) => {
         WHERE id=$1`, [id, hash]
     );
     if (!r.rowCount) throw new HttpError(404, 'User not found');
-    if (mode === 'email') {   // sent before the change is committed: if the email cannot be sent, the old password stays
+    if (sendMail) {   // sent before the change is committed: if the email cannot be sent, the old password stays
       try { await require('../password-mail').sendTemporaryPassword(target, temp); } catch (e) {
         console.error('[reset-password] email failed:', e.message);
         throw new HttpError(503, 'The email could not be sent, so the password was not changed. Check the email settings.');
@@ -452,8 +453,8 @@ router.post('/users/:id/reset-password', asyncH(async (req, res) => {
     }
   });
   await db.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = $1`, [id]);
-  await audit(req, 'admin.user_reset_password', 'user', id, { username: target.username, via: mode });
-  res.json(mode === 'email' ? { ok: true, emailed: true, sentTo: mailer.mask(target.email) } : { ok: true, temporary_password: temp });
+  await audit(req, 'admin.user_reset_password', 'user', id, { username: target.username, via: mode, emailed: sendMail || undefined });
+  res.json({ ok: true, ...(mode === 'generate' ? { temporary_password: temp } : {}), ...(sendMail ? { emailed: true, sentTo: mailer.mask(target.email) } : {}) });
 }));
 
 
