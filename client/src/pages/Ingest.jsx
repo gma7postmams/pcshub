@@ -730,7 +730,10 @@ export default function Ingest() {
             <button type="button" className="btn ibtn" id="full-btn" aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen' : 'Full screen'} onClick={() => setFull((f) => !f)}>
               {full ? <ExitFullscreenIcon /> : <FullscreenIcon />}
             </button>
-            {canWrite ? <ToolMenu items={[{ id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft }]} /> : null}
+            <ToolMenu items={[
+              canWrite && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
+              canDelete && { id: 'del-all-menu', label: 'Delete All', icon: <TrashIcon />, danger: true, disabled: !total, onClick: () => setDeletingAll(true) },   // everything matching the current search / filters, after typing DELETE
+            ]} />
           </div>
         </div>
         {canDelete && !draft && ((allOn && total > rows.length) || allMatching) ? (
@@ -976,7 +979,7 @@ function DeleteAllIngest({ total, scope, filters, admin, onClose, onDone }) {
     try { onDone(await post('/api/ingest/delete', { all: true, filters })); } catch (e) { toast(e.message, 'err'); setBusy(false); }
   };
   return (
-    <Modal title="Delete all selected requests" onClose={() => { if (!busy) onClose(); }}
+    <Modal title="Delete all requests" onClose={() => { if (!busy) onClose(); }}
       footer={(<><span className="grow" /><button type="button" className="btn" disabled={busy} onClick={onClose}>Cancel</button>
         <button type="button" className="btn danger" disabled={busy || typed.trim() !== 'DELETE' || !total} onClick={go}>Delete {total} request{total === 1 ? '' : 's'}</button></>)}>
       <p>This permanently deletes up to <strong>{total}</strong> Ingest request{total === 1 ? '' : 's'}: every one that matches what you are looking at now{scope.length ? ':' : ' (no filters, so the whole list).'}</p>
