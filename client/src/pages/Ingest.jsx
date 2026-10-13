@@ -14,6 +14,8 @@ import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } fr
 const CM_OPTIONS = ['DONE', 'NON-COMPLIANT'];
 const STATUS_FILTER = ['PENDING', ...CM_OPTIONS];
 const PAGE = 50;
+const ALL_ROWS = 3000;                         // the "All" choice in Rows: up to this many on one page (more are reached with the page buttons)
+const ROW_SIZES = [25, 50, 100, 200, ALL_ROWS];   // rows per page
 const withCurrent = (list, v) => (v && !list.includes(v) ? [...list, v] : list);
 const isoDate = (x) => (/^\d{4}-\d{2}-\d{2}/.test(x || '') ? String(x).slice(0, 10) : '');
 
@@ -178,12 +180,18 @@ export default function Ingest() {
   const confirm = useConfirm();
   const [params] = useSearchParams();
   const canWrite = s.can('ingest.write');
-  const canDelete = s.can('ingest.delete');
+  const canDeleteAny = s.can('ingest.delete');
+  const isAdminUser = !!(s.user && ['Admin', 'System Admin'].includes(s.user.role));
+  const canDelete = canDeleteAny || canWrite;   // an Editor can delete the requests she created herself
+  // May this person delete this request? (the server decides again): an Admin any; others only while there is no CM decision, and an Editor only her own
+  const mayDelete = (r) => !!r && (isAdminUser || (!r.cm_status && (canDeleteAny || (canWrite && r.created_by === (s.user && s.user.id)))));
 
   const narrow = useNarrow();
   const [lookups, setLookups] = useState(null);
   const [filt, setFilt] = useState({ q: '', status: /^pending$/i.test(params.get('status') || '') ? 'PENDING' : (params.get('status') || ''), program: '', platform: '', from: '', to: '', approval: /^pending$/i.test(params.get('approval') || '') ? 'pending' : '' });
   const [offset, setOffset] = useState(0);
+  const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('ing:rows')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
+  const changeSize = (e) => { const n = Number(e.target.value); try { localStorage.setItem('ing:rows', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
   const [sort, setSortState] = useState({ k: '', dir: 'asc' });   // clicked column header
   const setSort = (s2) => { setSortState(s2); setOffset(0); };
   const [data, setData] = useState(null);
@@ -200,12 +208,12 @@ export default function Ingest() {
 
   // quiet = a re-read because somebody else changed the list: keep the person's picked rows and the table as it is if the read fails
   const fetchPage = useCallback(async (quiet) => {
-    const p = new URLSearchParams({ limit: PAGE, offset });
+    const p = new URLSearchParams({ limit: size, offset });
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
     if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
     if (!quiet) setPicked(new Set());
     try { setData(await get(`/api/ingest?${p}`)); } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
-  }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset, size, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
   const load = useCallback(() => fetchPage(false), [fetchPage]);
 
   useEffect(() => { load(); }, [load]);
@@ -583,11 +591,17 @@ export default function Ingest() {
   const allOn = rows.length > 0 && rows.every((r) => picked.has(r.id));
   const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const removePicked = async () => {
-    const ids = [...picked];
-    if (!(await confirm('Delete ingest records', `Permanently delete ${ids.length} selected record${ids.length === 1 ? '' : 's'}? Records with a CM decision are kept (only an Admin can delete DONE ones).`, { okText: 'Delete', danger: true }))) return;
+    const ids = rows.filter((r) => picked.has(r.id) && mayDelete(r)).map((r) => r.id);
+    const skipped = picked.size - ids.length;
+    if (!ids.length) { toast(isAdminUser ? 'Nothing to delete' : 'You can delete only the requests you created, and not ones with a CM decision', 'err'); return; }
+    if (!(await confirm('Delete ingest records', `Permanently delete ${ids.length} selected record${ids.length === 1 ? '' : 's'}?${skipped ? ` ${skipped} other${skipped === 1 ? '' : 's'} selected cannot be deleted by you and will be kept.` : ''}${isAdminUser ? '' : ' Requests with a CM decision are kept; only an Admin can delete them.'}`, { okText: 'Delete', danger: true }))) return;
     try {
-      const r = await post('/api/ingest/delete', { ids });
-      toast(`${r.deleted} deleted${r.kept ? `, ${r.kept} kept (CM decided)` : ''}`, r.deleted ? undefined : 'err');
+      const r = { deleted: 0, kept: 0 };
+      for (let i = 0; i < ids.length; i += 500) {   // the server deletes at most 500 per request
+        const o = await post('/api/ingest/delete', { ids: ids.slice(i, i + 500) });
+        r.deleted += o.deleted || 0; r.kept += o.kept || 0;
+      }
+      toast(`${r.deleted} deleted${r.kept || skipped ? `, ${(r.kept || 0) + skipped} kept` : ''}`, r.deleted ? undefined : 'err');
       load();
     } catch (e) { toast(e.message, 'err'); }
   };
@@ -784,7 +798,11 @@ export default function Ingest() {
             {canDelete ? <button type="button" disabled={!picked.size} onClick={() => { setCtx(null); deletePicked(); }}>Delete {picked.size > 1 ? `${picked.size} rows` : 'row'}<span>Del</span></button> : null}
           </CellMenu>
         ) : null}
-        <Pager total={total} offset={offset} size={PAGE} onOffset={setOffset} />
+        <Pager total={total} offset={offset} size={size} onOffset={setOffset} lead={(
+          <label className="rows-sel"><span>Rows</span>
+            <select value={size} onChange={changeSize} aria-label="Rows per page">{ROW_SIZES.map((n) => <option key={n} value={n}>{n === ALL_ROWS ? 'All' : n}</option>)}</select>
+          </label>
+        )} />
       </div>
 
       {form && lookups ? (
@@ -800,7 +818,7 @@ export default function Ingest() {
         <IngestDetail
           r={detail}
           canWrite={canWrite && (!detail.cm_status || s.can('ingest.cm_complete'))}
-          canDelete={canDelete && (!detail.cm_status || (detail.cm_status === 'DONE' && ['Admin', 'System Admin'].includes(s.user.role)))}   // a CM-decided request is kept as history, except that an Admin can delete one that is DONE
+          canDelete={mayDelete(detail)}   // an Admin: any; others: not one with a CM decision, and an Editor only her own
           canApprove={canApprove && !detail.approved_by}
           approveReady={!!(detail.destination_folder && String(detail.destination_folder).trim())}
           canUnapprove={canApprove && !!detail.approved_by}

@@ -142,7 +142,7 @@ function ingestFilter(q) {
 
 router.get('/', asyncH(async (req, res) => {
   const { params, whereSql } = ingestFilter(req.query);
-  const { limit, offset } = v.paging(req.query, { def: 50, max: 200 });
+  const { limit, offset } = v.paging(req.query, { def: 50, max: 3000 })   // 3000 = the page's "All" choice;
   const countQ = await db.query(
     `SELECT count(*)::int AS n FROM ingest_records i LEFT JOIN users ru ON ru.id=i.requested_by_user_id ${whereSql}`, params
   );
@@ -564,23 +564,33 @@ router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(asyn
   res.json({ ok: true, status: decision });
 }));
 
-// A request with a CM decision is kept as a historical record — except that an Admin may delete one that is DONE (NON-COMPLIANT ones stay).
-function deleteBlock(cm, user) {
-  if (!cm || (cm === 'DONE' && user && ['Admin', 'System Admin'].includes(user.role))) return null;
-  return cm === 'DONE' ? 'Only an Admin can delete a request that is DONE in CM' : 'CM-completed requests are preserved as historical records';
+// Who may delete which request:
+//  - an Admin / System Admin may delete any request, including one marked DONE or NON-COMPLIANT in CM;
+//  - anyone else with the delete action may delete any request that has no CM decision yet (a CM decision is kept as a historical record);
+//  - anyone else who can add requests (an Editor) may delete only the requests they created themselves, and only while there is no CM decision.
+// Returns null when allowed, else the reason it is not.
+const isAdminRole = (user) => !!user && ['Admin', 'System Admin'].includes(user.role);
+function deleteBlock(rec, user) {
+  if (isAdminRole(user)) return null;
+  if (rec.cm_status) return 'CM-completed requests are preserved as historical records. Only an Admin can delete one';
+  if (!can(user, 'ingest.delete') && rec.created_by !== user.id) return 'You can delete only the requests you created';
+  return null;
 }
+const mayDeleteSome = (req, res, next) => (can(req.user, 'ingest.delete') || can(req.user, 'ingest.write')
+  ? next()
+  : res.status(403).json({ error: `Your role (${req.user && req.user.role}) or group does not permit: ingest.delete` }));
 
-router.delete('/:id', requireAction('ingest.delete'), asyncH(async (req, res) => {
+router.delete('/:id', mayDeleteSome, asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   let blocked = null;
   try {
   await db.tx(async (c) => {
-    const cur = await c.query('SELECT program, cm_status FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
+    const cur = await c.query('SELECT program, cm_status, created_by FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
     if (!cur.rows.length) throw new HttpError(404, 'Ingest record not found');
-    const block = deleteBlock(cur.rows[0].cm_status, req.user);
-    if (block) { blocked = { ...cur.rows[0], reason: block }; throw new HttpError(409, block); }
+    const block = deleteBlock(cur.rows[0], req.user);
+    if (block) { blocked = { program: cur.rows[0].program, cm_status: cur.rows[0].cm_status, reason: block }; throw new HttpError(409, block); }
     await c.query('DELETE FROM ingest_records WHERE id=$1', [id]);
-    await audit(req, 'ingest.delete', 'ingest_record', id, cur.rows[0], c);
+    await audit(req, 'ingest.delete', 'ingest_record', id, { program: cur.rows[0].program, cm_status: cur.rows[0].cm_status }, c);
   });
   } catch (e) {
     if (blocked) await auditBlocked(req, 'ingest.delete_blocked', id, blocked);
@@ -590,21 +600,21 @@ router.delete('/:id', requireAction('ingest.delete'), asyncH(async (req, res) =>
 }));
 
 // Batch delete: removes every selected record that may be deleted and reports the ones that were kept (same rules as above).
-router.post('/delete', requireAction('ingest.delete'), asyncH(async (req, res) => {
+router.post('/delete', mayDeleteSome, asyncH(async (req, res) => {
   const raw = req.body && req.body.ids;
   if (!Array.isArray(raw) || !raw.length) throw new HttpError(400, 'Choose at least one record');
   if (raw.length > 500) throw new HttpError(400, 'Delete at most 500 records at a time');
   const ids = [...new Set(raw.map((x) => v.id(x)))];
   const out = await db.tx(async (c) => {
-    const { rows } = await c.query('SELECT id, program, cm_status FROM ingest_records WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE', [ids]);
-    const ok = rows.filter((r) => !deleteBlock(r.cm_status, req.user));
+    const { rows } = await c.query('SELECT id, program, cm_status, created_by FROM ingest_records WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE', [ids]);
+    const ok = rows.filter((r) => !deleteBlock(r, req.user));
     const kept = rows.length - ok.length;
     if (ok.length) {
       await c.query('DELETE FROM ingest_records WHERE id = ANY($1::int[])', [ok.map((r) => r.id)]);
       for (const r of ok) await audit(req, 'ingest.delete', 'ingest_record', r.id, { program: r.program, cm_status: r.cm_status, batch: true }, c);
     }
-    for (const r of rows.filter((x) => deleteBlock(x.cm_status, req.user))) {
-      await audit(req, 'ingest.delete_blocked', 'ingest_record', r.id, { program: r.program, cm_status: r.cm_status, reason: deleteBlock(r.cm_status, req.user), batch: true }, c);
+    for (const r of rows.filter((x) => deleteBlock(x, req.user))) {
+      await audit(req, 'ingest.delete_blocked', 'ingest_record', r.id, { program: r.program, cm_status: r.cm_status, reason: deleteBlock(r, req.user), batch: true }, c);
     }
     return { deleted: ok.length, kept, missing: ids.length - rows.length };
   });

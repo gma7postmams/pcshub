@@ -110,6 +110,7 @@ function derivePlatform(plugId) {
 }
 
 const MAX_BATCH = 200;
+const LIST_MAX = 3000;   // most rows one list read returns (the page's "All" choice); saving is still MAX_BATCH rows at a time
 const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'billable_party', 'remarks', 'vo', 'total_mats', 'audio_guide', 'length', 'others', 'audio_status'];
 
 // ---------- Custom columns ("Add Column"): stored in workload_custom_columns, values in workload_items.custom_fields ----------
@@ -331,7 +332,7 @@ function orderBy(q, params) {
 
 router.get('/', asyncH(async (req, res) => {
   const { where, params } = buildFilter(req.query);
-  const { limit, offset } = v.paging(req.query, { def: 100, max: MAX_BATCH * 2 });
+  const { limit, offset } = v.paging(req.query, { def: 100, max: LIST_MAX });
   const total = await db.query(`SELECT count(*)::int AS n FROM workload_items w ${whereSql(where)}`, params);
   const order = orderBy(req.query, params);   // may add a parameter (custom column key), so it runs after the count
   const { rows } = await db.query(

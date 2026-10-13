@@ -14,7 +14,8 @@ import { useLive } from '../lib/live.js';
 // from /api/workload/meta (field types follow the red notes in the Sept 2026 template:
 // dropdown / Date / Open). Table mode = read + add/edit form; Excel mode = editable grid with batch save.
 const PAGE = 50;
-const ROW_SIZES = [25, 50, 100, 200];   // rows per page (the server saves at most 200 changed rows at once, so a page never holds more)
+const ALL_ROWS = 3000;   // the "All" choice in Rows: up to this many on one page (more are reached with the page buttons)
+const ROW_SIZES = [25, 50, 100, 200, ALL_ROWS];   // rows per page (the server saves at most 200 changed rows at once; Save sends a long page in several goes)
 const GRID_LIMIT = 200;
 const CARDS_BELOW = 900;   // window width under which table rows become cards
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
@@ -1237,6 +1238,15 @@ export default function Workload() {
     if (offset > 0 && out.deleted >= pageRows.length) setOffset(Math.max(0, offset - size)); else load();
     loadStats();
   };
+  // the server deletes at most 500 ticked rows per request, so a long selection (the "All" page) goes in several requests
+  const bulkDeleteIds = async (ids) => {
+    const sum = { deleted: 0, skipped: 0 };
+    for (let i = 0; i < ids.length; i += 500) {
+      const o = await post('/api/workload/bulk-delete', { ids: ids.slice(i, i + 500) });
+      sum.deleted += o.deleted || 0; sum.skipped += o.skipped || 0;
+    }
+    return sum;
+  };
   const deleteSelected = async (verb = 'Delete') => {
     if (allMatching) { setDeletingAll(true); return; }
     const ids = [...picked];
@@ -1248,13 +1258,13 @@ export default function Workload() {
       : `Permanently delete the ${what} you selected? Ctrl+Z can undo it.`, { okText: verb, danger: true }))) return;
     const snapshot = pageRows.filter((r) => picked.has(r.id)).map(toPayload);
     try {
-      const out = await post('/api/workload/bulk-delete', { ids });
+      const out = await bulkDeleteIds(ids);
       if (out.deleted && !out.skipped) {
         let current = ids;
         pushTbl({
           label: `${verb.toLowerCase()} ${what}`,
           undo: async () => { current = (await post('/api/workload/batch', { rows: snapshot })).createdIds || []; },
-          redo: async () => { await post('/api/workload/bulk-delete', { ids: current }); },
+          redo: async () => { await bulkDeleteIds(current); },
         });
       }
       afterBulk(out);
@@ -1527,13 +1537,19 @@ export default function Workload() {
     });
     if (!rows.length) { toast('Nothing to save'); return; }
     setSaving(true);
+    let created = 0; let updated = 0; let from = 0;
     try {
-      const out = await post('/api/workload/batch', { rows });
-      toast(`Saved — ${out.created} added, ${out.updated} updated`);
+      // the server takes at most 200 rows per save: a long page ("All") goes in several goes, each all-or-nothing
+      for (; from < rows.length; from += 200) {
+        const out = await post('/api/workload/batch', { rows: rows.slice(from, from + 200) });
+        created += out.created; updated += out.updated;
+      }
+      toast(`Saved — ${created} added, ${updated} updated`);
       await load();
     } catch (e) {
       // Server numbers rows within the changed set; show the grid row number instead
-      toast(String(e.message).replace(/^Row (\d+):/, (_, n) => `Grid row ${idx[+n - 1] + 1}:`), 'err');
+      toast(String(e.message).replace(/^Row (\d+):/, (_, n) => `Grid row ${idx[from + (+n) - 1] + 1}:`) + (created + updated ? ` (${created + updated} rows were already saved)` : ''), 'err');
+      if (created + updated) await load();
     } finally { setSaving(false); }
   };
 
@@ -1741,7 +1757,7 @@ export default function Workload() {
   );
   const rowsPicker = (
     <label className="rows-sel"><span>Rows</span>
-      <select value={size} onChange={changeSize} aria-label="Rows per page">{ROW_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}</select>
+      <select value={size} onChange={changeSize} aria-label="Rows per page">{ROW_SIZES.map((n) => <option key={n} value={n}>{n === ALL_ROWS ? 'All' : n}</option>)}</select>
     </label>
   );
 
@@ -1799,6 +1815,7 @@ export default function Workload() {
                 canWrite && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
                 s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
+                canWrite && isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
                 canWrite && !isGrid && pickedRowsList.length > 0 && { id: 'priority-btn', label: pickedAllPrio ? 'Remove Priority' : 'Set Priority', icon: <FlagIcon />, onClick: toggleTablePriority },
               ]} />
             </div>
@@ -1834,6 +1851,7 @@ export default function Workload() {
             {canWrite && isGrid && selRows.length ? <button type="button" className="btn" id="priority-btn" data-keep-sel onClick={togglePriority} title="Highlights the Breakdate / Time of the selected row(s)">{allPrio ? 'Remove Priority' : 'Set Priority'}</button> : null}
             {canWrite && isGrid && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? <button type="button" className="btn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}>Delete {selRows.filter((r) => !xlLocked(r)).length > 1 ? `${selRows.filter((r) => !xlLocked(r)).length} Rows` : 'Row'}</button> : null}
             {s.canPage('/admin') ? <button type="button" className="btn" id="lock-dates-btn" onClick={() => setManagingLocks(true)}><LockIcon /> Lock Dates</button> : null}
+            {canWrite && isAdminUser ? <button type="button" className="btn danger" id="delete-all-btn" onClick={() => setDeletingAll(true)} title="Delete every row that matches the filters you have on now (Admin)"><TrashIcon /> Delete All</button> : null}
             {canWrite && !isGrid && pickedCount ? (
               <button type="button" className="btn danger" id="delete-selected-btn" onClick={() => deleteSelected()} title="Delete the rows ticked in the table">
                 Delete Selected ({pickedCount})
