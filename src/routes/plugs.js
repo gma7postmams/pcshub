@@ -10,7 +10,6 @@ const db = require('../db');
 const v = require('../validate');
 const express = require('express');
 const { asyncH, HttpError, requireAction, requireAnyPage } = require('../middleware');
-const { can } = require('../permissions');
 const { audit } = require('../audit');
 const { logRun } = require('../transferlog');
 const { emitTransfer } = require('../transfer-hook');   // import events — the audit log subscribes to these (see src/transfer-hook.js)
@@ -550,10 +549,10 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     });
     return { created, already, locked, errors, dates };
   };
-  // After an import or a hand-added plug: the same copy, done for you. Quiet on failure (the plug list change itself already succeeded) and skipped
-  // for someone who may not write to the Workload Tracker.
+  // After an import or a hand-added plug: the same copy, done for you. Quiet on failure (the plug list change itself already succeeded).
+  // Done whoever adds the plugs, even someone who cannot open the Workload Tracker (an Editor with only the PSD Daily Plug List): the plug list
+  // feeds the tracker, so the rows must arrive either way. (The manual Copy button still needs the Workload write action.)
   const autoCopy = async (req, where, params) => {
-    if (!can(req.user, 'workload.write')) return null;
     try {
       const { rows } = await db.query(`SELECT p.id, p.plug_date, p.plug_id, p.prog_name, p.psd FROM workload_plugs p WHERE ${where} ORDER BY p.plug_date, p.seq, p.id LIMIT 5000`, params);
       if (!rows.length) return { created: 0, already: 0, locked: 0, errors: [] };
