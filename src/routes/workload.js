@@ -930,6 +930,107 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
   }
 }));
 
+// ---------- Fill from team workbook: the team's original per-day workbook (merged cells, banners, extra columns) fills the BLANK cells of
+// rows that are already in the tracker (e.g. copied from the PSD Daily Plug List), matched by Work Date + Plug ID. Nothing typed is
+// overwritten and no row or column is created. POST ?apply=1 saves; without it, the same work is done and reported but nothing is written. ----------
+const { readTeamWorkbook } = require('../workload-fill');
+const FILL_FIELDS = ['units_concerned', 'psd', 'prog_name', 'breakdate_vgfx', 'breakdate_vedit', 'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats'];
+const isBlank = (x) => x == null || String(x).trim() === '';
+
+router.post('/fill', requireAction('workload.write'), upload.single('file'), oneImportAtATime, asyncH(async (req, res) => {
+  const t0 = Date.now();
+  const apply = req.query.apply === '1';
+  const info = { file: req.file ? req.file.originalname : null, bytes: req.file ? req.file.size : 0 };
+  try {
+    if (!req.file) throw new HttpError(400, 'No file uploaded');
+    let ExcelJS;
+    try { ExcelJS = require('exceljs'); } catch (e) { throw new HttpError(501, 'This needs the "exceljs" package. Run "npm install" on the server, then restart.'); }
+    await assertSafeXlsx(req.file.buffer, req.file.originalname);
+    const wb = new ExcelJS.Workbook();
+    try { await wb.xlsx.load(req.file.buffer); } catch (e) { throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)'); }
+    const { entries, sheets } = readTeamWorkbook(wb);
+    if (!sheets.length) throw new HttpError(400, 'No daily sheets found. Expected sheets such as "SEP 10_main", each with a "DATE: SEP 10, Thursday" line and a PLUG ID header row.');
+
+    const dates = [...new Set(sheets.map((s) => s.date))];
+    const customCols = await loadCustomCols(db);
+    const locks = await loadLocks(db);
+    const { rows: dbRows } = await db.query('SELECT * FROM workload_items WHERE work_date = ANY($1::date[]) ORDER BY work_date, id', [dates]);
+    const groups = new Map();
+    for (const r of dbRows) {
+      const k = `${r.work_date}|${String(r.plug_id || '').split('\n')[0].trim().toUpperCase()}`;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(r);
+    }
+
+    const summary = { matched: 0, updated: 0, unchanged: 0, locked: 0, noMatch: 0, cells: 0, byField: {}, unitsSet: 0, priorityOn: 0, errors: [], noMatchSample: [], days: dates.length, sheets: sheets.length };
+    const plan = [];   // { id, set: { col: value }, rec }
+    for (const [k, rows] of groups) {
+      const list = entries.get(k);
+      if (!list) {
+        summary.noMatch += rows.length;
+        if (summary.noMatchSample.length < 15) summary.noMatchSample.push(`${k.slice(0, 10)} ${rows[0].plug_id.split('\n')[0]}`);
+        continue;
+      }
+      for (let i = 0; i < rows.length; i++) {
+        const cur = rows[i];
+        const e = list[Math.min(i, list.length - 1)];
+        summary.matched++;
+        if (locks.some((l) => cur.work_date >= l.from_date && cur.work_date <= l.to_date)) { summary.locked++; continue; }
+        const want = { ...e };
+        if (e.note) want.remarks = [e.remarks, e.note].filter(Boolean).join('\n');
+        const body = {};
+        COLS.forEach((c) => { body[c] = cur[c]; });
+        const touched = [];
+        for (const c of FILL_FIELDS) {
+          if (!isBlank(cur[c]) || isBlank(want[c])) continue;
+          body[c] = FIELDS[c].max ? String(want[c]).slice(0, FIELDS[c].max) : want[c];
+          touched.push(c);
+        }
+        const prio = !!e.is_priority && !cur.is_priority;
+        if (prio) body.is_priority = true;
+        if (!touched.length && !prio) { summary.unchanged++; continue; }
+        let rec;
+        try { rec = await parseRow(db, body, cur, customCols); } catch (err) {
+          summary.errors.push(`${cur.work_date} ${String(cur.plug_id).split('\n')[0]}: ${err instanceof HttpError ? err.message : 'unexpected error'}`);
+          continue;
+        }
+        const set = {};
+        for (const c of COLS) if (isBlank(cur[c]) && !isBlank(rec[c])) set[c] = rec[c];   // only cells that were blank (this includes Platform when the Plug ID gives one)
+        if (prio) set.is_priority = true;
+        const cols = Object.keys(set);
+        if (!cols.length) { summary.unchanged++; continue; }
+        plan.push({ id: cur.id, set });
+        summary.updated++;
+        for (const c of cols) {
+          if (c === 'is_priority') { summary.priorityOn++; continue; }
+          summary.cells++;
+          summary.byField[c] = (summary.byField[c] || 0) + 1;
+          if (c === 'units_concerned') summary.unitsSet++;
+        }
+      }
+    }
+    summary.errorCount = summary.errors.length;
+    summary.errors = summary.errors.slice(0, 20);
+
+    if (apply && plan.length) {
+      await db.tx(async (c) => {
+        for (const p of plan) {
+          const cols = Object.keys(p.set);
+          await c.query(
+            `UPDATE workload_items SET ${cols.map((k, i) => `"${k}"=$${i + 2}`).join(', ')}, updated_by=$${cols.length + 2}, updated_at=now() WHERE id=$1`,
+            [p.id, ...cols.map((k) => p.set[k]), req.user.id]
+          );
+        }
+      });
+    }
+    if (apply) await emitTransfer(req, 'workload.fill', { ...info, ...summary, ms: Date.now() - t0 });
+    res.json({ ok: true, applied: apply, ...summary });
+  } catch (e) {
+    if (req.query.apply === '1') await emitTransfer(req, 'workload.fill_failed', { ...info, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
+    throw e;
+  }
+}));
+
 module.exports = router;
 // shared with the PSD Daily Plug List routes (src/routes/plugs.js), which make Workload rows from plugs
 module.exports.helpers = { UNITS, UNIT_TEAMS, canonUnit, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked, exportPalette, hueOf };

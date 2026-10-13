@@ -25,6 +25,7 @@ const { logLine } = require('./transferlog');
 const TRANSFER_ACTIONS = [
   'workload.export', 'workload.export_failed',
   'workload.import', 'workload.import_failed',
+  'workload.fill', 'workload.fill_failed',
   'workload.plugs_import', 'workload.plugs_import_failed',
 ];
 

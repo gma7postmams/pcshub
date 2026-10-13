@@ -69,6 +69,8 @@ const ACTION_LABELS = {
   'workload.export_failed': 'Workload Export Failed',
   'workload.import': 'Imported Workload',
   'workload.import_failed': 'Workload Import Failed',
+  'workload.fill': 'Filled Workload from Team Workbook',
+  'workload.fill_failed': 'Workload Fill Failed',
   'workload.bulk_delete': 'Bulk-Deleted Workload Items',
   'workload.plugs_import': 'Imported Plug List',
   'workload.plugs_import_failed': 'Plug List Import Failed',
@@ -545,6 +547,12 @@ function formatDetails(row) {
 
     case 'workload.import_failed':
       return `Workload import failed${fileOf(d)}: ${d.error || 'unknown error'}`;
+
+    case 'workload.fill':
+      return `Filled blanks from${fileOf(d)}: ${n(d.updated, 'row')} updated (${n(d.cells, 'cell')}), ${d.unchanged || 0} already complete, ${d.noMatch || 0} not found in the workbook`;
+
+    case 'workload.fill_failed':
+      return `Workload fill failed${fileOf(d)}: ${d.error || 'unknown error'}`;
 
     case 'workload.bulk_delete':
       return `Deleted ${n(d.deleted, 'workload row')}${d.skippedLocked ? `, ${d.skippedLocked} locked and kept` : ''}${filtersOf(d.filters)}`;

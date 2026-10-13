@@ -418,6 +418,7 @@ export default function Workload() {
   const [picked, setPicked] = useState(() => new Set());
   const [allMatching, setAllMatching] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false);
+  const [filling, setFilling] = useState(false);
   const lastPick = useRef(null);
   const tblCursor = useRef(null);   // Table mode keyboard: the row (index on this page) the arrow keys move from
   const keysRef = useRef(null);
@@ -1815,6 +1816,7 @@ export default function Workload() {
                 canWrite && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
                 s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
+                canWrite && { id: 'fill-menu', label: 'Fill from team workbook…', icon: <UploadIcon />, onClick: () => setFilling(true) },
                 canWrite && isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
                 canWrite && !isGrid && pickedRowsList.length > 0 && { id: 'priority-btn', label: pickedAllPrio ? 'Remove Priority' : 'Set Priority', icon: <FlagIcon />, onClick: toggleTablePriority },
               ]} />
@@ -1838,6 +1840,9 @@ export default function Workload() {
                 <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} />
                 <button type="button" className="btn" id="import-btn" disabled={importing} onClick={() => fileRef.current.click()}>
                   <UploadIcon /> {importing ? 'Importing…' : 'Import'}
+                </button>
+                <button type="button" className="btn" id="fill-btn" title="Fill the blank cells of existing rows from the team's per-day workbook" onClick={() => setFilling(true)}>
+                  <UploadIcon /> Fill from workbook
                 </button>
               </>
             ) : null}
@@ -2038,6 +2043,10 @@ export default function Workload() {
         )}
       </div>
 
+      {filling ? (
+        <FillModal onClose={() => setFilling(false)} onDone={() => { setFilling(false); load(); }} />
+      ) : null}
+
       {deletingAll ? (
         <DeleteAllModal
           total={total}
@@ -2081,6 +2090,46 @@ export default function Workload() {
 
 // Admin-only: name a new column. It shows up everywhere (Table, Excel grid, the add/edit form, Excel export)
 // as a plain open-text field, appended after the template's own columns.
+// Fill the BLANK cells of rows already in the tracker from the team's original per-day workbook (merged cells and extra columns are fine).
+// Step 1 reads the file and shows what would change; step 2 saves it. Typed values are never overwritten and no rows are created.
+function FillModal({ onClose, onDone }) {
+  const toast = useToast();
+  const fileRef = useRef(null);
+  const [file, setFile] = useState(null);
+  const [res, setRes] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const run = async (apply) => {
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    setBusy(true);
+    try {
+      const out = await post(`/api/workload/fill${apply ? '?apply=1' : ''}`, fd);
+      if (apply) { toast(`${out.updated} row${out.updated === 1 ? '' : 's'} filled (${out.cells} cell${out.cells === 1 ? '' : 's'})`); onDone(out); return; }
+      setRes(out);
+    } catch (e) { toast(e.message, 'err'); } finally { setBusy(false); }
+  };
+  const FIELD_NAMES = { units_concerned: 'Units Concerned', psd: 'PSD', prog_name: 'Prog. Name', breakdate_vgfx: 'Breakdate (VGFX)', breakdate_vedit: 'Breakdate (VEDIT)', vo: 'VO', script: 'Script', art_stb: 'Artwork / STB', audio_guide: 'Audio Guide', remarks: 'Remarks', total_mats: 'Total Mats', platform: 'Platform' };
+  return (
+    <Modal title="Fill from team workbook" onClose={onClose}
+      footer={(<><span className="grow" /><button type="button" className="btn" onClick={onClose}>Cancel</button>
+        {res && res.updated ? <button type="button" className="btn primary" id="fill-apply" disabled={busy} onClick={() => run(true)}>{busy ? 'Saving…' : `Fill ${res.updated} row${res.updated === 1 ? '' : 's'}`}</button>
+          : <button type="button" className="btn primary" id="fill-check" disabled={busy || !file} onClick={() => run(false)}>{busy ? 'Reading…' : 'Check file'}</button>}</>)}>
+      <p>Pick the team's per-day workload workbook (the one with sheets like <em>SEP 10_main</em>). Its blank-cell values fill the rows you already have, matched by Work Date and Plug ID. Anything already typed is kept, no rows or columns are added, and the Audio sheets are skipped.</p>
+      <input ref={fileRef} id="fill-file" type="file" accept=".xlsx" onChange={(e) => { setFile(e.target.files[0] || null); setRes(null); }} />
+      {res ? (
+        <div id="fill-result" style={{ marginTop: 12 }}>
+          <p><strong>{res.updated}</strong> row{res.updated === 1 ? '' : 's'} would be filled ({res.cells} cell{res.cells === 1 ? '' : 's'}) from {res.sheets} sheet{res.sheets === 1 ? '' : 's'} covering {res.days} day{res.days === 1 ? '' : 's'}.</p>
+          {Object.keys(res.byField).length ? <ul className="plug-warn" style={{ color: 'inherit' }}>{Object.entries(res.byField).map(([k, n]) => <li key={k}>{FIELD_NAMES[k] || k}: {n}</li>)}</ul> : null}
+          <p className="dim">{res.unchanged} matched row{res.unchanged === 1 ? ' is' : 's are'} already complete{res.locked ? `, ${res.locked} in a locked period (left alone)` : ''}. {res.noMatch} row{res.noMatch === 1 ? '' : 's'} on those days {res.noMatch === 1 ? 'was' : 'were'} not found in the workbook{res.noMatchSample.length ? ` (e.g. ${res.noMatchSample.slice(0, 5).join(', ')})` : ''}.</p>
+          {res.errorCount ? <p className="dim">{res.errorCount} row{res.errorCount === 1 ? '' : 's'} skipped: {res.errors[0]}</p> : null}
+          {res.updated ? null : <p>Nothing to fill.</p>}
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
 function DeleteAllModal({ total, scope, filters, onClose, onDone }) {
   const toast = useToast();
   const [typed, setTyped] = useState('');
