@@ -14,7 +14,7 @@ export function BrandMark({ branding }) {
   return (
     <>
       {branding.logo_url
-        ? <img src={branding.logo_url} alt="" />
+        ? <img src={branding.logo_url} alt="" className={branding.logo_custom ? '' : 'default-logo'} />
         : <span className="mark">{initials(branding.app_name).slice(0, 2) || 'P'}</span>}
       <span className="name">{branding.app_name}</span>
     </>

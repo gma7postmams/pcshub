@@ -67,12 +67,12 @@ export default function Branding() {
         <div className="card">
           <div className="card-head"><h2>Logo</h2></div>
           <div className="card-pad stack">
-            <div>{b.logo_url ? <img className="logo-preview" src={b.logo_url} alt="Current logo" /> : <div className="dim">No logo uploaded — initials mark is used.</div>}</div>
+            <div>{b.logo_url ? <img className="logo-preview" src={b.logo_url} alt="Current logo" /> : null}{b.logo_custom ? null : <div className="dim mt-8">Using the default PULSE logo.</div>}</div>
             <form id="lf" className="stack" onSubmit={upload}>
               <input type="file" name="logo" accept="image/png,image/jpeg,image/webp" onChange={(e) => setFile(e.target.files[0] || null)} />
               <div className="row">
                 <button className="btn primary">Upload</button>
-                {b.logo_url ? <button type="button" className="btn danger" id="rmlogo" onClick={removeLogo}>Remove</button> : null}
+                {b.logo_custom ? <button type="button" className="btn danger" id="rmlogo" onClick={removeLogo}>Remove</button> : null}
               </div>
               <div className="dim">PNG, JPEG or WebP · max 2 MB · transparent PNG works best on both light and dark.</div>
             </form>

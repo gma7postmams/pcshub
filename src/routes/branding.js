@@ -18,7 +18,8 @@ router.get('/', asyncH(async (req, res) => {
     theme: THEME_KEYS.includes(s.theme) ? s.theme : 'midnight',
     accent_color: s.accent_color || '', // optional override of the theme accent
     themes: THEMES,
-    logo_url: s.logo_path || null,
+    logo_url: s.logo_path || '/brand/pulse-logo.png',   // the PULSE logo until an Admin uploads their own
+    logo_custom: !!s.logo_path,
   });
 }));
 

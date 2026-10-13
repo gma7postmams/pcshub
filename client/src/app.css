@@ -1164,3 +1164,6 @@ td.peer-flash { animation: peer-flash 1.8s ease-out; }
 .rp-opt .dim{display:block;font-size:12.5px}
 .rp-sep{border:0;border-top:1px solid var(--border,#e2e8f0);margin:4px 0;width:100%}
 .rp-opt input[type=checkbox]{width:16px;height:16px;min-width:16px;margin:2px 0 0;flex:none}
+/* the built-in PULSE logo has black lettering, so it sits on a white plate to stay readable on dark themes */
+.brand img.default-logo{background:#fff;padding:2px;border-radius:12px}
+.auth-card .brand img.default-logo{padding:8px;border-radius:24px}

@@ -26,7 +26,7 @@ export function BrandingProvider({ children }) {
   const appName = branding ? branding.app_name : null;
   useEffect(() => { if (appName) { try { localStorage.setItem('phub-app-name', appName); } catch (e) { /* storage blocked */ } } }, [appName]);
   // the browser-tab icon follows the logo on the Branding page (transparent background); no logo = the built-in icon
-  const logoUrl = branding ? branding.logo_url || '' : null;
+  const logoUrl = branding ? (branding.logo_custom ? branding.logo_url : '') : null;   // the built-in logo keeps the built-in favicon
   useEffect(() => { if (logoUrl !== null) applyFavicon(logoUrl); }, [logoUrl]);
   if (!branding) return null;
   return <BrandingCtx.Provider value={{ branding, reload }}>{children}</BrandingCtx.Provider>;
