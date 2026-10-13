@@ -14,12 +14,27 @@ function Swatch({ themeKey }) {
   );
 }
 
+function LogoSlot({ mode, label, url, set, onUpload, onRemove }) {
+  const [file, setFile] = useState(null);
+  const [key, setKey] = useState(0);
+  return (
+    <form className="stack" id={`lf-${mode}`} onSubmit={async (e) => { e.preventDefault(); if (await onUpload(mode, file)) { setFile(null); setKey((k) => k + 1); } }}>
+      <div className="dim">{label}</div>
+      <div><img className="logo-preview" src={url} alt={label} style={{ background: mode === 'dark' ? '#0b0e14' : '#ffffff' }} />{set ? null : <div className="dim mt-8">Not uploaded.</div>}</div>
+      <input key={key} type="file" name="logo" accept="image/png,image/jpeg,image/webp" onChange={(e) => setFile(e.target.files[0] || null)} />
+      <div className="row">
+        <button className="btn primary">Upload</button>
+        {set ? <button type="button" className="btn danger" id={`rmlogo-${mode}`} onClick={() => onRemove(mode)}>Remove</button> : null}
+      </div>
+    </form>
+  );
+}
+
 export default function Branding() {
   const toast = useToast();
   const { reload } = useBranding();
   const [b, setB] = useState(null);
   const [f, setF] = useState(null);
-  const [file, setFile] = useState(null);
 
   const load = async () => {
     const x = await get('/api/branding');
@@ -43,15 +58,14 @@ export default function Branding() {
     } catch (e) { toast(e.message, 'err'); }
   };
 
-  const upload = async (e) => {
-    e.preventDefault();
-    if (!file) { toast('Choose a file first', 'err'); return; }
+  const upload = async (mode, file) => {
+    if (!file) { toast('Choose a file first', 'err'); return false; }
     const fd = new FormData();
     fd.append('logo', file);
-    try { await api('POST', '/api/admin/branding/logo', fd); toast('Logo uploaded'); await reload(); await load(); } catch (ex) { toast(ex.message, 'err'); }
+    try { await api('POST', `/api/admin/branding/logo?mode=${mode}`, fd); toast(`${mode === 'dark' ? 'Dark mode' : 'Light mode'} logo uploaded`); await reload(); await load(); return true; } catch (ex) { toast(ex.message, 'err'); return false; }
   };
-  const removeLogo = async () => {
-    try { await del('/api/admin/branding/logo'); toast('Logo removed'); await reload(); await load(); } catch (ex) { toast(ex.message, 'err'); }
+  const removeLogo = async (mode) => {
+    try { await del(`/api/admin/branding/logo?mode=${mode}`); toast(`${mode === 'dark' ? 'Dark mode' : 'Light mode'} logo removed`); await reload(); await load(); } catch (ex) { toast(ex.message, 'err'); }
   };
 
   return (
@@ -67,15 +81,9 @@ export default function Branding() {
         <div className="card">
           <div className="card-head"><h2>Logo</h2></div>
           <div className="card-pad stack">
-            <div>{b.logo_url ? <img className="logo-preview" src={b.logo_url} alt="Current logo" /> : null}{b.logo_custom ? null : <div className="dim mt-8">Using the default PULSE logo.</div>}</div>
-            <form id="lf" className="stack" onSubmit={upload}>
-              <input type="file" name="logo" accept="image/png,image/jpeg,image/webp" onChange={(e) => setFile(e.target.files[0] || null)} />
-              <div className="row">
-                <button className="btn primary">Upload</button>
-                {b.logo_custom ? <button type="button" className="btn danger" id="rmlogo" onClick={removeLogo}>Remove</button> : null}
-              </div>
-              <div className="dim">PNG, JPEG or WebP · max 2 MB · transparent PNG works best on both light and dark.</div>
-            </form>
+            <LogoSlot mode="light" label="Light mode logo" url={b.logo_url} set={b.logo_light_set} onUpload={upload} onRemove={removeLogo} />
+            <LogoSlot mode="dark" label="Dark mode logo" url={b.logo_dark_url} set={b.logo_dark_set} onUpload={upload} onRemove={removeLogo} />
+            <div className="dim">{b.logo_custom ? 'Upload one logo and it is used in both modes; upload both and each mode uses its own.' : 'Using the default PULSE logo (black lettering in light mode, white in dark mode).'} PNG, JPEG or WebP · max 2 MB · transparent PNG works best.</div>
           </div>
         </div>
       </div>

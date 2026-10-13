@@ -384,7 +384,8 @@ INSERT INTO app_settings (key, value) VALUES
   ('tagline', 'Ingest · Approval · Workload · Backup and Restore'),
   ('theme', 'midnight'),
   ('accent_color', ''),
-  ('logo_path', '')
+  ('logo_path', ''),
+  ('logo_dark_path', '')
 ON CONFLICT (key) DO NOTHING;
 
 -- One time: an app name still set to the old built-in default becomes PULSE. A name an Admin chose themselves is left alone.

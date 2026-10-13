@@ -5,7 +5,7 @@ import { applyFavicon } from './lib/favicon.js';
 
 // The server writes the current Branding name into <meta name="app-name"> (src/app-shell.js), so even the fallback shows the right name.
 const metaName = () => { try { const m = document.querySelector('meta[name="app-name"]'); return (m && m.content) || ''; } catch (e) { return ''; } };
-const DEFAULT_BRANDING = { app_name: metaName() || 'PULSE', tagline: '', theme: 'midnight', accent_color: '', themes: [], logo_url: null };
+const DEFAULT_BRANDING = { app_name: metaName() || 'PULSE', tagline: '', theme: 'midnight', accent_color: '', themes: [], logo_url: null, logo_dark_url: null };
 
 // ---------- Branding (public — used by login too) ----------
 const BrandingCtx = createContext({ branding: DEFAULT_BRANDING, reload: () => {} });

@@ -791,22 +791,27 @@ router.post('/branding/logo', upload.single('logo'), asyncH(async (req, res) => 
     fs.unlinkSync(req.file.path);
     throw new HttpError(400, 'File content does not match its type');
   }
+  const key = logoKey(req);
   const url = `/uploads/branding/${req.file.filename}`;
-  const prev = await db.query(`SELECT value FROM app_settings WHERE key='logo_path'`);
+  const prev = await db.query(`SELECT value FROM app_settings WHERE key=$1`, [key]);
   await db.query(
-    `INSERT INTO app_settings (key, value, updated_at) VALUES ('logo_path',$1,now())
-     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [url]
+    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1,$2,now())
+     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [key, url]
   );
   removeOldLogo(prev.rows[0] && prev.rows[0].value);
-  await audit(req, 'admin.branding_logo', 'app_settings', null, { file: req.file.filename, size: req.file.size });
+  await audit(req, 'admin.branding_logo', 'app_settings', null, { file: req.file.filename, size: req.file.size, mode: key === 'logo_dark_path' ? 'dark' : 'light' });
   res.json({ ok: true, logo_url: url });
 }));
 
+// ?mode=dark is the dark-mode logo; anything else is the light-mode (or only) logo.
+const logoKey = (req) => (req.query.mode === 'dark' ? 'logo_dark_path' : 'logo_path');
+
 router.delete('/branding/logo', asyncH(async (req, res) => {
-  const prev = await db.query(`SELECT value FROM app_settings WHERE key='logo_path'`);
-  await db.query(`UPDATE app_settings SET value='', updated_at=now() WHERE key='logo_path'`);
+  const key = logoKey(req);
+  const prev = await db.query(`SELECT value FROM app_settings WHERE key=$1`, [key]);
+  await db.query(`UPDATE app_settings SET value='', updated_at=now() WHERE key=$1`, [key]);
   removeOldLogo(prev.rows[0] && prev.rows[0].value);
-  await audit(req, 'admin.branding_logo_remove', 'app_settings', null);
+  await audit(req, 'admin.branding_logo_remove', 'app_settings', null, { mode: key === 'logo_dark_path' ? 'dark' : 'light' });
   res.json({ ok: true });
 }));
 
