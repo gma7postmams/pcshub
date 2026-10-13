@@ -37,9 +37,13 @@ export default function Profile() {
 
   const changePassword = async (e) => {
     e.preventDefault();
-    if (pw.password !== pw.confirm) { toast('New passwords do not match', 'err'); return; }
+    // Read what is in the boxes right now, not the copy kept in state: phone keyboards (autofill, suggestions, auto-complete) can fill a box
+    // without a change event, so the state may lag one step behind and a full password looked too short on the first try.
+    const fd = new FormData(e.currentTarget);
+    const cur = String(fd.get('current') ?? pw.current), next = String(fd.get('password') ?? pw.password), conf = String(fd.get('confirm') ?? pw.confirm);
+    if (next !== conf) { toast('New passwords do not match', 'err'); return; }
     try {
-      await post('/api/profile/password', { current: pw.current, password: pw.password });
+      await post('/api/profile/password', { current: cur, password: next });
       toast('Password updated');
       setPwAll({ current: '', password: '', confirm: '' });
       if (forced) setTimeout(() => { window.location.href = '/'; }, 600);
