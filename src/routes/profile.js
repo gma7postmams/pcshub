@@ -174,7 +174,7 @@ router.get('/activity-history', asyncH(async (req, res) => {
     where.push(`created_at < ($${params.length}::date + 1)`);
   }
 
-  const { limit, offset } = v.paging(req.query, { def: 50, max: 200 });
+  const { limit, offset } = v.paging(req.query, { def: 25, max: 200 });
 
   const whereSql = `WHERE ${where.join(' AND ')}`;
 

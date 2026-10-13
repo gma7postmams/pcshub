@@ -13,7 +13,7 @@ import { useLive, useCellPresence, rangeCells, peerStyle } from '../lib/live.js'
 // (All / VGFX / VEDIT / Audio) are filters over it. Fields, per-tab columns and the Platform rules come
 // from /api/workload/meta (field types follow the red notes in the Sept 2026 template:
 // dropdown / Date / Open). Table mode = read + add/edit form; Excel mode = editable grid with batch save.
-const PAGE = 50;
+const PAGE = 25;
 const ALL_ROWS = 5000;   // the "All" choice in Rows: up to this many on one page (more are reached with the page buttons)
 const ROW_SIZES = [25, 50, 100, 200, ALL_ROWS];   // rows per page (the server saves at most 200 changed rows at once; Save sends a long page in several goes)
 const GRID_LIMIT = 200;
@@ -1788,7 +1788,7 @@ export default function Workload() {
         <div className="alert warn mb-12">
           {!lookups.workload_platform.length ? 'No Workload Platform options exist yet. ' : ''}
           {!lookups.plug_type.length ? 'No Plug Type options exist yet. ' : ''}
-          {s.canPage('/admin') ? <>Add them in <Link to="/admin#dropdowns">Admin → Dropdowns</Link>.</> : 'Ask an Admin to add them.'}
+          {s.canPage('/admin') ? <>Add them in <Link to="/admin#dropdowns">{((s.pages || []).find((p) => p.path === '/admin') || {}).label || 'Administration'} → Dropdowns</Link>.</> : 'Ask an Admin to add them.'}
         </div>
       ) : null}
 

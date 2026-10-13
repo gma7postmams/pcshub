@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { del, get, post, put } from '../../lib/api.js';
-import { Empty, Modal, RoleBadge, useConfirm, useForm, useToast } from '../../components/ui.jsx';
+import { Empty, Modal, Pager, RoleBadge, useConfirm, useForm, usePageSize, useToast } from '../../components/ui.jsx';
 import { keyLabels } from './labels.js';
 
 const ACT = {
@@ -21,6 +21,8 @@ export default function Roles({ model, refreshModel }) {
   const [roles, setRoles] = useState(null);
   const [editing, setEditing] = useState(null);   // a role, or {} for a new one
   const [members, setMembers] = useState(null);     // role whose users are being shown
+  const [size, setSize] = usePageSize('roles');      // roles are the columns of the table: this many per page
+  const [offset, setOffset] = useState(0);
   const load = useCallback(async () => { setRoles(await get('/api/admin/roles')); if (refreshModel) refreshModel(); }, [refreshModel]);
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   if (!roles) return <Empty>Loading…</Empty>;
@@ -30,6 +32,8 @@ export default function Roles({ model, refreshModel }) {
     if (!(await confirm('Delete role', `Delete the "${r.name}" role?`, { okText: 'Delete', danger: true }))) return;
     try { await del(`/api/admin/roles/${encodeURIComponent(r.name)}`); toast('Deleted'); load(); } catch (e) { toast(e.message, 'err'); }
   };
+  const start = Math.min(offset, Math.max(0, (Math.ceil(roles.length / size) - 1) * size));
+  const pageRoles = roles.slice(start, start + size);
   const cell = (ok) => (ok ? <span className="yes">✓</span> : <span className="no">—</span>);
 
   return (
@@ -38,18 +42,18 @@ export default function Roles({ model, refreshModel }) {
       <div className="card">
         <div className="table-wrap">
           <table className="t wl perm-matrix">
-            <thead><tr><th>Action</th><th>Needs page</th>{roles.map((r) => <th key={r.name}><RoleBadge role={r.name} /></th>)}</tr></thead>
+            <thead><tr><th>Action</th><th>Needs page</th>{pageRoles.map((r) => <th key={r.name}><RoleBadge role={r.name} /></th>)}</tr></thead>
             <tbody>
               {actions.map((a) => (
                 <tr key={a}>
                   <td>{ACT[a] || a} <span className="dim mono">{a}</span></td>
-                  <td className="dim">{model.actionPage[a] ? LABEL[model.actionPage[a]] : 'Admin page'}</td>
-                  {roles.map((r) => <td key={r.name}>{cell(r.actions.includes(a))}</td>)}
+                  <td className="dim">{model.actionPage[a] ? LABEL[model.actionPage[a]] : 'Administration'}</td>
+                  {pageRoles.map((r) => <td key={r.name}>{cell(r.actions.includes(a))}</td>)}
                 </tr>
               ))}
-              <tr><td>Open pages / sections</td><td className="dim">—</td>{roles.map((r) => <td key={r.name} className="dim">{['Admin', 'System Admin'].includes(r.name) ? 'All' : 'Per group'}</td>)}</tr>
-              <tr><td>Users</td><td className="dim">—</td>{roles.map((r) => <td key={r.name}>{r.users ? <button type="button" className="linklike" onClick={() => setMembers(r)} title="Who has this role">{r.users} {r.users === 1 ? 'user' : 'users'}</button> : <span className="dim">0</span>}</td>)}</tr>
-              <tr><td /><td />{roles.map((r) => (
+              <tr><td>Open pages / sections</td><td className="dim">—</td>{pageRoles.map((r) => <td key={r.name} className="dim">{['Admin', 'System Admin'].includes(r.name) ? 'All' : 'Per group'}</td>)}</tr>
+              <tr><td>Users</td><td className="dim">—</td>{pageRoles.map((r) => <td key={r.name}>{r.users ? <button type="button" className="linklike" onClick={() => setMembers(r)} title="Who has this role">{r.users} {r.users === 1 ? 'user' : 'users'}</button> : <span className="dim">0</span>}</td>)}</tr>
+              <tr><td /><td />{pageRoles.map((r) => (
                 <td key={r.name} className="nowrap">
                   {r.name === 'System Admin' ? <span className="dim">Fixed</span> : (
                     <>
@@ -63,6 +67,7 @@ export default function Roles({ model, refreshModel }) {
           </table>
         </div>
       </div>
+      <Pager total={roles.length} offset={start} size={size} onOffset={setOffset} onSize={setSize} label="Roles per page" />
       <div className="admin-note">
         Roles decide what a user can <strong>do</strong>. An action also needs the user&apos;s group to open the page it happens on
         (e.g. filling Destination Folder / Approved by needs a role with that action <em>and</em> a group with the Ingest Tracker page).

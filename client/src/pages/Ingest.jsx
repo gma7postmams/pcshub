@@ -13,7 +13,7 @@ import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } fr
 // Status (CM) is blank (Pending) until CM picks one of these
 const CM_OPTIONS = ['DONE', 'NON-COMPLIANT'];
 const STATUS_FILTER = ['PENDING', ...CM_OPTIONS];
-const PAGE = 50;
+const PAGE = 25;
 const ALL_ROWS = 5000;                         // the "All" choice in Rows: up to this many on one page (more are reached with the page buttons)
 const ROW_SIZES = [25, 50, 100, 200, ALL_ROWS];   // rows per page
 const withCurrent = (list, v) => (v && !list.includes(v) ? [...list, v] : list);

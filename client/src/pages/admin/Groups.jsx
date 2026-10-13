@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { del, get, post, put } from '../../lib/api.js';
 import { PlusIcon } from '../../components/Icons.jsx';
-import { Empty, Modal, useConfirm, useToast } from '../../components/ui.jsx';
+import { Empty, Modal, Pager, useConfirm, usePageSize, useToast } from '../../components/ui.jsx';
 import JsonTools from './JsonTools.jsx';
 
 function PermChips({ perms, catalog }) {
@@ -22,6 +22,8 @@ export default function Groups({ model }) {
   const confirm = useConfirm();
   const [list, setList] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [size, setSize] = usePageSize('groups');
+  const [offset, setOffset] = useState(0);
 
   const load = useCallback(async () => setList(await get('/api/admin/groups')), []);
   useEffect(() => { load(); }, [load]);
@@ -32,6 +34,7 @@ export default function Groups({ model }) {
   };
 
   if (!list) return <Empty>Loading…</Empty>;
+  const start = Math.min(offset, Math.max(0, (Math.ceil(list.length / size) - 1) * size));
   return (
     <>
       <div className="card">
@@ -52,7 +55,7 @@ export default function Groups({ model }) {
                 </tr>
               </thead>
               <tbody>
-                {list.map((g) => (
+                {list.slice(start, start + size).map((g) => (
                   <tr key={g.id}>
                     <td className="group-col">
                       <strong>{g.name}</strong>
@@ -73,6 +76,7 @@ export default function Groups({ model }) {
           )}
         </div>
       </div>
+      <Pager total={list.length} offset={start} size={size} onOffset={setOffset} onSize={setSize} label="Groups per page" />
       <div className="admin-note">Users are enrolled in one group. The group decides which pages and sections they can open; their <strong>role</strong> decides what they can do there. Admin role opens everything.</div>
       {editing ? <GroupForm g={editing.id ? editing : null} catalog={model.catalog} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} /> : null}
     </>
@@ -141,7 +145,7 @@ function GroupForm({ g, catalog, onClose, onSaved }) {
               </div>
             ))}
           </div>
-          <div className="dim mt-12">Profile is always available. The Admin page is limited to the Admin role.</div>
+          <div className="dim mt-12">Profile is always available. Administration (Settings for the Admin role) follows the user's role, not the group.</div>
         </div>
       </form>
     </Modal>

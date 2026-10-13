@@ -105,7 +105,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const [days, setDays] = useState(null);            // [{ date, n }] newest first (the latest 366 days with a list); null = loading
   const [totals, setTotals] = useState({ plugs: 0, days: 0, first: '', last: '' });   // across every day
   const [period, setPeriodState] = useState(() => stored('period', 'day', PERIODS.map((p) => p.value)));
-  const [size, setSizeState] = useState(() => stored('size3', '50', SIZES.map((s) => s.value)));
+  const [size, setSizeState] = useState(() => stored('size3', '25', SIZES.map((s) => s.value)));
   const [anchor, setAnchor] = useState('');          // the day / a day of the week / of the month being looked at
   const [custom, setCustom] = useState({ from: '', to: '' });
   const [q, setQ] = useState('');

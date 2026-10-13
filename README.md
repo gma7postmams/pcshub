@@ -37,7 +37,7 @@ For front-end development, run `npm start` and `npm run dev:client` in two termi
 3. **Database**: create an empty PostgreSQL database and a login for the app, then point the app at it (see below). Tables are created on first start.
 4. **Run as a service**: use the example unit in `deploy/` with systemd, then enable and start it.
 5. **HTTPS**: put nginx in front using the example in `deploy/`, and set `TRUST_PROXY` and `APP_ORIGIN` in `.env` as described in `.env.example`.
-6. **First sign-in**: sign in with the seeded Admin, choose a new password, then set up groups, users and dropdown lists in Admin.
+6. **First sign-in**: sign in with the seeded Admin, choose a new password, then set up groups, users and dropdown lists in Administration.
 
 **Upgrading**: pull the new code, run `npm install --omit=dev` and `npm run build`, then restart the service. Run `npm install` again whenever `package.json` changes.
 
@@ -73,7 +73,7 @@ Any one of the three being on is enough, so if it stays on after you turn it off
 ## Notes
 
 - All settings come from `.env`; `.env.example` lists them with comments. Never commit your real `.env`.
-- Take a backup before upgrading (Admin → Backup and Restore).
+- Take a backup before upgrading (Administration → Backup and Restore).
 
 ## Tests
 
@@ -111,13 +111,13 @@ npm test
 - **PSD Daily Plug List: select all and delete all (Admin):** select a page (the row-number header or Ctrl+A), then "Select all N in this view" (or Ctrl+A again) to select every plug in the current view on every page, or use **Delete All…** in the … menu to delete the whole list or just what the view shows (its days and search). Both ask you to type DELETE. Workload rows already made from the plugs are not touched. Selecting more than 1000 plugs by hand (e.g. with Rows set to All) now deletes in batches instead of failing with "Select at most 1000 plugs at a time".
 - **Ingest: green Approve button:** the Approve button in the ingest details window is now green, in the same soft tinted style as the red Delete button, instead of the blue primary colour.
 - **Activity History logo:** the Activity History tab in the top bar now has an icon like the other tabs (a pulse line).
-- **Groups: choose the Workload Tracker tabs:** in Admin > Groups, under *Workload Tracker*, tick which tabs the group sees (shown as *All Tab*, *VGFX Tab*, *VEDIT Tab*, *Audio Tab*; the section chips in the group list use the same look as the page chips): **All**, **VGFX**, **VEDIT**, **Audio**. A group that has the page but no tab ticked sees every tab (as before). A group without the All tab only gets rows of the teams it can see (rows whose Units Concerned is not set are in All only); the tabs, counts, list, export and bulk delete all follow it, and the server refuses a tab the group does not have. Admins always see everything.
+- **Groups: choose the Workload Tracker tabs:** in Administration → Groups, under *Workload Tracker*, tick which tabs the group sees (shown as *All Tab*, *VGFX Tab*, *VEDIT Tab*, *Audio Tab*; the section chips in the group list use the same look as the page chips): **All**, **VGFX**, **VEDIT**, **Audio**. A group that has the page but no tab ticked sees every tab (as before). A group without the All tab only gets rows of the teams it can see (rows whose Units Concerned is not set are in All only); the tabs, counts, list, export and bulk delete all follow it, and the server refuses a tab the group does not have. Admins always see everything.
 - **Cells light up while someone edits them:** on the Workload Tracker and the Ingest Tracker, a cell another person has open is outlined in their colour (the same colour as their avatar at the top of the page), in real time; hover it to see a small flag with their name above the cell, like Google Sheets. When someone selects a block of cells, the whole block is outlined on everyone else's screen (just its outer edge, like Excel / Sheets; up to 800 cells). It clears when they leave the cell, and by itself after about 25 seconds if their browser closes.
-- **Security events say which account:** in Admin > Security > Recent security events, *Password reset for*, *2FA reset for* and *Signed out by an Admin* now name the account that was affected (the Who column is still the Admin who did it).
+- **Security events say which account:** in Administration → Security → Recent security events, *Password reset for*, *2FA reset for* and *Signed out by an Admin* now name the account that was affected (the Who column is still the Admin who did it).
 - **Sign-in messages: wrong password vs locked:** a wrong username or password now says *Incorrect username or password.* An account that is locked says so, with the minutes left and to ask an Administrator to unlock it (including on the wrong password that triggers the lock). Note that the locked message does confirm the username exists.
 - **Maintenance mode: no more black page:** while planned maintenance is on, visiting any page goes to the normal sign-in page, which shows an *Under maintenance* tag with the message and an **Administrator Sign In** button. Clicking it shows the username and password boxes (only a System Admin can get in). Anyone already signed in is signed out and sent there.
 - **Prompts end with a full stop:** the messages that pop up at the bottom right now end with a full stop ("Saved.", "Account unlocked.") unless they already end with punctuation.
-- **Unlock only when locked:** in Admin > Access > Users the Unlock button is greyed out unless the account is currently locked.
+- **Unlock only when locked:** in Administration → Access → Users the Unlock button is greyed out unless the account is currently locked.
 - **Rows per page defaults to 50:** the Ingest Tracker, PSD Daily Plug List and Workload Tracker open with Rows set to **50** (the earlier default of All was reverted; everyone's saved Rows choice was reset once so 50 shows). A number picked in a browser is remembered again after that. **All** is still in the Rows list and shows up to 5000 rows at once on all three.
 - **Click a person's avatar to jump to their cell (like Google Sheets):** on the Workload and Ingest trackers each person's avatar has the same colour as the border on the cell they have open or selected. Click another person's avatar and the table scrolls to that cell and flashes it; hover the avatar to see what they are doing. If they are not on a cell (or it is on another page of rows) nothing happens. (The PSD Daily Plug List shows no cell activity yet.)
 - **Notification bell: live and animated:** a new notification now reaches the bell instantly (server push, like the trackers; the 30-second refresh stays as a safety net), and the bell rings and its badge pulses when the unread count goes up.

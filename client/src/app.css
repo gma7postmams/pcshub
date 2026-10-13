@@ -178,8 +178,16 @@ h3 { font-size: 15px; }
 .notif .n-body { color: var(--text-2); font-size: 13px; margin-top: 2px; }
 .notif .n-time { color: var(--text-3); font-size: 11.5px; margin-top: 3px; }
 
+/* Narrow desktop (1040-1279px): keep the full menu in the bar, just tighter (no brand name, the user chip is the avatar only; the name and role are in its menu) */
+@media (max-width: 1279px) and (min-width: 1040px) {
+  .brand .name { display: none; }
+  .navlinks { gap: 0; }
+  .navlinks a { padding: 7px 7px; font-size: 13px; }
+  .usermenu-btn .uinfo { display: none; }
+}
+
 /* Mobile nav: links collapse into a top drop panel (still top navigation, no sidebar) */
-@media (max-width: 1279px) {
+@media (max-width: 1039px) {
   .menu-toggle { display: grid; }
   .brand .name { display: none; }
   .navlinks {

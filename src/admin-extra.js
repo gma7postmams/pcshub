@@ -123,8 +123,8 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
   router.post('/security/test-email', asyncH(async (req, res) => {
     const mailer = require('./mailer');
     if (!mailer.configured()) throw new HttpError(400, 'Email is not set up on the server (SMTP settings in .env)');
-    if (!req.user.email) throw new HttpError(400, 'Your account has no email address (Admin > Access > Users)');
-    try { await mailer.send({ to: req.user.email, subject: 'Test email', text: 'Email sending works. This was sent from Admin > Security.' }); } catch (e) {
+    if (!req.user.email) throw new HttpError(400, 'Your account has no email address (Administration → Access → Users)');
+    try { await mailer.send({ to: req.user.email, subject: 'Test email', text: 'Email sending works. This was sent from Administration → Security.' }); } catch (e) {
       await audit(req, 'admin.test_email', 'app_settings', null, { outcome: 'failed', error: String(e.message).slice(0, 200) });
       throw new HttpError(502, `Could not send: ${String(e.message).slice(0, 200)}`);
     }

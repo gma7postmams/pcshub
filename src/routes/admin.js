@@ -468,7 +468,7 @@ router.post('/users/:id/2fa', asyncH(async (req, res) => {
   if (!cur) throw new HttpError(404, 'User not found');
   const method = req.body.method === undefined ? cur.twofa_method : v.oneOf(req.body.method, ['app', 'email'], { field: 'Method' });
   if (enabled && method === 'email') {
-    if (!require('../security-settings').get().allowEmail2fa || !require('../mailer').configured()) throw new HttpError(400, 'Email codes are not switched on (Admin > Security) or email is not set up on the server');
+    if (!require('../security-settings').get().allowEmail2fa || !require('../mailer').configured()) throw new HttpError(400, 'Email codes are not switched on (Administration → Security) or email is not set up on the server');
     if (!cur.email) throw new HttpError(400, 'Add an email address to this account first');
   }
   // Changing the method of an account that already enrolled makes it enrol again with the new one.
@@ -847,7 +847,7 @@ function auditWhere(q) {
 }
 router.get('/audit', asyncH(async (req, res) => {
   const { params, whereSql } = auditWhere(req.query);
-  const { limit, offset } = v.paging(req.query, { def: 50, max: 200 });
+  const { limit, offset } = v.paging(req.query, { def: 25, max: 200 });
   const [cnt, list] = await Promise.all([
     db.query(`SELECT count(*)::int AS n FROM audit_logs ${whereSql}`, params),
     db.query(`SELECT * FROM audit_logs ${whereSql} ORDER BY created_at DESC, id DESC LIMIT ${limit} OFFSET ${offset}`, params),

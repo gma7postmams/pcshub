@@ -3,7 +3,7 @@ import { del, get, post, put } from '../lib/api.js';
 import { fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { DownloadIcon, FileIcon, PencilIcon, PlusIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
-import { Empty, Modal, useConfirm, useToast } from '../components/ui.jsx';
+import { Empty, Modal, Pager, useConfirm, usePageSize, useToast } from '../components/ui.jsx';
 
 const size = (n) => {
   const b = Number(n) || 0;
@@ -50,6 +50,8 @@ export default function Knowledge() {
   const [meta, setMeta] = useState({ maxMb: 25, maxFiles: 20, trashDays: 30, exts: DEFAULT_EXTS });
   const [docs, setDocs] = useState(null);
   const [q, setQ] = useState('');
+  const [size, setSize] = usePageSize('knowledge');
+  const [offset, setOffset] = useState(0);
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState([]); // per-file problems from the last upload
   const [edit, setEdit] = useState(null);
@@ -164,6 +166,7 @@ export default function Knowledge() {
     return docs.filter((d) => (!tag || (d.tags || []).includes(tag))
       && (!t || d.title.toLowerCase().includes(t) || (d.filename || '').toLowerCase().includes(t) || (d.tags || []).some((x) => x.toLowerCase().includes(t))));
   }, [docs, q, tag]);
+  const start = Math.min(offset, Math.max(0, (Math.ceil(shown.length / size) - 1) * size));
   const allTags = useMemo(() => {
     const n = new Map();
     (docs || []).forEach((d) => (d.tags || []).forEach((t) => n.set(t, (n.get(t) || 0) + 1)));
@@ -219,7 +222,7 @@ export default function Knowledge() {
             <table className="t wl">
               <thead><tr><th>Document</th><th>Size</th><th>Added by</th><th>Added</th><th /></tr></thead>
               <tbody>
-                {shown.map((d) => (
+                {shown.slice(start, start + size).map((d) => (
                   <tr key={d.id}>
                     <td>
                       {d.has_file ? (
@@ -249,6 +252,7 @@ export default function Knowledge() {
             </table>
           </div>
         )}
+        {shown.length ? <Pager total={shown.length} offset={start} size={size} onOffset={setOffset} onSize={setSize} /> : null}
       </div>
 
       {blank ? (

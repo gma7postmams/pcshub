@@ -28,9 +28,11 @@ function shortName(name) {
   return out || name.slice(0, 12);
 }
 
-let html = null;
+let html = null; let htmlAt = 0;
+/** index.html, re-read whenever `npm run build` has replaced it (so a rebuild never leaves pages pointing at deleted bundles). */
 function template() {
-  if (html === null) html = fs.readFileSync(INDEX_HTML, 'utf8');
+  const at = fs.statSync(INDEX_HTML).mtimeMs;
+  if (html === null || at !== htmlAt) { html = fs.readFileSync(INDEX_HTML, 'utf8'); htmlAt = at; }
   return html;
 }
 

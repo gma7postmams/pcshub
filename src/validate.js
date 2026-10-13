@@ -85,7 +85,7 @@ function id(v) {
 }
 
 /** Paging from the query string. Never negative, never above `max` (a negative LIMIT/OFFSET is a database error). */
-function paging(q, { def = 50, max = 200 } = {}) {
+function paging(q, { def = 25, max = 200 } = {}) {
   const n = (x, fallback) => {
     const i = parseInt(Array.isArray(x) ? x[0] : x, 10);
     return Number.isFinite(i) && i >= 0 ? i : fallback;
