@@ -200,6 +200,8 @@ export default function Ingest() {
   const [reasonFor, setReasonFor] = useState(null);   // the record whose NON-COMPLIANT reason is being asked for
   const [editing, setEditing] = useState(null);   // { id, k }: the one cell being edited in the table
   const [picked, setPicked] = useState(() => new Set());   // rows ticked for batch delete
+  const [allMatching, setAllMatching] = useState(false);   // "Select all N": every request matching the filters, on every page
+  const [deletingAll, setDeletingAll] = useState(false);
   const q = useDebounced(filt.q, 300);
 
   useEffect(() => {
@@ -211,7 +213,7 @@ export default function Ingest() {
     const p = new URLSearchParams({ limit: size, offset });
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
     if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
-    if (!quiet) setPicked(new Set());
+    if (!quiet) { setPicked(new Set()); setAllMatching(false); }
     try { setData(await get(`/api/ingest?${p}`)); } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
   }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset, size, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
   const load = useCallback(() => fetchPage(false), [fetchPage]);
@@ -303,7 +305,7 @@ export default function Ingest() {
   const keysRef = useRef(null);
   const pasteRef = useRef(null);
   const clearPicksRef = useRef(() => {});
-  const clearPicks = () => { setPicked(new Set()); lastPick.current = null; };
+  const clearPicks = () => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; };
   clearPicksRef.current = clearPicks;
   const chosen = rows.filter((r) => picked.has(r.id));
 
@@ -591,6 +593,7 @@ export default function Ingest() {
   const allOn = rows.length > 0 && rows.every((r) => picked.has(r.id));
   const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const removePicked = async () => {
+    if (allMatching) { setDeletingAll(true); return; }
     const ids = rows.filter((r) => picked.has(r.id) && mayDelete(r)).map((r) => r.id);
     const skipped = picked.size - ids.length;
     if (!ids.length) { toast(isAdminUser ? 'Nothing to delete' : 'You can delete only the requests you created, and not ones with a CM decision', 'err'); return; }
@@ -606,7 +609,7 @@ export default function Ingest() {
     } catch (e) { toast(e.message, 'err'); }
   };
 
-  const cutChosen = async () => { if (!canDelete) { toast('You do not have permission to delete ingest records', 'err'); return; } if (await copyChosen()) await removePicked(); };
+  const cutChosen = async () => { if (allMatching) { toast('Cut works on the rows of one page. Use Delete for all matching requests', 'err'); return; } if (!canDelete) { toast('You do not have permission to delete ingest records', 'err'); return; } if (await copyChosen()) await removePicked(); };
   const deletePicked = () => { if (!canDelete) { toast('You do not have permission to delete ingest records', 'err'); return; } removePicked(); };
 
   // keyboard shortcuts, the same as the Workload Tracker's table (not while typing in a box, with a dialog open, or while a cell is being edited)
@@ -625,7 +628,7 @@ export default function Ingest() {
       if (!e.ctrlKey && !e.metaKey && key === 'escape') { setCellSel(null); return; }
     }
     if (e.ctrlKey || e.metaKey) {
-      if (key === 'a') { e.preventDefault(); setPicked(new Set(rows.map((r) => r.id))); setCellSel(null); }
+      if (key === 'a') { e.preventDefault(); if (rows.length && rows.every((r) => picked.has(r.id)) && total > rows.length) setAllMatching(true); else setPicked(new Set(rows.map((r) => r.id))); setCellSel(null); }   // again: every matching request, on every page
       else if (key === 'c') { if (picked.size && !(window.getSelection && String(window.getSelection()))) { e.preventDefault(); copyChosen(); } }
       else if (key === 'x') { if (picked.size) { e.preventDefault(); cutChosen(); } }
       else if (key === 'z') { if (canWrite) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); } }
@@ -681,7 +684,7 @@ export default function Ingest() {
     const up = () => { drag.current = null; if (cellDrag.current && cellDrag.current.moved) setTimeout(() => { suppress.current = false; }, 150); cellDrag.current = null; };
     const down = (e) => {   // a click outside the table (and its bar, menus and dialogs) drops the selection
       const t = e.target;
-      if (t && t.closest && !t.closest('.wl-card .table-wrap, .xl-menu, .modal-backdrop, .tpop, #del-sel')) { clearPicksRef.current(); setCellSel(null); }
+      if (t && t.closest && !t.closest('.wl-card .table-wrap, .xl-menu, .modal-backdrop, .tpop, #del-sel, .sel-banner')) { clearPicksRef.current(); setCellSel(null); }
     };
     window.addEventListener('keydown', key); window.addEventListener('paste', paste); window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up); window.addEventListener('mousedown', down);
@@ -714,13 +717,20 @@ export default function Ingest() {
             {canWrite ? <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
             {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import from Excel" title={importing ? 'Importing…' : 'Import from Excel'} disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}><UploadIcon /></button> : null}
             <button type="button" className="btn ibtn" id="export-btn" aria-label="Export to Excel" title="Export to Excel" onClick={exportXlsx}><DownloadIcon /></button>
-            {canDelete && picked.size ? <button type="button" className="btn ibtn danger" id="del-sel" onClick={removePicked} aria-label="Delete selected records" title={`Delete Selected (${picked.size})`}><TrashIcon /></button> : null}
+            {canDelete && (picked.size || allMatching) ? <button type="button" className="btn ibtn danger" id="del-sel" onClick={removePicked} aria-label="Delete selected records" title={`Delete Selected (${allMatching ? total : picked.size})`}><TrashIcon /></button> : null}
             <button type="button" className="btn ibtn" id="full-btn" aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen' : 'Full screen'} onClick={() => setFull((f) => !f)}>
               {full ? <ExitFullscreenIcon /> : <FullscreenIcon />}
             </button>
             {canWrite ? <ToolMenu items={[{ id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft }]} /> : null}
           </div>
         </div>
+        {canDelete && !draft && ((allOn && total > rows.length) || allMatching) ? (
+          <div className="sel-banner" role="status">
+            {allMatching
+              ? <>All <strong>{total}</strong> request{total === 1 ? '' : 's'} matching these filters are selected. <button type="button" className="linklike" onClick={clearPicks}>Clear selection</button></>
+              : <>All <strong>{rows.length}</strong> on this page are selected. <button type="button" className="linklike" id="select-all-matching" onClick={() => setAllMatching(true)}>Select all {total} matching</button></>}
+          </div>
+        ) : null}
         <div className={`table-wrap${narrow ? "" : " wl-fit"}`} id="tbl">
           {!data ? <Empty>Loading…</Empty>
             : data.error ? <Empty>{data.error}</Empty>
@@ -812,6 +822,17 @@ export default function Ingest() {
       {reasonFor ? (
         <ReasonModal r={reasonFor} onClose={() => setReasonFor(null)}
           onSave={async (reason) => { await decide(reasonFor, 'NON-COMPLIANT', reason); setReasonFor(null); toast('Saved'); }} />
+      ) : null}
+
+      {deletingAll ? (
+        <DeleteAllIngest
+          total={total}
+          scope={[filt.status && `Status (CM): ${filt.status}`, filt.program && `Program: ${filt.program}`, filt.platform && `Platform: ${filt.platform}`, filt.approval && `Approval: ${filt.approval}`,
+            (filt.from || filt.to) && `Dates: ${filt.from || '…'} → ${filt.to || '…'}`, q && `Search: “${q}”`].filter(Boolean)}
+          admin={isAdminUser}
+          filters={{ status: filt.status || undefined, program: filt.program || undefined, platform: filt.platform || undefined, approval: filt.approval || undefined, from: filt.from || undefined, to: filt.to || undefined, q: q || undefined }}
+          onClose={() => setDeletingAll(false)}
+          onDone={(out) => { setDeletingAll(false); clearPicks(); toast(`${out.deleted} deleted${out.kept ? `, ${out.kept} kept` : ''}`, out.deleted ? undefined : 'err'); setOffset(0); load(); }} />
       ) : null}
 
       {detail ? (
@@ -935,6 +956,27 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
 }
 
 const KV = ({ k, children }) => <><dt>{k}</dt><dd>{children || <span className="dim">—</span>}</dd></>;
+
+function DeleteAllIngest({ total, scope, filters, admin, onClose, onDone }) {
+  const toast = useToast();
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
+    try { onDone(await post('/api/ingest/delete', { all: true, filters })); } catch (e) { toast(e.message, 'err'); setBusy(false); }
+  };
+  return (
+    <Modal title="Delete all selected requests" onClose={() => { if (!busy) onClose(); }}
+      footer={(<><span className="grow" /><button type="button" className="btn" disabled={busy} onClick={onClose}>Cancel</button>
+        <button type="button" className="btn danger" disabled={busy || typed.trim() !== 'DELETE' || !total} onClick={go}>Delete {total} request{total === 1 ? '' : 's'}</button></>)}>
+      <p>This permanently deletes up to <strong>{total}</strong> Ingest request{total === 1 ? '' : 's'}: every one that matches what you are looking at now{scope.length ? ':' : ' (no filters, so the whole list).'}</p>
+      {scope.length ? <ul className="plug-warn" style={{ color: 'inherit' }}>{scope.map((x) => <li key={x}>{x}</li>)}</ul> : null}
+      <p>{admin ? 'As an Admin you can delete all of them, including ones marked DONE or NON-COMPLIANT in CM.' : 'Requests you did not create, and any with a CM decision, are kept.'} It cannot be undone — consider an Export first.</p>
+      <label className="f"><span>Type <strong>DELETE</strong> to confirm</span>
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" onKeyDown={(e) => { if (e.key === 'Enter' && typed.trim() === 'DELETE' && !busy) go(); }} /></label>
+    </Modal>
+  );
+}
 
 function IngestDetail({ r, canWrite, canDelete, canApprove, approveReady, canUnapprove, onClose, onEdit, onDelete, onApprove, onUnapprove }) {
   return (

@@ -24,6 +24,7 @@ const ACTION_LABELS = {
   'workload.plugs_export': 'Exported Plug List',
   'ingest.update': 'Updated Ingest Record',
   'ingest.delete': 'Deleted Ingest Record',
+  'ingest.delete_all': 'Deleted Ingest Records (Select all)',
   'ingest.edit_blocked': 'Ingest Edit Refused (CM Locked)',
   'ingest.delete_blocked': 'Ingest Delete Refused',
   'ingest.send_for_approval': 'Submitted For Approval',
@@ -395,6 +396,9 @@ function formatDetails(row) {
 
     case 'ingest.delete':
       return `Deleted ingest record${d.program ? ` (${d.program})` : ''}${d.cm_status ? ` — CM status was ${d.cm_status}` : ''}${d.batch ? ' (batch delete)' : ''}`;
+
+    case 'ingest.delete_all':
+      return `Deleted ${d.deleted ?? ''} ingest record(s) with Select all${d.kept ? ` (${d.kept} kept: CM decided or not theirs)` : ''}${d.filters && Object.keys(d.filters).length ? ` — filters: ${Object.entries(d.filters).map(([k, x]) => `${k}=${x}`).join(', ')}` : ''}`;
 
     case 'ingest.edit_blocked':
       return `Edit refused: ingest record${d.program ? ` (${d.program})` : ''} is ${d.cm_status || 'locked'} in CM${d.field ? ` (tried to change ${d.field})` : ''}`;

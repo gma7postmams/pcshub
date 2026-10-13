@@ -601,7 +601,23 @@ router.delete('/:id', mayDeleteSome, asyncH(async (req, res) => {
 
 // Batch delete: removes every selected record that may be deleted and reports the ones that were kept (same rules as above).
 router.post('/delete', mayDeleteSome, asyncH(async (req, res) => {
-  const raw = req.body && req.body.ids;
+  const body = req.body || {};
+  if (body.all) {
+    // "select all" across every page: every request matching the same filters as the list, minus the ones this person may not delete
+    const f = {};
+    ['status', 'program', 'platform', 'from', 'to', 'approval', 'q'].forEach((k) => { if (body.filters && body.filters[k]) f[k] = String(body.filters[k]).slice(0, 200); });
+    const { params, whereSql } = ingestFilter(f);
+    const out = await db.tx(async (c) => {
+      const { rows } = await c.query(
+        `SELECT i.id, i.program, i.cm_status, i.created_by FROM ingest_records i LEFT JOIN users ru ON ru.id=i.requested_by_user_id ${whereSql} ORDER BY i.id FOR UPDATE OF i`, params);
+      const ok = rows.filter((r) => !deleteBlock(r, req.user));
+      if (ok.length) await c.query('DELETE FROM ingest_records WHERE id = ANY($1::int[])', [ok.map((r) => r.id)]);
+      await audit(req, 'ingest.delete_all', 'ingest_record', null, { deleted: ok.length, kept: rows.length - ok.length, filters: f }, c);
+      return { deleted: ok.length, kept: rows.length - ok.length, missing: 0 };
+    });
+    return res.json({ ok: true, ...out });
+  }
+  const raw = body.ids;
   if (!Array.isArray(raw) || !raw.length) throw new HttpError(400, 'Choose at least one record');
   if (raw.length > 500) throw new HttpError(400, 'Delete at most 500 records at a time');
   const ids = [...new Set(raw.map((x) => v.id(x)))];
