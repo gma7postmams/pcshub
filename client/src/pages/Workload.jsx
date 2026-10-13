@@ -411,7 +411,8 @@ export default function Workload() {
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState(null);   // Table mode: the empty row Add Row put at the top, not saved yet
   const [editing, setEditing] = useState(null);
-  const peers = useCellPresence('workload', editing && editing.id !== 'draft' ? `${editing.id}:${editing.k}` : null);   // cells other people have open   // { id, k } while one table cell is open for editing
+  const curCell = useRef(null);   // the cell I have open or selected, kept up to date every render (announced to the others by useCellPresence)
+  const peers = useCellPresence('workload', curCell);   // cells other people have open or selected   // { id, k } while one table cell is open for editing
   const [addingColumn, setAddingColumn] = useState(false);
   const [managingLocks, setManagingLocks] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -1636,7 +1637,14 @@ export default function Workload() {
   };
 
   const isAll = tab === 'ALL';
-  const cols = meta.views[viewKey];   // raw column list (Table mode's tableCols below merges the two Breakdate / Time columns; Excel mode does the same)
+  const cols = meta.views[viewKey];
+  { // which cell am I on? (the open cell, else the first cell of a picked block)
+    const sel = !editing && cellSel && !picked.size ? { r: Math.min(cellSel.r0, cellSel.r1), c: Math.min(cellSel.c0, cellSel.c1) } : null;
+    const selRow = sel ? pageRows[sel.r] : null;
+    const selCol = sel ? cols.filter((k) => k !== 'breakdate_vedit')[sel.c] : null;
+    curCell.current = editing && editing.id !== 'draft' ? { key: `${editing.id}:${editing.k}`, kind: 'edit' } : selRow && selCol ? { key: `${selRow.id}:${selCol}`, kind: 'select' } : null;
+  }
+  const describePeer = (key) => { const [id, k] = key.split(':'); const r = pageRows.find((x) => String(x.id) === id); const f = meta.fields[k]; return `${f ? f.label : k}${r ? ` · ${r.plug_id || `row ${id}`}` : ''}`; };   // raw column list (Table mode's tableCols below merges the two Breakdate / Time columns; Excel mode does the same)
   // Table mode only: Breakdate/Time (VGFX) and (VEDIT) merge into ONE column/cell, holding one or two pills —
   // 'breakdate_vgfx' is kept as that column's position; breakdateCell() below decides what actually shows in it.
   const tableCols = cols.filter((k) => k !== 'breakdate_vedit');
@@ -1713,7 +1721,7 @@ export default function Workload() {
     const el = cellInner(r, k);
     const p = peers[`${r.id}:${k}`];
     if (!p) return el;
-    return cloneElement(el, { className: [el.props.className, 'peer-on'].filter(Boolean).join(' '), 'data-peer': p.name, style: { ...(el.props.style || {}), '--peer': p.hue } });
+    return cloneElement(el, { className: [el.props.className, 'peer-on'].filter(Boolean).join(' '), 'data-peer': p.name, 'data-peer-uid': p.uid, style: { ...(el.props.style || {}), '--peer': p.hue } });
   };
 
   // The merged Breakdate/Time column/cell: one or two pills (VGFX purple, VEDIT orange) depending on which
@@ -1798,7 +1806,7 @@ export default function Workload() {
             </FiltersMenu>
             <DateRange from={filt.from} to={filt.to} onChange={setRange} />
             <span className="grow" />
-            <div className="wl-presence"><PresenceAvatars path="/workload" /></div>
+            <div className="wl-presence"><PresenceAvatars path="/workload" peers={peers} describe={describePeer} /></div>
             <div className="wl-iconbar">
               {canWrite ? <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
               {canWrite && isGrid ? <button type="button" className="btn ibtn" id="add-row" aria-label="Add row" title="Add row" onClick={addRow}><PlusIcon /></button> : null}
@@ -1888,7 +1896,7 @@ export default function Workload() {
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
           <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
           <DateRange from={filt.from} to={filt.to} onChange={setRange} />
-          <div className="wl-presence"><PresenceAvatars path="/workload" /></div>
+          <div className="wl-presence"><PresenceAvatars path="/workload" peers={peers} describe={describePeer} /></div>
         </div>
 
           </>

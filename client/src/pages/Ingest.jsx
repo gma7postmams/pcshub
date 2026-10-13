@@ -200,7 +200,8 @@ export default function Ingest() {
   const [detail, setDetail] = useState(null);
   const [reasonFor, setReasonFor] = useState(null);   // the record whose NON-COMPLIANT reason is being asked for
   const [editing, setEditing] = useState(null);   // { id, k }: the one cell being edited in the table
-  const peers = useCellPresence('ingest', editing && editing.id !== 'draft' ? `${editing.id}:${editing.k}` : null);   // cells other people have open
+  const curCell = useRef(null);   // the cell I have open or selected (announced to the others by useCellPresence)
+  const peers = useCellPresence('ingest', curCell);   // cells other people have open or selected
   const [picked, setPicked] = useState(() => new Set());   // rows ticked for batch delete
   const [allMatching, setAllMatching] = useState(false);   // "Select all N": every request matching the filters, on every page
   const [deletingAll, setDeletingAll] = useState(false);
@@ -311,6 +312,10 @@ export default function Ingest() {
   clearPicksRef.current = clearPicks;
   const chosen = rows.filter((r) => picked.has(r.id));
 
+  const describePeer = (key) => { const [id, k] = key.split(':'); const r = rows.find((x) => String(x.id) === id); return `${(LBL && LBL[k]) || k}${r ? ` · ${r.program}` : ''}`; };
+  { const n = !editing && cellSel ? { r: Math.min(cellSel.r0, cellSel.r1), c: Math.min(cellSel.c0, cellSel.c1) } : null;
+    const selRow = n ? rows[n.r] : null;
+    curCell.current = editing && editing.id !== 'draft' ? { key: `${editing.id}:${editing.k}`, kind: 'edit' } : selRow && COLS[n.c] ? { key: `${selRow.id}:${COLS[n.c]}`, kind: 'select' } : null; }
   // May this person change this cell? (a CM-decided record is locked unless you are CM; Destination Folder is PCS / OCS only)
   const may = (r, k) => { const def = CELLS[k]; if (!def) return false; return def.cm ? (canCm && isApprovedRow(r)) : canWrite && (!r.cm_status || canCm) && (!def.approve || canApprove); };
 
@@ -372,7 +377,7 @@ export default function Ingest() {
   const cell = (r, k, children, props0 = {}) => {
     const p = peers[`${r.id}:${k}`];
     const props = { 'data-k': k, 'data-label': LBL[k], ...props0 };
-    if (p) { props.className = [props.className, 'peer-on'].filter(Boolean).join(' '); props['data-peer'] = p.name; props.style = { ...(props.style || {}), '--peer': p.hue }; }
+    if (p) { props.className = [props.className, 'peer-on'].filter(Boolean).join(' '); props['data-peer'] = p.name; props['data-peer-uid'] = p.uid; props.style = { ...(props.style || {}), '--peer': p.hue }; }
     const ci = COLS.indexOf(k);
     if (r.__i !== undefined && ci >= 0) {
       props['data-r'] = r.__i; props['data-c'] = ci;
@@ -716,7 +721,7 @@ export default function Ingest() {
           ) : null}
           </div>
           <div className="wl-tabactions">
-            <div className="wl-presence"><PresenceAvatars path="/ingest" /></div>
+            <div className="wl-presence"><PresenceAvatars path="/ingest" peers={peers} describe={describePeer} /></div>
             {canWrite ? <button type="button" className="btn ibtn primary" id="new-btn" aria-label="New Ingest" title="New Ingest" onClick={() => setForm({})}><PlusIcon /></button> : null}
             {canWrite ? <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
             {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import from Excel" title={importing ? 'Importing…' : 'Import from Excel'} disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}><UploadIcon /></button> : null}

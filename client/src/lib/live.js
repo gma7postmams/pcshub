@@ -90,20 +90,21 @@ const CELL_HUES = ['#4f8cff', '#a78bfa', '#34c38f', '#f0883e', '#e5568f', '#26b5
 const cellHue = (name) => CELL_HUES[[...String(name)].reduce((a, c) => a + c.charCodeAt(0), 0) % CELL_HUES.length];
 
 /**
- * Cells other people are editing right now.
- *   topic  'workload' | 'ingest'
- *   myKey  the cell I have open ("<row id>:<column>") or null. It is announced while open (refreshed every 10 s) and withdrawn when I leave it.
- * Returns { "<row id>:<column>": { name, hue } } for everybody else's open cells; each fades by itself after 25 s without a refresh.
+ * Cells other people have open or selected right now.
+ *   topic   'workload' | 'ingest'
+ *   curRef  a ref holding my current cell, { key: "<row id>:<column>", kind: 'edit' | 'select' }, or null. The page keeps it up to date on every render.
+ * My cell is announced when it changes (checked every 0.4 s) and refreshed every 10 s; it is withdrawn when I leave it.
+ * Returns { "<row id>:<column>": { name, uid, kind, hue } } for everybody else's cells; each fades by itself after 25 s without a refresh.
  */
-export function useCellPresence(topic, myKey) {
+export function useCellPresence(topic, curRef) {
   const [peers, setPeers] = useState({});
   useEffect(() => {
     const off = onLive((m) => {
       if (!m || m.t !== 'cell' || m.topic !== topic || m.by === TAB) return;
       setPeers((cur) => {
         const n = { ...cur };
-        Object.keys(n).forEach((k) => { if (n[k].by === m.by) delete n[k]; });   // a person has one open cell at a time
-        if (m.on) n[m.key] = { name: m.name, hue: cellHue(m.name), by: m.by, at: Date.now() };
+        Object.keys(n).forEach((k) => { if (n[k].by === m.by) delete n[k]; });   // a person has one cell at a time
+        if (m.on) n[m.key] = { name: m.name, uid: m.uid, kind: m.kind, hue: cellHue(m.name), by: m.by, at: Date.now() };
         return n;
       });
     });
@@ -115,11 +116,18 @@ export function useCellPresence(topic, myKey) {
     return () => { off(); clearInterval(sweep); };
   }, [topic]);
   useEffect(() => {
-    if (!myKey) return undefined;
-    const send = (on) => { post('/api/live/focus', { topic, key: myKey, on }, { quiet: true }).catch(() => {}); };
-    send(true);
-    const t = setInterval(() => send(true), 10000);
-    return () => { clearInterval(t); send(false); };
-  }, [topic, myKey]);
+    let last = null; let lastSent = 0;
+    const send = (c, on) => { post('/api/live/focus', { topic, key: c.key, kind: c.kind, on }, { quiet: true }).catch(() => {}); };
+    const tick = () => {
+      const c = curRef.current || null;
+      const same = c && last && c.key === last.key && c.kind === last.kind;
+      if (same) { if (Date.now() - lastSent > 10000) { send(c, true); lastSent = Date.now(); } return; }
+      if (last && !c) send(last, false);
+      if (c) { send(c, true); lastSent = Date.now(); }
+      last = c;
+    };
+    const t = setInterval(tick, 400);
+    return () => { clearInterval(t); if (last) send(last, false); };
+  }, [topic, curRef]);
   return peers;
 }

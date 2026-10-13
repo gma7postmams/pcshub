@@ -50,7 +50,7 @@ router.post('/focus', (req, res) => {
   const key = String(b.key || '').slice(0, 60);
   if (!key) return res.status(400).json({ error: 'Missing cell' });
   const name = String(req.user.full_name || req.user.username || 'Someone').slice(0, 60);
-  bus.emit('cell', { topic, key, on: b.on !== false, name, by: String(req.get('x-tab') || '').slice(0, 40) || null });
+  bus.emit('cell', { topic, key, on: b.on !== false, kind: b.kind === 'select' ? 'select' : 'edit', uid: req.user.id, name, by: String(req.get('x-tab') || '').slice(0, 40) || null });
   res.json({ ok: true });
 });
 
@@ -68,7 +68,7 @@ router.get('/stream', (req, res) => {
   const send = (m) => { if (!closed) res.write(`data: ${JSON.stringify(m)}\n\n`); };
   const onChange = (m) => { if (canPage(req.user, TOPIC_PAGE[m.t])) send(m); };
   bus.on('change', onChange);
-  const onCell = (m) => { if (canPage(req.user, TOPIC_PAGE[m.topic])) send({ t: 'cell', topic: m.topic, key: m.key, on: m.on, name: m.name, by: m.by }); };
+  const onCell = (m) => { if (canPage(req.user, TOPIC_PAGE[m.topic])) send({ t: 'cell', topic: m.topic, key: m.key, on: m.on, kind: m.kind, uid: m.uid, name: m.name, by: m.by }); };
   bus.on('cell', onCell);
   const onNotif = (m) => { if (req.user && m.ids.includes(req.user.id)) send({ t: 'notif' }); };
   bus.on('notif', onNotif);

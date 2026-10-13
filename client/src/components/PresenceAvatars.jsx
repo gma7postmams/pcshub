@@ -10,8 +10,23 @@ const HUES = ['#4f8cff', '#a78bfa', '#34c38f', '#f0883e', '#e5568f', '#26b5ad', 
 const hueFor = (name) => HUES[[...String(name)].reduce((a, c) => a + c.charCodeAt(0), 0) % HUES.length];
 const MAX_SHOWN = 6;
 
-export default function PresenceAvatars({ path }) {
+export default function PresenceAvatars({ path, peers, describe }) {
   const [users, setUsers] = useState([]);
+  const [openId, setOpenId] = useState(null);   // the avatar whose "where is she" card is open
+  useEffect(() => {
+    if (openId === null) return undefined;
+    const close = () => setOpenId(null);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [openId]);
+  const where = (u) => (peers ? Object.entries(peers).find(([, p]) => p.uid === u.id) : null);
+  const locate = (u) => {
+    const td = document.querySelector(`td[data-peer-uid="${u.id}"]`);
+    if (!td) return;
+    td.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+    td.classList.add('peer-flash');
+    setTimeout(() => td.classList.remove('peer-flash'), 1800);
+  };
   useEffect(() => {
     let live = true;
     let busy = false;   // never stack requests if one is slow
@@ -53,8 +68,15 @@ export default function PresenceAvatars({ path }) {
   return (
     <div className="presence" role="list" aria-label="People on this page right now">
       {shown.map((u) => (
-        <span key={u.id} role="listitem" className={`pa${u.you ? ' you' : ''}`} style={{ background: hueFor(u.name) }} data-tip={nameOf(u)} aria-label={nameOf(u)}>
+        <span key={u.id} role="listitem" className={`pa${u.you ? ' you' : ''}${peers && !u.you ? ' clickable' : ''}${openId === u.id ? ' open' : ''}`} style={{ background: hueFor(u.name) }} data-tip={openId === u.id ? undefined : nameOf(u)} aria-label={nameOf(u)}
+          onClick={peers && !u.you ? (e) => { e.stopPropagation(); setOpenId((cur) => (cur === u.id ? null : u.id)); } : undefined}>
           {initials(u.name).slice(0, 2)}
+          {openId === u.id ? (() => { const w = where(u); return (
+            <span className="pa-card" onClick={(e) => e.stopPropagation()}>
+              <strong>{u.name}</strong>
+              {w ? <span>{w[1].kind === 'select' ? 'Selected' : 'Editing'}: {describe ? describe(w[0]) : w[0]}</span> : <span className="dim">Not in a cell right now</span>}
+              {w ? <button type="button" className="btn sm" onClick={() => { locate(u); setOpenId(null); }}>Go to cell</button> : null}
+            </span>); })() : null}
         </span>
       ))}
       {rest.length ? <span role="listitem" className="pa more" data-tip={rest.map(nameOf).join(', ')} aria-label={rest.map(nameOf).join(', ')}>+{rest.length}</span> : null}
