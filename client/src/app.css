@@ -329,7 +329,7 @@ table.t td.num, table.t th.num { text-align: right; font-variant-numeric: tabula
 
 /* ---------- Toast ---------- */
 #toasts { position: fixed; bottom: 18px; right: 18px; z-index: 600; display: grid; gap: 8px; max-width: calc(100vw - 36px); }
-.toast { padding: 11px 15px; border-radius: 9px; background: var(--surface-3); border: 1px solid var(--border-2); box-shadow: var(--shadow); font-weight: 500; animation: fade .15s ease; max-width: 420px; }
+.toast { display: flex; align-items: flex-start; gap: 10px; padding: 11px 15px; border-radius: 9px; background: var(--surface-3); border: 1px solid var(--border-2); box-shadow: var(--shadow); font-weight: 500; animation: fade .15s ease; max-width: 420px; }
 .toast.ok { border-color: color-mix(in srgb, var(--green) 55%, transparent); }
 .toast.err { border-color: color-mix(in srgb, var(--red) 60%, transparent); background: color-mix(in srgb, var(--red) 14%, var(--surface-3)); }
 
@@ -1157,3 +1157,8 @@ td.peer-flash { animation: peer-flash 1.8s ease-out; }
 .maint-tag { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; color: var(--text-2); font-size: 13.5px; }
 .maint-tag .maint-badge { display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 700; font-size: 12.5px; letter-spacing: .02em; color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); }
 .auth-card #admin-signin { width: 100%; }
+
+/* A coloured dot in front of every prompt at the bottom right: green = done, red = error, grey = information */
+.toast-dot { flex: none; width: 9px; height: 9px; margin-top: 6px; border-radius: 50%; background: var(--gray); }
+.toast.ok .toast-dot { background: var(--green); }
+.toast.err .toast-dot { background: var(--red); }

@@ -90,7 +90,7 @@ export function ToastProvider({ children }) {
   return (
     <ToastCtx.Provider value={toast}>
       {children}
-      <div id="toasts">{items.map((t) => <div key={t.id} className={`toast ${t.type}`}>{t.msg}</div>)}</div>
+      <div id="toasts">{items.map((t) => <div key={t.id} className={`toast ${t.type}`}><span className="toast-dot" aria-hidden="true" />{t.msg}</div>)}</div>
     </ToastCtx.Provider>
   );
 }
