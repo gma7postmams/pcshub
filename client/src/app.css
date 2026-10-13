@@ -1145,3 +1145,7 @@ button.tag { padding: 1px 9px; cursor: pointer; }
 /* A cell somebody else has open: outlined in their colour (the same colour as their avatar at the top of the page) */
 td.peer-on { box-shadow: inset 0 0 0 2px var(--peer, #4f8cff); }
 td.editing { box-shadow: inset 0 0 0 2px var(--accent, #4f7cff); }
+
+/* Ingest: the Approve button is green so it stands apart from the blue primary buttons */
+.btn.approve { background: var(--green); border-color: var(--green); color: #fff; }
+.btn.approve:hover:not(:disabled) { filter: brightness(1.08); }

@@ -995,7 +995,7 @@ function IngestDetail({ r, canWrite, canDelete, canApprove, approveReady, canUna
           <button type="button" className="btn" onClick={onClose}>Close</button>
           {canUnapprove ? <button type="button" className="btn" id="unapprove" onClick={onUnapprove}>Undo approval</button> : null}
           {canApprove ? (
-            <button type="button" className="btn primary" id="approve" disabled={!approveReady} onClick={onApprove}
+            <button type="button" className="btn approve" id="approve" disabled={!approveReady} onClick={onApprove}
               title={approveReady ? 'Approve this ingest — you will be recorded as the approver' : 'Fill in the Destination Folder first'}>Approve</button>
           ) : null}
           {canWrite ? <button type="button" className="btn primary" id="edit" onClick={onEdit}>Edit</button> : null}
