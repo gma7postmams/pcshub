@@ -6,9 +6,9 @@ import { useBranding, useSession } from '../context.jsx';
 import { onLive } from '../lib/live.js';
 import { BellIcon, MenuIcon } from './Icons.jsx';
 import { RoleBadge, useToast } from './ui.jsx';
-import { BookIcon, CheckCircleIcon, ChevronDownSmall, CloudIcon, DocIcon, GearIcon, HomeIcon, ListIcon } from './DashIcons.jsx';
+import { BookIcon, PulseIcon, CheckCircleIcon, ChevronDownSmall, CloudIcon, DocIcon, GearIcon, HomeIcon, ListIcon } from './DashIcons.jsx';
 
-const NAV_ICON = { '/dashboard': HomeIcon, '/ingest': CloudIcon, '/workload': ListIcon, '/plug-list': DocIcon, '/knowledge': BookIcon, '/admin': GearIcon };
+const NAV_ICON = { '/dashboard': HomeIcon, '/ingest': CloudIcon, '/workload': ListIcon, '/plug-list': DocIcon, '/knowledge': BookIcon, '/admin': GearIcon, '/activity-history': PulseIcon };
 
 export function BrandMark({ branding }) {
   return (
