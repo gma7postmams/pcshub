@@ -103,7 +103,7 @@ function EarlierPill({ people }) {
     <span className="dsh-earlier" tabIndex={0} aria-label={`Earlier today: ${people.map((p) => p.name).join(', ')}`}>
       Earlier today<b>{people.length}</b>
       <span className="dsh-earlier-pop" role="tooltip">
-        {people.map((p) => <span key={p.id}><i style={{ background: hueFor(p.name) }} />{p.name}<em>{ago(p.lastActiveAt)}</em></span>)}
+        {people.map((p) => <span key={p.id}><i style={{ background: hueFor(p.name) }} />{p.name}<em title="Last active">{ago(p.lastActiveAt)}</em></span>)}
       </span>
     </span>
   );

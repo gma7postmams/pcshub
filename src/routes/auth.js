@@ -216,7 +216,7 @@ router.post('/reauth-code', requireAuth, asyncH(async (req, res) => {
 
 router.post('/logout', asyncH(async (req, res) => {
   if (req.user) await audit(req, 'auth.logout', 'user', req.user.id);
-  if (req.user) await db.query('DELETE FROM user_presence WHERE user_id = $1', [req.user.id]).then(() => require('./presence').presenceChanged()).catch(() => { /* presence is best-effort */ });   // signed out = no longer "active"
+  if (req.user) await db.query('UPDATE user_presence SET left_at = now(), last_active_at = now() WHERE user_id = $1', [req.user.id]).then(() => require('./presence').presenceChanged()).catch(() => { /* presence is best-effort */ });   // signed out = no longer "active"
   req.session.destroy(() => {
     clearSessionCookie(res);
     res.json({ ok: true });
