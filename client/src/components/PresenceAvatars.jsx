@@ -12,14 +12,8 @@ const MAX_SHOWN = 6;
 
 export default function PresenceAvatars({ path, peers, describe }) {
   const [users, setUsers] = useState([]);
-  const [openId, setOpenId] = useState(null);   // the avatar whose "where is she" card is open
-  useEffect(() => {
-    if (openId === null) return undefined;
-    const close = () => setOpenId(null);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
-  }, [openId]);
   const where = (u) => (peers ? Object.entries(peers).find(([, p]) => p.uid === u.id) : null);
+  // Like Google Sheets: click a collaborator and the sheet jumps to the cell they are on (and flashes it)
   const locate = (u) => {
     const td = document.querySelector(`td[data-peer-uid="${u.id}"]`);
     if (!td) return;
@@ -68,15 +62,9 @@ export default function PresenceAvatars({ path, peers, describe }) {
   return (
     <div className="presence" role="list" aria-label="People on this page right now">
       {shown.map((u) => (
-        <span key={u.id} role="listitem" className={`pa${u.you ? ' you' : ''}${peers && !u.you ? ' clickable' : ''}${openId === u.id ? ' open' : ''}`} style={{ background: hueFor(u.name) }} data-tip={openId === u.id ? undefined : nameOf(u)} aria-label={nameOf(u)}
-          onClick={peers && !u.you ? (e) => { e.stopPropagation(); setOpenId((cur) => (cur === u.id ? null : u.id)); } : undefined}>
+        <span key={u.id} role="listitem" className={`pa${u.you ? ' you' : ''}${peers && !u.you && where(u) ? ' clickable' : ''}`} style={{ background: hueFor(u.name) }} data-tip={`${nameOf(u)}${peers && !u.you && where(u) ? ` · ${where(u)[1].kind === 'select' ? 'selected' : 'editing'} a cell — click to jump` : ''}`} aria-label={nameOf(u)}
+          onClick={peers && !u.you ? () => locate(u) : undefined}>
           {initials(u.name).slice(0, 2)}
-          {openId === u.id ? (() => { const w = where(u); return (
-            <span className="pa-card" onClick={(e) => e.stopPropagation()}>
-              <strong>{u.name}</strong>
-              {w ? <span>{w[1].kind === 'select' ? 'Selected' : 'Editing'}: {describe ? describe(w[0]) : w[0]}</span> : <span className="dim">Not in a cell right now</span>}
-              {w ? <button type="button" className="btn sm" onClick={() => { locate(u); setOpenId(null); }}>Go to cell</button> : null}
-            </span>); })() : null}
         </span>
       ))}
       {rest.length ? <span role="listitem" className="pa more" data-tip={rest.map(nameOf).join(', ')} aria-label={rest.map(nameOf).join(', ')}>+{rest.length}</span> : null}
