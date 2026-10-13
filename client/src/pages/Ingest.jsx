@@ -7,7 +7,7 @@ import { PlusIcon, SearchIcon, DownloadIcon, UploadIcon, TrashIcon, FullscreenIc
 import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
 import { Chip, DateChip, DateRange, FilterSelect, FiltersMenu, Pager, PlatformCell, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
-import { useLive, useCellPresence } from '../lib/live.js';
+import { useLive, useCellPresence, rangeCells, peerStyle } from '../lib/live.js';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
 // Status (CM) is blank (Pending) until CM picks one of these
@@ -313,9 +313,6 @@ export default function Ingest() {
   const chosen = rows.filter((r) => picked.has(r.id));
 
   const describePeer = (key) => { const [id, k] = key.split(':'); const r = rows.find((x) => String(x.id) === id); return `${(LBL && LBL[k]) || k}${r ? ` · ${r.program}` : ''}`; };
-  { const n = !editing && cellSel ? { r: Math.min(cellSel.r0, cellSel.r1), c: Math.min(cellSel.c0, cellSel.c1) } : null;
-    const selRow = n ? rows[n.r] : null;
-    curCell.current = editing && editing.id !== 'draft' ? { key: `${editing.id}:${editing.k}`, kind: 'edit' } : selRow && COLS[n.c] ? { key: `${selRow.id}:${COLS[n.c]}`, kind: 'select' } : null; }
   // May this person change this cell? (a CM-decided record is locked unless you are CM; Destination Folder is PCS / OCS only)
   const may = (r, k) => { const def = CELLS[k]; if (!def) return false; return def.cm ? (canCm && isApprovedRow(r)) : canWrite && (!r.cm_status || canCm) && (!def.approve || canApprove); };
 
@@ -374,10 +371,13 @@ export default function Ingest() {
   // A cell in the table: editable in place when you may change it, otherwise plain (clicking it opens the details as before).
   const LBL = { program: 'PROG. NAME / PROJ. TITLE', platform: 'Platform', billable_party: 'Billable Party', episode_break_date_text: 'Episode / Breakdate', source: 'Source', materials_count: 'No. of Materials', requested_by: 'Requested By', destination_folder: 'Destination Folder', approved_by: 'Approved By', cm_status: 'Status (CM)', updated: 'Updated' };
   const normCells = () => (cellSel ? { r0: Math.min(cellSel.r0, cellSel.r1), r1: Math.max(cellSel.r0, cellSel.r1), c0: Math.min(cellSel.c0, cellSel.c1), c1: Math.max(cellSel.c0, cellSel.c1) } : null);
+  { const n = !editing && cellSel ? normCells() : null;
+    const cells = n ? rangeCells(rows, COLS, n.r0, n.r1, n.c0, n.c1) : [];
+    curCell.current = editing && editing.id !== 'draft' ? { cells: [`${editing.id}:${editing.k}|tblr`], kind: 'edit' } : cells.length ? { cells, kind: 'select' } : null; }
   const cell = (r, k, children, props0 = {}) => {
     const p = peers[`${r.id}:${k}`];
     const props = { 'data-k': k, 'data-label': LBL[k], ...props0 };
-    if (p) { props.className = [props.className, 'peer-on'].filter(Boolean).join(' '); props['data-peer'] = p.name; props['data-peer-uid'] = p.uid; props.style = { ...(props.style || {}), '--peer': p.hue }; }
+    if (p) { props.className = [props.className, 'peer-on'].filter(Boolean).join(' '); props['data-peer'] = p.name; props['data-peer-uid'] = p.first ? p.uid : undefined; props.style = { ...(props.style || {}), ...peerStyle(p) }; }
     const ci = COLS.indexOf(k);
     if (r.__i !== undefined && ci >= 0) {
       props['data-r'] = r.__i; props['data-c'] = ci;

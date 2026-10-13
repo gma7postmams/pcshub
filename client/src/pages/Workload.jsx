@@ -7,7 +7,7 @@ import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FlagIcon, FullscreenIcon,
 import { DateChip, DateRange, FilterSelect, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
-import { useLive, useCellPresence } from '../lib/live.js';
+import { useLive, useCellPresence, rangeCells, peerStyle } from '../lib/live.js';
 
 // Workload Tracker — ONE table. "Units Concerned" says which team(s) a plug is for; the tabs
 // (All / VGFX / VEDIT / Audio) are filters over it. Fields, per-tab columns and the Platform rules come
@@ -1638,11 +1638,11 @@ export default function Workload() {
 
   const isAll = tab === 'ALL';
   const cols = meta.views[viewKey];
-  { // which cell am I on? (the open cell, else the first cell of a picked block)
-    const sel = !editing && cellSel && !picked.size ? { r: Math.min(cellSel.r0, cellSel.r1), c: Math.min(cellSel.c0, cellSel.c1) } : null;
-    const selRow = sel ? pageRows[sel.r] : null;
-    const selCol = sel ? cols.filter((k) => k !== 'breakdate_vedit')[sel.c] : null;
-    curCell.current = editing && editing.id !== 'draft' ? { key: `${editing.id}:${editing.k}`, kind: 'edit' } : selRow && selCol ? { key: `${selRow.id}:${selCol}`, kind: 'select' } : null;
+  { // which cell(s) am I on? (the open cell, else the whole picked block)
+    const n = !editing && cellSel && !picked.size ? normCells() : null;
+    const tc = cols.filter((k) => k !== 'breakdate_vedit');
+    const cells = n ? rangeCells(pageRows, tc, n.r0, n.r1, n.c0, n.c1) : [];
+    curCell.current = editing && editing.id !== 'draft' ? { cells: [`${editing.id}:${editing.k}|tblr`], kind: 'edit' } : cells.length ? { cells, kind: 'select' } : null;
   }
   const describePeer = (key) => { const [id, k] = key.split(':'); const r = pageRows.find((x) => String(x.id) === id); const f = meta.fields[k]; return `${f ? f.label : k}${r ? ` · ${r.plug_id || `row ${id}`}` : ''}`; };   // raw column list (Table mode's tableCols below merges the two Breakdate / Time columns; Excel mode does the same)
   // Table mode only: Breakdate/Time (VGFX) and (VEDIT) merge into ONE column/cell, holding one or two pills —
@@ -1721,7 +1721,7 @@ export default function Workload() {
     const el = cellInner(r, k);
     const p = peers[`${r.id}:${k}`];
     if (!p) return el;
-    return cloneElement(el, { className: [el.props.className, 'peer-on'].filter(Boolean).join(' '), 'data-peer': p.name, 'data-peer-uid': p.uid, style: { ...(el.props.style || {}), '--peer': p.hue } });
+    return cloneElement(el, { className: [el.props.className, 'peer-on'].filter(Boolean).join(' '), 'data-peer': p.name, 'data-peer-uid': p.first ? p.uid : undefined, style: { ...(el.props.style || {}), ...peerStyle(p) } });
   };
 
   // The merged Breakdate/Time column/cell: one or two pills (VGFX purple, VEDIT orange) depending on which

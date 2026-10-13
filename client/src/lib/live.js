@@ -92,7 +92,7 @@ const cellHue = (name) => CELL_HUES[[...String(name)].reduce((a, c) => a + c.cha
 /**
  * Cells other people have open or selected right now.
  *   topic   'workload' | 'ingest'
- *   curRef  a ref holding my current cell, { key: "<row id>:<column>", kind: 'edit' | 'select' }, or null. The page keeps it up to date on every render.
+ *   curRef  a ref holding my current cell(s), { cells: ["<row id>:<column>|<outer edges>", ...], kind: 'edit' | 'select' }, or null (see rangeCells). The page keeps it up to date on every render.
  * My cell is announced when it changes (checked every 0.4 s) and refreshed every 10 s; it is withdrawn when I leave it.
  * Returns { "<row id>:<column>": { name, uid, kind, hue } } for everybody else's cells; each fades by itself after 25 s without a refresh.
  */
@@ -104,7 +104,7 @@ export function useCellPresence(topic, curRef) {
       setPeers((cur) => {
         const n = { ...cur };
         Object.keys(n).forEach((k) => { if (n[k].by === m.by) delete n[k]; });   // a person has one cell at a time
-        if (m.on) n[m.key] = { name: m.name, uid: m.uid, kind: m.kind, hue: cellHue(m.name), by: m.by, at: Date.now() };
+        if (m.on) (m.cells || [m.key]).forEach((c, i) => { const [key, edges = 'tblr'] = String(c).split('|'); n[key] = { name: m.name, uid: m.uid, kind: m.kind, hue: cellHue(m.name), by: m.by, at: Date.now(), edges, first: i === 0 }; });
         return n;
       });
     });
@@ -117,10 +117,11 @@ export function useCellPresence(topic, curRef) {
   }, [topic]);
   useEffect(() => {
     let last = null; let lastSent = 0;
-    const send = (c, on) => { post('/api/live/focus', { topic, key: c.key, kind: c.kind, on }, { quiet: true }).catch(() => {}); };
+    const send = (c, on) => { post('/api/live/focus', { topic, cells: c.cells, kind: c.kind, on }, { quiet: true }).catch(() => {}); };
+    const sig = (c) => (c ? `${c.kind}|${c.cells.length}|${c.cells[0]}|${c.cells[c.cells.length - 1]}` : '');
     const tick = () => {
       const c = curRef.current || null;
-      const same = c && last && c.key === last.key && c.kind === last.kind;
+      const same = c && last && sig(c) === sig(last);
       if (same) { if (Date.now() - lastSent > 10000) { send(c, true); lastSent = Date.now(); } return; }
       if (last && !c) send(last, false);
       if (c) { send(c, true); lastSent = Date.now(); }
@@ -130,4 +131,23 @@ export function useCellPresence(topic, curRef) {
     return () => { clearInterval(t); if (last) send(last, false); };
   }, [topic, curRef]);
   return peers;
+}
+
+/** The cells of a picked block as announced to the others: rows[r0..r1] x cols[c0..c1], each "<row id>:<column>|<outer edges>" so only the block's outline is drawn. */
+export function rangeCells(rows, cols, r0, r1, c0, c1) {
+  const out = [];
+  for (let r = r0; r <= r1 && out.length < 800; r++) {
+    const row = rows[r]; if (!row) continue;
+    for (let c = c0; c <= c1 && out.length < 800; c++) {
+      if (!cols[c]) continue;
+      out.push(`${row.id}:${cols[c]}|${r === r0 ? 't' : ''}${r === r1 ? 'b' : ''}${c === c0 ? 'l' : ''}${c === c1 ? 'r' : ''}`);
+    }
+  }
+  return out;
+}
+
+/** Inline style for a lit cell: the person's colour, and only the outer edges of their block get the line. */
+export function peerStyle(p) {
+  const e = p.edges == null ? 'tblr' : p.edges;
+  return { '--peer': p.hue, '--pt': e.includes('t') ? '2px' : '0px', '--pb': e.includes('b') ? '2px' : '0px', '--pl': e.includes('l') ? '2px' : '0px', '--pr': e.includes('r') ? '2px' : '0px' };
 }
