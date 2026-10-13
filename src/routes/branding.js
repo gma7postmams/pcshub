@@ -13,7 +13,7 @@ router.get('/', asyncH(async (req, res) => {
   const s = Object.fromEntries(rows.map((r) => [r.key, r.value]));
   res.set('Cache-Control', 'no-cache');
   res.json({
-    app_name: s.app_name || 'Promotional Content Hub',
+    app_name: s.app_name || 'PULSE',
     tagline: s.tagline || '',
     theme: THEME_KEYS.includes(s.theme) ? s.theme : 'midnight',
     accent_color: s.accent_color || '', // optional override of the theme accent

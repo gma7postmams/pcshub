@@ -8,7 +8,7 @@ async function appName() {
   if (!n) {
     try { const r = await require('./db').query(`SELECT value FROM app_settings WHERE key='app_name'`); n = r.rows[0] && r.rows[0].value; } catch (e) { /* fall through */ }
   }
-  return n || 'Promotional Content Hub';
+  return n || 'PULSE';
 }
 
 /** Email the new temporary password to `user` ({ full_name, username, email }), laid out exactly like the sign-in code email. Throws if it cannot be sent. */

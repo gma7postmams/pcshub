@@ -1,6 +1,6 @@
 {
-  "name": "Promotional Content Hub",
-  "short_name": "Promo Hub",
+  "name": "PULSE",
+  "short_name": "PULSE",
   "description": "Ingest, approval and workload tracker for promotional content",
   "start_url": "/dashboard",
   "scope": "/",

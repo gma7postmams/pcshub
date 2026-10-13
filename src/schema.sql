@@ -380,12 +380,18 @@ ON CONFLICT DO NOTHING;
 INSERT INTO app_settings (key, value) VALUES ('activity_view_v1', '1') ON CONFLICT (key) DO NOTHING;
 
 INSERT INTO app_settings (key, value) VALUES
-  ('app_name', 'Promotional Content Hub'),
+  ('app_name', 'PULSE'),
   ('tagline', 'Ingest · Approval · Workload · Backup and Restore'),
   ('theme', 'midnight'),
   ('accent_color', ''),
   ('logo_path', '')
 ON CONFLICT (key) DO NOTHING;
+
+-- One time: an app name still set to the old built-in default becomes PULSE. A name an Admin chose themselves is left alone.
+UPDATE app_settings SET value = 'PULSE', updated_at = now()
+ WHERE key = 'app_name' AND value = 'Promotional Content Hub'
+   AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'app_name_pulse_v1');
+INSERT INTO app_settings (key, value) VALUES ('app_name_pulse_v1', '1') ON CONFLICT (key) DO NOTHING;
 
 -- Dropdown lists (Platform, Workload Platform, Plug Type) start EMPTY: an Admin fills them in under Settings / Administration > Dropdowns.
 -- Nothing is added here, so values an Admin deletes are never brought back on restart.

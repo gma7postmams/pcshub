@@ -58,7 +58,7 @@ async function issue(session, user, purpose, appName) {
     if (!appName) {
       try { const r = await require('./db').query(`SELECT value FROM app_settings WHERE key='app_name'`); appName = r.rows[0] && r.rows[0].value; } catch (e) { /* fall through */ }
     }
-    appName = appName || 'Promotional Content Hub';
+    appName = appName || 'PULSE';
   }
   if (!user.email) throw new HttpError(400, 'This account has no email address. Ask an Admin to add one.');
   const cur = session.emailCode;

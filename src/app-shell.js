@@ -5,7 +5,7 @@ const { INDEX_HTML } = require('./middleware');
 // The app's name comes from Administration > Branding (app_settings.app_name). Everything the browser reads BEFORE the React app runs —
 // the page <title>, the home-screen / PWA name (manifest), the iOS home-screen name — is filled in here, so it follows the Branding name
 // instead of a name baked into the build.
-const DEFAULT_NAME = 'Promotional Content Hub';
+const DEFAULT_NAME = 'PULSE';
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 async function branding() {

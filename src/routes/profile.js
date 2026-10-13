@@ -78,7 +78,7 @@ router.post('/2fa/setup', asyncH(async (req, res) => {
   let issuer = mailer.shortName();
   if (!issuer) {
     const { rows } = await db.query(`SELECT value FROM app_settings WHERE key='app_name'`);
-    issuer = (rows[0] && rows[0].value) || 'Promotional Content Hub';
+    issuer = (rows[0] && rows[0].value) || 'PULSE';
   }
   const secret = totp.generateSecret();
   req.session.totpSetup = totp.encrypt(secret); // sessions are stored in Postgres — keep it encrypted there too
