@@ -191,8 +191,8 @@ export default function Ingest() {
   const [lookups, setLookups] = useState(null);
   const [filt, setFilt] = useState({ q: '', status: /^pending$/i.test(params.get('status') || '') ? 'PENDING' : (params.get('status') || ''), program: '', platform: '', from: '', to: '', approval: /^pending$/i.test(params.get('approval') || '') ? 'pending' : '' });
   const [offset, setOffset] = useState(0);
-  const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('ing:rows2')); return ROW_SIZES.includes(n) ? n : ALL_ROWS; } catch (_) { return ALL_ROWS; } });   // rows per page, remembered
-  const changeSize = (e) => { const n = Number(e.target.value); try { localStorage.setItem('ing:rows2', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
+  const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('ing:rows3')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
+  const changeSize = (e) => { const n = Number(e.target.value); try { localStorage.setItem('ing:rows3', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
   const [sort, setSortState] = useState({ k: '', dir: 'asc' });   // clicked column header
   const setSort = (s2) => { setSortState(s2); setOffset(0); };
   const [data, setData] = useState(null);
