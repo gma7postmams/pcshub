@@ -43,10 +43,12 @@ export default function Login() {
   };
   const submitReset = async (e) => {
     e.preventDefault();
-    if (newPw !== newPw2) { setErr('The two passwords are not the same.'); return; }
+    const fd = new FormData(e.currentTarget);   // the boxes' current content (autofill / keyboard suggestions can skip the change event)
+    const c = String(fd.get('code') ?? code).replace(/\D/g, ''), p1 = String(fd.get('newpw') ?? newPw), p2 = String(fd.get('newpw2') ?? newPw2);
+    if (p1 !== p2) { setErr('The two passwords are not the same.'); return; }
     setErr(''); setBusy(true);
     try {
-      await post('/api/auth/forgot/verify', { code, password: newPw });
+      await post('/api/auth/forgot/verify', { code: c, password: p1 });
       setStep('password'); setPassword(''); setNote('Your password was changed. Sign in with the new password.');
     } catch (ex) { setErr(ex.message); if (/expired|start again/i.test(ex.message)) setStep('forgot'); } finally { setBusy(false); }
   };
