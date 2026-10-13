@@ -96,6 +96,8 @@ const ACTION_LABELS = {
   'knowledge.seed': 'Seeded Knowledge Document',
   'knowledge.upload': 'Uploaded Knowledge Document',
   'knowledge.rename': 'Renamed Knowledge Document',
+  'knowledge.create': 'Created Knowledge Item',
+  'knowledge.attach': 'Added Knowledge Document File',
   'knowledge.delete': 'Moved Knowledge Document to Trash',
   'knowledge.restore': 'Restored Knowledge Document',
   'knowledge.purge': 'Permanently Deleted Knowledge Document',
@@ -486,6 +488,12 @@ function formatDetails(row) {
 
     case 'knowledge.upload':
       return `Uploaded knowledge document: ${d.title || d.filename || ''}${Array.isArray(d.tags) && d.tags.length ? ` · tags: ${d.tags.join(', ')}` : ''}`;
+
+    case 'knowledge.create':
+      return `Created knowledge item (no document yet): ${d.title || ''}${Array.isArray(d.tags) && d.tags.length ? ` · tags: ${d.tags.join(', ')}` : ''}`;
+
+    case 'knowledge.attach':
+      return `${d.replaced ? 'Replaced' : 'Added'} the document of “${d.title || ''}”: ${d.filename || ''}`;
 
     case 'knowledge.rename':
       return `${d.title ? `Renamed knowledge document to: ${d.title}` : 'Changed knowledge document'}${Array.isArray(d.tags) ? ` · tags: ${d.tags.join(', ') || 'none'}` : ''}`;

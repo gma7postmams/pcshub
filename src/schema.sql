@@ -361,6 +361,11 @@ ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT
 ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS deleted_by INT REFERENCES users(id) ON DELETE SET NULL;
 ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS deleted_name TEXT;
+-- An item can be created with just a name; its document (PDF, Word or PowerPoint) is attached later, so the file columns may be empty.
+ALTER TABLE knowledge_docs ALTER COLUMN filename DROP NOT NULL;
+ALTER TABLE knowledge_docs ALTER COLUMN stored_name DROP NOT NULL;
+ALTER TABLE knowledge_docs ALTER COLUMN size_bytes DROP NOT NULL;
+ALTER TABLE knowledge_docs ALTER COLUMN sha256 DROP NOT NULL;
 
 -- Editor can edit the PSD Daily Plug List. Existing databases get the action ONCE (flag in app_settings), so an Admin who later
 -- removes it from Editor in Admin > Access is not overruled on restart. New databases get it from the role defaults.

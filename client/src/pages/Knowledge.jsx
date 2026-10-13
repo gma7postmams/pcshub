@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { DownloadIcon, FileIcon, PencilIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
+import { DownloadIcon, FileIcon, PencilIcon, PlusIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import { Empty, Modal, useConfirm, useToast } from '../components/ui.jsx';
 
 const size = (n) => {
@@ -10,8 +10,9 @@ const size = (n) => {
   if (b < 1024 * 1024) return `${Math.max(1, Math.round(b / 1024))} KB`;
   return `${(b / 1024 / 1024).toFixed(1)} MB`;
 };
-const looksPdf = (f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
-const titleFrom = (name) => name.replace(/\.pdf$/i, '').replace(/_+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) || 'Untitled';
+const DEFAULT_EXTS = ['.pdf', '.doc', '.docx', '.ppt', '.pptx'];
+const extOf = (name) => { const m = /\.[^.]+$/.exec(name || ''); return m ? m[0].toLowerCase() : ''; };
+const titleFrom = (name) => name.replace(/\.(pdf|docx?|pptx?)$/i, '').replace(/_+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) || 'Untitled';
 
 /** Tags input: chips plus a text box (Enter or comma adds one); existing tags are offered as suggestions. */
 function TagsInput({ value, onChange, suggestions = [] }) {
@@ -35,17 +36,19 @@ function TagsInput({ value, onChange, suggestions = [] }) {
   );
 }
 
-// Knowledge Base — reference PDFs. Everyone with the page can open/download them;
-// Admin/Manager (knowledge.write) can drag & drop new PDFs, rename and delete.
+// Knowledge Base — reference documents (PDF, Word, PowerPoint). Everyone with the page can open/download them;
+// Admin/Manager (knowledge.write) can add an item by name (document later) or drag & drop files, rename, replace the document and delete.
 export default function Knowledge() {
   const s = useSession();
   const toast = useToast();
   const confirm = useConfirm();
   const canWrite = s.can('knowledge.write');
   const inputRef = useRef(null);
+  const attachRef = useRef(null);   // the hidden picker for "add / replace the document of one item"
+  const attachFor = useRef(null);
   const dragDepth = useRef(0);
 
-  const [meta, setMeta] = useState({ maxMb: 25, maxFiles: 20, trashDays: 30 });
+  const [meta, setMeta] = useState({ maxMb: 25, maxFiles: 20, trashDays: 30, exts: DEFAULT_EXTS });
   const [docs, setDocs] = useState(null);
   const [q, setQ] = useState('');
   const [over, setOver] = useState(false);
@@ -74,7 +77,7 @@ export default function Knowledge() {
     const problems = [];
     const ok = [];
     files.forEach((f) => {
-      const err = !looksPdf(f) ? 'Not a PDF file' : f.size > meta.maxMb * 1024 * 1024 ? `Larger than ${meta.maxMb} MB` : !f.size ? 'The file is empty' : '';
+      const err = !(meta.exts || DEFAULT_EXTS).includes(extOf(f.name)) ? 'Not a PDF, Word or PowerPoint file' : f.size > meta.maxMb * 1024 * 1024 ? `Larger than ${meta.maxMb} MB` : !f.size ? 'The file is empty' : '';
       if (err) problems.push({ filename: f.name, error: err }); else ok.push(f);
     });
     if (ok.length > meta.maxFiles) { ok.slice(meta.maxFiles).forEach((f) => problems.push({ filename: f.name, error: `More than ${meta.maxFiles} files at once` })); ok.length = meta.maxFiles; }
@@ -104,6 +107,25 @@ export default function Knowledge() {
       setBusy(false);
     }
   }, [busy, draft, load, toast]);
+
+  // An item with just a name: its document is added later (paperclip / upload button on its row)
+  const [blank, setBlank] = useState(null);   // { title, tags } while the "New item" form is open
+  const createBlank = async () => {
+    if (!blank || busy) return;
+    if (!blank.title.trim()) { toast('Give the item a name', 'err'); return; }
+    setBusy(true);
+    try { await post('/api/knowledge', { title: blank.title.trim(), tags: blank.tags }); toast('Item added'); setBlank(null); await load(); } catch (e) { toast(e.message, 'err'); } finally { setBusy(false); }
+  };
+  const chooseDocFor = (d) => { attachFor.current = d; if (attachRef.current) { attachRef.current.value = ''; attachRef.current.click(); } };
+  const attach = async (file) => {
+    const d = attachFor.current; attachFor.current = null;
+    if (!file || !d) return;
+    const err = !(meta.exts || DEFAULT_EXTS).includes(extOf(file.name)) ? 'Not a PDF, Word or PowerPoint file' : file.size > meta.maxMb * 1024 * 1024 ? `Larger than ${meta.maxMb} MB` : !file.size ? 'The file is empty' : '';
+    if (err) { toast(`${file.name}: ${err}`, 'err'); return; }
+    const fd = new FormData(); fd.append('file', file);
+    setBusy(true);
+    try { await post(`/api/knowledge/${d.id}/file`, fd); toast(d.has_file ? 'Document replaced' : 'Document added'); await load(); } catch (e) { toast(e.message, 'err'); } finally { setBusy(false); }
+  };
 
   const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
   const zone = canWrite ? {
@@ -142,7 +164,7 @@ export default function Knowledge() {
   const openTrash = async () => { try { setTrash(await get('/api/knowledge/trash')); } catch (e) { toast(e.message, 'err'); } };
   const restore = async (d) => { try { await post(`/api/knowledge/${d.id}/restore`, {}); toast('Restored'); await load(); openTrash(); } catch (e) { toast(e.message, 'err'); } };
   const purge = async (d) => {
-    if (!(await confirm('Delete forever', `Permanently delete "${d.title}"? The PDF file is removed from the server and cannot be restored.`, { okText: 'Delete forever', danger: true }))) return;
+    if (!(await confirm('Delete forever', `Permanently delete "${d.title}"? The document file is removed from the server and cannot be restored.`, { okText: 'Delete forever', danger: true }))) return;
     try { await del(`/api/knowledge/${d.id}/purge`); toast('Deleted'); openTrash(); } catch (e) { toast(e.message, 'err'); }
   };
 
@@ -151,20 +173,21 @@ export default function Knowledge() {
       <h1 className="sr-only">Knowledge Base</h1>
       {canWrite ? (
         <>
-          <input ref={inputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(e) => pick(e.target.files)} />
+          <input ref={inputRef} type="file" accept={(meta.exts || DEFAULT_EXTS).join(',')} multiple hidden onChange={(e) => pick(e.target.files)} />
+          <input ref={attachRef} type="file" accept={(meta.exts || DEFAULT_EXTS).join(',')} hidden onChange={(e) => attach(e.target.files[0])} />
           <div
             className={`dropzone${over ? ' over' : ''}${busy ? ' busy' : ''}`}
             role="button"
             tabIndex={0}
-            aria-label="Drop PDFs here or press Enter to browse"
+            aria-label="Drop documents here or press Enter to browse"
             onClick={() => !busy && inputRef.current && inputRef.current.click()}
             onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !busy) { e.preventDefault(); inputRef.current && inputRef.current.click(); } }}
             {...zone}
           >
             <UploadIcon />
             <div>
-              <strong>{busy ? 'Uploading…' : over ? 'Drop to upload' : 'Drag & drop PDFs here'}</strong>
-              <div className="muted">{busy ? 'Please wait' : `or click to browse · up to ${meta.maxFiles} PDFs at once, ${meta.maxMb} MB each · you can name them next`}</div>
+              <strong>{busy ? 'Uploading…' : over ? 'Drop to upload' : 'Drag & drop documents here'}</strong>
+              <div className="muted">{busy ? 'Please wait' : `PDF, Word or PowerPoint · or click to browse · up to ${meta.maxFiles} at once, ${meta.maxMb} MB each · you can name them next · or use New item to add a name now and the document later`}</div>
             </div>
           </div>
           {report.length ? (
@@ -185,11 +208,12 @@ export default function Knowledge() {
               {allTags.map(([t, n]) => <button key={t} type="button" className={`tag-filter${tag === t ? ' on' : ''}`} onClick={() => setTag(tag === t ? '' : t)}>{t} <i>{n}</i></button>)}
             </span>
           ) : null}
+          {canWrite ? <button type="button" className="btn sm primary" id="kb-new-btn" onClick={() => setBlank({ title: '', tags: [] })}><PlusIcon /> New item</button> : null}
           {canWrite ? <button type="button" className="btn sm" id="kb-trash-btn" onClick={openTrash}><TrashIcon /> Trash</button> : null}
-          {docs ? <span className="dim kb-count" aria-live="polite">{q.trim() && shown.length !== docs.length ? `${shown.length} of ${docs.length}` : docs.length} PDF{docs.length === 1 ? '' : 's'}</span> : null}
+          {docs ? <span className="dim kb-count" aria-live="polite">{q.trim() && shown.length !== docs.length ? `${shown.length} of ${docs.length}` : docs.length} item{docs.length === 1 ? '' : 's'}</span> : null}
         </div>
         {docs === null ? <Empty>Loading…</Empty> : !shown.length ? (
-          <Empty>{docs.length ? 'No documents match your search.' : canWrite ? 'No documents yet. Add a PDF above to create the first one.' : 'No documents have been added yet.'}</Empty>
+          <Empty>{docs.length ? 'No documents match your search.' : canWrite ? 'Nothing here yet. Add a file above, or use New item to start with just a name.' : 'No documents have been added yet.'}</Empty>
         ) : (
           <div className="table-wrap">
             <table className="t wl">
@@ -198,19 +222,22 @@ export default function Knowledge() {
                 {shown.map((d) => (
                   <tr key={d.id}>
                     <td>
-                      <a className="doc-link" href={`/api/knowledge/${d.id}/file`} target="_blank" rel="noopener noreferrer">
-                        <FileIcon /><span>{d.title}</span>
-                      </a>
-                      {d.filename !== `${d.title}.pdf` ? <div className="dim mono doc-file">{d.filename}</div> : null}
+                      {d.has_file ? (
+                        <a className="doc-link" href={`/api/knowledge/${d.id}/file`} target={extOf(d.filename) === '.pdf' ? '_blank' : undefined} rel="noopener noreferrer">
+                          <FileIcon /><span>{d.title}</span>
+                        </a>
+                      ) : <span className="doc-link"><FileIcon /><span>{d.title}</span> <span className="chip c-amber" title="Open the row's upload button to add the document">No document yet</span></span>}
+                      {d.has_file && d.filename && d.filename.replace(/\.[^.]+$/, '') !== d.title ? <div className="dim mono doc-file">{d.filename}</div> : null}
                       {(d.tags || []).length ? <div className="doc-tags">{d.tags.map((t) => <button key={t} type="button" className="tag" onClick={() => setTag(t)} title={`Show only “${t}”`}>{t}</button>)}</div> : null}
                     </td>
-                    <td className="dim">{size(d.size_bytes)}</td>
+                    <td className="dim">{d.has_file ? size(d.size_bytes) : '—'}</td>
                     <td className="dim">{d.uploaded_name || '—'}</td>
                     <td className="dim">{fmtDateTime(d.created_at)}</td>
                     <td className="doc-actions">
-                      <a className="iconbtn" title="Download" aria-label={`Download ${d.title}`} href={`/api/knowledge/${d.id}/file?download=1`}><DownloadIcon /></a>
+                      {d.has_file ? <a className="iconbtn" title="Download" aria-label={`Download ${d.title}`} href={`/api/knowledge/${d.id}/file?download=1`}><DownloadIcon /></a> : null}
                       {canWrite ? (
                         <>
+                          <button type="button" className="iconbtn" title={d.has_file ? 'Replace the document' : 'Add the document'} aria-label={`${d.has_file ? 'Replace' : 'Add'} the document of ${d.title}`} disabled={busy} onClick={() => chooseDocFor(d)}><UploadIcon /></button>
                           <button type="button" className="iconbtn" title="Rename / tags" aria-label={`Rename or tag ${d.title}`} onClick={() => setEdit({ id: d.id, title: d.title, tags: d.tags || [] })}><PencilIcon /></button>
                           <button type="button" className="iconbtn" title="Move to Trash" aria-label={`Move ${d.title} to Trash`} onClick={() => remove(d)}><TrashIcon /></button>
                         </>
@@ -223,6 +250,32 @@ export default function Knowledge() {
           </div>
         )}
       </div>
+
+      {blank ? (
+        <Modal
+          title="New item"
+          size="sm"
+          onClose={() => { if (!busy) setBlank(null); }}
+          footer={(
+            <>
+              <button type="button" className="btn" disabled={busy} onClick={() => setBlank(null)}>Cancel</button>
+              <button type="button" className="btn primary" id="kb-new-save" disabled={busy || !blank.title.trim()} onClick={createBlank}>{busy ? 'Saving…' : 'Add item'}</button>
+            </>
+          )}
+        >
+          <label className="f">
+            <span>Item name <span className="req">*</span></span>
+            <input id="kb-new-name" autoFocus value={blank.title} maxLength={200} placeholder="e.g. Promo ingest guidelines"
+              onChange={(e) => setBlank({ ...blank, title: e.target.value })}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createBlank(); } }} />
+          </label>
+          <label className="f mt-12">
+            <span>Tags <span className="dim">(optional)</span></span>
+            <TagsInput value={blank.tags} onChange={(tags) => setBlank({ ...blank, tags })} suggestions={allTags.map(([t]) => t)} />
+          </label>
+          <p className="dim m-0 mt-12">No document needed now. Add the PDF, Word or PowerPoint file later with the upload button on the item's row.</p>
+        </Modal>
+      ) : null}
 
       {draft ? (
         <Modal
@@ -298,7 +351,7 @@ export default function Knowledge() {
               <tbody>
                 {trash.docs.map((d) => (
                   <tr key={d.id}>
-                    <td><FileIcon /> {d.title}<div className="dim mono doc-file">{d.filename} · {size(d.size_bytes)}</div></td>
+                    <td><FileIcon /> {d.title}<div className="dim mono doc-file">{d.has_file ? `${d.filename} · ${size(d.size_bytes)}` : 'No document'}</div></td>
                     <td className="dim">{fmtDateTime(d.deleted_at)}{d.deleted_name ? <div>by {d.deleted_name}</div> : null}</td>
                     <td className="doc-actions">
                       <button type="button" className="btn sm" onClick={() => restore(d)}>Restore</button>
