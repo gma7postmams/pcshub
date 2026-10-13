@@ -2098,13 +2098,14 @@ function FillModal({ onClose, onDone }) {
   const [file, setFile] = useState(null);
   const [res, setRes] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [defUnits, setDefUnits] = useState('');
   const run = async (apply) => {
     if (!file) return;
     const fd = new FormData();
     fd.append('file', file);
     setBusy(true);
     try {
-      const out = await post(`/api/workload/fill${apply ? '?apply=1' : ''}`, fd);
+      const out = await post(`/api/workload/fill?${apply ? 'apply=1&' : ''}units=${encodeURIComponent(defUnits)}`, fd);
       if (apply) { toast(`${out.updated} row${out.updated === 1 ? '' : 's'} filled (${out.cells} cell${out.cells === 1 ? '' : 's'})`); onDone(out); return; }
       setRes(out);
     } catch (e) { toast(e.message, 'err'); } finally { setBusy(false); }
@@ -2116,6 +2117,10 @@ function FillModal({ onClose, onDone }) {
         {res && res.updated ? <button type="button" className="btn primary" id="fill-apply" disabled={busy} onClick={() => run(true)}>{busy ? 'Saving…' : `Fill ${res.updated} row${res.updated === 1 ? '' : 's'}`}</button>
           : <button type="button" className="btn primary" id="fill-check" disabled={busy || !file} onClick={() => run(false)}>{busy ? 'Reading…' : 'Check file'}</button>}</>)}>
       <p>Pick the team's per-day workload workbook (the one with sheets like <em>SEP 10_main</em>). Its blank-cell values fill the rows you already have, matched by Work Date and Plug ID. Anything already typed is kept, no rows or columns are added, and the Audio sheets are skipped.</p>
+      <label className="f" style={{ marginTop: 8 }}><span>Units Concerned for plugs the workbook doesn't name a team for (e.g. “NEW OCTOBER TEMPLATE”, “WAITING FOR LOCAL”)</span>
+        <select id="fill-units" value={defUnits} onChange={(e) => { setDefUnits(e.target.value); setRes(null); }}>
+          <option value="">Leave blank</option><option value="VGFX/VEDIT">VGFX/VEDIT</option><option value="VGFX Only">VGFX Only</option><option value="VEDIT Only">VEDIT Only</option>
+        </select></label>
       <input ref={fileRef} id="fill-file" type="file" accept=".xlsx" onChange={(e) => { setFile(e.target.files[0] || null); setRes(null); }} />
       {res ? (
         <div id="fill-result" style={{ marginTop: 12 }}>
@@ -2123,6 +2128,7 @@ function FillModal({ onClose, onDone }) {
           {Object.keys(res.byField).length ? <ul className="plug-warn" style={{ color: 'inherit' }}>{Object.entries(res.byField).map(([k, n]) => <li key={k}>{FIELD_NAMES[k] || k}: {n}</li>)}</ul> : null}
           <p className="dim">{res.unchanged} matched row{res.unchanged === 1 ? ' is' : 's are'} already complete{res.locked ? `, ${res.locked} in a locked period (left alone)` : ''}. {res.noMatch} row{res.noMatch === 1 ? '' : 's'} on those days {res.noMatch === 1 ? 'was' : 'were'} not found in the workbook{res.noMatchSample.length ? ` (e.g. ${res.noMatchSample.slice(0, 5).join(', ')})` : ''}.</p>
           {res.errorCount ? <p className="dim">{res.errorCount} row{res.errorCount === 1 ? '' : 's'} skipped: {res.errors[0]}</p> : null}
+          {res.unitsFromOtherDays || res.unitsDefaulted ? <p className="dim">Units Concerned: {res.unitsSet - res.unitsFromOtherDays - res.unitsDefaulted} from the row's own Breakdate, {res.unitsFromOtherDays} from the same plug on another day{res.unitsDefaulted ? `, ${res.unitsDefaulted} set to ${defUnits}` : ''}.</p> : null}
           {res.updated ? null : <p>Nothing to fill.</p>}
         </div>
       ) : null}

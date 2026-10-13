@@ -27,32 +27,33 @@ function cellStr(cell) {
   return String(v).replace(/\r\n?/g, '\n').trim();
 }
 
-/** The year in which "Sep 10" is a Thursday, searched from next year back a few years (the workbook has no year). */
-function yearFor(mon, day, dowName, nowYear) {
-  const want = dowName ? DOW.indexOf(dowName.slice(0, 3).toLowerCase()) : -1;
-  if (want >= 0) {
-    for (let y = nowYear + 1; y >= nowYear - 4; y--) {
-      const d = new Date(Date.UTC(y, mon, day));
-      if (d.getUTCMonth() === mon && d.getUTCDay() === want) return y;
-    }
-  }
-  return nowYear;
-}
-
-/** "DATE: SEP 10, Thursday" -> 'YYYY-MM-DD' (or null). */
-function sheetDate(ws, nowYear) {
+/** "DATE: SEP 10, Thursday" -> { mon, day, dow } (or null). The workbook has no year. */
+function sheetDay(ws) {
   for (let r = 1; r <= 6; r++) {
     const m = /DATE\s*:\s*([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{1,2})(?:\s*,?\s*([A-Za-z]+))?/i.exec(cellStr(ws.getRow(r).getCell(1)));
     if (!m) continue;
     const mon = MON.indexOf(m[1].toLowerCase());
     const day = +m[2];
-    if (mon < 0 || day < 1 || day > 31) continue;
-    const y = yearFor(mon, day, m[3], nowYear);
-    const d = new Date(Date.UTC(y, mon, day));
-    if (d.getUTCMonth() !== mon) continue;
-    return `${y}-${pad(mon + 1)}-${pad(day)}`;
+    if (mon >= 0 && day >= 1 && day <= 31) return { mon, day, dow: m[3] || '' };
   }
   return null;
+}
+
+/** One year for the whole workbook: the one in which most sheets' "Sep 10, Thursday" really is that weekday (a typo'd weekday on one sheet is outvoted). */
+function workbookYear(days, nowYear) {
+  const tally = new Map();
+  for (const d of days) {
+    const want = d.dow ? DOW.indexOf(d.dow.slice(0, 3).toLowerCase()) : -1;
+    if (want < 0) continue;
+    for (let y = nowYear + 1; y >= nowYear - 4; y--) {
+      const t = new Date(Date.UTC(y, d.mon, d.day));
+      if (t.getUTCMonth() === d.mon && t.getUTCDay() === want) tally.set(y, (tally.get(y) || 0) + 1);
+    }
+  }
+  let best = nowYear;
+  let n = 0;
+  for (const [y, c] of tally) if (c > n || (c === n && y > best)) { best = y; n = c; }
+  return best;
 }
 
 /** "10am", "4pm", "10:30am", "12nn" (noon), "12mn" (midnight) -> [hour, minute]; null when it is not a time. */
@@ -117,10 +118,13 @@ function readTeamWorkbook(wb, nowYear = new Date().getFullYear()) {
   const backup = new Map();
   const sheets = [];
   const skipped = [];
+  const year = workbookYear(wb.worksheets.map(sheetDay).filter(Boolean), nowYear);
+  const votes = new Map();   // Plug ID -> the units its own Breakdate lines gave, on any day
   for (const ws of wb.worksheets) {
     const name = ws.name || '';
     if (/ojo|^temp$|filter\s*pool/i.test(name)) { skipped.push(name); continue; }
-    const date = sheetDate(ws, nowYear);
+    const day = sheetDay(ws);
+    const date = day ? `${year}-${pad(day.mon + 1)}-${pad(day.day)}` : null;
     // header row = the one with a "PLUG ID" cell in the first rows
     let hdr = 0;
     let plugCol = 0;
@@ -136,7 +140,6 @@ function readTeamWorkbook(wb, nowYear = new Date().getFullYear()) {
       const hit = h && HEADERS.find(([k, re]) => !cols[k] && re.test(h));
       if (hit) cols[hit[0]] = c;
     }
-    const year = +date.slice(0, 4);
     const target = /back\s*up/i.test(name) ? backup : main;
     let plugs = 0;
     let lastUnit = null;
@@ -154,7 +157,7 @@ function readTeamWorkbook(wb, nowYear = new Date().getFullYear()) {
         if (bd.vedit) e.breakdate_vedit = bd.vedit;
         if (bd.priority) e.is_priority = true;
         const u = unitsOf(bd.teams);
-        if (u) { e.units_concerned = u; lastUnit = u; }
+        if (u) { e.units_concerned = u; lastUnit = u; if (!votes.has(pid)) votes.set(pid, new Set()); votes.get(pid).add(u); }
         else if (lastUnit && /^\s*rehash/i.test(e.remarks || '')) e.units_concerned = lastUnit;   // a "Rehash for digital" line follows the plug it is rehashed from
         if (bd.leftover.length) e.note = bd.leftover.join('\n');
       }
@@ -168,7 +171,10 @@ function readTeamWorkbook(wb, nowYear = new Date().getFullYear()) {
   // the day's main sheet wins; its backup only supplies plugs the main sheet does not list
   const entries = new Map(main);
   for (const [k, list] of backup) if (!entries.has(k)) entries.set(k, list);
-  return { entries, sheets, skipped };
+  // a Plug ID whose other days all name the same team(s) lends that to a day that does not name any
+  const unitByPlug = new Map();
+  for (const [pid, set] of votes) if (set.size === 1) unitByPlug.set(pid, [...set][0]);
+  return { entries, sheets, skipped, unitByPlug };
 }
 
-module.exports = { plugKey, readTeamWorkbook, parseBreakdate, parseTime, sheetDate, cellStr };
+module.exports = { plugKey, readTeamWorkbook, parseBreakdate, parseTime, sheetDay, workbookYear, cellStr };

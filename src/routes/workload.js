@@ -948,7 +948,8 @@ router.post('/fill', requireAction('workload.write'), upload.single('file'), one
     await assertSafeXlsx(req.file.buffer, req.file.originalname);
     const wb = new ExcelJS.Workbook();
     try { await wb.xlsx.load(req.file.buffer); } catch (e) { throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)'); }
-    const { entries, sheets } = readTeamWorkbook(wb);
+    const { entries, sheets, unitByPlug } = readTeamWorkbook(wb);
+    const defUnits = ['VGFX Only', 'VEDIT Only', 'VGFX/VEDIT'].includes(String(req.query.units || '')) ? String(req.query.units) : null;   // optional: Units Concerned for a plug whose lines never name a team
     if (!sheets.length) throw new HttpError(400, 'No daily sheets found. Expected sheets such as "SEP 10_main", each with a "DATE: SEP 10, Thursday" line and a PLUG ID header row.');
 
     const dates = [...new Set(sheets.map((s) => s.date))];
@@ -962,7 +963,7 @@ router.post('/fill', requireAction('workload.write'), upload.single('file'), one
       groups.get(k).push(r);
     }
 
-    const summary = { matched: 0, updated: 0, unchanged: 0, locked: 0, noMatch: 0, cells: 0, byField: {}, unitsSet: 0, priorityOn: 0, errors: [], noMatchSample: [], days: dates.length, sheets: sheets.length };
+    const summary = { matched: 0, updated: 0, unchanged: 0, locked: 0, noMatch: 0, cells: 0, byField: {}, unitsSet: 0, unitsFromOtherDays: 0, unitsDefaulted: 0, priorityOn: 0, errors: [], noMatchSample: [], days: dates.length, sheets: sheets.length };
     const plan = [];   // { id, set: { col: value }, rec }
     for (const [k, rows] of groups) {
       const list = entries.get(k);
@@ -978,6 +979,11 @@ router.post('/fill', requireAction('workload.write'), upload.single('file'), one
         if (locks.some((l) => cur.work_date >= l.from_date && cur.work_date <= l.to_date)) { summary.locked++; continue; }
         const want = { ...e };
         if (e.note) want.remarks = [e.remarks, e.note].filter(Boolean).join('\n');
+        let unitHow = null;
+        if (!want.units_concerned) {
+          const other = unitByPlug.get(k.slice(11));
+          if (other) { want.units_concerned = other; unitHow = 'other'; } else if (defUnits) { want.units_concerned = defUnits; unitHow = 'default'; }
+        }
         const body = {};
         COLS.forEach((c) => { body[c] = cur[c]; });
         const touched = [];
@@ -1005,7 +1011,7 @@ router.post('/fill', requireAction('workload.write'), upload.single('file'), one
           if (c === 'is_priority') { summary.priorityOn++; continue; }
           summary.cells++;
           summary.byField[c] = (summary.byField[c] || 0) + 1;
-          if (c === 'units_concerned') summary.unitsSet++;
+          if (c === 'units_concerned') { summary.unitsSet++; if (unitHow === 'other') summary.unitsFromOtherDays++; else if (unitHow === 'default') summary.unitsDefaulted++; }
         }
       }
     }
