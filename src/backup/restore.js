@@ -369,7 +369,7 @@ async function validate(ownerDb, backupSummary, meta) {
   const off = Object.keys(live).filter((k) => expected[k] != null && expected[k] !== live[k]);
   add('Record counts match the backup', off.length ? 'warn' : 'pass', off.length ? `Differences in ${off.join(', ')} (the backup counts were taken just before the dump)` : 'Counts agree with the backup summary');
 
-  const { rows: docs } = await ownerDb.query('SELECT stored_name FROM knowledge_docs');
+  const { rows: docs } = await ownerDb.query('SELECT stored_name FROM knowledge_docs WHERE stored_name IS NOT NULL');   // items added by name only have no file yet
   const missing = docs.filter((d) => !fs.existsSync(path.join(cfg.UPLOADS_ROOT, 'knowledge', path.basename(d.stored_name)))).length;
   add('Knowledge files present', missing ? 'warn' : 'pass', missing ? `${missing} document record(s) have no file on disk` : `${docs.length} document file(s) found`);
   return checks;

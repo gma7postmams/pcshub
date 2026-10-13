@@ -181,7 +181,7 @@ async function runCreate(job, req, release) {
     await progress('Building archive');
     const dumpStat = await fsp.stat(dumpPath);
     const dumpSha = await sha256File(dumpPath);
-    const { rows: docs } = await db.query('SELECT stored_name FROM knowledge_docs');
+    const { rows: docs } = await db.query('SELECT stored_name FROM knowledge_docs WHERE stored_name IS NOT NULL');   // items added by name only have no file yet
     const onDisk = new Set(fileList.filter((f) => f.path.startsWith('uploads/knowledge/')).map((f) => f.path.slice('uploads/knowledge/'.length)));
     const known = new Set(docs.map((d) => d.stored_name));
 

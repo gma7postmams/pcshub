@@ -20,7 +20,7 @@ const ENTITIES = [
       FROM dropdown_options WHERE category = 'program'` },
   { id: 'platforms', label: 'Platforms', sql: `SELECT value AS k, value AS label, jsonb_build_object('active', is_active, 'sort_order', sort_order) AS f
       FROM dropdown_options WHERE category = 'platform'` },
-  { id: 'knowledge_docs', label: 'Knowledge Documents', sql: `SELECT stored_name AS k, title AS label,
+  { id: 'knowledge_docs', label: 'Knowledge Documents', sql: `SELECT COALESCE(stored_name, 'item-' || id) AS k, title AS label,
       jsonb_build_object('title', title, 'filename', filename, 'sha256', sha256, 'size_bytes', size_bytes) AS f FROM knowledge_docs` },
   { id: 'ingest_records', label: 'Ingest Records', sql: `SELECT id::text AS k, concat_ws(' · ', '#' || id, program, platform) AS label,
       to_jsonb(r) ${VOLATILE} AS f FROM ingest_records r` },

@@ -148,7 +148,7 @@ export default function Knowledge() {
     const t = q.trim().toLowerCase();
     if (!docs) return [];
     return docs.filter((d) => (!tag || (d.tags || []).includes(tag))
-      && (!t || d.title.toLowerCase().includes(t) || d.filename.toLowerCase().includes(t) || (d.tags || []).some((x) => x.toLowerCase().includes(t))));
+      && (!t || d.title.toLowerCase().includes(t) || (d.filename || '').toLowerCase().includes(t) || (d.tags || []).some((x) => x.toLowerCase().includes(t))));
   }, [docs, q, tag]);
   const allTags = useMemo(() => {
     const n = new Map();
