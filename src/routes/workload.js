@@ -112,7 +112,7 @@ function derivePlatform(plugId) {
 }
 
 const MAX_BATCH = 200;
-const LIST_MAX = 3000;   // most rows one list read returns (the page's "All" choice); saving is still MAX_BATCH rows at a time
+const LIST_MAX = 5000;   // most rows one list read returns (the page's "All" choice); saving is still MAX_BATCH rows at a time
 const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'billable_party', 'remarks', 'vo', 'total_mats', 'audio_guide', 'length', 'others', 'audio_status'];
 
 // ---------- Custom columns ("Add Column"): stored in workload_custom_columns, values in workload_items.custom_fields ----------

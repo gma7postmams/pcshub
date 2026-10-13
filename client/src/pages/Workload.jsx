@@ -14,7 +14,7 @@ import { useLive, useCellPresence } from '../lib/live.js';
 // from /api/workload/meta (field types follow the red notes in the Sept 2026 template:
 // dropdown / Date / Open). Table mode = read + add/edit form; Excel mode = editable grid with batch save.
 const PAGE = 50;
-const ALL_ROWS = 3000;   // the "All" choice in Rows: up to this many on one page (more are reached with the page buttons)
+const ALL_ROWS = 5000;   // the "All" choice in Rows: up to this many on one page (more are reached with the page buttons)
 const ROW_SIZES = [25, 50, 100, 200, ALL_ROWS];   // rows per page (the server saves at most 200 changed rows at once; Save sends a long page in several goes)
 const GRID_LIMIT = 200;
 const CARDS_BELOW = 900;   // window width under which table rows become cards

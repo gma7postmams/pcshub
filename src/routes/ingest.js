@@ -142,7 +142,7 @@ function ingestFilter(q) {
 
 router.get('/', asyncH(async (req, res) => {
   const { params, whereSql } = ingestFilter(req.query);
-  const { limit, offset } = v.paging(req.query, { def: 50, max: 3000 })   // 3000 = the page's "All" choice;
+  const { limit, offset } = v.paging(req.query, { def: 50, max: 5000 })   // 5000 = the page's "All" choice;
   const countQ = await db.query(
     `SELECT count(*)::int AS n FROM ingest_records i LEFT JOIN users ru ON ru.id=i.requested_by_user_id ${whereSql}`, params
   );
