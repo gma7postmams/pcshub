@@ -516,16 +516,20 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     res.json({ ok: true, deleted: out });
   }));
 
-  // ---- copy a day's plugs (or the chosen ones) into the Workload Tracker: one new row per plug not already there ----
-  // The shared core of "Copy to Workload": one new Workload row per plug that isn't there yet for that day (Plug ID matched in any letter case, also
-  // inside a multi-line Plug ID cell). Days in a locked period are skipped. Used by the Copy button and, automatically, after an import or a new plug.
+  // ---- copy a day's plugs (or the chosen ones) into the Workload Tracker: one new row per plug LINE not already there ----
+  // The shared core of "Copy to Workload". A plug ID listed twice on one day (different PSDs, say) is two assignments, so it gets two rows. A line is
+  // "already there" when the day already has that many rows for the Plug ID (matched in any letter case, also inside a multi-line Plug ID cell): the
+  // first N lines are taken to be those N rows, so copying again never doubles anything up. Days in a locked period are skipped. Used by the Copy
+  // button and, automatically, after an import or a new plug.
   const copyPlugs = async (req, plugs, units) => {
     const locks = await loadLocks(db);
     const dates = [...new Set(plugs.map((p) => p.plug_date))];
     const { rows: have } = await db.query(
-      `SELECT DISTINCT w.work_date AS d, upper(btrim(x)) AS id FROM workload_items w, unnest(string_to_array(w.plug_id, E'\\n')) AS x WHERE w.work_date = ANY($1::date[])`, [dates]
+      `SELECT w.work_date AS d, upper(btrim(x)) AS id, count(DISTINCT w.id)::int AS n FROM workload_items w, unnest(string_to_array(w.plug_id, E'\\n')) AS x
+        WHERE w.work_date = ANY($1::date[]) GROUP BY 1, 2`, [dates]
     );
-    const taken = new Set(have.map((r) => `${r.d}|${r.id}`));
+    const rowsFor = new Map(have.map((r) => [`${r.d}|${r.id}`, r.n]));
+    const lineNo = new Map();
     const customCols = await loadCustomCols(db);
     let created = 0;
     let already = 0;
@@ -534,13 +538,14 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     await db.tx(async (c) => {
       for (const p of plugs) {
         const key = `${p.plug_date}|${p.plug_id.toUpperCase()}`;
-        if (taken.has(key)) { already++; continue; }
+        const nth = (lineNo.get(key) || 0) + 1;
+        lineNo.set(key, nth);
+        if (nth <= (rowsFor.get(key) || 0)) { already++; continue; }
         try { assertNotLocked(locks, p.plug_date); } catch (e) { locked++; continue; }   // a day inside a locked period is skipped
         try {
           const rec = await parseRow(c, { work_date: p.plug_date, units_concerned: units, plug_id: p.plug_id, psd: p.psd, prog_name: p.prog_name }, null, customCols, { allowBlankUnits: true });
           const id = await insertRow(c, rec, req.user.id);
           await audit(req, 'workload.create', 'workload_item', id, { from_plug_list: true, plug_id: p.plug_id }, c);
-          taken.add(key);
           created++;
         } catch (e) {
           errors.push(`${p.plug_date} ${p.plug_id}: ${e instanceof HttpError ? e.message : 'unexpected error'}`);
