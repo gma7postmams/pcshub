@@ -38,10 +38,10 @@ const CATALOG = [
     path: '/workload',
     // Which tabs of the Workload Tracker the group sees. A group with the page but none of these ticked sees every tab (as before this existed).
     sections: [
-      { key: 'workload.all', label: 'All tab' },
-      { key: 'workload.vgfx', label: 'VGFX tab' },
-      { key: 'workload.vedit', label: 'VEDIT tab' },
-      { key: 'workload.audio', label: 'Audio tab' },
+      { key: 'workload.all', label: 'All Tab' },
+      { key: 'workload.vgfx', label: 'VGFX Tab' },
+      { key: 'workload.vedit', label: 'VEDIT Tab' },
+      { key: 'workload.audio', label: 'Audio Tab' },
     ],
   },
 
