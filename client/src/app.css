@@ -1140,12 +1140,6 @@ button.tag { padding: 1px 9px; cursor: pointer; }
 /* On a mid-width screen the top bar is already full: the maintenance badge shrinks to its dot (hover for the message) so it cannot push the bar wider than the window */
 @media (max-width: 1399px) { .maint-pill { font-size: 0; gap: 0; padding: 6px; margin-right: 4px; } .maint-pill::before { width: 9px; height: 9px; } }
 
-/* Logo + title at the top of Activity History */
-.page-logo { display:flex; align-items:center; gap:12px; margin:4px 0 14px; }
-.page-logo img { height:38px; width:auto; max-width:140px; object-fit:contain; }
-.page-logo .mark { display:inline-flex; align-items:center; justify-content:center; width:38px; height:38px; border-radius:10px; background:var(--accent, #4f7cff); color:#fff; font-weight:700; }
-.page-logo h1 { margin:0; font-size:1.35rem; }
-
 /* Notification bell: rings when a new notification arrives */
 @keyframes bell-ring { 0%,100%{transform:rotate(0)} 10%{transform:rotate(18deg)} 20%{transform:rotate(-16deg)} 30%{transform:rotate(13deg)} 40%{transform:rotate(-10deg)} 50%{transform:rotate(6deg)} 60%{transform:rotate(-3deg)} 70%{transform:rotate(0)} }
 @keyframes badge-pulse { 0%{box-shadow:0 0 0 0 rgba(239,68,68,.7)} 100%{box-shadow:0 0 0 10px rgba(239,68,68,0)} }
