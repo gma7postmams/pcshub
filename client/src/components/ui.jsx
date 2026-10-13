@@ -76,6 +76,8 @@ export function Options({ list, blank }) {
 }
 
 // ---------- Toasts ----------
+/** Every prompt ends with a full stop (unless it already ends with . ! ? or similar). */
+const withStop = (m) => { const t = String(m ?? '').trimEnd(); return t && !/[.!?…:;)\]]$/.test(t) ? `${t}.` : t; };
 const ToastCtx = createContext(() => {});
 export const useToast = () => useContext(ToastCtx);
 
@@ -90,7 +92,7 @@ export function ToastProvider({ children }) {
   return (
     <ToastCtx.Provider value={toast}>
       {children}
-      <div id="toasts">{items.map((t) => <div key={t.id} className={`toast ${t.type}`}><span className="toast-dot" aria-hidden="true" />{t.msg}</div>)}</div>
+      <div id="toasts">{items.map((t) => <div key={t.id} className={`toast ${t.type}`}>{withStop(t.msg)}</div>)}</div>
     </ToastCtx.Provider>
   );
 }
