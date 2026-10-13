@@ -167,7 +167,7 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
       db.query(`SELECT count(*)::int AS n FROM ingest_records WHERE approved_at IS NULL AND COALESCE(btrim(approved_by), '') = ''`),
       db.query(`SELECT count(*)::int AS n FROM audit_logs WHERE action IN ('auth.login_failed','auth.locked') AND created_at > now() - interval '7 days'`),
       db.query(`SELECT id, created_at, finished_at, size_bytes, note FROM backup_jobs WHERE kind='create' AND status='succeeded' AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`),
-      db.query(`SELECT count(*)::int AS n FROM user_presence WHERE last_active_at > now() - interval '3 minutes'`).catch(() => ({ rows: [{ n: 0 }] })),
+      db.query(`SELECT count(*)::int AS n FROM user_presence WHERE left_at IS NULL AND last_active_at > now() - interval '3 minutes'`).catch(() => ({ rows: [{ n: 0 }] })),
     ]);
     const last = backup.rows[0] || null;
     res.json({

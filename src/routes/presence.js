@@ -23,8 +23,8 @@ router.post('/', asyncH(async (req, res) => {
   const r = await db.query(
     `INSERT INTO user_presence (user_id, last_active_at, page) VALUES ($1, now(), $2)
      ON CONFLICT (user_id) DO UPDATE
-        SET last_active_at = now(), page = COALESCE(EXCLUDED.page, user_presence.page)
-      WHERE user_presence.last_active_at < now() - interval '15 seconds' OR user_presence.page IS DISTINCT FROM EXCLUDED.page`,
+        SET last_active_at = now(), left_at = NULL, page = COALESCE(EXCLUDED.page, user_presence.page)
+      WHERE user_presence.last_active_at < now() - interval '15 seconds' OR user_presence.page IS DISTINCT FROM EXCLUDED.page OR user_presence.left_at IS NOT NULL`,
     [req.user.id, page]
   );
   if (r.rowCount) changed();   // the row only changes when the person moved to another page or the heartbeat was due
@@ -34,7 +34,7 @@ router.post('/', asyncH(async (req, res) => {
 // "I'm leaving": sent as the tab / browser closes (and by logout on the server), so the person drops off the list at once instead of
 // lingering until the heartbeat window runs out. If they have another tab open it simply reappears on that tab's next heartbeat.
 router.post('/leave', asyncH(async (req, res) => {
-  await db.query('DELETE FROM user_presence WHERE user_id = $1', [req.user.id]);
+  await db.query('UPDATE user_presence SET left_at = now(), last_active_at = now() WHERE user_id = $1', [req.user.id]);   // kept, so they still show under Earlier today
   changed();
   res.json({ ok: true });
 }));
@@ -55,7 +55,7 @@ async function usersOn(path, me) {
   const { rows } = await db.query(
     `SELECT p.user_id AS id, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name, u.role, p.last_active_at
        FROM user_presence p JOIN users u ON u.id = p.user_id
-      WHERE u.is_active AND p.page = $1 AND p.last_active_at >= now() - ($2 || ' minutes')::interval
+      WHERE u.is_active AND p.left_at IS NULL AND p.page = $1 AND p.last_active_at >= now() - ($2 || ' minutes')::interval
       ORDER BY (p.user_id = $3) DESC, p.last_active_at DESC LIMIT 30`,
     [path, String(ACTIVE_MINUTES), me]
   );

@@ -79,7 +79,7 @@ const unitsFor = (team) => Object.entries(UNIT_TEAMS).filter(([, teams]) => team
 async function activeUsers(u) {
   const { rows } = await db.query(
     `SELECT p.user_id AS id, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name, u.role, p.page, p.last_active_at,
-            (p.last_active_at >= now() - ($1 || ' minutes')::interval) AS active
+            (p.left_at IS NULL AND p.last_active_at >= now() - ($1 || ' minutes')::interval) AS active
        FROM user_presence p JOIN users u ON u.id = p.user_id
       WHERE u.is_active AND p.last_active_at >= now() - interval '24 hours'
       ORDER BY p.last_active_at DESC LIMIT 60`, [String(ACTIVE_MINUTES)]
@@ -220,7 +220,7 @@ router.get('/users/stream', (req, res) => {
     try {
       const users = await activeUsers(req.user);
       // only what the cards show decides whether there is something new to send (a heartbeat alone changes nothing visible)
-      const key = JSON.stringify([users.active.map((p) => [p.id, p.page, p.role, p.name]), users.earlier.map((p) => [p.id, p.page])]);
+      const key = JSON.stringify([users.active.map((p) => [p.id, p.page, p.role, p.name]), users.earlier.map((p) => [p.id, p.page, p.lastActiveAt])]);
       if (!closed && key !== last) { last = key; res.write(`data: ${JSON.stringify({ users })}\n\n`); } else if (!closed) res.write(': ping\n\n');
     } catch (e) { /* the next change or tick tries again */ }
     busy = false;

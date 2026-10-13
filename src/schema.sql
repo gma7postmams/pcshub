@@ -548,6 +548,8 @@ CREATE TABLE IF NOT EXISTS user_presence (
   page            TEXT
 );
 CREATE INDEX IF NOT EXISTS user_presence_active_idx ON user_presence (last_active_at DESC);
+-- Set when the person closes the tab / signs out: they stop counting as active at once but stay in "Earlier today" (the row used to be deleted, which made them vanish from both).
+ALTER TABLE user_presence ADD COLUMN IF NOT EXISTS left_at TIMESTAMPTZ;
 
 -- Dashboard sections: "Active users" is new and "Recent ingest activity" is gone. Once (flag in app_settings) every group that can open
 -- the Dashboard gets Active users — an Admin can untick it per group afterwards without it coming back — and the retired key is removed.
