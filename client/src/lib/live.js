@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { post } from './api.js';
 
 // Live updates: when somebody else saves on the Ingest Tracker, Workload Tracker or PSD Daily Plug List, the server pushes "that list changed"
 // (src/live.js) and the open page quietly re-reads it. The push carries no data, only the topic.
@@ -76,4 +77,49 @@ export function useLive(topics, refresh, busy) {
     const poll = setInterval(() => { if (!document.hidden && Date.now() - lastHeard > 50000) want(); }, 30000);
     return () => { dead = true; subs.delete(onMsg); clearTimeout(timer); clearInterval(poll); document.removeEventListener('visibilitychange', onVis); };
   }, [key]);
+}
+
+/** Listen to every live message (the bell uses this for { t: 'notif' }). Returns an unsubscribe function. */
+export function onLive(fn) {
+  start();
+  subs.add(fn);
+  return () => subs.delete(fn);
+}
+
+const CELL_HUES = ['#4f8cff', '#a78bfa', '#34c38f', '#f0883e', '#e5568f', '#26b5ad', '#f1b44c'];
+const cellHue = (name) => CELL_HUES[[...String(name)].reduce((a, c) => a + c.charCodeAt(0), 0) % CELL_HUES.length];
+
+/**
+ * Cells other people are editing right now.
+ *   topic  'workload' | 'ingest'
+ *   myKey  the cell I have open ("<row id>:<column>") or null. It is announced while open (refreshed every 10 s) and withdrawn when I leave it.
+ * Returns { "<row id>:<column>": { name, hue } } for everybody else's open cells; each fades by itself after 25 s without a refresh.
+ */
+export function useCellPresence(topic, myKey) {
+  const [peers, setPeers] = useState({});
+  useEffect(() => {
+    const off = onLive((m) => {
+      if (!m || m.t !== 'cell' || m.topic !== topic || m.by === TAB) return;
+      setPeers((cur) => {
+        const n = { ...cur };
+        Object.keys(n).forEach((k) => { if (n[k].by === m.by) delete n[k]; });   // a person has one open cell at a time
+        if (m.on) n[m.key] = { name: m.name, hue: cellHue(m.name), by: m.by, at: Date.now() };
+        return n;
+      });
+    });
+    const sweep = setInterval(() => setPeers((cur) => {
+      const keys = Object.keys(cur).filter((k) => Date.now() - cur[k].at > 25000);
+      if (!keys.length) return cur;
+      const n = { ...cur }; keys.forEach((k) => delete n[k]); return n;
+    }), 5000);
+    return () => { off(); clearInterval(sweep); };
+  }, [topic]);
+  useEffect(() => {
+    if (!myKey) return undefined;
+    const send = (on) => { post('/api/live/focus', { topic, key: myKey, on }, { quiet: true }).catch(() => {}); };
+    send(true);
+    const t = setInterval(() => send(true), 10000);
+    return () => { clearInterval(t); send(false); };
+  }, [topic, myKey]);
+  return peers;
 }

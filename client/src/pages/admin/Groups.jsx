@@ -83,7 +83,12 @@ function GroupForm({ g, catalog, onClose, onSaved }) {
   const toast = useToast();
   const [name, setName] = useState(g ? g.name : '');
   const [description, setDescription] = useState(g ? g.description || '' : '');
-  const [perms, setPerms] = useState(() => new Set(g ? g.perms : []));
+  const [perms, setPerms] = useState(() => {
+    const set = new Set(g ? g.perms : []);
+    const tabs = ['workload.all', 'workload.vgfx', 'workload.vedit', 'workload.audio'];
+    if (set.has('workload') && !tabs.some((k) => set.has(k))) tabs.forEach((k) => set.add(k));   // an older group with the page and no tab ticked sees every tab
+    return set;
+  });
 
   const togglePage = (p) => {
     setPerms((prev) => {
@@ -130,6 +135,7 @@ function GroupForm({ g, catalog, onClose, onSaved }) {
                     {p.sections.map((x) => (
                       <label className="check" key={x.key}><input type="checkbox" data-kind="section" checked={perms.has(x.key)} onChange={() => toggleKey(x.key)} /> {x.label}</label>
                     ))}
+                    {p.key === 'workload' ? <div className="dim" style={{ fontSize: 12 }}>Only the ticked tabs are shown to this group. With none ticked, every tab is shown.</div> : null}
                   </div>
                 ) : null}
               </div>

@@ -4,6 +4,7 @@ const db = require('../db');
 const v = require('../validate');
 const { asyncH, HttpError, requireAction } = require('../middleware');
 const { audit } = require('../audit');
+const { workloadTabs } = require('../permissions');
 
 const { logRun } = require('../transferlog');   // action logging (audit entry + server log line) for bulk delete
 const { readTeamWorkbook, plugKey, looseKey } = require('../workload-fill');   // the team's per-day workbook (Import hands it to Fill from team workbook)
@@ -159,7 +160,7 @@ router.get('/meta', asyncH(async (req, res) => {
   const customCols = await loadCustomCols(db);
   const locks = await loadLocks(db);
   res.json({
-    ready: true, units: UNITS, unitTeams: UNIT_TEAMS, tabs: ['ALL', ...TEAMS].map((key) => ({ key, label: TAB_LABEL[key] })),
+    ready: true, units: UNITS, unitTeams: UNIT_TEAMS, tabs: workloadTabs(req.user).map((key) => ({ key, label: TAB_LABEL[key] })),
     tabDefaultUnits: TAB_DEFAULT_UNITS, audioExtra: AUDIO_EXTRA, fields: extendFields(customCols), views: extendViews(customCols),
     notSet: NOT_SET, platformRules: PLATFORM_RULES, customColumns: customCols.map((c) => ({ id: c.id, key: c.col_key, label: c.label })),
     locks,
@@ -278,10 +279,18 @@ const SELECT = `
   SELECT w.*, uu.full_name AS updated_by_name
     FROM workload_items w LEFT JOIN users uu ON uu.id = w.updated_by`;
 
-function buildFilter(query) {
+function buildFilter(query, user) {
   const where = [];
   const params = [];
   const add = (sql, val) => { params.push(val); where.push(sql.replace('?', `$${params.length}`)); };
+  // The person's group decides which tabs they may open (Admin > Groups): without the All tab they only get rows of the teams they may see
+  const tabs = user ? workloadTabs(user) : ['ALL', ...TEAMS];
+  if (!tabs.includes('ALL')) {
+    const mine = TEAMS.filter((t) => tabs.includes(t));
+    if (!mine.length) throw new HttpError(403, 'Your group cannot open any tab of the Workload Tracker');
+    if (query.team && !mine.includes(String(query.team))) throw new HttpError(403, 'Your group cannot open that tab of the Workload Tracker');
+    add('w.units_concerned = ANY(?::text[])', UNITS.filter((u) => UNIT_TEAMS[u].some((t) => mine.includes(t))));
+  }
   if (query.team) {
     const team = v.oneOf(String(query.team), TEAMS, { field: 'team' });
     add('w.units_concerned = ANY(?::text[])', UNITS.filter((u) => UNIT_TEAMS[u].includes(team)));
@@ -304,7 +313,7 @@ const whereSql = (where) => (where.length ? `WHERE ${where.join(' AND ')}` : '')
 // Counts for the summary cards and tab badges: follows every active filter except the team tab.
 // `today` comes from the browser so "Today" is the user's local date.
 router.get('/stats', asyncH(async (req, res) => {
-  const { where, params } = buildFilter({ ...req.query, team: undefined });
+  const { where, params } = buildFilter({ ...req.query, team: undefined }, req.user);
   const today = v.date(req.query.today, { field: 'today' }) || new Date().toISOString().slice(0, 10);
   const P = (val) => { params.push(val); return `$${params.length}`; };
   const team = (t) => `count(*) FILTER (WHERE w.units_concerned = ANY(${P(UNITS.filter((u) => UNIT_TEAMS[u].includes(t)))}::text[]))::int`;
@@ -332,7 +341,7 @@ function orderBy(q, params) {
 }
 
 router.get('/', asyncH(async (req, res) => {
-  const { where, params } = buildFilter(req.query);
+  const { where, params } = buildFilter(req.query, req.user);
   const { limit, offset } = v.paging(req.query, { def: 100, max: LIST_MAX });
   const total = await db.query(`SELECT count(*)::int AS n FROM workload_items w ${whereSql(where)}`, params);
   const order = orderBy(req.query, params);   // may add a parameter (custom column key), so it runs after the count
@@ -413,7 +422,7 @@ router.get('/export', asyncH(async (req, res) => {
   const customCols = await loadCustomCols(db);
   const fieldsExt = extendFields(customCols);
   const customKeys = customCols.map((c) => c.col_key);
-  const { where, params } = buildFilter({ ...req.query, team: undefined });
+  const { where, params } = buildFilter({ ...req.query, team: undefined }, req.user);
   // the same order as the table on screen: newest Work Date first (or the column header you sorted by), so the latest is at the top of each sheet
   const order = orderBy(req.query, params);
   const { rows: rawRows } = await db.query(
@@ -708,7 +717,7 @@ router.post('/bulk-delete', requireAction('workload.write'), asyncH(async (req, 
     mode = 'all matching';
     filters = {};
     ['team', 'units', 'platform', 'plug_type', 'from', 'to', 'q'].forEach((k) => { if (body.filters && body.filters[k]) filters[k] = String(body.filters[k]).slice(0, 200); });
-    ({ where, params } = buildFilter(filters));
+    ({ where, params } = buildFilter(filters, req.user));
   } else {
     mode = 'selected';
     const ids = Array.isArray(body.ids) ? [...new Set(body.ids.map((n) => v.id(n)))].slice(0, 1000) : [];

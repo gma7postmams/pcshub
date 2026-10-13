@@ -7,7 +7,7 @@ import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FlagIcon, FullscreenIcon,
 import { DateChip, DateRange, FilterSelect, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
-import { useLive } from '../lib/live.js';
+import { useLive, useCellPresence } from '../lib/live.js';
 
 // Workload Tracker — ONE table. "Units Concerned" says which team(s) a plug is for; the tabs
 // (All / VGFX / VEDIT / Audio) are filters over it. Fields, per-tab columns and the Platform rules come
@@ -410,7 +410,8 @@ export default function Workload() {
   const [form, setForm] = useState(null);   // null | { rec } (rec null = new)
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState(null);   // Table mode: the empty row Add Row put at the top, not saved yet
-  const [editing, setEditing] = useState(null);   // { id, k } while one table cell is open for editing
+  const [editing, setEditing] = useState(null);
+  const peers = useCellPresence('workload', editing && editing.id !== 'draft' ? `${editing.id}:${editing.k}` : null);   // cells other people have open   // { id, k } while one table cell is open for editing
   const [addingColumn, setAddingColumn] = useState(false);
   const [managingLocks, setManagingLocks] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -520,7 +521,7 @@ export default function Workload() {
 
   const loadMeta = useCallback(() => {
     Promise.all([get('/api/workload/meta'), get('/api/dropdowns?categories=workload_platform,plug_type')])
-      .then(([m, dd]) => { setMeta(m); setLookups(dd); })
+      .then(([m, dd]) => { setMeta(m); setLookups(dd); if (m.tabs.length && !m.tabs.some((t) => t.key === tab)) setTab(m.tabs[0].key); })   // a group may see only some tabs
       .catch((e) => toast(e.message, 'err'));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(loadMeta, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1688,7 +1689,7 @@ export default function Workload() {
 
   // Managers click a cell to edit just that cell (nothing else opens); viewers just read.
   const rowLocked = (r) => isLocked(r.work_date, meta.locks);
-  const cell = (r, k) => {
+  const cellInner = (r, k) => {
     const td = cellView(r, k);
     if (!canWrite) return td;
     if (rowLocked(r)) return cloneElement(td, { title: `Locked: ${lockNote(r.work_date, meta.locks)}` });
@@ -1705,6 +1706,14 @@ export default function Workload() {
       onClick: (e) => { e.stopPropagation(); open(); },
       onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); open(); } },
     });
+  };
+
+  // Somebody else has this cell open: it lights up in their colour with their name (Google-Sheets style)
+  const cell = (r, k) => {
+    const el = cellInner(r, k);
+    const p = peers[`${r.id}:${k}`];
+    if (!p) return el;
+    return cloneElement(el, { className: [el.props.className, 'peer-on'].filter(Boolean).join(' '), 'data-peer': p.name, style: { ...(el.props.style || {}), '--peer': p.hue } });
   };
 
   // The merged Breakdate/Time column/cell: one or two pills (VGFX purple, VEDIT orange) depending on which

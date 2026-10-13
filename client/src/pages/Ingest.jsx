@@ -7,7 +7,7 @@ import { PlusIcon, SearchIcon, DownloadIcon, UploadIcon, TrashIcon, FullscreenIc
 import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
 import { Chip, DateChip, DateRange, FilterSelect, FiltersMenu, Pager, PlatformCell, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
-import { useLive } from '../lib/live.js';
+import { useLive, useCellPresence } from '../lib/live.js';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
 // Status (CM) is blank (Pending) until CM picks one of these
@@ -22,6 +22,7 @@ const isoDate = (x) => (/^\d{4}-\d{2}-\d{2}/.test(x || '') ? String(x).slice(0, 
 // Status (CM) cell: the decision plus its audit-trail timestamp. Same chips as the Workload Tracker (soft colour + dot).
 const CM_HUE = { DONE: 'green', 'NON-COMPLIANT': 'red', PENDING: 'amber' };
 const CmChip = ({ s }) => <Chip hue={CM_HUE[s] || 'amber'} dot>{s}</Chip>;
+const isApprovedRow = (r) => !!(r && (r.approved_at || (r.approved_by && String(r.approved_by).trim())));
 const CmStatus = ({ r, inline }) => (r.cm_status
   ? (
     <div className={`stack${inline ? ' inline' : ''}`}>
@@ -199,6 +200,7 @@ export default function Ingest() {
   const [detail, setDetail] = useState(null);
   const [reasonFor, setReasonFor] = useState(null);   // the record whose NON-COMPLIANT reason is being asked for
   const [editing, setEditing] = useState(null);   // { id, k }: the one cell being edited in the table
+  const peers = useCellPresence('ingest', editing && editing.id !== 'draft' ? `${editing.id}:${editing.k}` : null);   // cells other people have open
   const [picked, setPicked] = useState(() => new Set());   // rows ticked for batch delete
   const [allMatching, setAllMatching] = useState(false);   // "Select all N": every request matching the filters, on every page
   const [deletingAll, setDeletingAll] = useState(false);
@@ -310,7 +312,7 @@ export default function Ingest() {
   const chosen = rows.filter((r) => picked.has(r.id));
 
   // May this person change this cell? (a CM-decided record is locked unless you are CM; Destination Folder is PCS / OCS only)
-  const may = (r, k) => { const def = CELLS[k]; if (!def) return false; return def.cm ? canCm : canWrite && (!r.cm_status || canCm) && (!def.approve || canApprove); };
+  const may = (r, k) => { const def = CELLS[k]; if (!def) return false; return def.cm ? (canCm && isApprovedRow(r)) : canWrite && (!r.cm_status || canCm) && (!def.approve || canApprove); };
 
   const patchCell = async (id, k, value) => {
     const out = await patch(`/api/ingest/${id}`, { field: k, value: k === 'materials_count' ? (value === '' ? null : Number(value)) : value });
@@ -368,7 +370,9 @@ export default function Ingest() {
   const LBL = { program: 'PROG. NAME / PROJ. TITLE', platform: 'Platform', billable_party: 'Billable Party', episode_break_date_text: 'Episode / Breakdate', source: 'Source', materials_count: 'No. of Materials', requested_by: 'Requested By', destination_folder: 'Destination Folder', approved_by: 'Approved By', cm_status: 'Status (CM)', updated: 'Updated' };
   const normCells = () => (cellSel ? { r0: Math.min(cellSel.r0, cellSel.r1), r1: Math.max(cellSel.r0, cellSel.r1), c0: Math.min(cellSel.c0, cellSel.c1), c1: Math.max(cellSel.c0, cellSel.c1) } : null);
   const cell = (r, k, children, props0 = {}) => {
+    const p = peers[`${r.id}:${k}`];
     const props = { 'data-k': k, 'data-label': LBL[k], ...props0 };
+    if (p) { props.className = [props.className, 'peer-on'].filter(Boolean).join(' '); props['data-peer'] = p.name; props.style = { ...(props.style || {}), '--peer': p.hue }; }
     const ci = COLS.indexOf(k);
     if (r.__i !== undefined && ci >= 0) {
       props['data-r'] = r.__i; props['data-c'] = ci;
@@ -941,9 +945,10 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
         <label className="f full"><span>Destination Folder <span className="dim">— PCS</span></span>
           <textarea name="destination_folder" className="mono" maxLength={1000} value={f.destination_folder} onChange={set('destination_folder')} disabled={!canApprove} /></label>
         <label className="f"><span>Status (CM)</span>
-          <select name="cm_status" value={f.cm_status} onChange={set('cm_status')} disabled={!canCm}>
+          <select name="cm_status" value={f.cm_status} onChange={set('cm_status')} disabled={!canCm || !isApprovedRow(rec)} title={isApprovedRow(rec) ? undefined : 'Available once the material is approved'}>
             <Options list={CM_OPTIONS} blank="PENDING" />
           </select></label>
+        {!isApprovedRow(rec) ? <div className="dim">Status (CM) can be set once the material is approved.</div> : null}
         {f.cm_status === 'NON-COMPLIANT' ? (
           <label className="f"><span>Reason <span className="req">*</span></span>
             <input name="cm_reason" maxLength={2000} value={f.cm_reason} onChange={set('cm_reason')} disabled={!canCm} /></label>

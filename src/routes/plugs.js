@@ -12,6 +12,7 @@ const express = require('express');
 const { asyncH, HttpError, requireAction, requireAnyPage } = require('../middleware');
 const { audit } = require('../audit');
 const { logRun } = require('../transferlog');
+const { notifyPageUsers } = require('../notify');
 const { emitTransfer } = require('../transfer-hook');   // import events — the audit log subscribes to these (see src/transfer-hook.js)
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
@@ -373,6 +374,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
       const filled = await backfillWorkload(db, { from: result[0].date, to: result[result.length - 1].date, userId: req.user.id });   // rows already in the tracker with blank PSD / Prog. Name
       const copied = await autoCopy(req, 'p.plug_date = ANY($1::date[])', [result.map((r) => r.date)]);   // new plugs go straight into the Workload Tracker
       const total = result.reduce((o, s) => ({ plugs: o.plugs + s.plugs, added: o.added + s.added, skipped: o.skipped + s.skipped }), { plugs: 0, added: 0, skipped: 0 });
+      await notifyAdded(req, total.added, `${total.added} plug${total.added === 1 ? '' : 's'} (${result[0].date === result[result.length - 1].date ? result[0].date : `${result[0].date} to ${result[result.length - 1].date}`}, imported from ${info.file || 'a file'})`);
       await emitTransfer(req, 'workload.plugs_import', { ...info, days: result.length, from: result[0].date, to: result[result.length - 1].date, ...total, workloadRowsFilled: filled, copiedToWorkload: copied ? copied.created : null, warnings: warnings.slice(0, 20), ms: Date.now() - t0 });
       res.json({ ok: true, year, days: result.length, workloadRowsFilled: filled, copied, ...total, existing: total.plugs - total.added, sheets: result, warnings: warnings.slice(0, 20) });
     } catch (e) {
@@ -380,6 +382,18 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
       throw e;
     }
   }));
+
+  // Everyone who can open the Plug List hears when plugs are added (never the person who added them). Best effort: a failed notification never fails the save.
+  const notifyAdded = async (req, count, what) => {
+    if (!count) return;
+    try {
+      await notifyPageUsers('plugs', {
+        title: `${count} new plug${count === 1 ? '' : 's'} added`,
+        body: `${req.user.full_name} added ${what} to the PSD Daily Plug List.`,
+        link: '/plug-list',
+      }, { excludeUserId: req.user.id });
+    } catch (e) { console.error('[plugs] notification failed:', e.message); }
+  };
 
   // ---- add / edit / delete a single plug by hand ----
   const plugBody = (body) => ({
@@ -405,6 +419,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     await audit(req, 'workload.plug_add', 'workload_plug', row.id, { plug_date: b.plug_date, plug_id: b.plug_id });
     const filled = await backfillWorkload(db, { from: b.plug_date, to: b.plug_date, userId: req.user.id });
     const copied = await autoCopy(req, 'p.id = $1', [row.id]);
+    await notifyAdded(req, 1, `${b.plug_id} (${b.plug_date})`);
     res.status(201).json({ id: row.id, workloadRowsFilled: filled, copied });
   }));
 
@@ -449,6 +464,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     });
     const filled = await backfillWorkload(db, { from: out.days[0], to: out.days[out.days.length - 1], userId: req.user.id });
     const copied = out.addedIds.length ? await autoCopy(req, 'p.id = ANY($1::bigint[])', [out.addedIds]) : null;
+    await notifyAdded(req, out.added, `${out.added} plug${out.added === 1 ? '' : 's'} (${out.days[0]}${out.days.length > 1 ? ` to ${out.days[out.days.length - 1]}` : ''})`);
     res.json({ ok: true, added: out.added, updated: out.updated, addedIds: out.addedIds, workloadRowsFilled: filled, copied });
   }));
 

@@ -328,6 +328,15 @@ router.post('/import', requireAction('ingest.write'), upload.single('file'), one
       }
     }
   });
+  if (created) {
+    try {
+      await notifyCapable('ingest.approve', {
+        title: `${created} new ingest request${created === 1 ? '' : 's'} imported`,
+        body: `${req.user.full_name} imported ${created} ingest request${created === 1 ? '' : 's'} from ${req.file.originalname}. They are waiting for approval.`,
+        link: '/ingest?approval=1',
+      }, { excludeUserId: req.user.id });
+    } catch (e) { console.error('[ingest] import notification failed:', e.message); }
+  }
   await audit(req, 'ingest.import', 'ingest_record', null, { file: req.file.originalname, rows: recs.length, created, existing, skipped: errors.length });
   res.json({ ok: true, created, existing, skipped: errors.length, errors: errors.slice(0, 20) });
 }));
@@ -354,7 +363,7 @@ router.post('/', requireAction('ingest.write'), asyncH(async (req, res) => {
     await audit(req, 'ingest.create', 'ingest_record', rows[0].id, r, c);
     await notifyCapable('ingest.approve', {
       title: `New ingest: ${r.program}`,
-      body: `${req.user.full_name} added a new ingest request (${r.platform}). Destination Folder and Approved By are waiting.`,
+      body: `${req.user.full_name} added a new ingest request (${r.platform}). ${filled(r.destination_folder) ? 'It is waiting for your approval.' : 'Destination Folder and Approved By are waiting.'}`,
       link: `/ingest?id=${rows[0].id}`,
     }, { excludeUserId: req.user.id }, c);
     return rows[0];
@@ -367,6 +376,18 @@ function interested(r, actorId) {
   return [r.created_by, r.requested_by_user_id, r.approved_by_user_id].filter((uid) => uid && uid !== actorId);
 }
 
+const isApproved = (r) => Boolean(r && (r.approved_at || (r.approved_by && String(r.approved_by).trim())));
+const filled = (x) => Boolean(x && String(x).trim());
+
+/** Tell the approvers a request is ready for them (Destination Folder filled in, not yet approved). */
+async function notifyReady(c, actor, id, r) {
+  await notifyCapable('ingest.approve', {
+    title: `For approval: ${r.program}`,
+    body: `${actor.full_name} filled in the Destination Folder${r.platform ? ` (${r.platform})` : ''}. This ingest request is waiting for your approval.`,
+    link: `/ingest?id=${id}`,
+  }, { excludeUserId: actor.id }, c);
+}
+
 router.put('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   let blocked = null;
@@ -374,7 +395,7 @@ router.put('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
   await db.tx(async (c) => {
     const cur = await c.query(
       `SELECT cm_status, episode_date, to_char(episode_date, 'YYYY-MM-DD') AS episode_date_iso,
-              episode_break_date_text, destination_folder, approved_by, requested_by_user_id, requested_by_psd,
+              episode_break_date_text, destination_folder, approved_by, approved_at, requested_by_user_id, requested_by_psd,
               program, billable_party, platform, materials_count, source, remarks
          FROM ingest_records WHERE id=$1 FOR UPDATE`, [id]
     );
@@ -395,6 +416,7 @@ router.put('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
     );
     const changes = changesOf(cur.rows[0], r);
     if (Object.keys(changes).length) await audit(req, 'ingest.update', 'ingest_record', id, { program: r.program, changes }, c);
+    if (!filled(cur.rows[0].destination_folder) && filled(r.destination_folder) && !isApproved(cur.rows[0]) && !filled(r.approved_by)) await notifyReady(c, req.user, id, r);
   });
   } catch (e) {
     if (blocked) await auditBlocked(req, 'ingest.edit_blocked', id, { ...blocked, reason: e.message });
@@ -428,7 +450,7 @@ router.patch('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
   let row;
   try {
   row = await db.tx(async (c) => {
-    const cur = await c.query('SELECT cm_status, program, billable_party, platform, episode_break_date_text, materials_count, source, destination_folder, remarks FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
+    const cur = await c.query('SELECT cm_status, program, billable_party, platform, episode_break_date_text, materials_count, source, destination_folder, approved_by, approved_at, remarks FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
     if (!cur.rows.length) throw new HttpError(404, 'Ingest record not found');
     if (cur.rows[0].cm_status && !can(req.user, 'ingest.cm_complete')) {
       blocked = { cm_status: cur.rows[0].cm_status, program: cur.rows[0].program, field };
@@ -446,6 +468,7 @@ router.patch('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
     delete changes.__none;
     const only = {}; if (changes[field]) only[field] = changes[field];
     if (Object.keys(only).length) await audit(req, 'ingest.update', 'ingest_record', id, { program: cur.rows[0].program, changes: only, via: 'table cell' }, c);
+    if (field === 'destination_folder' && !filled(cur.rows[0].destination_folder) && filled(value) && !isApproved(cur.rows[0])) await notifyReady(c, req.user, id, cur.rows[0]);
     const out = await c.query(`${SELECT} WHERE i.id=$1`, [id]);
     return out.rows[0];
   });
@@ -536,11 +559,12 @@ router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(asyn
 
   await db.tx(async (c) => {
     const cur = await c.query(
-      `SELECT id, cm_status, cm_non_compliant_reason, program, created_by, requested_by_user_id, approved_by_user_id
+      `SELECT id, cm_status, cm_non_compliant_reason, program, created_by, requested_by_user_id, approved_by_user_id, approved_by, approved_at
          FROM ingest_records WHERE id=$1 FOR UPDATE`, [id]
     );
     const r = cur.rows[0];
     if (!r) throw new HttpError(404, 'Ingest record not found');
+    if (!isApproved(r)) throw new HttpError(409, 'The Status (CM) can only be set after the material has been approved');
     const newReason = decision === 'NON-COMPLIANT' ? reason : null;
     if (r.cm_status === decision && r.cm_non_compliant_reason === newReason) return;   // nothing changed: no new timestamp
 

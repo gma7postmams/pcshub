@@ -32,7 +32,18 @@ const CATALOG = [
 
   { key: 'ingest', label: 'Ingest Tracker', path: '/ingest', sections: [] },
   { key: 'plugs', label: 'PSD Daily Plug List', path: '/plug-list', sections: [] },
-  { key: 'workload', label: 'Workload Tracker', path: '/workload', sections: [] },
+  {
+    key: 'workload',
+    label: 'Workload Tracker',
+    path: '/workload',
+    // Which tabs of the Workload Tracker the group sees. A group with the page but none of these ticked sees every tab (as before this existed).
+    sections: [
+      { key: 'workload.all', label: 'All tab' },
+      { key: 'workload.vgfx', label: 'VGFX tab' },
+      { key: 'workload.vedit', label: 'VEDIT tab' },
+      { key: 'workload.audio', label: 'Audio tab' },
+    ],
+  },
 
   {
     key: 'knowledge',
@@ -138,7 +149,17 @@ function normalizeKeys(keys) {
 function effectiveKeys(user) {
   if (!user) return new Set();
   if (isAdminish(user)) return new Set(ALL_KEYS);
-  return new Set(normalizeKeys(user.perms));
+  const set = new Set(normalizeKeys(user.perms));
+  if (set.has('workload') && !WORKLOAD_TAB_KEYS.some((k) => set.has(k))) WORKLOAD_TAB_KEYS.forEach((k) => set.add(k));   // no tab ticked = every tab
+  return set;
+}
+
+const WORKLOAD_TAB_KEYS = ['workload.all', 'workload.vgfx', 'workload.vedit', 'workload.audio'];
+const WORKLOAD_TAB_BY_KEY = { 'workload.all': 'ALL', 'workload.vgfx': 'VGFX', 'workload.vedit': 'VEDIT', 'workload.audio': 'AUDIO' };
+/** The Workload Tracker tabs this person may open, in tab order: ['ALL', 'VGFX', 'VEDIT', 'AUDIO'] or fewer. */
+function workloadTabs(user) {
+  const eff = effectiveKeys(user);
+  return WORKLOAD_TAB_KEYS.filter((k) => eff.has(k)).map((k) => WORKLOAD_TAB_BY_KEY[k]);
 }
 
 function canPage(user, path) {
@@ -203,5 +224,5 @@ function landingPath(user) {
 
 module.exports = {
   ROLES, SYSADMIN, isSysAdmin, isAdminish, CATALOG, FIXED_PAGES, ROLE_ACTIONS, DEFAULT_ROLE_ACTIONS, ALL_ACTIONS, BUILTIN_ROLES, applyRoles, ACTION_PAGE, PAGE_BY_PATH,
-  normalizeKeys, canPage, canSection, can, allowedPages, allowedSections, allowedActions, landingPath,
+  normalizeKeys, effectiveKeys, workloadTabs, canPage, canSection, can, allowedPages, allowedSections, allowedActions, landingPath,
 };

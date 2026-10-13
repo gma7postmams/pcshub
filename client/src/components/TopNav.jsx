@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { get, post } from '../lib/api.js';
 import { ago, initials, safeLocalLink } from '../lib/util.js';
 import { useBranding, useSession } from '../context.jsx';
+import { onLive } from '../lib/live.js';
 import { BellIcon, MenuIcon } from './Icons.jsx';
 import { RoleBadge, useToast } from './ui.jsx';
 import { BookIcon, CheckCircleIcon, ChevronDownSmall, CloudIcon, DocIcon, GearIcon, HomeIcon, ListIcon } from './DashIcons.jsx';
@@ -47,11 +48,24 @@ export default function TopNav() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(null); // 'nav' | 'notif' | 'user' | null
   const [notif, setNotif] = useState({ unread: 0, rows: null });
+  const [ring, setRing] = useState(false);
+  const lastUnread = useRef(null);
   const u = s.user;
 
   const loadNotif = useCallback(async () => {
-    try { setNotif(await get('/api/notifications')); } catch (_) { /* ignore */ }
+    try {
+      const d = await get('/api/notifications');
+      if (lastUnread.current !== null && d.unread > lastUnread.current) {   // something new arrived: ring the bell
+        setRing(true);
+        setTimeout(() => setRing(false), 3500);
+      }
+      lastUnread.current = d.unread;
+      setNotif(d);
+    } catch (_) { /* ignore */ }
   }, []);
+
+  // Real time: the server says "your notifications changed" and the bell re-reads at once (the 30 s poll stays as a safety net)
+  useEffect(() => onLive((m) => { if (m && (m.t === 'notif' || m.t === 'reconnect')) loadNotif(); }), [loadNotif]);
 
   useEffect(() => {
     loadNotif();
@@ -100,9 +114,9 @@ export default function TopNav() {
       </nav>
       <div className="nav-right">
         {s.maintenance && s.maintenance.on ? <span className="maint-pill" id="maint-pill" role="status" aria-label="Maintenance mode is ON" title={`Maintenance mode is ON: only site administrators can sign in. ${s.maintenance.message || ''}`.trim()}>Maintenance: ON</span> : null}
-        <button type="button" className="iconbtn" id="notif-btn" aria-label="Notifications" onClick={toggle('notif')}>
+        <button type="button" className={`iconbtn${ring ? ' ringing' : ''}`} id="notif-btn" aria-label="Notifications" onClick={toggle('notif')}>
           <BellIcon />
-          {notif.unread ? <span className="badge-count" id="notif-count">{notif.unread > 99 ? '99+' : notif.unread}</span> : null}
+          {notif.unread ? <span className={`badge-count${ring ? ' pulse' : ''}`} id="notif-count">{notif.unread > 99 ? '99+' : notif.unread}</span> : null}
         </button>
         <button type="button" className="usermenu-btn" id="user-btn" onClick={toggle('user')}>
           <span className="avatar">{initials(u.full_name)}</span>
