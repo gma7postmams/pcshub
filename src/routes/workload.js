@@ -6,6 +6,7 @@ const { asyncH, HttpError, requireAction } = require('../middleware');
 const { audit } = require('../audit');
 
 const { logRun } = require('../transferlog');   // action logging (audit entry + server log line) for bulk delete
+const { readTeamWorkbook, plugKey, looseKey } = require('../workload-fill');   // the team's per-day workbook (Import hands it to Fill from team workbook)
 const { emitTransfer } = require('../transfer-hook');   // import / export events — the audit log subscribes to these (see src/transfer-hook.js)
 
 // Mounted behind requirePageAccess('/workload'); writes need requireAction('workload.write').
@@ -767,6 +768,9 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
   try { await wb.xlsx.load(req.file.buffer); } catch (e) {
     throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)');
   }
+  // The team's own per-day workbook (not this app's Export): it does not create rows, it fills the blank cells of rows already in the tracker.
+  // Say so; the page then offers the preview-and-fill window (POST /fill) with this same file.
+  if (readTeamWorkbook(wb).sheets.length) return res.json({ ok: true, teamWorkbook: true });
   // Sheet NAMES vary (MAIN/AUDIO for a full export, or just VGFX/VEDIT/AUDIO for a single-team export) but
   // every recognized sheet has the SAME shape: a header row of column labels. readSheet() below works from
   // the headers, not the sheet name, so every worksheet in the file is given a chance.
@@ -933,7 +937,6 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
 // ---------- Fill from team workbook: the team's original per-day workbook (merged cells, banners, extra columns) fills the BLANK cells of
 // rows that are already in the tracker (e.g. copied from the PSD Daily Plug List), matched by Work Date + Plug ID. Nothing typed is
 // overwritten and no row or column is created. POST ?apply=1 saves; without it, the same work is done and reported but nothing is written. ----------
-const { readTeamWorkbook, plugKey, looseKey } = require('../workload-fill');
 const FILL_FIELDS = ['units_concerned', 'psd', 'prog_name', 'breakdate_vgfx', 'breakdate_vedit', 'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats', 'length', 'others', 'audio_status'];
 const isBlank = (x) => x == null || String(x).trim() === '';
 

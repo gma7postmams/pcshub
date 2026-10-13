@@ -708,6 +708,7 @@ export default function Workload() {
     setImporting(true);
     try {
       const out = await post('/api/workload/import', form2);
+      if (out.teamWorkbook) { setFilling({ file }); return; }   // the team's per-day workbook: check it, then fill the blanks of the rows already here
       const bits = [`${out.created} row${out.created === 1 ? '' : 's'} imported`];
       if (out.skipped) bits.push(`${out.skipped} skipped`);
       if (out.newColumns && out.newColumns.length) bits.push(`new column${out.newColumns.length === 1 ? '' : 's'}: ${out.newColumns.join(', ')}`);
@@ -1816,7 +1817,6 @@ export default function Workload() {
                 canWrite && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
                 s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
-                canWrite && { id: 'fill-menu', label: 'Fill from team workbook…', icon: <UploadIcon />, onClick: () => setFilling(true) },
                 canWrite && isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
                 canWrite && !isGrid && pickedRowsList.length > 0 && { id: 'priority-btn', label: pickedAllPrio ? 'Remove Priority' : 'Set Priority', icon: <FlagIcon />, onClick: toggleTablePriority },
               ]} />
@@ -1840,9 +1840,6 @@ export default function Workload() {
                 <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} />
                 <button type="button" className="btn" id="import-btn" disabled={importing} onClick={() => fileRef.current.click()}>
                   <UploadIcon /> {importing ? 'Importing…' : 'Import'}
-                </button>
-                <button type="button" className="btn" id="fill-btn" title="Fill the blank cells of existing rows from the team's per-day workbook" onClick={() => setFilling(true)}>
-                  <UploadIcon /> Fill from workbook
                 </button>
               </>
             ) : null}
@@ -2044,7 +2041,7 @@ export default function Workload() {
       </div>
 
       {filling ? (
-        <FillModal onClose={() => setFilling(false)} onDone={() => { setFilling(false); load(); }} />
+        <FillModal file={filling.file} onClose={() => setFilling(false)} onDone={() => { setFilling(false); load(); }} />
       ) : null}
 
       {deletingAll ? (
@@ -2092,10 +2089,8 @@ export default function Workload() {
 // as a plain open-text field, appended after the template's own columns.
 // Fill the BLANK cells of rows already in the tracker from the team's original per-day workbook (merged cells and extra columns are fine).
 // Step 1 reads the file and shows what would change; step 2 saves it. Typed values are never overwritten and no rows are created.
-function FillModal({ onClose, onDone }) {
+function FillModal({ file, onClose, onDone }) {
   const toast = useToast();
-  const fileRef = useRef(null);
-  const [file, setFile] = useState(null);
   const [res, setRes] = useState(null);
   const [busy, setBusy] = useState(false);
   const [defUnits, setDefUnits] = useState('');
@@ -2111,19 +2106,19 @@ function FillModal({ onClose, onDone }) {
       setRes(out);
     } catch (e) { toast(e.message, 'err'); } finally { setBusy(false); }
   };
+  useEffect(() => { setRes(null); run(false); }, [defUnits, otherDays]);   // check the file now, and again whenever an option changes
   const FIELD_NAMES = { units_concerned: 'Units Concerned', psd: 'PSD', prog_name: 'Prog. Name', breakdate_vgfx: 'Breakdate (VGFX)', breakdate_vedit: 'Breakdate (VEDIT)', vo: 'VO', script: 'Script', art_stb: 'Artwork / STB', audio_guide: 'Audio Guide', remarks: 'Remarks', total_mats: 'Total Mats', platform: 'Platform' };
   return (
     <Modal title="Fill from team workbook" onClose={onClose}
       footer={(<><span className="grow" /><button type="button" className="btn" onClick={onClose}>Cancel</button>
-        {res && res.updated ? <button type="button" className="btn primary" id="fill-apply" disabled={busy} onClick={() => run(true)}>{busy ? 'Saving…' : `Fill ${res.updated} row${res.updated === 1 ? '' : 's'}`}</button>
-          : <button type="button" className="btn primary" id="fill-check" disabled={busy || !file} onClick={() => run(false)}>{busy ? 'Reading…' : 'Check file'}</button>}</>)}>
-      <p>Pick the team's per-day workload workbook (the one with sheets like <em>SEP 10_main</em>). Its blank-cell values fill the rows you already have, matched by Work Date and Plug ID. Anything already typed is kept and no rows or columns are added. The Audio (_ojo) sheets fill Length, Remarks and Status, and the unit of audio-only plugs.</p>
+        {res && res.updated ? <button type="button" className="btn primary" id="fill-apply" disabled={busy} onClick={() => run(true)}>{busy ? 'Saving…' : `Fill ${res.updated} row${res.updated === 1 ? '' : 's'}`}</button> : null}</>)}>
+      <p><strong>{file ? file.name : ''}</strong> is the team's per-day workbook (sheets like <em>SEP 10_main</em>), so it doesn't add rows: its values fill the blank cells of the rows you already have, matched by Work Date and Plug ID. Anything already typed is kept. The Audio (_ojo) sheets fill Length, Remarks and Status, and the unit of audio-only plugs.</p>
       <label className="check-row" style={{ marginTop: 8 }}><input id="fill-otherdays" type="checkbox" checked={otherDays} onChange={(e) => { setOtherDays(e.target.checked); setRes(null); }} /> <span>If a plug's own day isn't in the workbook, use the same plug from the nearest day that lists it (not its Breakdate)</span></label>
       <label className="f" style={{ marginTop: 8 }}><span>Units Concerned for plugs the workbook doesn't name a team for (e.g. “NEW OCTOBER TEMPLATE”, “WAITING FOR LOCAL”)</span>
         <select id="fill-units" value={defUnits} onChange={(e) => { setDefUnits(e.target.value); setRes(null); }}>
           <option value="">Leave blank</option><option value="VGFX/VEDIT">VGFX/VEDIT</option><option value="VGFX Only">VGFX Only</option><option value="VEDIT Only">VEDIT Only</option>
         </select></label>
-      <input ref={fileRef} id="fill-file" type="file" accept=".xlsx" onChange={(e) => { setFile(e.target.files[0] || null); setRes(null); }} />
+      {!res && busy ? <p className="dim">Reading the workbook…</p> : null}
       {res ? (
         <div id="fill-result" style={{ marginTop: 12 }}>
           <p><strong>{res.updated}</strong> row{res.updated === 1 ? '' : 's'} would be filled ({res.cells} cell{res.cells === 1 ? '' : 's'}) from {res.sheets} sheet{res.sheets === 1 ? '' : 's'} covering {res.days} day{res.days === 1 ? '' : 's'}.</p>
