@@ -46,12 +46,10 @@ export default function Knowledge() {
   const inputRef = useRef(null);
   const attachRef = useRef(null);   // the hidden picker for "add / replace the document of one item"
   const attachFor = useRef(null);
-  const dragDepth = useRef(0);
 
   const [meta, setMeta] = useState({ maxMb: 25, maxFiles: 20, trashDays: 30, exts: DEFAULT_EXTS });
   const [docs, setDocs] = useState(null);
   const [q, setQ] = useState('');
-  const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState([]); // per-file problems from the last upload
   const [edit, setEdit] = useState(null);
@@ -127,15 +125,7 @@ export default function Knowledge() {
     try { await post(`/api/knowledge/${d.id}/file`, fd); toast(d.has_file ? 'Document replaced' : 'Document added'); await load(); } catch (e) { toast(e.message, 'err'); } finally { setBusy(false); }
   };
 
-  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
-  const zone = canWrite ? {
-    onDragEnter: (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth.current += 1; setOver(true); },
-    onDragOver: (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; },
-    onDragLeave: (e) => { if (!hasFiles(e)) return; dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setOver(false); },
-    onDrop: (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth.current = 0; setOver(false); pick(e.dataTransfer.files); },
-  } : {};
-
-  // Dropping a file beside the zone must not make the browser navigate away to the PDF
+  // A file dropped on the page must not make the browser navigate away to it (files are added with the Upload / New item buttons)
   useEffect(() => {
     if (!canWrite) return undefined;
     const stop = (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault(); };
@@ -175,21 +165,6 @@ export default function Knowledge() {
         <>
           <input ref={inputRef} type="file" accept={(meta.exts || DEFAULT_EXTS).join(',')} multiple hidden onChange={(e) => pick(e.target.files)} />
           <input ref={attachRef} type="file" accept={(meta.exts || DEFAULT_EXTS).join(',')} hidden onChange={(e) => attach(e.target.files[0])} />
-          <div
-            className={`dropzone${over ? ' over' : ''}${busy ? ' busy' : ''}`}
-            role="button"
-            tabIndex={0}
-            aria-label="Drop documents here or press Enter to browse"
-            onClick={() => !busy && inputRef.current && inputRef.current.click()}
-            onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !busy) { e.preventDefault(); inputRef.current && inputRef.current.click(); } }}
-            {...zone}
-          >
-            <UploadIcon />
-            <div>
-              <strong>{busy ? 'Uploading…' : over ? 'Drop to upload' : 'Drag & drop documents here'}</strong>
-              <div className="muted">{busy ? 'Please wait' : `PDF, Word or PowerPoint · or click to browse · up to ${meta.maxFiles} at once, ${meta.maxMb} MB each · you can name them next · or use New item to add a name now and the document later`}</div>
-            </div>
-          </div>
           {report.length ? (
             <div className="alert warn mt-12">
               <strong>{report.length === 1 ? '1 file was not added' : `${report.length} files were not added`}</strong>
@@ -208,12 +183,13 @@ export default function Knowledge() {
               {allTags.map(([t, n]) => <button key={t} type="button" className={`tag-filter${tag === t ? ' on' : ''}`} onClick={() => setTag(tag === t ? '' : t)}>{t} <i>{n}</i></button>)}
             </span>
           ) : null}
+          {canWrite ? <button type="button" className="btn sm" id="kb-upload-btn" disabled={busy} onClick={() => inputRef.current && inputRef.current.click()}><UploadIcon /> {busy ? 'Uploading…' : 'Upload'}</button> : null}
           {canWrite ? <button type="button" className="btn sm primary" id="kb-new-btn" onClick={() => setBlank({ title: '', tags: [] })}><PlusIcon /> New item</button> : null}
           {canWrite ? <button type="button" className="btn sm" id="kb-trash-btn" onClick={openTrash}><TrashIcon /> Trash</button> : null}
           {docs ? <span className="dim kb-count" aria-live="polite">{q.trim() && shown.length !== docs.length ? `${shown.length} of ${docs.length}` : docs.length} item{docs.length === 1 ? '' : 's'}</span> : null}
         </div>
         {docs === null ? <Empty>Loading…</Empty> : !shown.length ? (
-          <Empty>{docs.length ? 'No documents match your search.' : canWrite ? 'Nothing here yet. Add a file above, or use New item to start with just a name.' : 'No documents have been added yet.'}</Empty>
+          <Empty>{docs.length ? 'No documents match your search.' : canWrite ? 'Nothing here yet. Use Upload to add files, or New item to start with just a name.' : 'No documents have been added yet.'}</Empty>
         ) : (
           <div className="table-wrap">
             <table className="t wl">
