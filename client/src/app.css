@@ -1168,3 +1168,8 @@ td.peer-flash { animation: peer-flash 1.8s ease-out; }
 .brand img.logo-d{display:none}
 html[data-mode="dark"] .brand img.logo-l{display:none}
 html[data-mode="dark"] .brand img.logo-d{display:inline}
+.logo-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.logo-pair .logo-preview{display:block;width:100%;height:84px;box-sizing:border-box}
+.logo-file{width:100%;min-width:0;padding:4px;font-size:12px}
+.logo-file::file-selector-button{padding:3px 8px;margin-right:6px;font-size:12px}
+@media (max-width:560px){.logo-pair{grid-template-columns:1fr}}

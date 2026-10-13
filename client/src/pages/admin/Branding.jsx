@@ -21,7 +21,7 @@ function LogoSlot({ mode, label, url, set, onUpload, onRemove }) {
     <form className="stack" id={`lf-${mode}`} onSubmit={async (e) => { e.preventDefault(); if (await onUpload(mode, file)) { setFile(null); setKey((k) => k + 1); } }}>
       <div className="dim">{label}</div>
       <div><img className="logo-preview" src={url} alt={label} style={{ background: mode === 'dark' ? '#0b0e14' : '#ffffff' }} />{set ? null : <div className="dim mt-8">Not uploaded.</div>}</div>
-      <input key={key} type="file" name="logo" accept="image/png,image/jpeg,image/webp" onChange={(e) => setFile(e.target.files[0] || null)} />
+      <input key={key} className="logo-file" type="file" name="logo" accept="image/png,image/jpeg,image/webp" onChange={(e) => setFile(e.target.files[0] || null)} />
       <div className="row">
         <button className="btn primary">Upload</button>
         {set ? <button type="button" className="btn danger" id={`rmlogo-${mode}`} onClick={() => onRemove(mode)}>Remove</button> : null}
@@ -81,8 +81,10 @@ export default function Branding() {
         <div className="card">
           <div className="card-head"><h2>Logo</h2></div>
           <div className="card-pad stack">
-            <LogoSlot mode="light" label="Light mode logo" url={b.logo_url} set={b.logo_light_set} onUpload={upload} onRemove={removeLogo} />
-            <LogoSlot mode="dark" label="Dark mode logo" url={b.logo_dark_url} set={b.logo_dark_set} onUpload={upload} onRemove={removeLogo} />
+            <div className="logo-pair">
+              <LogoSlot mode="light" label="Light mode logo" url={b.logo_url} set={b.logo_light_set} onUpload={upload} onRemove={removeLogo} />
+  <LogoSlot mode="dark" label="Dark mode logo" url={b.logo_dark_url} set={b.logo_dark_set} onUpload={upload} onRemove={removeLogo} />
+            </div>
             <div className="dim">{b.logo_custom ? 'Upload one logo and it is used in both modes; upload both and each mode uses its own.' : 'Using the default PULSE logo (black lettering in light mode, white in dark mode).'} PNG, JPEG or WebP · max 2 MB · transparent PNG works best.</div>
           </div>
         </div>
