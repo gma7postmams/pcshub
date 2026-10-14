@@ -97,9 +97,9 @@ function PlugCellEditor({ k, initial, onSave, onCancel }) {
 }
 const remember = (k, v) => { try { localStorage.setItem(`plugs:${k}`, v); } catch (e) { /* storage unavailable */ } };
 
-/** The date button of the toolbar, styled like "All dates" on the Workload / Ingest trackers: shows what is being looked at; click for
-    Today / This week / This month / All dates or a custom From – To. (The ‹ › arrows next to it step through days, weeks or months.) */
-function PlugDate({ period, anchor, range, custom, onToday, onAll, onCustom }) {
+/** The date button of the toolbar, styled like "All dates" on the Workload / Ingest trackers. It shows what is being looked at (the View chosen in
+    Filters decides that); with View = Custom range, click it to pick From – To. The ‹ › arrows next to it step through days, weeks or months. */
+function PlugDate({ period, anchor, range, custom, onCustom }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -110,21 +110,16 @@ function PlugDate({ period, anchor, range, custom, onToday, onAll, onCustom }) {
     document.addEventListener('keydown', esc);
     return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
   }, [open]);
-  const label = period === 'all' || (period === 'custom' && !range.from && !range.to) ? 'All dates' : rangeLabel(period, range, anchor);
-  const pick = (fn) => () => { fn(); setOpen(false); };
+  const isCustom = period === 'custom';
+  const label = period === 'all' ? 'All dates' : isCustom && !range.from && !range.to ? 'Pick dates' : rangeLabel(period, range, anchor);
   return (
     <div className="daterange" ref={ref}>
-      <button type="button" className="daterange-btn" id="plug-date-btn" title="Dates shown" onClick={() => setOpen((o) => !o)}><CalendarIcon /><span>{label}</span></button>
-      {open ? (
+      <button type="button" className="daterange-btn" id="plug-date-btn" title={isCustom ? 'Pick the dates' : 'Dates shown (change the View in Filters)'}
+        style={isCustom ? undefined : { cursor: 'default' }} onClick={() => { if (isCustom) setOpen((o) => !o); }}><CalendarIcon /><span>{label}</span></button>
+      {open && isCustom ? (
         <div className="popover daterange-pop">
-          <div className="presets">
-            <button type="button" className="btn sm" onClick={pick(() => onToday('day'))}>Today</button>
-            <button type="button" className="btn sm" onClick={pick(() => onToday('week'))}>This week</button>
-            <button type="button" className="btn sm" onClick={pick(() => onToday('month'))}>This month</button>
-            <button type="button" className="btn sm" onClick={pick(onAll)}>All dates</button>
-          </div>
-          <label className="f"><span>From</span><input type="date" value={period === 'custom' ? custom.from : range.from} max={(period === 'custom' ? custom.to : range.to) || undefined} onChange={(e) => onCustom({ from: e.target.value, to: period === 'custom' ? custom.to : range.to })} /></label>
-          <label className="f"><span>To</span><input type="date" value={period === 'custom' ? custom.to : range.to} min={(period === 'custom' ? custom.from : range.from) || undefined} onChange={(e) => onCustom({ from: period === 'custom' ? custom.from : range.from, to: e.target.value })} /></label>
+          <label className="f"><span>From</span><input type="date" value={custom.from} max={custom.to || undefined} onChange={(e) => onCustom({ from: e.target.value, to: custom.to })} /></label>
+          <label className="f"><span>To</span><input type="date" value={custom.to} min={custom.from || undefined} onChange={(e) => onCustom({ from: custom.from, to: e.target.value })} /></label>
         </div>
       ) : null}
     </div>
@@ -641,12 +636,10 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
           <SearchIcon />
           <input type="search" placeholder="Search plugs…" title="Search plug ID, program, PSD" value={q} onChange={(e) => setQ(e.target.value)} />
         </label>
-        <FiltersMenu count={period === 'day' ? 0 : 1} onClear={() => setPeriod('day')}>
+        <FiltersMenu count={0} onClear={() => {}}>
           <FilterSelect label="View" value={period} onChange={(e) => setPeriod(e.target.value)}><Options list={PERIODS} /></FilterSelect>
         </FiltersMenu>
-        <PlugDate period={period} anchor={anchor} range={range} custom={custom}
-          onToday={(p) => { setPeriod(p); setAnchor(isoDate()); }} onAll={() => setPeriod('all')}
-          onCustom={(c) => { setCustom(c); setPeriod('custom'); }} />
+        <PlugDate period={period} anchor={anchor} range={range} custom={custom} onCustom={setCustom} />
         {period === 'day' || period === 'week' || period === 'month' ? (
           <div className="plug-date">
             <button type="button" className="btn sm" disabled={!canPrev} onClick={() => go(-1)} title={`Previous ${period === 'day' ? 'day with a list' : period}`}>‹</button>
