@@ -1193,3 +1193,12 @@ table.t.wl.cards .chips.bd-chips { align-items: flex-start; width: 100%; }
 table.t.wl.cards .bd-chips .chip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; white-space: normal; text-align: left; overflow-wrap: normal; }
 /* One search-box width on the Ingest, Plug List and Workload toolbars (the Workload one was 420 px; now a little longer, 480 px, on all three) */
 .wl-toolbar .wl-search.short, .wl-tabbar .wl-search.short, .plug-list .plug-bar .wl-search { flex: 1 1 260px; min-width: 150px; max-width: 480px; }
+
+/* date popover (Ingest / Plug List / Workload): opens under the button, left edges aligned; presets in an even 2-column grid; From / To fill the width */
+.daterange-pop { left: 0; right: auto; width: 260px; max-width: calc(100vw - 24px); box-sizing: border-box; text-align: left; }
+.daterange-pop .presets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.daterange-pop .presets .btn { width: 100%; justify-content: center; margin: 0; }
+.daterange-pop .f { display: grid; gap: 4px; margin: 0; width: 100%; text-align: left; }
+.daterange-pop .f > span { margin: 0; padding: 0; text-align: left; }
+.daterange-pop .f input[type=date] { display: block; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; margin: 0; -webkit-appearance: none; appearance: none; }
+@media (max-width: 680px) { .daterange-pop { left: 0; right: 0; width: auto; } }
