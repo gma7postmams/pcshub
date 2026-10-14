@@ -257,7 +257,7 @@ async function parseRow(client, body, current, customCols = [], opts = {}) {
 }
 
 const colList = COLS.map((c) => `"${c}"`);
-const CUR_COLS = 'id, units_concerned, platform, plug_type, prog_name, audio_guide, work_date, is_priority';
+const CUR_COLS = 'id, units_concerned, platform, plug_type, prog_name, vo, script, art_stb, audio_guide, work_date, is_priority';
 
 async function insertRow(client, rec, userId) {
   const params = [...COLS.map((c) => rec[c]), !!rec.is_priority, JSON.stringify(rec.custom_fields || {}), userId];
@@ -269,22 +269,36 @@ async function insertRow(client, rec, userId) {
   return rows[0].id;
 }
 
-// Tell the VGFX / VEDIT / Audio users when a row is given its Units Concerned (new row with it set, or it was blank / changed). Best effort: never fails the save.
-// `items` = [{ units, plug_id, work_date }]
-async function notifyUnitsSet(req, items) {
+// Tell the teams involved in a row (its Units Concerned: VGFX / VEDIT / Audio) when VO, Script, Artwork / STB or Audio Guide is filled in or changed.
+// Best effort: never fails the save. `items` = [{ units, plug_id, work_date, fields: ['vo', ...] }] (see fieldsSet).
+const NOTIFY_FIELDS = { vo: ['workload_vo', 'VO'], script: ['workload_script', 'Script'], art_stb: ['workload_art_stb', 'Artwork / STB'], audio_guide: ['workload_audio_guide', 'Audio Guide'] };
+/** Which of those four fields were given a value (or a different one) by this save. `prev` is the row before (null for a new row). */
+function fieldsSet(prev, rec) {
+  const val = (x) => (x == null ? '' : String(x).trim());
+  return Object.keys(NOTIFY_FIELDS).filter((f) => val(rec[f]) && val(rec[f]).toUpperCase() !== 'N/A' && val(rec[f]) !== val(prev && prev[f]));
+}
+async function notifyFieldsSet(req, items) {
   try {
-    const list = items.filter((x) => x && UNIT_TEAMS[x.units]);
-    if (!list.length) return;
     const first = (x) => String(x.plug_id || '').split('\n')[0].trim() || 'a row';
     const day = (x) => (x.work_date instanceof Date ? x.work_date.toISOString().slice(0, 10) : String(x.work_date || '').slice(0, 10));
-    const byTeam = new Map();
-    for (const x of list) for (const t of UNIT_TEAMS[x.units]) { if (!byTeam.has(t)) byTeam.set(t, []); byTeam.get(t).push(x); }
-    for (const [team, xs] of byTeam) {
+    // team -> field -> rows
+    const by = new Map();
+    for (const x of items) {
+      const teams = UNIT_TEAMS[x.units];
+      if (!x || !teams || !x.fields || !x.fields.length) continue;
+      for (const t of teams) for (const f of x.fields) {
+        if (!by.has(t)) by.set(t, new Map());
+        if (!by.get(t).has(f)) by.get(t).set(f, []);
+        by.get(t).get(f).push(x);
+      }
+    }
+    for (const [team, fm] of by) for (const [f, xs] of fm) {
+      const [kind, label] = NOTIFY_FIELDS[f];
       const one = xs.length === 1;
       await notifyWorkloadTeams([team], {
-        title: one ? `New ${team} workload item` : `${xs.length} new ${team} workload items`,
-        body: one ? `${req.user.full_name} set ${first(xs[0])} (${day(xs[0])}) to ${xs[0].units}.` : `${req.user.full_name} set Units Concerned to include ${team} on ${xs.length} workload rows.`,
-        link: '/workload', kind: 'workload_team',
+        title: one ? `${label} updated: ${first(xs[0])}` : `${label} updated on ${xs.length} workload items`,
+        body: one ? `${req.user.full_name} set ${label} on ${first(xs[0])} (${day(xs[0])}, ${xs[0].units}).` : `${req.user.full_name} set ${label} on ${xs.length} workload rows for ${team}.`,
+        link: '/workload', kind,
       }, { excludeUserId: req.user.id });
     }
   } catch (e) { console.error('[workload] notification failed:', e.message); }
@@ -627,7 +641,7 @@ router.post('/', requireAction('workload.write'), asyncH(async (req, res) => {
     made = rec;
     return newId;
   });
-  await notifyUnitsSet(req, [{ units: made.units_concerned, plug_id: made.plug_id, work_date: made.work_date }]);
+  await notifyFieldsSet(req, [{ units: made.units_concerned, plug_id: made.plug_id, work_date: made.work_date, fields: fieldsSet(null, made) }]);
   res.status(201).json({ ok: true, id });
 }));
 
@@ -642,7 +656,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
     let created = 0;
     let updated = 0;
     const createdIds = [];
-    const unitsSet = [];   // rows that got a Units Concerned (new, or blank / different before) — the team users are told
+    const fieldsChanged = [];   // rows where VO / Script / Artwork-STB / Audio Guide was filled in or changed — the teams involved are told
     const results = [];   // what was stored for the auto-filled columns, so the table can tell a cleared PSD / Platform that was filled in again
     for (let i = 0; i < list.length; i++) {
       const row = list[i] || {};
@@ -656,7 +670,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           assertNotLocked(locks, rec.work_date);
           await updateRow(c, id, rec, req.user.id);
           await audit(req, 'workload.update', 'workload_item', id, rec, c);
-          if (rec.units_concerned && rec.units_concerned !== cur.rows[0].units_concerned) unitsSet.push({ units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date });
+          fieldsChanged.push({ units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur.rows[0], rec) });
           results.push({ id, psd: rec.psd || '', prog_name: rec.prog_name || '', platform: rec.platform || '' });
           updated++;
         } else {
@@ -665,7 +679,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           const id = await insertRow(c, rec, req.user.id);
           await audit(req, 'workload.create', 'workload_item', id, rec, c);
           createdIds.push(id);
-          if (rec.units_concerned) unitsSet.push({ units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date });
+          fieldsChanged.push({ units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(null, rec) });
           created++;
         }
       } catch (e) {
@@ -673,10 +687,10 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
         throw e;
       }
     }
-    return { created, updated, createdIds, results, unitsSet };
+    return { created, updated, createdIds, results, fieldsChanged };
   });
-  await notifyUnitsSet(req, out.unitsSet);
-  const { unitsSet, ...shown } = out;
+  await notifyFieldsSet(req, out.fieldsChanged);
+  const { fieldsChanged, ...shown } = out;
   res.json({ ok: true, ...shown });
 }));
 
@@ -705,7 +719,7 @@ router.patch('/:id', requireAction('workload.write'), asyncH(async (req, res) =>
     await audit(req, 'workload.update', 'workload_item', id, { field, value });
     return res.json({ ok: true, values: { [field]: value } });
   }
-  let unitsSet = null;
+  let fieldsChanged = null;
   const values = await db.tx(async (c) => {
     const found = await c.query('SELECT * FROM workload_items WHERE id=$1 FOR UPDATE', [id]);
     if (!found.rows.length) throw new HttpError(404, 'Workload item not found');
@@ -723,12 +737,12 @@ router.patch('/:id', requireAction('workload.write'), asyncH(async (req, res) =>
       [id, ...changed.map((k) => rec[k]), req.user.id]
     );
     await audit(req, 'workload.update', 'workload_item', id, { field, value: rec[field] }, c);
-    if (field === 'units_concerned' && rec.units_concerned && rec.units_concerned !== cur.units_concerned) unitsSet = { units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date };
+    if (NOTIFY_FIELDS[field]) fieldsChanged = { units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur, { [field]: rec[field] }) };
     // hand back values in the same shape the list uses ('YYYY-MM-DDTHH:MM' for Breakdate/Time)
     const shape = (k) => (FIELDS[k].kind === 'datetime' && rec[k] ? rec[k].slice(0, 16).replace(' ', 'T') : rec[k]);
     return Object.fromEntries(changed.map((k) => [k, shape(k)]));
   });
-  if (unitsSet) await notifyUnitsSet(req, [unitsSet]);
+  if (fieldsChanged) await notifyFieldsSet(req, [fieldsChanged]);
   res.json({ ok: true, values });
 }));
 
@@ -736,7 +750,7 @@ router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const customCols = await loadCustomCols(db);
   const locks = await loadLocks(db);
-  let unitsSet = null;
+  let fieldsChanged = null;
   await db.tx(async (c) => {
     const cur = await c.query(`SELECT ${CUR_COLS} FROM workload_items WHERE id=$1 FOR UPDATE`, [id]);
     if (!cur.rows.length) throw new HttpError(404, 'Workload item not found');
@@ -745,9 +759,9 @@ router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
     assertNotLocked(locks, rec.work_date);
     await updateRow(c, id, rec, req.user.id);
     await audit(req, 'workload.update', 'workload_item', id, rec, c);
-    if (rec.units_concerned && rec.units_concerned !== cur.rows[0].units_concerned) unitsSet = { units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date };
+    fieldsChanged = { units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur.rows[0], rec) };
   });
-  if (unitsSet) await notifyUnitsSet(req, [unitsSet]);
+  if (fieldsChanged) await notifyFieldsSet(req, [fieldsChanged]);
   res.json({ ok: true });
 }));
 
