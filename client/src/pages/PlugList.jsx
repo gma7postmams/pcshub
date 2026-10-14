@@ -4,7 +4,7 @@ import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
 import { CalendarIcon, DownloadIcon, ExitFullscreenIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive } from '../lib/live.js';
-import { ExportButton, FilterSelect, FiltersMenu, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
+import { ExportButton, FilterSelect, FiltersMenu, pickerHeld, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
 import { useSession } from '../context.jsx';
 import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
@@ -104,7 +104,7 @@ function PlugDate({ period, anchor, range, custom, onCustom, onPeriod }) {
   const ref = useRef(null);
   useEffect(() => {
     if (!open) return undefined;
-    const away = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const away = (e) => { if (ref.current && !ref.current.contains(e.target) && !pickerHeld(ref.current)) setOpen(false); };
     const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', away);
     document.addEventListener('keydown', esc);

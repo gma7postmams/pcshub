@@ -114,7 +114,7 @@ export function DateRange({ from, to, onChange, title = 'Work date range' }) {
   const ref = useRef(null);
   useEffect(() => {
     if (!open) return undefined;
-    const away = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const away = (e) => { if (ref.current && !ref.current.contains(e.target) && !pickerHeld(ref.current)) setOpen(false); };
     const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', away);
     document.addEventListener('keydown', esc);
@@ -223,11 +223,15 @@ export function useFitBox(dep) {
   }, [dep]);
 }
 
+/** True while a date field inside `box` has focus: its browser date picker (Firefox's, in responsive design mode especially) is a layer of its own and a tap
+    inside it must not count as a click outside the popover, which would remove the field and close the picker under the finger. */
+export const pickerHeld = (box) => { const a = document.activeElement; return !!(box && a && box.contains(a) && a.tagName === 'INPUT' && /^(date|time|datetime-local|month|week)$/.test(a.type)); };
+
 /** Click-outside / Escape handling shared by the two toolbar popovers */
 function useDismiss(open, setOpen, ref) {
   useEffect(() => {
     if (!open) return undefined;
-    const away = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const away = (e) => { if (ref.current && !ref.current.contains(e.target) && !pickerHeld(ref.current)) setOpen(false); };
     const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', away);
     document.addEventListener('keydown', esc);

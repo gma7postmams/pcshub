@@ -103,9 +103,9 @@ function DateRangeInput({ value, onChange, disabled }) {
   const { from, to } = splitRange(value);
   const join = (a, b) => (a && b ? `${a}/${b}` : a || '');
   return (
-    <span className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+    <span className="dri">
       <input type="date" value={from} disabled={disabled} max={to || undefined} aria-label="From" onChange={(e) => onChange(join(e.target.value, to))} />
-      <span className="dim">–</span>
+      <span className="dim dri-dash">–</span>
       <input type="date" value={to} disabled={disabled || !from} min={from || undefined} aria-label="To (optional)" onChange={(e) => onChange(join(from, e.target.value))} />
     </span>
   );
