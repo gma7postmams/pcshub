@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
-import { CalendarIcon, DownloadIcon, ExitFullscreenIcon, FillIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
+import { CalendarIcon, DownloadIcon, ExitFullscreenIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive } from '../lib/live.js';
 import { FilterSelect, FiltersMenu, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
@@ -162,7 +162,6 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const [summary, setSummary] = useState(null);      // result of the last import
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(null);      // the plug being edited
-  const [filling, setFilling] = useState(false);
   const okToLeave = async () => true;   // Excel mode (and its unsaved-grid prompt) is gone: the list is the Table only
   const [draft, setDraft] = useState(null);          // the empty row Add Row put at the top, not saved yet
   const [cellEd, setCellEd] = useState(null);        // { id, k } while one cell is open for editing
@@ -217,7 +216,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   // other people's changes appear by themselves (Workload changes too: the "In Workload" flag) — not while a cell, form or dialog is open here
   useLive(['plugs'], () => { loadDays(true); return loadRows(true); }, () => {
     const el = document.activeElement;
-    return !!(adding || editing || draft || cellEd || needYear || summary || filling || importing || document.querySelector('.modal-backdrop') || (el && el.closest && el.closest('td') && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)));
+    return !!(adding || editing || draft || cellEd || needYear || summary || importing || document.querySelector('.modal-backdrop') || (el && el.closest && el.closest('td') && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)));
   });
   const exportXlsx = async () => {   // the days and search on screen, in the sort on screen
     const p = new URLSearchParams({ order: period === 'all' ? 'desc' : 'asc' });
@@ -261,15 +260,6 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     else setNeedYear(file);                                           // the list has no year in it: ask
   };
 
-  // Existing Workload rows with a Plug ID but no PSD / PROG. NAME / PROJ. TITLE: fill them from the lists (also happens by itself on import / restart)
-  const fillExisting = async () => {
-    setFilling(true);
-    try {
-      const out = await post('/api/plugs/fill', {});
-      toast(out.filled ? `${out.filled} Workload row${out.filled === 1 ? '' : 's'} filled in from the plug list` : 'Nothing to fill — every Workload row with a matching Plug ID already has its PSD and PROG. NAME / PROJ. TITLE');
-      if (out.filled && onCopied) onCopied(out);
-    } catch (e) { toast(e.message, 'err'); } finally { setFilling(false); }
-  };
   const removePlug = async (r) => {
     if (!(await confirm('Delete plug', `Remove "${r.plug_id}" from the ${fmtDate(r.plug_date)} list? Workload rows already made from it are not touched.`, { okText: 'Delete', danger: true }))) return;
     try { await del(`/api/plugs/${r.id}`); toast('Deleted'); await loadDays(); loadRows(); } catch (e) { toast(e.message, 'err'); }
@@ -680,7 +670,6 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
             <ToolMenu items={[
               { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
               isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
-              canWorkload && { id: 'fill-blank-btn', label: filling ? 'Filling…' : 'Fill Blank Rows', icon: <FillIcon />, disabled: filling, onClick: fillExisting },
             ]} />
           ) : null}
         </div>
