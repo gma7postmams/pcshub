@@ -83,7 +83,6 @@ export default function Profile() {
       {!forced && needs2fa ? <div className="alert warn mb-12"><strong>Two-factor authentication is required for your account.</strong> Set it up below to continue using the app.</div> : null}
 
       <div className="prof-cols">
-        <div className="prof-col">
         <div className="card">
           <div className="card-head"><h2>Account</h2><RoleBadge role={u.role} /></div>
           <div className="card-pad stack prof-pic-wrap">
@@ -133,8 +132,6 @@ export default function Profile() {
           </div>
         </div>
         <PushSetup />
-        </div>
-        <div className="prof-col">
         <div className="card">
           <div className="card-head"><h2>Change password</h2></div>
           <form className="card-pad stack" id="pwf" autoComplete="off" onSubmit={changePassword}>
@@ -165,9 +162,8 @@ export default function Profile() {
           </div>
         </div>
 
-        </div>
+        <NotifPrefs />
       </div>
-      <NotifPrefs />
 
       {emailSetup ? (
         <EmailSetupModal

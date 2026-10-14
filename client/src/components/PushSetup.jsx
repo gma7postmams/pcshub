@@ -67,7 +67,9 @@ export default function PushSetup() {
   if (!supported) {
     note = isIos && !standalone
       ? 'On iPhone, first add this app to your Home Screen (Share, then Add to Home Screen), open it from there, and come back to this page.'
-      : 'This browser does not support push notifications.';
+      : !('serviceWorker' in navigator)
+        ? 'This window cannot run background features, so notifications are not available here. Private windows (and Firefox set to never remember history) turn them off: open the site in a normal window.'
+        : 'This browser does not support push notifications.';
   } else if (perm === 'denied') {
     note = 'Notifications are blocked for this app. Allow them in your phone settings (iPhone: Settings, Notifications, this app; Android: long-press the app icon, App info, Notifications), then reload.';
   }

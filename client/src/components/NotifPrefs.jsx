@@ -23,7 +23,7 @@ export default function NotifPrefs() {
   if (!kinds) return null;
   if (!kinds.length) return null;
   return (
-    <div className="card mt-14" id="notif-prefs">
+    <div className="card" id="notif-prefs">
       <div className="card-head">
         <h2>Notification settings</h2>
         <span className="np-all"><button type="button" className="btn" onClick={() => all(true)}>All on</button><button type="button" className="btn" onClick={() => all(false)}>All off</button></span>
