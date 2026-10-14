@@ -25,14 +25,14 @@ function parseEpisodeText(raw, year) {
       segs.push(a === b ? a : `${a}/${b}`); cm = +m[1].slice(5, 7); cy = +m[1].slice(0, 4); continue;
     }
     const full = new RegExp(`^${MONRE}\\s*(\\d{1,2})(?:\\s*,?\\s*(\\d{4}))?(?:\\s*-\\s*(?:${MONRE}\\s*)?(\\d{1,2})(?:\\s*,?\\s*(\\d{4}))?)?$`, 'i').exec(seg);
-    const bare = /^(\d{1,2})(?:\s*-\s*(\d{1,2}))?$/.exec(seg);
+    const bare = new RegExp(`^(\\d{1,2})(?:\\s*-\\s*(?:${MONRE}\\s*)?(\\d{1,2}))?$`, 'i').exec(seg);   // "21", "21-25" or "28 - Oct 2" (the month comes from the previous date)
     let y1; let m1; let d1; let y2; let m2; let d2;
     if (full) {
       m1 = MON[full[1].toLowerCase()]; d1 = +full[2]; d2 = full[5] ? +full[5] : null; m2 = full[4] ? MON[full[4].toLowerCase()] : m1;
       y2 = full[6] ? +full[6] : null; y1 = full[3] ? +full[3] : y2 && m2 >= m1 ? y2 : cy;
       if (y2 == null) y2 = m2 < m1 ? y1 + 1 : y1;   // "Dec 28 - Jan 3" runs into the next year
     } else if (bare && cm) {
-      m1 = cm; y1 = cy; d1 = +bare[1]; d2 = bare[2] ? +bare[2] : null; m2 = m1; y2 = y1;
+      m1 = cm; y1 = cy; d1 = +bare[1]; d2 = bare[3] ? +bare[3] : null; m2 = bare[2] ? MON[bare[2].toLowerCase()] : m1; y2 = m2 < m1 ? y1 + 1 : y1;
     } else return null;
     const a = real(y1, m1, d1); const b = d2 ? real(y2, m2, d2) : a;
     if (!a || !b || b < a) return null;
