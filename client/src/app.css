@@ -1250,5 +1250,5 @@ td.editing .cell-editor:not(.date) input:not([type="date"]):not([type="datetime-
 td.editing .cell-editor textarea { border-color: transparent; background-color: transparent; box-shadow: none; outline: none; }
 td.editing .cell-editor:not(.date) input:not([type="date"]):not([type="datetime-local"]):focus,
 td.editing .cell-editor textarea:focus { border-color: transparent; box-shadow: none; outline: none; }
-td.editing .cell-editor .ag input { background-color: var(--bg-2); border-color: var(--border-2); }
-td.editing .cell-editor .ag input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+td.editing .cell-editor:not(.date) .ag input:not([type="date"]):not([type="datetime-local"]):not([type="time"]) { background-color: var(--bg-2); border-color: var(--border-2); }
+td.editing .cell-editor:not(.date) .ag input:not([type="date"]):not([type="datetime-local"]):focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
