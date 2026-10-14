@@ -407,7 +407,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
       await notifyPageUsers('plugs', {
         title: `${count} new plug${count === 1 ? '' : 's'} added`,
         body: `${req.user.full_name} added ${what} to the PSD Daily Plug List.`,
-        link: '/plug-list',
+        link: '/plug-list', kind: 'plugs_added',
       }, { excludeUserId: req.user.id });
     } catch (e) { console.error('[plugs] notification failed:', e.message); }
   };

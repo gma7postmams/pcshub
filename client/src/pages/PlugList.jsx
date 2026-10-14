@@ -151,7 +151,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const [days, setDays] = useState(null);            // [{ date, n }] newest first (the latest 366 days with a list); null = loading
   const [totals, setTotals] = useState({ plugs: 0, days: 0, first: '', last: '' });   // across every day
   const saved = useRef(loadView('plugs', {})).current;   // what this tab last had on screen (kept across a refresh)
-  const [period, setPeriodState] = useState(() => (PERIODS.some((p) => p.value === saved.period) ? saved.period : stored('period', 'day', PERIODS.map((p) => p.value))));
+  const [period, setPeriodState] = useState(() => (PERIODS.some((p) => p.value === saved.period) ? saved.period : 'day'));   // a fresh tab / a new day opens on Daily (today)
   const [size, setSizeState] = useState(() => stored('size3', '25', SIZES.map((s) => s.value)));
   const [anchor, setAnchor] = useState(saved.anchor || '');          // the day / a day of the week / of the month being looked at
   const [custom, setCustom] = useState(saved.custom || { from: '', to: '' });

@@ -284,7 +284,7 @@ async function notifyUnitsSet(req, items) {
       await notifyWorkloadTeams([team], {
         title: one ? `New ${team} workload item` : `${xs.length} new ${team} workload items`,
         body: one ? `${req.user.full_name} set ${first(xs[0])} (${day(xs[0])}) to ${xs[0].units}.` : `${req.user.full_name} set Units Concerned to include ${team} on ${xs.length} workload rows.`,
-        link: '/workload',
+        link: '/workload', kind: 'workload_team',
       }, { excludeUserId: req.user.id });
     }
   } catch (e) { console.error('[workload] notification failed:', e.message); }

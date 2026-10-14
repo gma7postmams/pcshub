@@ -19,6 +19,24 @@ const stepUp = require('../reauth');
 
 const router = express.Router();
 
+// ---- Which activities notify me (bell / phone) ----
+router.get('/notif-prefs', asyncH(async (req, res) => {
+  const { relevantKinds } = require('../notify-kinds');
+  const { rows } = await db.query('SELECT notif_prefs FROM users WHERE id=$1', [req.user.id]);
+  const prefs = (rows[0] && rows[0].notif_prefs) || {};
+  res.json({ kinds: relevantKinds(req.user).map((k) => ({ ...k, bell: (prefs[k.key] || {}).bell !== false, push: (prefs[k.key] || {}).push !== false })) });
+}));
+router.put('/notif-prefs', asyncH(async (req, res) => {
+  const { KEYS } = require('../notify-kinds');
+  const kind = String(req.body.kind || '');
+  const channel = String(req.body.channel || '');
+  if (!KEYS.has(kind) || !['bell', 'push'].includes(channel) || typeof req.body.on !== 'boolean') throw new HttpError(400, 'Invalid setting');
+  await db.query(
+    `UPDATE users SET notif_prefs = jsonb_set(COALESCE(notif_prefs, '{}'::jsonb), ARRAY[$2::text], COALESCE(notif_prefs -> $2, '{}'::jsonb) || jsonb_build_object($3::text, $4::boolean), true) WHERE id=$1`,
+    [req.user.id, kind, channel, req.body.on]);
+  res.json({ ok: true });
+}));
+
 // ---- Phone notifications (Web Push) ----
 router.get('/push', asyncH(async (req, res) => {
   const { rows } = await db.query('SELECT endpoint FROM push_subscriptions WHERE user_id=$1', [req.user.id]);

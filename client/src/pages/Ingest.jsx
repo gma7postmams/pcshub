@@ -4,7 +4,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { isBlockText, pasteFallback } from '../lib/pasteFallback.js';
 import { parseEpisodeText } from '../lib/episode.js';
 import { loadView, saveView, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
-import { ago, downloadFile, fmtDate, fmtDateTime } from '../lib/util.js';
+import { ago, downloadFile, fmtDate, fmtDateTime, isoDate as todayISO } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { PlusIcon, SearchIcon, DownloadIcon, UploadIcon, TrashIcon, FullscreenIcon, ExitFullscreenIcon } from '../components/Icons.jsx';
 import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
@@ -281,9 +281,10 @@ export default function Ingest() {
   const [lookups, setLookups] = useState(null);
   const [filt, setFilt] = useState(() => {   // the last filters of this tab (kept across a refresh), unless a dashboard link brought its own
     const mine = loadView('ingest', {}).filt || {};
-    const base = { q: '', status: '', program: '', platform: '', from: '', to: '', approval: '', ...mine };
+    const base = { q: '', status: '', program: '', platform: '', from: todayISO(), to: todayISO(), approval: '', ...mine };   // a fresh tab starts on today
     if (params.get('status')) base.status = /^pending$/i.test(params.get('status')) ? 'PENDING' : params.get('status');
     if (params.get('approval')) base.approval = /^pending$/i.test(params.get('approval')) ? 'pending' : params.get('approval');
+    if (params.get('status') || params.get('approval')) { base.from = ''; base.to = ''; }   // a Dashboard link to the pending items shows them on every date
     return base;
   });
   const [offset, setOffset] = useState(() => loadView('ingest', {}).offset || 0);   // the page you were on is kept across a refresh

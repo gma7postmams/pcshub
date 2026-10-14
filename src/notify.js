@@ -1,18 +1,28 @@
 const db = require('./db');
 const { can, ROLE_ACTIONS, effectiveKeys } = require('./permissions');
 
-async function notifyUsers(userIds, { title, body, link }, client) {
+async function notifyUsers(userIds, { title, body, link, kind }, client) {
   const ids = [...new Set((userIds || []).filter((x) => Number.isInteger(x)))];
   if (!ids.length) return;
   const runner = client || db;
-  await runner.query(
-    `INSERT INTO notifications (user_id, title, body, link)
-     SELECT u, $2, $3, $4 FROM unnest($1::int[]) AS u`,
-    [ids, title, body || null, link || null]
-  );
-  try { require('./live').publishNotif(ids); } catch (_) { /* live updates are a bonus */ }
+  // People choose per kind of activity whether it shows in the bell and whether it is pushed to their phone (missing = on)
+  let bellIds = ids, pushIds = ids;
+  if (kind) {
+    const { rows } = await runner.query('SELECT id, notif_prefs FROM users WHERE id = ANY($1::int[])', [ids]);
+    const pref = new Map(rows.map((r) => [r.id, (r.notif_prefs && r.notif_prefs[kind]) || {}]));
+    bellIds = ids.filter((i) => (pref.get(i) || {}).bell !== false);
+    pushIds = ids.filter((i) => (pref.get(i) || {}).push !== false);
+  }
+  if (bellIds.length) {
+    await runner.query(
+      `INSERT INTO notifications (user_id, title, body, link)
+       SELECT u, $2, $3, $4 FROM unnest($1::int[]) AS u`,
+      [bellIds, title, body || null, link || null]
+    );
+    try { require('./live').publishNotif(bellIds); } catch (_) { /* live updates are a bonus */ }
+  }
   // phones: after the caller's transaction (if any) is done; fire and forget
-  setTimeout(() => { try { require('./push').sendPush(ids, { title, body, link }); } catch (e) { console.warn('push unavailable:', e.message); } }, client ? 1500 : 0);
+  if (pushIds.length) setTimeout(() => { try { require('./push').sendPush(pushIds, { title, body, link }); } catch (e) { console.warn('push unavailable:', e.message); } }, client ? 1500 : 0);
 }
 
 /** Notify every active user who can perform `action` (role grants it AND their group opens its page). */

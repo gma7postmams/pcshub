@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, del, post, put } from '../lib/api.js';
 import PushSetup from '../components/PushSetup.jsx';
+import NotifPrefs from '../components/NotifPrefs.jsx';
 import { avatarUrl, colorFor, makeAvatar } from '../lib/avatar.js';
 import { initials } from '../lib/util.js';
 import { useBranding, useSession } from '../context.jsx';
@@ -82,7 +83,6 @@ export default function Profile() {
       {!forced && needs2fa ? <div className="alert warn mb-12"><strong>Two-factor authentication is required for your account.</strong> Set it up below to continue using the app.</div> : null}
 
       <div className="prof-cols">
-        <div className="prof-col">
         <div className="card">
           <div className="card-head"><h2>Account</h2><RoleBadge role={u.role} /></div>
           <div className="card-pad stack prof-pic-wrap">
@@ -132,8 +132,6 @@ export default function Profile() {
           </div>
         </div>
         <PushSetup />
-        </div>
-        <div className="prof-col">
         <div className="card">
           <div className="card-head"><h2>Change password</h2></div>
           <form className="card-pad stack" id="pwf" autoComplete="off" onSubmit={changePassword}>
@@ -164,7 +162,7 @@ export default function Profile() {
           </div>
         </div>
 
-        </div>
+        <NotifPrefs />
       </div>
 
       {emailSetup ? (
