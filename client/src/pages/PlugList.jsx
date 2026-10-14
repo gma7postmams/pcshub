@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
+import { loadView, saveView } from '../lib/viewstate.js';
 import { CalendarIcon, DownloadIcon, ExitFullscreenIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive } from '../lib/live.js';
@@ -135,14 +136,15 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const fileRef = useRef(null);
   const [days, setDays] = useState(null);            // [{ date, n }] newest first (the latest 366 days with a list); null = loading
   const [totals, setTotals] = useState({ plugs: 0, days: 0, first: '', last: '' });   // across every day
-  const [period, setPeriodState] = useState(() => stored('period', 'day', PERIODS.map((p) => p.value)));
+  const saved = useRef(loadView('plugs', {})).current;   // what this tab last had on screen (kept across a refresh)
+  const [period, setPeriodState] = useState(() => (PERIODS.some((p) => p.value === saved.period) ? saved.period : stored('period', 'day', PERIODS.map((p) => p.value))));
   const [size, setSizeState] = useState(() => stored('size3', '25', SIZES.map((s) => s.value)));
-  const [anchor, setAnchor] = useState('');          // the day / a day of the week / of the month being looked at
-  const [custom, setCustom] = useState({ from: '', to: '' });
-  const [filt, setFilt] = useState({ in_workload: '', psd: '', account_by: '' });   // the Filters menu
+  const [anchor, setAnchor] = useState(saved.anchor || '');          // the day / a day of the week / of the month being looked at
+  const [custom, setCustom] = useState(saved.custom || { from: '', to: '' });
+  const [filt, setFilt] = useState({ in_workload: '', psd: '', account_by: '', ...(saved.filt || {}) });   // the Filters menu
   const [opts, setOpts] = useState({ psd: [], account_by: [] });
   const filtCount = Object.values(filt).filter(Boolean).length
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(saved.q || '');
   const query = useDebounced(q, 250);
   const [data, setData] = useState(null);            // { rows, total }; null = loading
   const [picked, setPicked] = useState(() => new Set());   // ticked rows (Table mode) for Delete selected
@@ -179,7 +181,8 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const range = rangeOf(period, anchor, custom);
   const limit = size === 'all' ? ALL_CAP : Number(size);
   const narrow = useNarrow();
-  const [sort, setSort] = useState({ k: '', dir: 'asc' });   // clicked column header
+  const [sort, setSort] = useState(saved.sort || { k: '', dir: 'asc' });   // clicked column header
+  useEffect(() => { saveView('plugs', { filt, q, sort, custom, anchor, period }); }, [filt, q, sort, custom, anchor, period]);
   const viewKey = `${period}|${range.from}|${range.to}|${query}|${filt.in_workload}|${filt.psd}|${filt.account_by}|${size}|${sort.k}|${sort.dir}`;
   const [pageState, setPageState] = useState({ key: '', offset: 0 });   // the page resets to the first whenever the view changes
   const offset = pageState.key === viewKey ? pageState.offset : 0;

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
+import { loadView, saveView } from '../lib/viewstate.js';
 import { ago, downloadFile, fmtDate, fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { PlusIcon, SearchIcon, DownloadIcon, UploadIcon, TrashIcon, FullscreenIcon, ExitFullscreenIcon } from '../components/Icons.jsx';
@@ -189,11 +190,18 @@ export default function Ingest() {
 
   const narrow = useNarrow();
   const [lookups, setLookups] = useState(null);
-  const [filt, setFilt] = useState({ q: '', status: /^pending$/i.test(params.get('status') || '') ? 'PENDING' : (params.get('status') || ''), program: '', platform: '', from: '', to: '', approval: /^pending$/i.test(params.get('approval') || '') ? 'pending' : '' });
+  const [filt, setFilt] = useState(() => {   // the last filters of this tab (kept across a refresh), unless a dashboard link brought its own
+    const mine = loadView('ingest', {}).filt || {};
+    const base = { q: '', status: '', program: '', platform: '', from: '', to: '', approval: '', ...mine };
+    if (params.get('status')) base.status = /^pending$/i.test(params.get('status')) ? 'PENDING' : params.get('status');
+    if (params.get('approval')) base.approval = /^pending$/i.test(params.get('approval')) ? 'pending' : params.get('approval');
+    return base;
+  });
   const [offset, setOffset] = useState(0);
   const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('ing:rows3')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
   const changeSize = (e) => { const n = Number(e.target.value); try { localStorage.setItem('ing:rows3', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
-  const [sort, setSortState] = useState({ k: '', dir: 'asc' });   // clicked column header
+  const [sort, setSortState] = useState(() => loadView('ingest', {}).sort || { k: '', dir: 'asc' });   // clicked column header
+  useEffect(() => { saveView('ingest', { filt, sort }); }, [filt, sort]);
   const setSort = (s2) => { setSortState(s2); setOffset(0); };
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);     // null | {} (new) | record (edit)

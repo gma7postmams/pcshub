@@ -1,5 +1,6 @@
 import { cloneElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { loadView as loadViewState, saveView as saveViewState } from '../lib/viewstate.js';
 import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
@@ -418,10 +419,11 @@ export default function Workload() {
   const setMode = () => {};
   const isGrid = false;   // Excel mode = the editable grid; Table mode = rows with the New / Edit form (the layout around both is the same)
   const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('wl:rows3')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
-  const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', from: '', to: '' });
+  const [filt, setFilt] = useState(() => ({ q: '', units: '', platform: '', plug_type: '', from: '', to: '', ...(loadViewState('workload', {}).filt || {}) }));   // kept across a refresh
   const [stats, setStats] = useState(null);   // summary cards + tab badges
   const [offset, setOffset] = useState(0);
-  const [sort, setSortState] = useState({ k: '', dir: 'asc' });   // clicked column header (Table mode)
+  const [sort, setSortState] = useState(() => loadViewState('workload', {}).sort || { k: '', dir: 'asc' });   // clicked column header (Table mode)
+  useEffect(() => { saveViewState('workload', { filt, sort }); }, [filt, sort]);
   const setSort = (s2) => { setSortState(s2); setOffset(0); };
   const [data, setData] = useState(null);   // table mode: { total, rows } | { error }
   const [grid, setGrid] = useState(null);   // excel mode: { total, rows } | { error }
