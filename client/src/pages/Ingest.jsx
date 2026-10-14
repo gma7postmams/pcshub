@@ -738,6 +738,15 @@ export default function Ingest() {
       if ((e.ctrlKey || e.metaKey) && key === 'x') { if (canWrite) { e.preventDefault(); copyCells().then((ok) => { if (ok) clearCells(); }); } return; }
       if (!e.ctrlKey && !e.metaKey && (key === 'delete' || key === 'backspace')) { if (canWrite) { e.preventDefault(); clearCells(); } return; }
       if (!e.ctrlKey && !e.metaKey && key === 'escape') { setCellSel(null); return; }
+      if (!e.ctrlKey && !e.metaKey && ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {   // Shift+arrows grow / shrink the block from the cell it started on; plain arrows move to a single cell
+        e.preventDefault();
+        const nR = rows.length; const nC = COLS.length;
+        const dr = key === 'arrowdown' ? 1 : key === 'arrowup' ? -1 : 0; const dc = key === 'arrowright' ? 1 : key === 'arrowleft' ? -1 : 0;
+        const r1 = Math.max(0, Math.min(nR - 1, cellSel.r1 + dr)); const c1 = Math.max(0, Math.min(nC - 1, cellSel.c1 + dc));
+        setCellSel(e.shiftKey ? { ...cellSel, r1, c1 } : { r0: r1, c0: c1, r1, c1 });
+        requestAnimationFrame(() => { const td = document.querySelector(`td[data-r="${r1}"][data-c="${c1}"]`); if (td && td.scrollIntoView) td.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
+        return;
+      }
     }
     if (e.ctrlKey || e.metaKey) {
       if (key === 'a') { e.preventDefault(); if (rows.length && rows.every((r) => picked.has(r.id)) && total > rows.length) setAllMatching(true); else setPicked(new Set(rows.map((r) => r.id))); setCellSel(null); }   // again: every matching request, on every page
