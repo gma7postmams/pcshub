@@ -36,6 +36,13 @@ const readRange = (sessionKey) => {
 const saveRange = (sessionKey, r) => { if (!sessionKey) return; try { localStorage.setItem(RANGE_KEY, JSON.stringify({ k: sessionKey, r })); } catch (e) { /* storage unavailable */ } };
 
 /** A card's heading: a tinted icon chip, the title, a little grey hint and an optional control at the right. */
+// the time of day beside the date, kept current (changes once a minute)
+function ClockText() {
+  const [t, setT] = useState(() => new Date());
+  useEffect(() => { const id = setInterval(() => setT(new Date()), 15000); return () => clearInterval(id); }, []);
+  return <span>{t.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>;
+}
+
 function CardHead({ icon: Icon, hue, dot, plain, title, hint, sub, right }) {
   return (
     <div className="dsh-head">
@@ -333,7 +340,7 @@ export default function Dashboard() {
         {night ? <MoonArt /> : <SunArt />}
         <div className="dsh-hero-text">
           <h1>{greet}, {s.user.full_name.split(' ')[0]}!</h1>
-          <div className="dsh-date">{now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>
+          <div className="dsh-date">{now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} · <ClockText /></div>
         </div>
         <HeroArt />
       </section>
