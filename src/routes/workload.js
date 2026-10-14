@@ -2,7 +2,7 @@ const express = require('express');
 const validator = require('validator');
 const db = require('../db');
 const v = require('../validate');
-const { groupByDate, truthy } = require('../export-sheets');
+const { groupByDate, truthy, dateTag } = require('../export-sheets');
 const { asyncH, HttpError, requireAction } = require('../middleware');
 const { audit } = require('../audit');
 const { workloadTabs } = require('../permissions');
@@ -580,7 +580,7 @@ router.get('/export', asyncH(async (req, res) => {
   // truncate or mishandle a chunked response, which shows up as "the file format is invalid" when opened.
   const buffer = await wb.xlsx.writeBuffer();
   const byDate = truthy(req.query.by_date) && rows.length;
-  const filename = `Workload_${team || 'ALL'}_${stamp}${byDate ? '_by_date' : ''}.xlsx`;
+  const filename = `Workload_${team || 'ALL'}_${dateTag(req.query.from, req.query.to)}${byDate ? '_by_date' : ''}.xlsx`;
   await emitTransfer(req, 'workload.export', { ...exportInfo, file: filename, bytes: buffer.length, ms: Date.now() - t0 });
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.set('Content-Disposition', `attachment; filename="${filename}"`);

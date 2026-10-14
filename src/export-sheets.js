@@ -27,5 +27,14 @@ function groupByDate(rows, dateOf) {
   });
 }
 
+/** The dates an export covers, for its file name: "2026-09-01", "2026-09-01_to_2026-09-30", "from_2026-09-01", "until_2026-09-30" or "All_dates". */
+const dateTag = (from, to) => {
+  const ok = (x) => (/^\d{4}-\d{2}-\d{2}$/.test(String(x || '')) ? String(x) : '');
+  const a = ok(from); const b = ok(to);
+  if (a && b) return a === b ? a : `${a}_to_${b}`;
+  if (a) return `from_${a}`;
+  if (b) return `until_${b}`;
+  return 'All_dates';
+};
 const truthy = (x) => x === '1' || x === 'true' || x === 'yes' || x === 'on';
-module.exports = { groupByDate, truthy, isoOf };
+module.exports = { groupByDate, truthy, isoOf, dateTag };
