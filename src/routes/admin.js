@@ -335,7 +335,7 @@ async function parseUser(body, { creating }) {
     if (!/^[A-Za-z0-9._-]{3,60}$/.test(out.username)) {
       throw new HttpError(400, 'Username must be 3–60 chars: letters, numbers, . _ -');
     }
-    out.password = v.password(body.password, { username: out.username, fullName: out.full_name });
+    if (body.mode !== 'generate') out.password = v.password(body.password, { username: out.username, fullName: out.full_name });
   }
   return out;
 }
@@ -349,15 +349,34 @@ async function assertAnotherAdmin(c, excludingId) {
 
 router.post('/users', asyncH(async (req, res) => {
   const u = await parseUser(req.body, { creating: true });
-  const hash = await bcrypt.hash(u.password, 12);
+  // mode 'generate': a random temporary password (shown once; always must be changed). Otherwise the Admin typed one (forcing a change is the default, not a must).
+  const generate = req.body.mode === 'generate';
+  const sendMail = req.body.send_email === true;   // (`email` is the address itself)
+  const mailer = require('../mailer');
+  if (sendMail) {
+    if (!u.email) throw new HttpError(400, 'Fill in the email address to email the password.');
+    if (!mailer.configured()) throw new HttpError(400, 'Email is not set up on the server, so a password cannot be emailed.');
+  }
+  const temp = generate ? `${crypto.randomBytes(12).toString('base64url')}${crypto.randomInt(10, 99)}` : u.password;
+  const force = generate || req.body.force_change !== false;
+  const hash = await bcrypt.hash(temp, 12);
   try {
-    const { rows } = await db.query(
-      `INSERT INTO users (username, full_name, email, password_hash, role, group_id, is_active, must_change_password)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-      [u.username, u.full_name, u.email, hash, u.role, u.group_id, u.is_active, req.body.force_change !== false]   // the Admin typed this password: forcing a change is the default, not a must
-    );
-    await audit(req, 'admin.user_create', 'user', rows[0].id, { username: u.username, role: u.role, group_id: u.group_id });
-    res.status(201).json({ ok: true, id: rows[0].id });
+    const id = await db.tx(async (c) => {
+      const { rows } = await c.query(
+        `INSERT INTO users (username, full_name, email, password_hash, role, group_id, is_active, must_change_password)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+        [u.username, u.full_name, u.email, hash, u.role, u.group_id, u.is_active, force]
+      );
+      if (sendMail) {   // sent before the user is committed: if the email cannot be sent, no account is created
+        try { await require('../password-mail').sendTemporaryPassword(u, temp, { force }); } catch (e) {
+          console.error('[create-user] email failed:', e.message);
+          throw new HttpError(503, 'The email could not be sent, so the user was not created. Check the email settings.');
+        }
+      }
+      return rows[0].id;
+    });
+    await audit(req, 'admin.user_create', 'user', id, { username: u.username, role: u.role, group_id: u.group_id, via: generate ? 'generate' : 'manual', emailed: sendMail || undefined });
+    res.status(201).json({ ok: true, id, ...(generate ? { temporary_password: temp } : {}), ...(sendMail ? { emailed: true, sentTo: mailer.mask(u.email) } : {}) });
   } catch (e) {
     if (e.code === '23505') throw new HttpError(409, 'Username already exists');
     throw e;
@@ -448,7 +467,7 @@ router.post('/users/:id/reset-password', asyncH(async (req, res) => {
     );
     if (!r.rowCount) throw new HttpError(404, 'User not found');
     if (sendMail) {   // sent before the change is committed: if the email cannot be sent, the old password stays
-      try { await require('../password-mail').sendTemporaryPassword(target, temp); } catch (e) {
+      try { await require('../password-mail').sendTemporaryPassword(target, temp, { force }); } catch (e) {
         console.error('[reset-password] email failed:', e.message);
         throw new HttpError(503, 'The email could not be sent, so the password was not changed. Check the email settings.');
       }

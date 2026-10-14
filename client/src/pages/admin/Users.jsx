@@ -151,7 +151,7 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
   const LABEL = keyLabels(model);
   const [f, set] = useForm({
     full_name: u ? u.full_name : '', email: u ? u.email || '' : '', username: '', password: '',
-    role: u ? u.role : 'Viewer', force_change: true, group_id: u && u.group_id ? String(u.group_id) : '', is_active: u ? u.is_active : true,
+    role: u ? u.role : 'Viewer', force_change: true, mode: 'generate', send_email: false, group_id: u && u.group_id ? String(u.group_id) : '', is_active: u ? u.is_active : true,
   });
   const [temp, setTemp] = useState(null);
   const [resetOpen, setResetOpen] = useState(false);   // the Reset password window
@@ -169,10 +169,11 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
       : 'Not enrolled: user can only open Profile until assigned to a group.';
 
   const save = async () => {
-    const body = { ...f, is_active: self ? true : f.is_active };
+    const body = { ...f, is_active: self ? true : f.is_active, send_email: f.send_email && !!f.email.trim() };
     try {
-      await (u ? put(`/api/admin/users/${u.id}`, body) : post('/api/admin/users', body));
-      toast('User saved'); onSaved();
+      if (u) { await put(`/api/admin/users/${u.id}`, body); toast('User saved'); onSaved(); return; }
+      const r = await post('/api/admin/users', { ...body, ...(f.mode === 'generate' ? { password: '' } : {}) });
+      if (r.temporary_password) setTemp({ pw: r.temporary_password, sentTo: r.sentTo }); else { toast(r.emailed ? `User saved. Password emailed to ${r.sentTo}` : 'User saved'); onSaved(); }
     } catch (e) { toast(e.message, 'err'); }
   };
   const action = async (path, msg, confirmArgs, extra = {}) => {
@@ -202,11 +203,18 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
             <select name="group_id" value={f.group_id} onChange={set('group_id')}><Options list={groups.map((x) => ({ value: String(x.id), label: x.name }))} blank="— Not enrolled —" /></select></label>
           <div className="full dim" id="grp-hint">{hint}</div>
           {!u ? (
-            <label className="f full"><span>Temporary password <span className="req">*</span></span>
-              <input name="password" type="text" autoComplete="new-password" placeholder="Letters and numbers" value={f.password} onChange={set('password')} />
-            </label>
+            <div className="full stack" id="pw-block">
+              <label className="rp-opt"><input type="radio" name="pwmode" value="generate" checked={f.mode === 'generate'} onChange={() => set('mode')('generate')} /><span>Generate a temporary password <span className="dim">— shown once, for you to pass on</span></span></label>
+              <label className="rp-opt"><input type="radio" name="pwmode" value="manual" checked={f.mode === 'manual'} onChange={() => set('mode')('manual')} /><span>Type a temporary password myself</span></label>
+              {f.mode === 'manual' ? (
+                <>
+                  <input name="password" type="text" autoComplete="new-password" aria-label="Temporary password" placeholder="Letters and numbers" value={f.password} onChange={set('password')} />
+                  <label className="rp-opt"><input type="checkbox" id="force-change" name="force_change" checked={f.force_change} onChange={set('force_change')} /><span>User must change it at first sign-in</span></label>
+                </>
+              ) : <span className="dim">The user must change a generated password at first sign-in.</span>}
+              <label className="rp-opt"><input type="checkbox" id="send-email" name="send_email" disabled={!f.email.trim()} checked={f.send_email && !!f.email.trim()} onChange={set('send_email')} /><span>Email it to the user <span className="dim">{f.email.trim() ? `— ${f.email.trim()}` : '— fill in the email address first'}</span></span></label>
+            </div>
           ) : null}
-          {!u ? <label className="check full"><input type="checkbox" id="force-change" name="force_change" checked={f.force_change} onChange={set('force_change')} /> User must change this password at first sign-in</label> : null}
           <label className="check full"><input type="checkbox" name="is_active" checked={self ? true : f.is_active} disabled={self} onChange={set('is_active')} /> Active</label>
           {self ? <div className="full alert info">You cannot deactivate or demote yourself if you are the last Admin.</div> : null}
         </form>
