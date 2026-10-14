@@ -1257,7 +1257,8 @@ td.editing .cell-editor:not(.date) .ag input:not([type="date"]):not([type="datet
 /* Episode / Breakdate date boxes: iOS Safari shrinks a native date input to its text height unless its own look is switched off */
 .dri input[type=date], .dri-day input[type=date] { -webkit-appearance: none; appearance: none; display: block; box-sizing: border-box; height: 37px; min-height: 37px; margin: 0; text-align: left; }
 .dri input[type=date]::-webkit-date-and-time-value, .dri-day input[type=date]::-webkit-date-and-time-value { text-align: left; min-height: 1.3em; }
-.dri-day .btn { flex: none; height: 37px; min-width: 37px; padding: 0 10px; }
+.dri-day .btn { flex: none; height: 28px; width: 28px; min-width: 28px; padding: 0; line-height: 1; align-self: center; }   /* the × stays small beside the date boxes */
+@media (max-width: 680px) { .dri-day .btn { height: 37px; width: 37px; min-width: 37px; } }
 /* cards: a cell somebody else has open gets room inside its outline, and the ticked card is not also painted cell by cell */
 table.t.wl.cards td { align-self: start; }
 table.t.wl.cards td.peer-on { padding: 6px 8px; margin: -6px -8px; border-radius: 6px; }
@@ -1265,3 +1266,8 @@ table.t.wl.cards td.xl-sel, table.t.wl.cards td.xl-sel.xl-single, table.t.wl.car
 table.t.wl.cards td.xl-sel::after { content: none; }
 table.t.wl.cards tbody tr.picked td { box-shadow: none; background: none; }   /* a ticked card is outlined as a whole, not cell by cell */
 @media (max-width: 680px) { .dri-list { gap: 14px; } }   /* each From / To pair reads as one group */
+
+/* cards: the ticked box and the ⋮ menu share the top-right corner — put the menu to the left of the box; an inline editor gets room around its outline */
+table.t.wl.cards tr:has(td.chk) td.actions-cell { right: 46px; top: 8px; }
+table.t.wl.cards tr:has(td.chk) td[data-k="plug_id"] { padding-right: 84px; }
+table.t.wl.cards td.editing { padding: 6px 8px; margin: -6px -8px; border-radius: 6px; }
