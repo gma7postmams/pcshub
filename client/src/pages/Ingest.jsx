@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
-import { loadView, saveView, loadDialog, syncDialog } from '../lib/viewstate.js';
+import { loadView, saveView, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
 import { ago, downloadFile, fmtDate, fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { PlusIcon, SearchIcon, DownloadIcon, UploadIcon, TrashIcon, FullscreenIcon, ExitFullscreenIcon } from '../components/Icons.jsx';
@@ -113,8 +113,9 @@ function DateRangeInput({ value, onChange, disabled }) {
 }
 
 // One table cell turned into its own editor. Dropdowns save as soon as you pick; a failed save keeps the editor open with the message shown.
-function InlineCell({ def, initial, options, onSave, onCancel }) {
-  const [val, setVal] = useState(initial);
+function InlineCell({ def, initial, options, onSave, onCancel, memo }) {
+  const [val, setValRaw] = useState(() => (memo ? loadCellText('ingest', memo, initial) : initial));
+  const setVal = (v) => { setValRaw(v); if (memo) saveCellText('ingest', memo, v); };
   const [busy, setBusy] = useState(false);
   const box = useRef(null);
   const finished = useRef(false);
@@ -208,7 +209,7 @@ export default function Ingest() {
   useEffect(() => { syncDialog('ingest', form); }, [form]);
   const [detail, setDetail] = useState(null);
   const [reasonFor, setReasonFor] = useState(null);   // the record whose NON-COMPLIANT reason is being asked for
-  const [editing, setEditing] = useState(null);   // { id, k }: the one cell being edited in the table
+  const [editing, setEditing] = useState(() => loadEdit('ingest').cell || null);   // { id, k }: the one cell being edited in the table (comes back after a refresh)
   const curCell = useRef(null);   // the cell I have open or selected (announced to the others by useCellPresence)
   const peers = useCellPresence('ingest', curCell);   // cells other people have open or selected
   const [picked, setPicked] = useState(() => new Set());   // rows ticked for batch delete
@@ -304,7 +305,10 @@ export default function Ingest() {
     document.addEventListener('keydown', esc);
     return () => document.removeEventListener('keydown', esc);
   }, []);
-  const [draft, setDraft] = useState(null);          // the empty row Add Row put at the top, not saved yet
+  const [draft, setDraft] = useState(() => loadEdit('ingest').draft || null);          // the empty row Add Row put at the top, not saved yet (kept across a refresh)
+  const prevEd = useRef(editing ? `${editing.id}:${editing.k}` : null);
+  useEffect(() => { prevEd.current = syncEdit('ingest', editing, draft, prevEd.current); }, [editing, draft]);
+  useEffect(() => { if (editing && editing.id !== 'draft' && data && data.rows && !data.rows.some((r) => r.id === editing.id)) setEditing(null); }, [data]);   // eslint-disable-line react-hooks/exhaustive-deps
   // other people's changes appear by themselves (not while a cell, form, detail or dialog is open here, so nothing is overwritten under your hands)
   useLive(['ingest'], () => fetchPage(true), () => !!(editing || form || detail || reasonFor || draft || document.querySelector('.modal-backdrop')));
   const [ctx, setCtx] = useState(null);              // right-click menu position
@@ -402,7 +406,7 @@ export default function Ingest() {
       const initial = cellInitial(r, k);
       return (
         <td data-k={k} data-r={props['data-r']} data-c={props['data-c']} className="editing" onClick={(e) => e.stopPropagation()}>
-          <InlineCell def={def} initial={initial} options={k === 'cm_status' ? CM_OPTIONS : withCurrent(lookups ? lookups.platform : [], r.platform)}
+          <InlineCell memo={`${r.id}:${k}`} def={def} initial={initial} options={k === 'cm_status' ? CM_OPTIONS : withCurrent(lookups ? lookups.platform : [], r.platform)}
             onSave={(value, move) => saveCell(r, k, value, initial, move)} onCancel={() => setEditing(null)} />
         </td>
       );
