@@ -1191,3 +1191,5 @@ html[data-mode="dark"] .brand img.logo-d{display:inline}
 table.t.wl.cards td[data-k="breakdate_vgfx"] { grid-column: 1 / -1; text-align: left; }
 table.t.wl.cards .chips.bd-chips { align-items: flex-start; width: 100%; }
 table.t.wl.cards .bd-chips .chip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; white-space: normal; text-align: left; overflow-wrap: normal; }
+/* One search-box width on the Ingest, Plug List and Workload toolbars (the Workload one was 420 px; now a little longer, 480 px, on all three) */
+.wl-toolbar .wl-search.short, .wl-tabbar .wl-search.short, .plug-list .plug-bar .wl-search { flex: 1 1 260px; min-width: 150px; max-width: 480px; }
