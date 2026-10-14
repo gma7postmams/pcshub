@@ -269,27 +269,6 @@ async function insertRow(client, rec, userId) {
   return rows[0].id;
 }
 
-// Tell the VGFX / VEDIT / Audio users when a row is given its Units Concerned (new row with it set, or it was blank / changed). Best effort: never fails the save.
-// `items` = [{ units, plug_id, work_date }]
-async function notifyUnitsSet(req, items) {
-  try {
-    const list = items.filter((x) => x && UNIT_TEAMS[x.units]);
-    if (!list.length) return;
-    const first = (x) => String(x.plug_id || '').split('\n')[0].trim() || 'a row';
-    const day = (x) => (x.work_date instanceof Date ? x.work_date.toISOString().slice(0, 10) : String(x.work_date || '').slice(0, 10));
-    const byTeam = new Map();
-    for (const x of list) for (const t of UNIT_TEAMS[x.units]) { if (!byTeam.has(t)) byTeam.set(t, []); byTeam.get(t).push(x); }
-    for (const [team, xs] of byTeam) {
-      const one = xs.length === 1;
-      await notifyWorkloadTeams([team], {
-        title: one ? `New ${team} workload item` : `${xs.length} new ${team} workload items`,
-        body: one ? `${req.user.full_name} set ${first(xs[0])} (${day(xs[0])}) to ${xs[0].units}.` : `${req.user.full_name} set Units Concerned to include ${team} on ${xs.length} workload rows.`,
-        link: '/workload', kind: 'workload_team',
-      }, { excludeUserId: req.user.id });
-    }
-  } catch (e) { console.error('[workload] notification failed:', e.message); }
-}
-
 // Script / Artwork-STB / Audio Guide: tell the team when one of them goes from empty (or N/A) to filled in. `before` = the row as it was (null for a new row), `after` = the new values.
 const MATERIALS = [['script', 'Script'], ['art_stb', 'Artwork / STB'], ['audio_guide', 'Audio Guide']];
 const hasValue = (x) => { const t = x == null ? '' : String(x).trim(); return t !== '' && !/^n\/?a$/i.test(t); };
@@ -652,7 +631,6 @@ router.post('/', requireAction('workload.write'), asyncH(async (req, res) => {
     made = rec;
     return newId;
   });
-  await notifyUnitsSet(req, [{ units: made.units_concerned, plug_id: made.plug_id, work_date: made.work_date }]);
   await notifyMaterialsFilled(req, [filledItem(null, made)]);
   res.status(201).json({ ok: true, id });
 }));
@@ -669,7 +647,6 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
     let updated = 0;
     const createdIds = [];
     const filledSet = [];   // rows whose Script / Artwork / Audio Guide was just filled in
-    const unitsSet = [];   // rows that got a Units Concerned (new, or blank / different before) — the team users are told
     const results = [];   // what was stored for the auto-filled columns, so the table can tell a cleared PSD / Platform that was filled in again
     for (let i = 0; i < list.length; i++) {
       const row = list[i] || {};
@@ -683,7 +660,6 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           assertNotLocked(locks, rec.work_date);
           await updateRow(c, id, rec, req.user.id);
           await audit(req, 'workload.update', 'workload_item', id, rec, c);
-          if (rec.units_concerned && rec.units_concerned !== cur.rows[0].units_concerned) unitsSet.push({ units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date });
           { const f = filledItem(cur.rows[0], rec); if (f) filledSet.push(f); }
           results.push({ id, psd: rec.psd || '', prog_name: rec.prog_name || '', platform: rec.platform || '' });
           updated++;
@@ -693,7 +669,6 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           const id = await insertRow(c, rec, req.user.id);
           await audit(req, 'workload.create', 'workload_item', id, rec, c);
           createdIds.push(id);
-          if (rec.units_concerned) unitsSet.push({ units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date });
           { const f = filledItem(null, rec); if (f) filledSet.push(f); }
           created++;
         }
@@ -702,11 +677,10 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
         throw e;
       }
     }
-    return { created, updated, createdIds, results, unitsSet, filledSet };
+    return { created, updated, createdIds, results, filledSet };
   });
-  await notifyUnitsSet(req, out.unitsSet);
   await notifyMaterialsFilled(req, out.filledSet);
-  const { unitsSet, filledSet, ...shown } = out;
+  const { filledSet, ...shown } = out;
   res.json({ ok: true, ...shown });
 }));
 
@@ -735,7 +709,6 @@ router.patch('/:id', requireAction('workload.write'), asyncH(async (req, res) =>
     await audit(req, 'workload.update', 'workload_item', id, { field, value });
     return res.json({ ok: true, values: { [field]: value } });
   }
-  let unitsSet = null;
   let filledNow = null;
   const values = await db.tx(async (c) => {
     const found = await c.query('SELECT * FROM workload_items WHERE id=$1 FOR UPDATE', [id]);
@@ -754,13 +727,11 @@ router.patch('/:id', requireAction('workload.write'), asyncH(async (req, res) =>
       [id, ...changed.map((k) => rec[k]), req.user.id]
     );
     await audit(req, 'workload.update', 'workload_item', id, { field, value: rec[field] }, c);
-    if (field === 'units_concerned' && rec.units_concerned && rec.units_concerned !== cur.units_concerned) unitsSet = { units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date };
     if (['script', 'art_stb', 'audio_guide'].includes(field)) filledNow = filledItem(cur, rec);
     // hand back values in the same shape the list uses ('YYYY-MM-DDTHH:MM' for Breakdate/Time)
     const shape = (k) => (FIELDS[k].kind === 'datetime' && rec[k] ? rec[k].slice(0, 16).replace(' ', 'T') : rec[k]);
     return Object.fromEntries(changed.map((k) => [k, shape(k)]));
   });
-  if (unitsSet) await notifyUnitsSet(req, [unitsSet]);
   if (filledNow) await notifyMaterialsFilled(req, [filledNow]);
   res.json({ ok: true, values });
 }));
@@ -769,7 +740,6 @@ router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const customCols = await loadCustomCols(db);
   const locks = await loadLocks(db);
-  let unitsSet = null;
   let filledNow = null;
   await db.tx(async (c) => {
     const cur = await c.query(`SELECT ${CUR_COLS} FROM workload_items WHERE id=$1 FOR UPDATE`, [id]);
@@ -779,10 +749,8 @@ router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
     assertNotLocked(locks, rec.work_date);
     await updateRow(c, id, rec, req.user.id);
     await audit(req, 'workload.update', 'workload_item', id, rec, c);
-    if (rec.units_concerned && rec.units_concerned !== cur.rows[0].units_concerned) unitsSet = { units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date };
     filledNow = filledItem(cur.rows[0], rec);
   });
-  if (unitsSet) await notifyUnitsSet(req, [unitsSet]);
   if (filledNow) await notifyMaterialsFilled(req, [filledNow]);
   res.json({ ok: true });
 }));

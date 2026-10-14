@@ -5,7 +5,6 @@ const isAdminRole = (u) => u.role === 'Admin' || u.role === 'System Admin';
 
 const KINDS = [
   { key: 'plugs_added', label: 'New plugs added', desc: 'Someone adds plugs to the PSD Daily Plug List.', relevant: (u, k) => k.has('plugs') },
-  { key: 'workload_team', label: 'Workload items for my team', desc: 'Units Concerned is set or changed to include your team (VGFX, VEDIT or AUDIO).', relevant: (u, k) => !isAdminRole(u) && [...k].some((x) => /^workload\.(vgfx|vedit|audio)$/i.test(x)) },
   { key: 'workload_materials', label: 'Script / Artwork / Audio Guide filled in', desc: 'Script, Artwork / STB or Audio Guide is filled in on a workload item for your team (VGFX, VEDIT or AUDIO).', relevant: (u, k) => !isAdminRole(u) && [...k].some((x) => /^workload\.(vgfx|vedit|audio)$/i.test(x)) },
   { key: 'ingest_new', label: 'New ingest requests', desc: 'An ingest request is added or imported and needs approval.', relevant: (u) => can(u, 'ingest.approve') },
   { key: 'ingest_for_approval', label: 'Ingest ready for approval', desc: 'A Destination Folder is filled in, so the request waits for your approval.', relevant: (u) => can(u, 'ingest.approve') },
