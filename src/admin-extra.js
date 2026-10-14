@@ -329,7 +329,7 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
     if (!areas.length) throw new HttpError(400, 'Choose at least one area to clear');
     if (all && req.body.allDates !== true) throw new HttpError(400, 'Choose a date range, or tick All dates');
     if (req.body.confirm !== 'DELETE') throw new HttpError(400, 'Type DELETE to confirm');
-    await stepUp.verify(req, { action: 'admin.clear_data', entity: 'clear_data', id: null }, req.body, { passwordOnly: true });   // already signed in with 2FA: the password is enough here
+    await stepUp.verify(req, { action: 'admin.clear_data', entity: 'clear_data', id: null }, req.body);
     let results;
     try { results = await clearData.run(areas, from, to, req.user.id); } catch (e) { throw new HttpError(409, e.message); }
     await audit(req, 'admin.clear_data', 'clear_data', null, { areas, from, to, results });   // written after the clear, so it survives an Audit Log clear

@@ -77,7 +77,7 @@ export default function ClearData() {
 
       {open ? (
         <ReauthDialog
-          title="Clear data" okText="Clear data" danger typed="DELETE" passwordOnly onClose={() => setOpen(false)}
+          title="Clear data" okText="Clear data" danger typed="DELETE" onClose={() => setOpen(false)}
           intro={`This permanently removes about ${hits} record${hits === 1 ? '' : 's'} (${areas.map((k) => info.areas[k].label).join(', ')}) for ${scope}. A copy is written to the archive first.${areas.includes('knowledge') ? ' Knowledge Base document files are deleted from the server and are not copied.' : ''}`}
           onSubmit={run}
         />

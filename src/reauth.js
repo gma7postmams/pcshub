@@ -1,7 +1,6 @@
-// Step-up authentication ("confirm it's you") for the actions that could turn a borrowed session into a lasting
-// takeover: resetting someone's password or 2FA, granting the Admin role, and downloading / deleting / restoring backups.
+// Step-up authentication ("confirm it's you") for destructive actions: restoring, downloading and deleting backups, removing old records and clearing data.
 //
-// The caller re-enters their password, plus a fresh authenticator code when 2FA is on. Wrong answers are counted per
+// The caller re-enters their password (they already signed in with 2FA, so no code is asked unless a route opts in). Wrong answers are counted per
 // user, so a stolen session cannot be used to guess the password.
 const bcrypt = require('bcrypt');
 const db = require('./db');
@@ -49,7 +48,7 @@ const credsOf = (c) => (c && typeof c === 'object' && !Array.isArray(c) ? c : {}
  * mistaken for the confirmation. Throws 403 { reauth: true } when it is missing or wrong.
  * `log` = { action, entity, id, details? } writes an audit line for a wrong answer.
  */
-async function verify(req, log, creds, { passwordOnly = false } = {}) {   // passwordOnly: the password alone is enough (no 2FA code)
+async function verify(req, log, creds, { passwordOnly = true } = {}) {   // by default the password alone is enough: the Admin already signed in with 2FA. Pass { passwordOnly: false } to also ask for the code
   const c = credsOf(creds);
   const password = typeof c.password === 'string' && c.password.length <= 200 ? c.password : '';
   const { rows } = await db.query('SELECT password_hash, totp_enabled, totp_secret, twofa_method FROM users WHERE id=$1', [req.user.id]);

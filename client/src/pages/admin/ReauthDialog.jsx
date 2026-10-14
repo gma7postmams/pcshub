@@ -4,7 +4,7 @@ import { Modal, useToast } from '../../components/ui.jsx';
 import { ApiError, post } from '../../lib/api.js';
 
 /** Asks for the password (and 2FA code when enabled); resolves through onSubmit({ password, code }). */
-export default function ReauthDialog({ title, intro, okText, danger, typed, onClose, onSubmit, extraReady = true, passwordOnly = false, children }) {
+export default function ReauthDialog({ title, intro, okText, danger, typed, onClose, onSubmit, extraReady = true, passwordOnly = true, children }) {
   const { user } = useSession();
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
