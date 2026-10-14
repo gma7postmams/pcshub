@@ -4,7 +4,7 @@ import { Modal, useToast } from '../../components/ui.jsx';
 import { ApiError, post } from '../../lib/api.js';
 
 /** Asks for the password (and 2FA code when enabled); resolves through onSubmit({ password, code }). */
-export default function ReauthDialog({ title, intro, okText, danger, typed, onClose, onSubmit, extraReady = true, children }) {
+export default function ReauthDialog({ title, intro, okText, danger, typed, onClose, onSubmit, extraReady = true, passwordOnly = false, children }) {
   const { user } = useSession();
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -12,8 +12,9 @@ export default function ReauthDialog({ title, intro, okText, danger, typed, onCl
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState('');
   const toast = useToast();
-  const ready = extraReady && password && (!user.totp_enabled || code) && (!typed || confirm === typed);
-  const viaEmail = user.totp_enabled && user.twofa_method === 'email';
+  const needCode = user.totp_enabled && !passwordOnly;
+  const ready = extraReady && password && (!needCode || code) && (!typed || confirm === typed);
+  const viaEmail = needCode && user.twofa_method === 'email';
   const sendCode = async () => { try { const r = await post('/api/auth/reauth-code', {}); setSent(r.sentTo); } catch (e) { toast(e.message, 'err'); } };
   const submit = async () => {
     setBusy(true);
@@ -32,7 +33,7 @@ export default function ReauthDialog({ title, intro, okText, danger, typed, onCl
         {typed ? <label className="f"><span>Type <strong>{typed}</strong> to confirm</span><input autoComplete="off" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></label> : null}
         <label className="f"><span>Your password</span><input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
         {viaEmail ? <div className="row"><button type="button" className="btn sm" onClick={sendCode}>{sent ? 'Send again' : 'Email me a code'}</button><span className="dim">{sent ? `Sent to ${sent}` : 'The code is sent to your account email'}</span></div> : null}
-        {user.totp_enabled ? <label className="f"><span>{viaEmail ? 'Code from your email' : 'Authentication code'}</span><input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value)} /></label> : null}
+        {needCode ? <label className="f"><span>{viaEmail ? 'Code from your email' : 'Authentication code'}</span><input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value)} /></label> : null}
       </form>
     </Modal>
   );

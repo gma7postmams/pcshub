@@ -10,12 +10,14 @@ const db = require('./db');
 const { ARCHIVE_DIR } = require('./retention');
 
 const CHUNK = 2000;
+const KB_DIR = path.join(__dirname, '..', 'uploads', 'knowledge');
 // $1 = from (date or null), $2 = to (date or null), $3 = the acting user's id (only where `self` is true)
 const range = (expr) => `($1::date IS NULL OR ${expr} >= $1::date) AND ($2::date IS NULL OR ${expr} <= $2::date)`;
 const AREAS = {
   ingest: { label: 'Ingest Tracker', basis: 'Episode date (or created date); every status, with its approval requests', table: 'ingest_records', date: 'COALESCE(episode_date, created_at::date)', children: [{ table: 'approval_requests', fk: 'ingest_record_id' }], live: 'ingest' },
   workload: { label: 'Workload Tracker', basis: 'Work date (or created date)', table: 'workload_items', date: 'COALESCE(work_date, created_at::date)', live: 'workload' },
   plugs: { label: 'PSD Daily Plug List', basis: 'Plug date', table: 'workload_plugs', date: 'plug_date', live: 'plugs' },
+  knowledge: { label: 'Knowledge Base', basis: 'Date added; includes the Trash. The document files are deleted from the server too (only the list of items is archived)', table: 'knowledge_docs', date: 'created_at::date', files: 'stored_name' },
   audit: { label: 'Audit Log', basis: 'Entry date', table: 'audit_logs', date: 'created_at::date' },
   notifications: { label: 'Notifications', basis: 'Sent date', table: 'notifications', date: 'created_at::date' },
   users: {
@@ -27,7 +29,7 @@ const AREAS = {
     extra: 'NOT EXISTS (SELECT 1 FROM users u WHERE u.group_id = groups.id)', children: [{ table: 'group_permissions', fk: 'group_id' }],
   },
 };
-const ORDER = ['ingest', 'workload', 'plugs', 'audit', 'notifications', 'users', 'groups'];   // users before groups, so emptied groups can go too
+const ORDER = ['ingest', 'workload', 'plugs', 'knowledge', 'audit', 'notifications', 'users', 'groups'];   // users before groups, so emptied groups can go too
 
 const where = (a) => [a.extra, range(a.date)].filter(Boolean).join(' AND ');
 const args = (a, from, to, uid) => (a.self ? [from, to, uid] : [from, to]);
@@ -73,8 +75,9 @@ async function clearArea(k, from, to, uid) {
         for (const r of kids.rows) await write({ t: c.table, row: r });
       }
       if (k === 'users') await db.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = ANY($1)`, [ids]);
-      const res = await db.query(`DELETE FROM ${a.table} WHERE ${key} = ANY($${p.length + 1}) AND ${where(a)}`, [...p, ids]);
+      const res = await db.query(`DELETE FROM ${a.table} WHERE ${key} = ANY($${p.length + 1}) AND ${where(a)}${a.files ? ` RETURNING ${a.files}` : ''}`, [...p, ids]);
       deleted += res.rowCount;
+      if (a.files) for (const r of res.rows) if (r[a.files]) fs.unlink(path.join(KB_DIR, path.basename(r[a.files])), () => {});
       if (rows.length < CHUNK) break;
     }
   } catch (e) { gz.end(); await done.catch(() => {}); throw e; }

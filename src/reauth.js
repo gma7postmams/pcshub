@@ -49,12 +49,12 @@ const credsOf = (c) => (c && typeof c === 'object' && !Array.isArray(c) ? c : {}
  * mistaken for the confirmation. Throws 403 { reauth: true } when it is missing or wrong.
  * `log` = { action, entity, id, details? } writes an audit line for a wrong answer.
  */
-async function verify(req, log, creds) {
+async function verify(req, log, creds, { passwordOnly = false } = {}) {   // passwordOnly: the password alone is enough (no 2FA code)
   const c = credsOf(creds);
   const password = typeof c.password === 'string' && c.password.length <= 200 ? c.password : '';
   const { rows } = await db.query('SELECT password_hash, totp_enabled, totp_secret, twofa_method FROM users WHERE id=$1', [req.user.id]);
   const u = rows[0];
-  const twofa = Boolean(u && u.totp_enabled);
+  const twofa = !passwordOnly && Boolean(u && u.totp_enabled);
   if (!password) throw new HttpError(403, 'Confirm your password to continue', { reauth: true, twofa, method: u && u.twofa_method });   // nothing was guessed: just ask
   attempt(req.user.id);
   let ok = Boolean(u) && await bcrypt.compare(password, u.password_hash);
