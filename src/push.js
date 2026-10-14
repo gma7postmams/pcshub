@@ -19,29 +19,54 @@ async function getKeys() {
   return keys;
 }
 
-const subject = () => process.env.PUSH_SUBJECT || 'mailto:admin@localhost.invalid';
+// The VAPID "subject" must be a real mailto: or https: address (Apple's push service refuses a made-up one). Default: this site's own https address,
+// remembered from the first Profile visit (app_settings.push_subject); PUSH_SUBJECT in .env overrides it.
+let subj = null;
+async function getSubject() {
+  if (process.env.PUSH_SUBJECT) return process.env.PUSH_SUBJECT;
+  if (subj) return subj;
+  const { rows } = await db.query("SELECT value FROM app_settings WHERE key='push_subject'");
+  subj = rows[0] ? rows[0].value : 'https://example.com';
+  return subj;
+}
+async function rememberSite(req) {
+  try {
+    if (process.env.PUSH_SUBJECT) return;
+    const host = req.get('x-forwarded-host') || req.get('host');
+    if (!host || /^(localhost|127\.|\[|\d+\.\d+\.\d+\.\d+)/.test(host)) return;
+    const val = `https://${host.split(',')[0].trim()}`;
+    if (val === subj) return;
+    await db.query(`INSERT INTO app_settings (key, value) VALUES ('push_subject', $1) ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=now()`, [val]);
+    subj = val;
+  } catch (_) { /* best effort */ }
+}
 
 async function publicKey() { return (await getKeys()).publicKey; }
 
 /** Send `payload` ({title, body, link}) to every device of `userIds`. Never throws; dead subscriptions (410/404) are deleted. */
 async function sendPush(userIds, payload) {
+  const results = [];
   try {
     const ids = [...new Set((userIds || []).filter((x) => Number.isInteger(x)))];
-    if (!ids.length) return;
+    if (!ids.length) return results;
     const { rows } = await db.query('SELECT id, user_id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ANY($1::int[])', [ids]);
-    if (!rows.length) return;
+    if (!rows.length) return results;
     const k = await getKeys();
+    const sub = await getSubject();
     const body = JSON.stringify({ title: String(payload.title || '').slice(0, 120), body: String(payload.body || '').slice(0, 240), link: payload.link || '/' });
     await Promise.all(rows.map(async (s) => {
       try {
         await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, body,
-          { vapidDetails: { subject: subject(), publicKey: k.publicKey, privateKey: k.privateKey }, TTL: 24 * 3600, urgency: 'normal' });
+          { vapidDetails: { subject: sub, publicKey: k.publicKey, privateKey: k.privateKey }, TTL: 24 * 3600, urgency: 'normal' });
+        results.push({ ok: true });
       } catch (e) {
+        results.push({ ok: false, status: e && e.statusCode, host: (() => { try { return new URL(s.endpoint).host; } catch (_) { return ''; } })(), message: String((e && e.body) || (e && e.message) || '').slice(0, 160) });
         if (e && (e.statusCode === 404 || e.statusCode === 410)) await db.query('DELETE FROM push_subscriptions WHERE id=$1', [s.id]).catch(() => {});
-        else console.warn('push failed:', e && (e.statusCode || e.message));
+        else console.warn('push failed:', e && e.statusCode, e && e.body);
       }
     }));
-  } catch (e) { console.warn('push error:', e.message); }
+  } catch (e) { console.warn('push error:', e.message); results.push({ ok: false, message: e.message }); }
+  return results;
 }
 
-module.exports = { publicKey, sendPush };
+module.exports = { publicKey, sendPush, rememberSite };

@@ -27,6 +27,7 @@ router.get('/push', asyncH(async (req, res) => {
     console.error('push setup failed:', e.message);
     throw new HttpError(400, e.code === 'MODULE_NOT_FOUND' ? 'Push notifications are not installed on the server yet (an Admin needs to run npm install and restart)' : 'Push notifications are not available right now');
   }
+  require('../push').rememberSite(req);
   res.json({ key, endpoints: rows.map((r) => r.endpoint) });
 }));
 router.post('/push', asyncH(async (req, res) => {
@@ -48,8 +49,10 @@ router.delete('/push', asyncH(async (req, res) => {
   res.json({ ok: true });
 }));
 router.post('/push/test', asyncH(async (req, res) => {
-  await require('../push').sendPush([req.user.id], { title: 'Test notification', body: 'Phone notifications are working.', link: '/profile' });
-  res.json({ ok: true });
+  const push = require('../push');
+  push.rememberSite(req);
+  const results = await push.sendPush([req.user.id], { title: 'Test notification', body: 'Phone notifications are working.', link: '/profile' });
+  res.json({ ok: true, results });
 }));
 
 router.put('/', asyncH(async (req, res) => {

@@ -54,7 +54,14 @@ export default function PushSetup() {
       toast('Phone notifications are off for this device');
     } catch (e) { toast(e.message, 'err'); } finally { setBusy(false); }
   };
-  const test = async () => { try { await api('POST', '/api/profile/push/test'); toast('Test sent. It should arrive in a few seconds.'); } catch (e) { toast(e.message, 'err'); } };
+  const test = async () => {
+    try {
+      const { results } = await api('POST', '/api/profile/push/test');
+      if (!results.length) toast('This device is not registered any more. Turn notifications off and on again.', 'err');
+      else if (results.some((r) => r.ok)) toast('Sent. If nothing shows, lock the phone or close the app (iPhone hides alerts while the app is open) and check Focus / Do Not Disturb.');
+      else { const r = results[0]; toast(`The push service refused it${r.status ? ` (${r.status})` : ''}${r.host ? ` at ${r.host}` : ''}. ${r.message || ''}`, 'err'); }
+    } catch (e) { toast(e.message, 'err'); }
+  };
 
   let note = null;
   if (!supported) {
