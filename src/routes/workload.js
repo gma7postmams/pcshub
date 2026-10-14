@@ -79,8 +79,8 @@ const VIEWS = {
   VGFX: MAIN_COLS,
   VEDIT: MAIN_COLS,
   AUDIO: AUDIO_COLS,
-  // PREP = every row (like All) without the four prep fields; those four decide which part of the tab a row sits in (see PREP_FIELDS)
-  PREP: [...MAIN_COLS.slice(0, -1), 'length', 'others', 'audio_status', 'plug_type'].filter((k) => !['vo', 'script', 'art_stb', 'audio_guide'].includes(k)),
+  // PREP (the Ongoing tab) = every row (like All) without the four prep fields, Total Mats and Prog. Name / Proj. Title; those four decide which part of the tab a row sits in (see PREP_FIELDS)
+  PREP: [...MAIN_COLS.slice(0, -1), 'length', 'others', 'audio_status', 'plug_type'].filter((k) => !['vo', 'script', 'art_stb', 'audio_guide', 'total_mats', 'prog_name'].includes(k)),
 };
 // A prep field is "available" once it has any value (a date, text, or N/A for "not needed"). A row is ready when all four are; otherwise it waits in the lower part, listing what is missing.
 const PREP_FIELDS = ['vo', 'script', 'art_stb', 'audio_guide'];
