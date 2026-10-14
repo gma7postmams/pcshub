@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { post, put } from '../lib/api.js';
-import { useSession } from '../context.jsx';
+import { useBranding, useSession } from '../context.jsx';
+import { Swatch } from '../components/ThemeSwatch.jsx';
 import { AppearanceSeg } from '../components/TopNav.jsx';
 import { Modal, RoleBadge, useForm, useToast } from '../components/ui.jsx';
 
 export default function Profile() {
   const s = useSession();
+  const { branding } = useBranding();
   const toast = useToast();
   const [params, setParams] = useSearchParams();
   const u = s.user;
@@ -94,7 +96,17 @@ export default function Profile() {
           <div className="card-head"><h2>Appearance</h2></div>
           <div className="card-pad stack">
             <div><AppearanceSeg /></div>
-            <p className="muted m-0 mt-12">Dark, Light, or System to follow your device setting. Saved to your account. The colour theme is set by your Admin.</p>
+            <p className="muted m-0 mt-12">Dark, Light, or System to follow your device setting. Saved to your account.</p>
+            <div className="theme-grid" id="utg">
+              {[{ key: '', label: `Default (${(branding.themes.find((t) => t.key === branding.theme) || {}).label || 'Admin'})`, sw: branding.theme }, ...branding.themes.map((t) => ({ key: t.key, label: t.label, sw: t.key }))].map((t) => (
+                <button type="button" key={t.key || 'default'} data-user-theme={t.key} className={`theme-card ${(u.theme || '') === t.key ? 'on' : ''}`}
+                  onClick={() => s.setTheme(t.key).catch((err) => toast(err.message, 'err'))}>
+                  <Swatch themeKey={t.sw} />
+                  <div className="nm">{t.label}</div>
+                </button>
+              ))}
+            </div>
+            <p className="muted m-0">Pick a colour theme just for you, or Default to follow the one your Admin sets.</p>
           </div>
         </div>
 

@@ -394,7 +394,7 @@ INSERT INTO app_settings (key, value) VALUES ('activity_view_v1', '1') ON CONFLI
 INSERT INTO app_settings (key, value) VALUES
   ('app_name', 'PULSE'),
   ('tagline', 'Ingest · Approval · Workload · Backup and Restore'),
-  ('theme', 'midnight'),
+  ('theme', 'graphite'),
   ('accent_color', ''),
   ('logo_path', ''),
   ('logo_dark_path', '')
@@ -410,7 +410,16 @@ INSERT INTO app_settings (key, value) VALUES ('app_name_pulse_v1', '1') ON CONFL
 -- Nothing is added here, so values an Admin deletes are never brought back on restart.
 
 -- Themes: older installs stored the Midnight accent as an explicit override; clear it so the theme's own accent applies
-INSERT INTO app_settings (key, value) VALUES ('theme', 'midnight') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('theme', 'graphite') ON CONFLICT (key) DO NOTHING;
+
+-- Graphite is the default theme. One time: an install still on the old built-in default (Midnight) moves to Graphite; after this an Admin's choice is never touched.
+UPDATE app_settings SET value = 'graphite', updated_at = now()
+ WHERE key = 'theme' AND value = 'midnight'
+   AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'theme_default_graphite_v1');
+INSERT INTO app_settings (key, value) VALUES ('theme_default_graphite_v1', '1') ON CONFLICT (key) DO NOTHING;
+
+-- Personal colour theme: NULL = follow the Admin default theme
+ALTER TABLE users ADD COLUMN IF NOT EXISTS theme TEXT;
 UPDATE app_settings SET value = '' WHERE key = 'accent_color' AND lower(value) = '#4f8cff';
 
 -- Custom Workload columns: admins can add extra columns beyond the template's fixed fields. Values live in

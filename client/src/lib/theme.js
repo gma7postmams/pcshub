@@ -1,6 +1,8 @@
-// Theme engine. Palette (data-theme) is set by Admin for everyone; appearance (data-mode) is per user.
+// Theme engine. Palette (data-theme): a user's personal theme if they picked one, else the Admin default. Appearance (data-mode) is per user.
 // Colours live in app.css; theme-boot.js applies the cached state in <head> before first paint.
-const state = { name: 'midnight', accent: '', mode: 'system' };
+const cache = () => { try { return JSON.parse(localStorage.getItem('phub-theme') || '{}') || {}; } catch (_) { return {}; } };
+// name/accent = the Admin default; user = the personal theme (null = follow the Admin default); preview = Admin Branding page live preview
+const state = { name: 'graphite', accent: '', mode: 'system', user: cache().user || null, preview: false };
 const mq = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
 
 export function contrastFor(hex) {
@@ -21,9 +23,12 @@ function resolvedMode() {
 
 export function applyTheme() {
   const d = document.documentElement;
-  d.setAttribute('data-theme', state.name);
+  const personal = !state.preview && state.user ? state.user : '';
+  const name = personal || state.name;
+  d.setAttribute('data-theme', name);
   d.setAttribute('data-mode', resolvedMode());
-  const custom = /^#[0-9a-f]{6}$/i.test(state.accent || '') ? state.accent : '';
+  // the Admin's custom accent belongs to the Admin theme; a personal theme uses its own accent
+  const custom = !personal && /^#[0-9a-f]{6}$/i.test(state.accent || '') ? state.accent : '';
   if (custom) {
     d.style.setProperty('--accent', custom);
     d.style.setProperty('--accent-contrast', contrastFor(custom));
@@ -37,7 +42,7 @@ export function applyTheme() {
   });
   try {
     localStorage.setItem('phub-theme', JSON.stringify({
-      theme: state.name, mode: state.mode, accent: custom, contrast: custom ? contrastFor(custom) : '',
+      theme: name, user: state.user || '', mode: state.mode, accent: custom, contrast: custom ? contrastFor(custom) : '',
     }));
   } catch (_) { /* storage unavailable: theme-boot falls back to defaults */ }
 }
@@ -46,11 +51,20 @@ export function cachedMode() {
   try { return JSON.parse(localStorage.getItem('phub-theme') || '{}').mode || 'system'; } catch (_) { return 'system'; }
 }
 
-export function setPalette(name, accent) {
-  state.name = name || 'midnight';
+export function setPalette(name, accent, preview) {
+  state.name = name || 'graphite';
   state.accent = accent || '';
+  state.preview = !!preview;
   applyTheme();
 }
+
+// the signed-in user's personal theme (null/'' = none, follow the Admin default)
+export function setUserTheme(name) {
+  state.user = name || null;
+  applyTheme();
+}
+
+export function isPreview() { return state.preview; }
 
 export function setMode(mode) {
   state.mode = mode || 'system';

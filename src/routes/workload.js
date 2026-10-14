@@ -396,7 +396,7 @@ const oneLineText = (t) => String(t ?? '').replace(/\s*\n+\s*/g, ' \u00b7 ');   
 
 async function exportPalette(db_) {
   const row = await db_.query("SELECT value FROM app_settings WHERE key='theme'");
-  const tint = THEME_TINT[(row.rows[0] || {}).value] || THEME_TINT.midnight;
+  const tint = THEME_TINT[(row.rows[0] || {}).value] || THEME_TINT.graphite;
   const border = mix(tint, 8, 'e1e4ea');    // grid lines
   const headerFill = mix(tint, 9, 'e7eaef'); // header background, tinted like the web table's header
   const pillFg = (hue) => argb(HUE_HEX[hue]);

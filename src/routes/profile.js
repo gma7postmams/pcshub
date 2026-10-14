@@ -10,7 +10,7 @@ const emailCode = require('../email-code');
 const mailer = require('../mailer');
 const { audit } = require('../audit');
 const totp = require('../totp');
-const { MODES } = require('../themes');
+const { MODES, THEME_KEYS } = require('../themes');
 const { twofaRequired } = require('../config');
 const stepUp = require('../reauth');
 
@@ -66,6 +66,14 @@ router.put('/appearance', asyncH(async (req, res) => {
   const mode = v.oneOf(req.body.mode, MODES, { field: 'Appearance' });
   await db.query('UPDATE users SET appearance=$2, updated_at=now() WHERE id=$1', [req.user.id, mode]);
   res.json({ ok: true, mode });
+}));
+
+// Personal colour theme. Empty/null = no personal choice: the user follows the Admin default theme (which can change at any time).
+router.put('/theme', asyncH(async (req, res) => {
+  const raw = req.body.theme;
+  const theme = raw === null || raw === undefined || raw === '' ? null : v.oneOf(raw, THEME_KEYS, { field: 'Theme' });
+  await db.query('UPDATE users SET theme=$2, updated_at=now() WHERE id=$1', [req.user.id, theme]);
+  res.json({ ok: true, theme });
 }));
 
 // --- TOTP 2FA ---

@@ -1,11 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { get, put } from './lib/api.js';
-import { cachedMode, setMode, setPalette } from './lib/theme.js';
+import { cachedMode, isPreview, setMode, setPalette, setUserTheme } from './lib/theme.js';
 import { applyFavicon } from './lib/favicon.js';
 
 // The server writes the current Branding name into <meta name="app-name"> (src/app-shell.js), so even the fallback shows the right name.
 const metaName = () => { try { const m = document.querySelector('meta[name="app-name"]'); return (m && m.content) || ''; } catch (e) { return ''; } };
-const DEFAULT_BRANDING = { app_name: metaName() || 'PULSE', tagline: '', theme: 'midnight', accent_color: '', themes: [], logo_url: null, logo_dark_url: null };
+const DEFAULT_BRANDING = { app_name: metaName() || 'PULSE', tagline: '', theme: 'graphite', accent_color: '', themes: [], logo_url: null, logo_dark_url: null };
 
 // ---------- Branding (public — used by login too) ----------
 const BrandingCtx = createContext({ branding: DEFAULT_BRANDING, reload: () => {} });
@@ -22,6 +22,13 @@ export function BrandingProvider({ children }) {
     return b;
   }, []);
   useEffect(() => { reload(); }, [reload]);
+  // An Admin changing the default theme reaches everyone still on it: re-read it when the tab comes back into view
+  useEffect(() => {
+    const again = () => { if (document.visibilityState === 'visible' && !isPreview()) get('/api/branding').then((b) => { setPalette(b.theme, b.accent_color); setBranding((x) => (x && x.theme === b.theme && x.accent_color === b.accent_color ? x : { ...x, theme: b.theme, accent_color: b.accent_color })); }).catch(() => {}); };
+    document.addEventListener('visibilitychange', again);
+    window.addEventListener('focus', again);
+    return () => { document.removeEventListener('visibilitychange', again); window.removeEventListener('focus', again); };
+  }, []);
   // the offline page (served by the service worker, no server) reads the name from here
   const appName = branding ? branding.app_name : null;
   useEffect(() => { if (appName) { try { localStorage.setItem('phub-app-name', appName); } catch (e) { /* storage blocked */ } } }, [appName]);
@@ -41,10 +48,11 @@ export function SessionProvider({ children, fallback }) {
   const load = useCallback(async () => {
     const m = await get('/api/auth/me');
     setMode(m.user.appearance || 'system');
+    setUserTheme(m.user.theme);
     setMe(m);
     return m;
   }, []);
-  useEffect(() => { load().catch(() => {}); }, [load]);
+  useEffect(() => { load().catch(() => { setUserTheme(null); }); }, [load]);
   if (!me) return fallback || null;
 
   const value = {
@@ -57,6 +65,11 @@ export function SessionProvider({ children, fallback }) {
       setMode(mode);
       setMe((prev) => ({ ...prev, user: { ...prev.user, appearance: mode } }));
       await put('/api/profile/appearance', { mode });
+    },
+    setTheme: async (theme) => {
+      setUserTheme(theme);
+      setMe((prev) => ({ ...prev, user: { ...prev.user, theme: theme || null } }));
+      await put('/api/profile/theme', { theme: theme || null });
     },
     patchUser: (patch) => setMe((prev) => ({ ...prev, user: { ...prev.user, ...patch } })),
   };
