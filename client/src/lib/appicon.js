@@ -1,8 +1,8 @@
 // The installed-app (PWA) icon, drawn in the browser from an uploaded logo: the empty transparent margin is trimmed, the logo is fitted
-// (never stretched) into the middle of a 512 x 512 square with a safe margin, on white for the light-mode logo or near-black for the dark-mode one.
+// (never stretched) into the middle of a 512 x 512 square with a small margin, on white for the light-mode logo or near-black for the dark-mode one.
 // The server keeps the PNG next to the logo and puts it in the app manifest. Returns a PNG Blob, or null if the image can't be read.
 const SIZE = 512;
-const PAD = 0.17;   // Android crops installed icons to a circle about two thirds wide, so the logo stays well inside
+const PAD = 0.07;   // a small safe margin: iPhone draws the icon as is (a wide margin made the logo look tiny); Android's round crop may trim a circular logo's very edge
 
 const load = (file) => new Promise((resolve) => {
   const url = URL.createObjectURL(file);
