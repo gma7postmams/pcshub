@@ -1336,7 +1336,7 @@ body { padding-bottom: env(safe-area-inset-bottom, 0px); }
 .prof-cols > .card { break-inside: avoid; margin: 0 0 14px; width: 100%; display: inline-block; vertical-align: top; }
 @media (max-width: 680px) { .prof-cols { column-count: 1; } }
 
-/* Workload PREP tab: the Ready / Waiting bands and the "Waiting for" chips */
+/* Workload PREP tab: the Ready / Waiting bands and the "For followup" chips */
 .prep-divider td{padding:8px 12px;font-size:12.5px;letter-spacing:.02em;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--surface-2,rgba(127,127,127,.08))}
 .prep-divider.waiting td{border-top-width:2px}
 .prep-missing{white-space:normal}

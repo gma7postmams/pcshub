@@ -1756,7 +1756,7 @@ export default function Workload() {
       <tr key={key} className={`prep-divider ${cls}`}><td colSpan={tableCols.length + 4}><strong>{title}</strong> <span className="dim">({n}) {note}</span></td></tr>
     );
     const up = band('up', 'ready', 'Ready', nReady, 'VO, Script, Artwork / STB and Audio Guide are all available');
-    const low = band('low', 'waiting', 'Waiting', nWait, 'at least one of the four is not available yet; each row lists what is missing');
+    const low = band('low', 'waiting', 'For followup', nWait, 'at least one of the four is not available yet; each row lists what is missing');
     if (ready && (first || wasReady === null)) return up;
     if (!ready && (first || wasReady === true || wasReady === null)) return <>{first && wasReady === null && !ready ? up : null}{low}</>;
     return null;
@@ -2102,7 +2102,7 @@ export default function Workload() {
                   : !data.rows.length && !draft ? <Empty>No workload items match these filters.</Empty>
                     : (
                       <table className={`t wl v-${viewKey.toLowerCase()}${cards ? ' cards' : ''}`}>
-                        <thead><tr>{!cards ? <th className="rn" title={pageAllPicked ? 'Click to unselect all' : 'Select all rows on this page (Ctrl+A)'} onClick={() => (pageAllPicked ? clearPicks() : selectPage())} /> : null}{canWrite && cards ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{isPrep ? <th data-k="prep_missing">Waiting for</th> : null}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
+                        <thead><tr>{!cards ? <th className="rn" title={pageAllPicked ? 'Click to unselect all' : 'Select all rows on this page (Ctrl+A)'} onClick={() => (pageAllPicked ? clearPicks() : selectPage())} /> : null}{canWrite && cards ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{isPrep ? <th data-k="prep_missing">For followup</th> : null}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {draft ? (
                             <tr key="draft" className="draft-row" data-draft="1">
