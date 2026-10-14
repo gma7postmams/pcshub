@@ -54,14 +54,18 @@ const EPFMT = { test: (x) => RANGE.test(x) || LIST.test(x) };   // a stored rang
 const MONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // "Sep 14–18, 21–25, 2026" — the month and year are written once while they stay the same
 const listText = (x) => {
+  const iso = (d) => d.y * 10000 + d.m * 100 + d.d;
   const segs = String(x).split(',').map((g) => { const [a, b] = g.split('/'); const P = (d) => { const [y, m, dd] = d.split('-'); return { y: +y, m: +m, d: +dd }; }; return { a: P(a), b: b ? P(b) : null }; });
-  let cm = 0; let cy = 0; let out = '';
+  let cm = 0; let cy = 0; let prevEnd = 0; let prevCross = false; let out = '';
   segs.forEach((g, i) => {
-    const part = (d, first) => `${d.m !== cm || d.y !== cy ? `${MONS[d.m - 1]} ` : ''}${d.d}`;
+    // the month is left out only when it is plainly the previous one's: same month, later than the previous end, and the previous did not run into another month
+    const same = i > 0 && g.a.m === cm && g.a.y === cy && iso(g.a) > prevEnd && !prevCross;
     if (i) out += ', ';
-    if (g.a.y !== cy && i) out = out.replace(/, $/, `, ${cy}, `);
-    out += part(g.a); cm = g.a.m; cy = g.a.y;
-    if (g.b) { out += `–${g.b.m !== cm || g.b.y !== cy ? `${MONS[g.b.m - 1]} ` : ''}${g.b.d}`; if (g.b.y !== cy) out += `, ${cy}`; cm = g.b.m; cy = g.b.y; }
+    if (i && g.a.y !== cy) out = out.replace(/, $/, `, ${cy}, `);
+    out += `${same ? '' : `${MONS[g.a.m - 1]} `}${g.a.d}`;
+    cm = g.a.m; cy = g.a.y; prevCross = false;
+    if (g.b) { const cross = g.b.m !== g.a.m || g.b.y !== g.a.y; out += `–${cross ? `${MONS[g.b.m - 1]} ` : ''}${g.b.d}`; if (g.b.y !== g.a.y) out += `, ${g.b.y}`; cm = g.b.m; cy = g.b.y; prevCross = cross; }
+    prevEnd = iso(g.b || g.a);
   });
   return `${out}, ${cy}`;
 };
@@ -124,11 +128,20 @@ function DateRangeInput({ value, onChange, disabled }) {
   const join = (a, b) => (a && b ? `${a}/${b}` : a || '');
   const [rows, setRows] = useState(() => (LIST.test(value || '') ? String(value).split(',').map((g) => { const [a, b] = g.split('/'); return { a, b: b || '' }; }) : null));   // null = one date / range; else the rows (may include empty ones)
   const emit = (rs) => onChange([...new Set(rs.filter((r) => r.a).map((r) => join(r.a, r.b && r.b >= r.a ? r.b : '')))].sort().join(','));
+  // Ctrl+V while the field is open: text such as "Sep 14-18, 21-25" or "Sep 1, 7, 14" fills it (the date boxes themselves can't take pasted text)
+  const onPaste = (e) => {
+    const t = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
+    const parsed = t ? parseEpisodeText(t) : null;
+    if (!parsed) return;
+    e.preventDefault();
+    if (parsed.includes(',')) setRows(parsed.split(',').map((g) => { const [a, b] = g.split('/'); return { a, b: b || '' }; })); else if (rows) setRows([{ a: parsed.slice(0, 10), b: parsed.includes('/') ? parsed.slice(-10) : '' }]);
+    onChange(parsed);
+  };
   if (rows) {
     const edit = (i, part) => { const n = rows.map((r, j) => (j === i ? { ...r, ...part } : r)); setRows(n); emit(n); };
     const del = (i) => { const n = rows.filter((_, j) => j !== i); setRows(n.length ? n : [{ a: '', b: '' }]); emit(n); };
     return (
-      <span className="dri-list">
+      <span className="dri-list" onPaste={onPaste}>
         {rows.map((r, i) => (
           <span className="dri-day" key={i}>
             <span className="dri">
@@ -147,7 +160,7 @@ function DateRangeInput({ value, onChange, disabled }) {
     );
   }
   return (
-    <span className="dri-wrap">
+    <span className="dri-wrap" onPaste={onPaste}>
       <span className="dri">
         <input type="date" value={from} disabled={disabled} max={to || undefined} aria-label="From" onChange={(e) => onChange(join(e.target.value, to))} />
         <span className="dim dri-dash">–</span>
