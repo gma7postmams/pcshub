@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, del, post, put } from '../lib/api.js';
+import PushSetup from '../components/PushSetup.jsx';
 import { avatarUrl, colorFor, makeAvatar } from '../lib/avatar.js';
 import { initials } from '../lib/util.js';
 import { useBranding, useSession } from '../context.jsx';
@@ -130,6 +131,7 @@ export default function Profile() {
             {!u.totp_enabled && u.totp_required ? <div><button type="button" className="btn primary" id="tfa" disabled={forced} onClick={startSetup}>Set up 2FA</button></div> : null}
           </div>
         </div>
+        <PushSetup />
         </div>
         <div className="prof-col">
         <div className="card">

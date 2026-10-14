@@ -1318,3 +1318,4 @@ body { padding-bottom: env(safe-area-inset-bottom, 0px); }
 .prof-pic .stack p { margin: 16px 0 0; }
 .prof-pic .pp-av { font-size: 54px; letter-spacing: 1px; }
 @media (max-width: 680px) { .prof-pic .pp-av { font-size: 48px; } .prof-pic .stack p { margin-top: 14px; } }
+.push-note{color:var(--warn,#b45309);line-height:1.45}

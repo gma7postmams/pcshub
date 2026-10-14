@@ -19,6 +19,34 @@ const stepUp = require('../reauth');
 
 const router = express.Router();
 
+// ---- Phone notifications (Web Push) ----
+router.get('/push', asyncH(async (req, res) => {
+  const { rows } = await db.query('SELECT endpoint FROM push_subscriptions WHERE user_id=$1', [req.user.id]);
+  res.json({ key: await require('../push').publicKey(), endpoints: rows.map((r) => r.endpoint) });
+}));
+router.post('/push', asyncH(async (req, res) => {
+  const sub = req.body || {};
+  const endpoint = v.str(sub.endpoint, { field: 'Endpoint', max: 1000, required: true });
+  const p256dh = v.str(sub.keys && sub.keys.p256dh, { field: 'Key', max: 200, required: true });
+  const auth = v.str(sub.keys && sub.keys.auth, { field: 'Key', max: 100, required: true });
+  if (!/^https:\/\//.test(endpoint)) throw new HttpError(400, 'Invalid endpoint');
+  await db.query(
+    `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, ua) VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (endpoint) DO UPDATE SET user_id=$1, p256dh=$3, auth=$4, ua=$5`,
+    [req.user.id, endpoint, p256dh, auth, String(req.get('user-agent') || '').slice(0, 200)]);
+  res.json({ ok: true });
+}));
+router.delete('/push', asyncH(async (req, res) => {
+  const endpoint = v.str(req.body && req.body.endpoint, { field: 'Endpoint', max: 1000 });
+  if (endpoint) await db.query('DELETE FROM push_subscriptions WHERE user_id=$1 AND endpoint=$2', [req.user.id, endpoint]);
+  else await db.query('DELETE FROM push_subscriptions WHERE user_id=$1', [req.user.id]);
+  res.json({ ok: true });
+}));
+router.post('/push/test', asyncH(async (req, res) => {
+  await require('../push').sendPush([req.user.id], { title: 'Test notification', body: 'Phone notifications are working.', link: '/profile' });
+  res.json({ ok: true });
+}));
+
 router.put('/', asyncH(async (req, res) => {
   const full_name = v.str(req.body.full_name, { field: 'Full name', max: 120, required: true });
   const email = v.str(req.body.email, { field: 'Email', max: 200 });

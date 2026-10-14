@@ -11,6 +11,8 @@ async function notifyUsers(userIds, { title, body, link }, client) {
     [ids, title, body || null, link || null]
   );
   try { require('./live').publishNotif(ids); } catch (_) { /* live updates are a bonus */ }
+  // phones: after the caller's transaction (if any) is done; fire and forget
+  setTimeout(() => { require('./push').sendPush(ids, { title, body, link }); }, client ? 1500 : 0);
 }
 
 /** Notify every active user who can perform `action` (role grants it AND their group opens its page). */

@@ -598,3 +598,15 @@ INSERT INTO app_settings (key, value) VALUES ('system_admin_v1', '1') ON CONFLIC
 UPDATE roles SET description = 'Every page and action in the app; in Settings only the Audit Log, Dropdowns and Branding'
  WHERE name = 'Admin' AND description = 'Every page and action in the app; in the Admin area only the Audit Log and the Dropdowns' AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'admin_branding_v1');
 INSERT INTO app_settings (key, value) VALUES ('admin_branding_v1', '1') ON CONFLICT (key) DO NOTHING;
+
+-- Phone / browser push notifications: one row per device a user has switched them on for
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id         SERIAL PRIMARY KEY,
+  user_id    INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint   TEXT NOT NULL UNIQUE,
+  p256dh     TEXT NOT NULL,
+  auth       TEXT NOT NULL,
+  ua         TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions (user_id);
