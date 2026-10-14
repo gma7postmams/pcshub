@@ -4,7 +4,7 @@ import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
 import { CalendarIcon, DownloadIcon, ExitFullscreenIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive } from '../lib/live.js';
-import { DateRange, FilterSelect, FiltersMenu, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
+import { FilterSelect, FiltersMenu, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
 import { useSession } from '../context.jsx';
 import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
@@ -28,6 +28,11 @@ const addMonths = (iso, n) => { const d = parseIso(monthStart(iso)); d.setUTCMon
 
 const SIZES = [{ value: '25', label: '25' }, { value: '50', label: '50' }, { value: '100', label: '100' }, { value: '250', label: '250' }, { value: '500', label: '500' }, { value: 'all', label: 'All' }];
 const ALL_CAP = 5000;   // "All rows" shows at most this many at once (the server's limit)
+
+const PERIODS = [
+  { value: 'all', label: 'All' }, { value: 'day', label: 'Daily' }, { value: 'week', label: 'Weekly' },
+  { value: 'month', label: 'Monthly' }, { value: 'custom', label: 'Custom range' },
+];
 
 const rangeOf = (period, anchor, custom) => {
   if (period === 'day') return { from: anchor, to: anchor };
@@ -93,6 +98,39 @@ function PlugCellEditor({ k, initial, onSave, onCancel }) {
 }
 const remember = (k, v) => { try { localStorage.setItem(`plugs:${k}`, v); } catch (e) { /* storage unavailable */ } };
 
+/** The date button: click it to choose the View (All / Daily / Weekly / Monthly / Custom range; Custom adds From – To). The ‹ › arrows step through days, weeks or months. */
+function PlugDate({ period, anchor, range, custom, onCustom, onPeriod }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const away = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
+  }, [open]);
+  const label = period === 'all' ? 'All dates' : period === 'custom' && !range.from && !range.to ? 'Pick dates' : rangeLabel(period, range, anchor);
+  return (
+    <div className="daterange" ref={ref}>
+      <button type="button" className="daterange-btn" id="plug-date-btn" title="Choose the dates" onClick={() => setOpen((o) => !o)}><CalendarIcon /><span>{label}</span></button>
+      {open ? (
+        <div className="popover daterange-pop">
+          <div className="presets">
+            {PERIODS.map((o) => <button key={o.value} type="button" className={`btn sm${period === o.value ? ' primary' : ''}`} onClick={() => { onPeriod(o.value); if (o.value !== 'custom') setOpen(false); }}>{o.label}</button>)}
+          </div>
+          {period === 'custom' ? (
+            <>
+              <label className="f"><span>From</span><input type="date" value={custom.from} max={custom.to || undefined} onChange={(e) => onCustom({ from: e.target.value, to: custom.to })} /></label>
+              <label className="f"><span>To</span><input type="date" value={custom.to} min={custom.from || undefined} onChange={(e) => onCustom({ from: custom.from, to: e.target.value })} /></label>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const toast = useToast();
   const confirm = useConfirm();
@@ -100,7 +138,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const fileRef = useRef(null);
   const [days, setDays] = useState(null);            // [{ date, n }] newest first (the latest 366 days with a list); null = loading
   const [totals, setTotals] = useState({ plugs: 0, days: 0, first: '', last: '' });   // across every day
-  const [period, setPeriodState] = useState(() => stored('period', 'day', ['day', 'all']));
+  const [period, setPeriodState] = useState(() => stored('period', 'day', PERIODS.map((p) => p.value)));
   const [size, setSizeState] = useState(() => stored('size3', '25', SIZES.map((s) => s.value)));
   const [anchor, setAnchor] = useState('');          // the day / a day of the week / of the month being looked at
   const [custom, setCustom] = useState({ from: '', to: '' });
@@ -149,12 +187,8 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const [pageState, setPageState] = useState({ key: '', offset: 0 });   // the page resets to the first whenever the view changes
   const offset = pageState.key === viewKey ? pageState.offset : 0;
   const setOffset = async (o) => { if (!(await okToLeave())) return; setPageState({ key: viewKey, offset: o }); };
+  const setPeriod = async (p) => { if (!(await okToLeave())) return; setPeriodState(p); remember('period', p); };
   const setF = (k) => (e) => { setFilt((f) => ({ ...f, [k]: e.target.value })); };
-  const pickRange = async (r) => {   // the date button: a preset or From / To; no dates = every day
-    if (!(await okToLeave())) return;
-    if (!r.from && !r.to) { setPeriodState('all'); remember('period', 'all'); return; }
-    setCustom(r); setPeriodState('custom');
-  };
   const setSize = async (s) => { if (!(await okToLeave())) return; setSizeState(s); remember('size3', s); };
 
   const loadDays = useCallback(async (quiet) => {   // quiet = a re-read because somebody else changed the list: no error pop-up
@@ -199,6 +233,19 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     Object.entries(filt).forEach(([k, val]) => { if (val) p.set(k, val); });
     if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
     try { await downloadFile(`/api/plugs/export?${p}`, 'PSD_Plug_List.xlsx'); } catch (e) { toast(e.message, 'err'); }
+  };
+
+  // ---- moving through time ----
+  const dayList = days || [];
+  const prevDay = dayList.find((d) => d.date < anchor);
+  const nextDay = [...dayList].reverse().find((d) => d.date > anchor);
+  const canPrev = period === 'day' ? !!prevDay : !!totals.first && range.from > totals.first;
+  const canNext = period === 'day' ? !!nextDay : !!totals.last && range.to < totals.last;
+  const go = async (dir) => {
+    if (!(await okToLeave())) return;
+    if (period === 'day') setAnchor((dir < 0 ? prevDay : nextDay).date);   // the previous / next day that has a list
+    else if (period === 'week') setAnchor(addDays(anchor, dir * 7));
+    else if (period === 'month') setAnchor(addMonths(anchor, dir));
   };
 
   const upload = async (file, yr) => {
@@ -606,7 +653,13 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
           <FilterSelect label="PSD" value={filt.psd} onChange={setF('psd')}><Options list={opts.psd} blank="All" /></FilterSelect>
           <FilterSelect label="Account by" value={filt.account_by} onChange={setF('account_by')}><Options list={opts.account_by} blank="All" /></FilterSelect>
         </FiltersMenu>
-        <DateRange from={range.from} to={range.to} onChange={pickRange} title="Plug dates" />
+        <PlugDate period={period} anchor={anchor} range={range} custom={custom} onCustom={setCustom} onPeriod={setPeriod} />
+        {period === 'day' || period === 'week' || period === 'month' ? (
+          <div className="plug-date">
+            <button type="button" className="btn sm" disabled={!canPrev} onClick={() => go(-1)} title={`Previous ${period === 'day' ? 'day with a list' : period}`}>‹</button>
+            <button type="button" className="btn sm" disabled={!canNext} onClick={() => go(1)} title={`Next ${period === 'day' ? 'day with a list' : period}`}>›</button>
+          </div>
+        ) : null}
         <span className="grow" />
         <div className="wl-presence"><PresenceAvatars path="/plug-list" /></div>
         <div className="wl-iconbar">
