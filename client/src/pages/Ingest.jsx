@@ -71,7 +71,7 @@ const listText = (x) => {
   return `${out}, ${cy}`;
 };
 const splitRange = (x) => { const m = RANGE.exec(String(x || '')); return m ? { from: m[1], to: m[2] } : { from: isoDate(x) || '', to: '' }; };
-const dayText = (x) => { if (LIST.test(String(x || ''))) return listText(x); const m = RANGE.exec(String(x || '')); return m ? `${fmtDate(m[1])} – ${fmtDate(m[2])}` : (isoDate(x) ? fmtDate(isoDate(x)) : (x || '')); };   // a single date, a range, or old free text as written; a real date reads like the Workload Tracker's; old free text is shown as written
+const dayText = (x) => { if (LIST.test(String(x || ''))) return listText(x); const m = RANGE.exec(String(x || '')); return m ? `${fmtDate(m[1])} – ${fmtDate(m[2])}` : (isoDate(x) ? fmtDate(isoDate(x)) : (x || '')); };   // a single date, a range, or old free text as written; a real date reads like the Workload page's; old free text is shown as written
 
 // Columns that can be edited right in the table, like the Workload Tracker: click a cell, change it, Enter or click away saves, Esc cancels.
 // Requested By is not one of them — it is filled in from whoever created the request. Destination Folder and Approved By are for PCS / OCS only.
@@ -820,7 +820,7 @@ export default function Ingest() {
 
   return (
     <main className="container wide wl-page">
-      <h1 className="sr-only">Ingest Tracker</h1>
+      <h1 className="sr-only">Ingest</h1>
 
       <div className={`card wl-card${full ? ' full' : ''}`}>
         <div className="wl-tabbar one-row">

@@ -14,8 +14,8 @@ const KB_DIR = path.join(__dirname, '..', 'uploads', 'knowledge');
 // $1 = from (date or null), $2 = to (date or null), $3 = the acting user's id (only where `self` is true)
 const range = (expr) => `($1::date IS NULL OR ${expr} >= $1::date) AND ($2::date IS NULL OR ${expr} <= $2::date)`;
 const AREAS = {
-  ingest: { label: 'Ingest Tracker', basis: 'Episode date (or created date); every status, with its approval requests', table: 'ingest_records', date: 'COALESCE(episode_date, created_at::date)', children: [{ table: 'approval_requests', fk: 'ingest_record_id' }], live: 'ingest' },
-  workload: { label: 'Workload Tracker', basis: 'Work date (or created date)', table: 'workload_items', date: 'COALESCE(work_date, created_at::date)', live: 'workload' },
+  ingest: { label: 'Ingest', basis: 'Episode date (or created date); every status, with its approval requests', table: 'ingest_records', date: 'COALESCE(episode_date, created_at::date)', children: [{ table: 'approval_requests', fk: 'ingest_record_id' }], live: 'ingest' },
+  workload: { label: 'Workload', basis: 'Work date (or created date)', table: 'workload_items', date: 'COALESCE(work_date, created_at::date)', live: 'workload' },
   plugs: { label: 'PSD Daily Plug List', basis: 'Plug date', table: 'workload_plugs', date: 'plug_date', live: 'plugs' },
   knowledge: { label: 'Knowledge Base', basis: 'Date added; includes the Trash. The document files are deleted from the server too (only the list of items is archived)', table: 'knowledge_docs', date: 'created_at::date', files: 'stored_name' },
   audit: { label: 'Audit Log', basis: 'Entry date', table: 'audit_logs', date: 'created_at::date' },

@@ -22,13 +22,13 @@ const MODULES = {
     where: 'created_at < $1', oldest: 'created_at',
   },
   ingest: {
-    label: 'Ingest Tracker', table: 'ingest_records', basis: 'Episode date (or created date), and not edited since; only Approved or Rejected records',
+    label: 'Ingest', table: 'ingest_records', basis: 'Episode date (or created date), and not edited since; only Approved or Rejected records',
     where: `status IN ('Approved','Rejected') AND COALESCE(episode_date, created_at::date) < $1::date AND updated_at < $1`,
     oldest: 'COALESCE(episode_date, created_at::date)',
     children: [{ table: 'approval_requests', fk: 'ingest_record_id' }],
   },
   workload: {
-    label: 'Workload Tracker', table: 'workload_items', basis: 'Work date (or created date), and not edited since',
+    label: 'Workload', table: 'workload_items', basis: 'Work date (or created date), and not edited since',
     where: 'COALESCE(work_date, created_at::date) < $1::date AND updated_at < $1', oldest: 'COALESCE(work_date, created_at::date)',
   },
   plugs: {

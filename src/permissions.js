@@ -30,11 +30,11 @@ const CATALOG = [
     ],
   },
 
-  { key: 'ingest', label: 'Ingest Tracker', path: '/ingest', sections: [] },
+  { key: 'ingest', label: 'Ingest', path: '/ingest', sections: [] },
   { key: 'plugs', label: 'PSD Daily Plug List', path: '/plug-list', sections: [] },
   {
     key: 'workload',
-    label: 'Workload Tracker',
+    label: 'Workload',
     path: '/workload',
     // Which tabs of the Workload Tracker the group sees. A group with the page but none of these ticked sees every tab (as before this existed).
     sections: [
@@ -42,7 +42,7 @@ const CATALOG = [
       { key: 'workload.vgfx', label: 'VGFX Tab' },
       { key: 'workload.vedit', label: 'VEDIT Tab' },
       { key: 'workload.audio', label: 'Audio Tab' },
-      { key: 'workload.prep', label: 'PREP Tab' },
+      { key: 'workload.prep', label: 'Ongoing Tab' },
     ],
   },
 
@@ -100,7 +100,7 @@ const DEFAULT_ROLE_ACTIONS = Object.assign(Object.create(null), {
     'activity.view'
   ],   // no knowledge.write: only Admin / System Admin add, change or delete Knowledge Base documents; everyone with the page can open and download them
   Editor:  ['ingest.write', 'plugs.write', 'activity.view'],   // plugs.write: edit the PSD Daily Plug List (page access still comes from the group)
-  Ingest:  ['ingest.cm_complete'],   // Ingest Tracker only: Status (CM) and its NON-COMPLIANT reason, nothing else
+  Ingest:  ['ingest.cm_complete'],   // Ingest only: Status (CM) and its NON-COMPLIANT reason, nothing else
   Viewer:  [],
 });
 // The live role -> actions map. It starts from the built-in defaults and is replaced from the database (roles / role_actions,

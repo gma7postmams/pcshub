@@ -36,7 +36,7 @@ const unitKey = (t) => String(t ?? '').toLowerCase().replace(/[\u2013\u2014\u221
 const UNIT_BY_KEY = Object.assign(Object.create(null), Object.fromEntries(UNITS.map((u) => [unitKey(u), u])));
 const canonUnit = (raw) => { const t = String(raw ?? '').trim(); return UNIT_BY_KEY[unitKey(t)] || t; };
 const NOT_SET = '(Not set)';   // Units filter value for rows copied from the PSD Daily Plug List that haven't been assigned a team yet
-const TAB_LABEL = Object.assign(Object.create(null), { ALL: 'All', VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio', PREP: 'PREP' });
+const TAB_LABEL = Object.assign(Object.create(null), { ALL: 'All', VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio', PREP: 'Ongoing' });
 
 // Field kinds: date | select | text | audio_guide | date_or_text (a picked date OR typed text). `multiline` = textarea. `hint` = placeholder from the red notes.
 const OPEN = 'Type or paste anything';
@@ -321,9 +321,9 @@ function buildFilter(query, user) {
   const prep = query.team === 'PREP';   // the PREP tab lists every row, like All
   if (!tabs.includes('ALL')) {
     const mine = TEAMS.filter((t) => tabs.includes(t));
-    if (!mine.length && !tabs.includes('PREP')) throw new HttpError(403, 'Your group cannot open any tab of the Workload Tracker');
-    if (query.team && !prep && !mine.includes(String(query.team))) throw new HttpError(403, 'Your group cannot open that tab of the Workload Tracker');
-    if (prep && !tabs.includes('PREP')) throw new HttpError(403, 'Your group cannot open that tab of the Workload Tracker');
+    if (!mine.length && !tabs.includes('PREP')) throw new HttpError(403, 'Your group cannot open any tab of the Workload page');
+    if (query.team && !prep && !mine.includes(String(query.team))) throw new HttpError(403, 'Your group cannot open that tab of the Workload page');
+    if (prep && !tabs.includes('PREP')) throw new HttpError(403, 'Your group cannot open that tab of the Workload page');
     if (!tabs.includes('PREP')) add('w.units_concerned = ANY(?::text[])', UNITS.filter((u) => UNIT_TEAMS[u].some((t) => mine.includes(t))));
   }
   if (query.team && !prep) {

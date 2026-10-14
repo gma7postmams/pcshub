@@ -182,7 +182,7 @@ router.get('/activity/stream', (req, res) => {
 
 // Just the chart's days for another range (the dropdown), without recomputing the whole dashboard.
 router.get('/days', asyncH(async (req, res) => {
-  if (!canPage(req.user, '/workload')) return res.status(403).json({ error: 'No access to the Workload Tracker' });
+  if (!canPage(req.user, '/workload')) return res.status(403).json({ error: 'No access to the Workload page' });
   const range = rangeKey(req.query.range);
   res.set('Cache-Control', 'no-store');
   const { rows, bucket } = await workloadDays(range);

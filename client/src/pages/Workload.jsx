@@ -459,7 +459,7 @@ export default function Workload() {
     document.addEventListener('keydown', esc);
     return () => document.removeEventListener('keydown', esc);
   }, []);
-  const mode = 'table';   // Excel mode was removed: the Workload Tracker is the Table only (the grid code below is no longer reachable)
+  const mode = 'table';   // Excel mode was removed: the Workload page is the Table only (the grid code below is no longer reachable)
   const setMode = () => {};
   const isGrid = false;   // Excel mode = the editable grid; Table mode = rows with the New / Edit form (the layout around both is the same)
   const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('wl:rows3')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
@@ -1911,7 +1911,7 @@ export default function Workload() {
 
   return (
     <main className="container wide wl-page">
-      <h1 className="sr-only">Workload Tracker</h1>
+      <h1 className="sr-only">Workload</h1>
 
       {!lookups.workload_platform.length || !lookups.plug_type.length ? (
         <div className="alert warn mb-12">

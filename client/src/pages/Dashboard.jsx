@@ -406,7 +406,7 @@ export default function Dashboard() {
 
       {w ? (
         <section className="dsh-card">
-          <CardHead icon={PulseIcon} hue="blue" title="Workload Tracker" hint={`${w.total} item${w.total === 1 ? '' : 's'} in total`} right={<RangeMenu ranges={w.ranges} value={w.range} onChange={changeRange} />} />
+          <CardHead icon={PulseIcon} hue="blue" title="Workload" hint={`${w.total} item${w.total === 1 ? '' : 's'} in total`} right={<RangeMenu ranges={w.ranges} value={w.range} onChange={changeRange} />} />
           <div className="dsh-stats">
             <StatCard icon={CalendarGridIcon} hue="blue" label="Today" value={w.today} foot={w.today === 1 ? 'item to work on' : 'items to work on'} onClick={go('/workload')} />
             <StatCard icon={CalendarGridIcon} hue="purple" label="This week" value={w.thisWeek} foot="Monday to Sunday" onClick={go('/workload')} />
@@ -448,7 +448,7 @@ export default function Dashboard() {
 
       {d.kpis ? (
         <section className="dsh-card">
-          <CardHead icon={DocIcon} hue="blue" title="Ingest Tracker" hint={`${d.kpis.total} record${d.kpis.total === 1 ? '' : 's'}`} />
+          <CardHead icon={DocIcon} hue="blue" title="Ingest" hint={`${d.kpis.total} record${d.kpis.total === 1 ? '' : 's'}`} />
           <div className="dsh-stats compact five">
             <StatCard icon={CalendarCheckIcon} hue="blue" soft label="Total Ingest Records" value={d.kpis.total} foot={`${d.kpis.thisMonth.created} created this month`} onClick={go(d.canOpen.ingest ? '/ingest' : null)} />
             <StatCard icon={ClockIcon} hue="purple" soft label="Pending Approval" value={d.kpis.pendingApproval ?? 0} foot="Waiting for an approver" onClick={go(d.canOpen.ingest ? '/ingest?approval=pending' : null)} />

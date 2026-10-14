@@ -581,7 +581,7 @@ function formatDetails(row) {
       return `Plug list import failed${fileOf(d)}: ${d.error || 'unknown error'}`;
 
     case 'workload.plugs_copy':
-      return `Copied ${n(d.created, 'plug')} to the Workload Tracker${rangeOf(d)}`
+      return `Copied ${n(d.created, 'plug')} to the Workload page${rangeOf(d)}`
         + `${d.alreadyInWorkload ? `, ${d.alreadyInWorkload} already there` : ''}${d.skippedLocked ? `, ${d.skippedLocked} on locked days` : ''}`;
 
     case 'workload.plugs_fill':

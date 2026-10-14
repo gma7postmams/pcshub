@@ -51,7 +51,7 @@ INSERT INTO roles (name, description, rank) VALUES
    2),
 
   ('Ingest',
-   'Ingest Tracker only: can set Status (CM) and its NON-COMPLIANT reason; nothing else',
+   'Ingest only: can set Status (CM) and its NON-COMPLIANT reason; nothing else',
    1),
 
   ('Viewer',

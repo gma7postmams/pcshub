@@ -352,7 +352,7 @@ export default function PlugGrid({ source, canWrite, defaultDate, me, limit, onD
     try {
       const res = await post('/api/plugs/batch', { rows: out });
       const c = res.copied;
-      toast(`Saved — ${res.added} added, ${res.updated} updated${c && c.created ? ` · ${c.created} copied to the Workload Tracker` : ''}`);
+      toast(`Saved — ${res.added} added, ${res.updated} updated${c && c.created ? ` · ${c.created} copied to the Workload page` : ''}`);
       if (onSaved) onSaved({ dates: out.map((x) => x.plug_date) });
     } catch (e) {
       toast(String(e.message).replace(/^Row (\d+):/, (_, n) => `Grid row ${idx[+n - 1] + 1}:`), 'err');

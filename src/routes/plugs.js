@@ -389,7 +389,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
         }
       });
       const filled = await backfillWorkload(db, { from: result[0].date, to: result[result.length - 1].date, userId: req.user.id });   // rows already in the tracker with blank PSD / Prog. Name
-      const copied = await autoCopy(req, 'p.plug_date = ANY($1::date[])', [result.map((r) => r.date)]);   // new plugs go straight into the Workload Tracker
+      const copied = await autoCopy(req, 'p.plug_date = ANY($1::date[])', [result.map((r) => r.date)]);   // new plugs go straight into the Workload page
       const total = result.reduce((o, s) => ({ plugs: o.plugs + s.plugs, added: o.added + s.added, skipped: o.skipped + s.skipped }), { plugs: 0, added: 0, skipped: 0 });
       await notifyAdded(req, total.added, `${total.added} plug${total.added === 1 ? '' : 's'} (${result[0].date === result[result.length - 1].date ? result[0].date : `${result[0].date} to ${result[result.length - 1].date}`}, imported from ${info.file || 'a file'})`);
       await emitTransfer(req, 'workload.plugs_import', { ...info, days: result.length, from: result[0].date, to: result[result.length - 1].date, ...total, workloadRowsFilled: filled, copiedToWorkload: copied ? copied.created : null, warnings: warnings.slice(0, 20), ms: Date.now() - t0 });

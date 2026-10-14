@@ -70,7 +70,7 @@ export default function Roles({ model, refreshModel }) {
       <Pager total={roles.length} offset={start} size={size} onOffset={setOffset} onSize={setSize} label="Roles per page" />
       <div className="admin-note">
         Roles decide what a user can <strong>do</strong>. An action also needs the user&apos;s group to open the page it happens on
-        (e.g. filling Destination Folder / Approved by needs a role with that action <em>and</em> a group with the Ingest Tracker page).
+        (e.g. filling Destination Folder / Approved by needs a role with that action <em>and</em> a group with the Ingest page page).
         Admin is fixed; the other built-in roles can have their actions changed; custom roles can be added, renamed and deleted (only when no user has them).
       </div>
       {members ? <RoleMembers role={members} onClose={() => setMembers(null)} /> : null}

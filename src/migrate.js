@@ -46,6 +46,8 @@ async function upgradeIngestRecords(db) {
             AND cm_non_compliant_reason IS NOT NULL AND length(btrim(cm_non_compliant_reason)) > 0)
       );
     END $$`);
+    // Page renamed: the built-in Ingest role's description no longer says "Ingest Tracker" (only if nobody edited it)
+    await client.query(`UPDATE roles SET description = REPLACE(description, 'Ingest Tracker only', 'Ingest only') WHERE name = 'Ingest' AND description LIKE 'Ingest Tracker only:%'`);
     // The Approval page was merged into the Ingest Tracker: carry the approver's name onto the record, and drop the old page grant.
     await client.query(
       `UPDATE ingest_records i SET approved_by = u.full_name

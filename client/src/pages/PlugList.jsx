@@ -276,7 +276,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     try {
       const out = await post('/api/plugs/import', form);
       setSummary(out);
-      toast(`${out.added} plug${out.added === 1 ? '' : 's'} added${out.existing ? `, ${out.existing} already there` : ''}${out.copied && out.copied.created ? ` — ${out.copied.created} copied to the Workload Tracker` : ''}${out.workloadRowsFilled ? ` — ${out.workloadRowsFilled} existing Workload row${out.workloadRowsFilled === 1 ? '' : 's'} filled in` : ''}`);
+      toast(`${out.added} plug${out.added === 1 ? '' : 's'} added${out.existing ? `, ${out.existing} already there` : ''}${out.copied && out.copied.created ? ` — ${out.copied.created} copied to the Workload page` : ''}${out.workloadRowsFilled ? ` — ${out.workloadRowsFilled} existing Workload row${out.workloadRowsFilled === 1 ? '' : 's'} filled in` : ''}`);
       await loadDays();
       loadRows();
     } catch (e) { toast(e.message, 'err'); } finally { setImporting(false); if (fileRef.current) fileRef.current.value = ''; }
@@ -711,7 +711,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       {data === null || days === null ? <Empty>Loading…</Empty>
         : !totals.plugs ? (
           <Empty>
-            No PSD Daily Plug List yet.{canWrite ? ' Use “Import Plug List” and pick the PSD’s daily plug list workbook (one sheet per day).' : ' Ask someone who can edit the Workload Tracker to import it.'}
+            No PSD Daily Plug List yet.{canWrite ? ' Use “Import Plug List” and pick the PSD’s daily plug list workbook (one sheet per day).' : ' Ask someone who can edit the Workload page to import it.'}
           </Empty>
         ) : (
           <>
@@ -802,8 +802,8 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
             {summary.existing ? <>; {summary.existing} {summary.existing === 1 ? 'was' : 'were'} already on the list</> : null}
             {summary.skipped ? <>; {summary.skipped} line{summary.skipped === 1 ? '' : 's'} skipped (no Plug ID)</> : null}.
           </p>
-          {summary.copied ? <p><strong>{summary.copied.created}</strong> plug{summary.copied.created === 1 ? '' : 's'} copied to the Workload Tracker (Units Concerned left blank — set it there){summary.copied.already ? <>; {summary.copied.already} already {summary.copied.already === 1 ? 'was' : 'were'} there</> : null}{summary.copied.locked ? <>; {summary.copied.locked} skipped because the day is locked</> : null}.</p> : null}
-          {summary.workloadRowsFilled ? <p><strong>{summary.workloadRowsFilled}</strong> row{summary.workloadRowsFilled === 1 ? '' : 's'} already in the Workload Tracker had a Plug ID but no PSD / PROG. NAME / PROJ. TITLE — now filled in from this list.</p> : null}
+          {summary.copied ? <p><strong>{summary.copied.created}</strong> plug{summary.copied.created === 1 ? '' : 's'} copied to the Workload page (Units Concerned left blank — set it there){summary.copied.already ? <>; {summary.copied.already} already {summary.copied.already === 1 ? 'was' : 'were'} there</> : null}{summary.copied.locked ? <>; {summary.copied.locked} skipped because the day is locked</> : null}.</p> : null}
+          {summary.workloadRowsFilled ? <p><strong>{summary.workloadRowsFilled}</strong> row{summary.workloadRowsFilled === 1 ? '' : 's'} already in the Workload page had a Plug ID but no PSD / PROG. NAME / PROJ. TITLE — now filled in from this list.</p> : null}
           {summary.warnings && summary.warnings.length ? <ul className="plug-warn">{summary.warnings.map((w) => <li key={w}>{w}</li>)}</ul> : null}
           <div className="plug-sum">
             {summary.sheets.map((s) => <div key={s.sheet + s.date}><span>{dateLabel(s.date)}</span><span className="dim">{s.plugs} plugs{s.added ? ` · ${s.added} new` : ''}{s.additional ? ` · ${s.additional} added late` : ''}</span></div>)}
@@ -827,8 +827,8 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
           onSaved={async (d, out) => {
             setAdding(false); setEditing(null);
             if (editing) { if (out && out.workloadRowsFilled) toast(`${out.workloadRowsFilled} Workload row${out.workloadRowsFilled === 1 ? '' : 's'} filled in from this plug`); }
-            else if (out && out.copied && out.copied.created) toast('Plug added and copied to the Workload Tracker (set its Units Concerned there)');
-            else if (out && out.copied && out.copied.locked) toast('Plug added — not copied to the Workload Tracker because that day is locked', 'err');
+            else if (out && out.copied && out.copied.created) toast('Plug added and copied to the Workload page (set its Units Concerned there)');
+            else if (out && out.copied && out.copied.locked) toast('Plug added — not copied to the Workload page because that day is locked', 'err');
             else toast(out && out.workloadRowsFilled ? `Plug added — ${out.workloadRowsFilled} Workload row${out.workloadRowsFilled === 1 ? '' : 's'} filled in from it` : 'Plug added');
             await loadDays();
             if (d && period !== 'all' && period !== 'custom' && (d < range.from || d > range.to)) setAnchor(d);   // a plug on another day: go there
@@ -883,7 +883,7 @@ function PlugModal({ date, plug, onClose, onSaved }) {
     setBusy(true);
     try {
       const out = plug ? await put(`/api/plugs/${plug.id}`, f) : await post('/api/plugs', f);
-      if (plug) toast('Plug updated');   // a new plug's message (added / copied to the Workload Tracker) comes from onSaved, so there is only one
+      if (plug) toast('Plug updated');   // a new plug's message (added / copied to the Workload page) comes from onSaved, so there is only one
       onSaved(f.plug_date, out);
     } catch (e) { toast(e.message, 'err'); setBusy(false); }
   };
