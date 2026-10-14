@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { Children, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { fmtDate, isoDate } from '../lib/util.js';
 import { CalendarIcon, ChevronDownIcon, CopyIcon, FilterIcon, KebabIcon, MoreHIcon, PencilIcon, TrashIcon } from './Icons.jsx';
@@ -174,18 +175,26 @@ export function RowMenu({ onEdit, onDuplicate, onDelete }) {
     if (pos) { close(); return; }
     openedAt.current = Date.now();
     const r = btn.current.getBoundingClientRect();
-    const up = r.bottom + 100 > window.innerHeight;
-    setPos({ right: Math.max(8, window.innerWidth - r.right), ...(up ? { bottom: window.innerHeight - r.top + 4 } : { top: r.bottom + 4 }) });
+    // the menu is about 46 px per item: open it below the button when it fits, else above, else pinned inside the window (a phone card near the bottom edge)
+    const h = (onDuplicate ? 3 : 2) * 46 + 16;
+    const vh = window.innerHeight;
+    const room = (px) => px >= 0;
+    let place;
+    if (room(vh - r.bottom - 4 - h)) place = { top: r.bottom + 4 };
+    else if (room(r.top - 4 - h)) place = { bottom: vh - r.top + 4 };
+    else place = { top: Math.max(8, vh - h - 8) };
+    setPos({ right: Math.max(8, window.innerWidth - r.right), ...place });
   };
   return (
     <>
       <button type="button" className="kebab" aria-label="Row actions" aria-haspopup="menu" aria-expanded={!!pos} ref={btn} onClick={toggle}><KebabIcon /></button>
-      {pos ? (
+      {pos ? createPortal(   // on <body>, so a later card / row can never paint over the menu
         <div className="rowmenu" role="menu" style={pos} ref={menu}>
           <button type="button" role="menuitem" onClick={() => { close(); onEdit(); }}><PencilIcon /> Edit</button>
           {onDuplicate ? <button type="button" role="menuitem" onClick={() => { close(); onDuplicate(); }}><CopyIcon /> Duplicate</button> : null}
           <button type="button" role="menuitem" className="danger row-del" onClick={() => { close(); onDelete(); }}><TrashIcon /> Delete</button>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </>
   );
