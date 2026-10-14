@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { CloseIcon } from './Icons.jsx';
 
@@ -141,7 +142,7 @@ export function Modal({ title, size, onClose, footer, children }) {
     if (isTopModal(id.current)) onCloseRef.current();
   };
 
-  return (
+  return createPortal(   // on <body>, so no page container (a transformed / clipped one) can shrink or crop the dialog
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
       <div className={`modal ${size || ''}`} role="dialog" aria-modal="true" ref={ref}>
         <div className="modal-head">
@@ -151,7 +152,8 @@ export function Modal({ title, size, onClose, footer, children }) {
         <div className="modal-body">{children}</div>
         {footer ? <div className="modal-foot">{footer}</div> : null}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
