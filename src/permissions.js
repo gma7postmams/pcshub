@@ -42,6 +42,7 @@ const CATALOG = [
       { key: 'workload.vgfx', label: 'VGFX Tab' },
       { key: 'workload.vedit', label: 'VEDIT Tab' },
       { key: 'workload.audio', label: 'Audio Tab' },
+      { key: 'workload.prep', label: 'PREP Tab' },
     ],
   },
 
@@ -153,8 +154,8 @@ function effectiveKeys(user) {
   return set;
 }
 
-const WORKLOAD_TAB_KEYS = ['workload.all', 'workload.vgfx', 'workload.vedit', 'workload.audio'];
-const WORKLOAD_TAB_BY_KEY = { 'workload.all': 'ALL', 'workload.vgfx': 'VGFX', 'workload.vedit': 'VEDIT', 'workload.audio': 'AUDIO' };
+const WORKLOAD_TAB_KEYS = ['workload.all', 'workload.vgfx', 'workload.vedit', 'workload.audio', 'workload.prep'];
+const WORKLOAD_TAB_BY_KEY = { 'workload.all': 'ALL', 'workload.vgfx': 'VGFX', 'workload.vedit': 'VEDIT', 'workload.audio': 'AUDIO', 'workload.prep': 'PREP' };
 /** The Workload Tracker tabs this person may open, in tab order: ['ALL', 'VGFX', 'VEDIT', 'AUDIO'] or fewer. */
 function workloadTabs(user) {
   const eff = effectiveKeys(user);

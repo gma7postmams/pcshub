@@ -89,7 +89,7 @@ function GroupForm({ g, catalog, onClose, onSaved }) {
   const [description, setDescription] = useState(g ? g.description || '' : '');
   const [perms, setPerms] = useState(() => {
     const set = new Set(g ? g.perms : []);
-    const tabs = ['workload.all', 'workload.vgfx', 'workload.vedit', 'workload.audio'];
+    const tabs = ['workload.all', 'workload.vgfx', 'workload.vedit', 'workload.audio', 'workload.prep'];
     if (set.has('workload') && !tabs.some((k) => set.has(k))) tabs.forEach((k) => set.add(k));   // an older group with the page and no tab ticked sees every tab
     return set;
   });

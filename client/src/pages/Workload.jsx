@@ -1,4 +1,4 @@
-import { cloneElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { cloneElement, Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { isBlockText, pasteFallback } from '../lib/pasteFallback.js';
 import { normDate, parseLooseDate } from '../components/PlugGrid.jsx';
@@ -199,7 +199,9 @@ function canonUnit(meta, text) {
 // in) — the same rule as the Dashboard's period menu. Stored together with that sign-in's key (session_key from /api/auth/me).
 const fmtMDY = (iso) => `${iso.slice(5, 7)}${iso.slice(8, 10)}${iso.slice(2, 4)}`;   // 2026-10-10 -> 101026 (Script, Artwork / STB, Audio Guide dates)
 const VIEW_KEY = 'wl:mode';
-const TAB_KEYS = ['ALL', 'VGFX', 'VEDIT', 'AUDIO'];
+const TAB_KEYS = ['ALL', 'VGFX', 'VEDIT', 'AUDIO', 'PREP'];
+// PREP tab: VO, Script, Artwork / STB and Audio Guide are not shown there; they decide whether a row sits in the upper part (all four available) or the lower part (waiting for the ones listed).
+const PREP_LABEL = { vo: 'VO', script: 'Script', art_stb: 'Artwork / STB', audio_guide: 'Audio Guide' };
 const readView = (sessionKey) => {
   const fresh = { mode: 'table', tab: 'ALL' };
   if (!sessionKey) return fresh;
@@ -1732,6 +1734,7 @@ export default function Workload() {
   };
 
   const isAll = tab === 'ALL';
+  const isPrep = tab === 'PREP';
   const cols = meta.views[viewKey];
   { // which cell(s) am I on? (the open cell, else the whole picked block)
     const n = !editing && cellSel && !picked.size ? normCells() : null;
@@ -1743,6 +1746,21 @@ export default function Workload() {
   // Table mode only: Breakdate/Time (VGFX) and (VEDIT) merge into ONE column/cell, holding one or two pills —
   // 'breakdate_vgfx' is kept as that column's position; breakdateCell() below decides what actually shows in it.
   const tableCols = cols.filter((k) => k !== 'breakdate_vedit');
+  // PREP: a band across the table where the upper part (all four available) and the lower part (still waiting) begin
+  const prepDivider = (r, prev, first) => {
+    const ready = !(r.prep_missing || []).length;
+    const wasReady = prev ? !(prev.prep_missing || []).length : null;
+    const nReady = (data && data.prepReady) || 0;
+    const nWait = Math.max(0, ((data && data.total) || 0) - nReady);
+    const band = (key, cls, title, n, note) => (
+      <tr key={key} className={`prep-divider ${cls}`}><td colSpan={tableCols.length + 4}><strong>{title}</strong> <span className="dim">({n}) {note}</span></td></tr>
+    );
+    const up = band('up', 'ready', 'Ready', nReady, 'VO, Script, Artwork / STB and Audio Guide are all available');
+    const low = band('low', 'waiting', 'Waiting', nWait, 'at least one of the four is not available yet; each row lists what is missing');
+    if (ready && (first || wasReady === null)) return up;
+    if (!ready && (first || wasReady === true || wasReady === null)) return <>{first && wasReady === null && !ready ? up : null}{low}</>;
+    return null;
+  };
   const selNow = isGrid ? normSel() : null;                                   // Excel mode: what is selected right now
   const selRows = selNow && grid && grid.rows ? grid.rows.slice(selNow.rLo, selNow.rHi + 1) : [];
   const allPrio = selRows.length > 0 && selRows.every((r) => r.is_priority);
@@ -1858,7 +1876,7 @@ export default function Workload() {
     );
   };
 
-  const tabCount = { ALL: stats && stats.total, VGFX: stats && stats.vgfx, VEDIT: stats && stats.vedit, AUDIO: stats && stats.audio };
+  const tabCount = { ALL: stats && stats.total, VGFX: stats && stats.vgfx, VEDIT: stats && stats.vedit, AUDIO: stats && stats.audio, PREP: stats && stats.prep_waiting };   // PREP: the rows still waiting for one of the four fields
   // Bottom bar, like a spreadsheet: the All / VGFX / VEDIT / Audio tabs at the left, the count, Rows picker and page buttons at the right
   const sheetTabs = (
     <div className="tabs sheet-tabs" id="section-tabs">
@@ -2084,7 +2102,7 @@ export default function Workload() {
                   : !data.rows.length && !draft ? <Empty>No workload items match these filters.</Empty>
                     : (
                       <table className={`t wl v-${viewKey.toLowerCase()}${cards ? ' cards' : ''}`}>
-                        <thead><tr>{!cards ? <th className="rn" title={pageAllPicked ? 'Click to unselect all' : 'Select all rows on this page (Ctrl+A)'} onClick={() => (pageAllPicked ? clearPicks() : selectPage())} /> : null}{canWrite && cards ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
+                        <thead><tr>{!cards ? <th className="rn" title={pageAllPicked ? 'Click to unselect all' : 'Select all rows on this page (Ctrl+A)'} onClick={() => (pageAllPicked ? clearPicks() : selectPage())} /> : null}{canWrite && cards ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{isPrep ? <th data-k="prep_missing">Waiting for</th> : null}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {draft ? (
                             <tr key="draft" className="draft-row" data-draft="1">
@@ -2098,7 +2116,9 @@ export default function Workload() {
                             </tr>
                           ) : null}
                           {data.rows.map((r, idx) => (
-                            <tr key={r.id} data-id={r.id}
+                            <Fragment key={r.id}>
+                            {isPrep ? prepDivider(r, idx > 0 ? data.rows[idx - 1] : null, idx === 0 && offset === 0) : null}
+                            <tr data-id={r.id}
                               className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}`.trim()}
                               onMouseDown={cellDown}
                               onContextMenu={(e) => rowMenu(e, r)}
@@ -2114,6 +2134,11 @@ export default function Workload() {
                                 </td>
                               ) : null}
                               {tableCols.map((k, ci) => { const td = k === 'breakdate_vgfx' ? breakdateCell(r) : cell(r, k); const n = normCells(); return cloneElement(td, { 'data-r': idx, 'data-c': ci, 'data-sel': n && idx >= n.r0 && idx <= n.r1 && ci >= n.c0 && ci <= n.c1 ? '1' : undefined }); })}
+                              {isPrep ? (
+                                <td className="prep-missing">
+                                  {(r.prep_missing || []).length ? r.prep_missing.map((f) => <span key={f} className="chip c-amber">{PREP_LABEL[f] || f}</span>) : <span className="dim">All available</span>}
+                                </td>
+                              ) : null}
                               {canWrite ? (
                                 <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
                                   <RowMenu
@@ -2124,6 +2149,7 @@ export default function Workload() {
                                 </td>
                               ) : null}
                             </tr>
+                            </Fragment>
                           ))}
                         </tbody>
                       </table>

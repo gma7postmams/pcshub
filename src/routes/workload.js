@@ -36,7 +36,7 @@ const unitKey = (t) => String(t ?? '').toLowerCase().replace(/[\u2013\u2014\u221
 const UNIT_BY_KEY = Object.assign(Object.create(null), Object.fromEntries(UNITS.map((u) => [unitKey(u), u])));
 const canonUnit = (raw) => { const t = String(raw ?? '').trim(); return UNIT_BY_KEY[unitKey(t)] || t; };
 const NOT_SET = '(Not set)';   // Units filter value for rows copied from the PSD Daily Plug List that haven't been assigned a team yet
-const TAB_LABEL = Object.assign(Object.create(null), { ALL: 'All', VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio' });
+const TAB_LABEL = Object.assign(Object.create(null), { ALL: 'All', VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio', PREP: 'PREP' });
 
 // Field kinds: date | select | text | audio_guide | date_or_text (a picked date OR typed text). `multiline` = textarea. `hint` = placeholder from the red notes.
 const OPEN = 'Type or paste anything';
@@ -79,7 +79,12 @@ const VIEWS = {
   VGFX: MAIN_COLS,
   VEDIT: MAIN_COLS,
   AUDIO: AUDIO_COLS,
+  // PREP = every row (like All) without the four prep fields; those four decide which part of the tab a row sits in (see PREP_FIELDS)
+  PREP: [...MAIN_COLS.slice(0, -1), 'length', 'others', 'audio_status', 'plug_type'].filter((k) => !['vo', 'script', 'art_stb', 'audio_guide'].includes(k)),
 };
+// A prep field is "available" once it has any value (a date, text, or N/A for "not needed"). A row is ready when all four are; otherwise it waits in the lower part, listing what is missing.
+const PREP_FIELDS = ['vo', 'script', 'art_stb', 'audio_guide'];
+const PREP_MISSING_SQL = `ARRAY_REMOVE(ARRAY[${PREP_FIELDS.map((f) => `CASE WHEN NULLIF(btrim(w.${f}), '') IS NULL THEN '${f}' END`).join(', ')}], NULL)`;
 // Default Units Concerned when adding a row from a team tab
 const TAB_DEFAULT_UNITS = { VGFX: 'VGFX Only', VEDIT: 'VEDIT Only', AUDIO: 'Audio - RADIO' };
 
@@ -312,14 +317,16 @@ function buildFilter(query, user) {
   const params = [];
   const add = (sql, val) => { params.push(val); where.push(sql.replace('?', `$${params.length}`)); };
   // The person's group decides which tabs they may open (Admin > Groups): without the All tab they only get rows of the teams they may see
-  const tabs = user ? workloadTabs(user) : ['ALL', ...TEAMS];
+  const tabs = user ? workloadTabs(user) : ['ALL', ...TEAMS, 'PREP'];
+  const prep = query.team === 'PREP';   // the PREP tab lists every row, like All
   if (!tabs.includes('ALL')) {
     const mine = TEAMS.filter((t) => tabs.includes(t));
-    if (!mine.length) throw new HttpError(403, 'Your group cannot open any tab of the Workload Tracker');
-    if (query.team && !mine.includes(String(query.team))) throw new HttpError(403, 'Your group cannot open that tab of the Workload Tracker');
-    add('w.units_concerned = ANY(?::text[])', UNITS.filter((u) => UNIT_TEAMS[u].some((t) => mine.includes(t))));
+    if (!mine.length && !tabs.includes('PREP')) throw new HttpError(403, 'Your group cannot open any tab of the Workload Tracker');
+    if (query.team && !prep && !mine.includes(String(query.team))) throw new HttpError(403, 'Your group cannot open that tab of the Workload Tracker');
+    if (prep && !tabs.includes('PREP')) throw new HttpError(403, 'Your group cannot open that tab of the Workload Tracker');
+    if (!tabs.includes('PREP')) add('w.units_concerned = ANY(?::text[])', UNITS.filter((u) => UNIT_TEAMS[u].some((t) => mine.includes(t))));
   }
-  if (query.team) {
+  if (query.team && !prep) {
     const team = v.oneOf(String(query.team), TEAMS, { field: 'team' });
     add('w.units_concerned = ANY(?::text[])', UNITS.filter((u) => UNIT_TEAMS[u].includes(team)));
   }
@@ -348,7 +355,8 @@ router.get('/stats', asyncH(async (req, res) => {
   const { rows } = await db.query(
     `SELECT count(*)::int AS total,
             count(*) FILTER (WHERE w.work_date = ${P(today)})::int AS today,
-            ${team('VGFX')} AS vgfx, ${team('VEDIT')} AS vedit, ${team('AUDIO')} AS audio
+            ${team('VGFX')} AS vgfx, ${team('VEDIT')} AS vedit, ${team('AUDIO')} AS audio,
+            count(*) FILTER (WHERE cardinality(${PREP_MISSING_SQL}) > 0)::int AS prep_waiting
        FROM workload_items w ${whereSql(where)}`, params
   );
   res.json(rows[0]);
@@ -373,7 +381,18 @@ router.get('/', asyncH(async (req, res) => {
   const { where, params } = buildFilter(req.query, req.user);
   const { limit, offset } = v.paging(req.query, { def: 100, max: LIST_MAX });
   const total = await db.query(`SELECT count(*)::int AS n FROM workload_items w ${whereSql(where)}`, params);
+  const filterParams = params.slice();   // orderBy() may add a parameter after this
   const order = orderBy(req.query, params);   // may add a parameter (custom column key), so it runs after the count
+  if (req.query.team === 'PREP') {
+    // ready rows first (all four prep fields available), then the ones still waiting; each row says what is missing
+    const { rows } = await db.query(
+      `SELECT * FROM (SELECT w.*, uu.full_name AS updated_by_name, ${PREP_MISSING_SQL} AS prep_missing
+                        FROM workload_items w LEFT JOIN users uu ON uu.id = w.updated_by ${whereSql(where)}) w
+        ORDER BY (cardinality(prep_missing) > 0), ${order} LIMIT ${limit} OFFSET ${offset}`, params
+    );
+    const ready = await db.query(`SELECT count(*)::int AS n FROM (SELECT ${PREP_MISSING_SQL} AS m FROM workload_items w ${whereSql(where)}) x WHERE cardinality(m) = 0`, filterParams);
+    return res.json({ total: total.rows[0].n, prepReady: ready.rows[0].n, rows: rows.map(flattenCustom) });
+  }
   const { rows } = await db.query(
     `${SELECT} ${whereSql(where)} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params
   );
@@ -461,7 +480,7 @@ router.get('/export', asyncH(async (req, res) => {
   exportInfo.matched = rows.length;
   exportInfo.truncated = rawRows.length >= 20000;   // the export stops at 20,000 rows
   const involves = (r, teams) => teams.some((t) => (UNIT_TEAMS[r.units_concerned] || []).includes(t));
-  const team = req.query.team ? v.oneOf(String(req.query.team), TEAMS, { field: 'team' }) : null;
+  const team = req.query.team && req.query.team !== 'PREP' ? v.oneOf(String(req.query.team), TEAMS, { field: 'team' }) : null;
   // Breakdate / Time (VGFX) and (VEDIT) share ONE column, like the web table: 'breakdate_vgfx' keeps that column's
   // position and its cell holds one line per involved team (VGFX above VEDIT); 'breakdate_vedit' gets no column of its own.
   const oneBreakdate = (cols) => cols.filter((k) => k !== 'breakdate_vedit');
