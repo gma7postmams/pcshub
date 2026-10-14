@@ -1181,3 +1181,13 @@ html[data-mode="dark"] .brand img.logo-d{display:inline}
 .logo-file{width:100%;min-width:0;padding:4px;font-size:12px}
 .logo-file::file-selector-button{padding:3px 8px;margin-right:6px;font-size:12px}
 @media (max-width:560px){.logo-pair{grid-template-columns:1fr}}
+
+/* Phone / card layout fixes */
+.chip-tag { white-space: nowrap; flex: none; overflow-wrap: normal; word-break: normal; }
+/* Plug list cards: IN WORKLOAD was squeezed to the width of one letter (the table's 1% column width was carried into the card) */
+.plug-t.cards td.plug-inwl { width: auto; text-align: left; white-space: normal; padding: 0; }
+.plug-t.cards td.plug-inwl .chip { white-space: nowrap; align-self: flex-start; overflow-wrap: normal; }
+/* Workload cards: the Breakdate / Time pills get the full card width, left aligned, with the team label kept in one piece */
+table.t.wl.cards td[data-k="breakdate_vgfx"] { grid-column: 1 / -1; text-align: left; }
+table.t.wl.cards .chips.bd-chips { align-items: flex-start; width: 100%; }
+table.t.wl.cards .bd-chips .chip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; white-space: normal; text-align: left; overflow-wrap: normal; }
