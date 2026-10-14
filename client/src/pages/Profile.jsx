@@ -97,16 +97,17 @@ export default function Profile() {
           <div className="card-pad stack">
             <div><AppearanceSeg /></div>
             <p className="muted m-0 mt-12">Dark, Light, or System to follow your device setting. Saved to your account.</p>
+            <label className="check"><input type="checkbox" id="utheme-default" checked={!u.theme} onChange={(e) => { if (e.target.checked) s.setTheme('').catch((err) => toast(err.message, 'err')); else s.setTheme(branding.theme).catch((err) => toast(err.message, 'err')); }} /> Use the default theme ({(branding.themes.find((t) => t.key === branding.theme) || {}).label || 'set by your Admin'})</label>
             <div className="theme-grid" id="utg">
-              {[{ key: '', label: `Default (${(branding.themes.find((t) => t.key === branding.theme) || {}).label || 'Admin'})`, sw: branding.theme }, ...branding.themes.map((t) => ({ key: t.key, label: t.label, sw: t.key }))].map((t) => (
-                <button type="button" key={t.key || 'default'} data-user-theme={t.key} className={`theme-card ${(u.theme || '') === t.key ? 'on' : ''}`}
+              {branding.themes.map((t) => (
+                <button type="button" key={t.key} data-user-theme={t.key} className={`theme-card ${u.theme === t.key ? 'on' : ''}`}
                   onClick={() => s.setTheme(t.key).catch((err) => toast(err.message, 'err'))}>
-                  <Swatch themeKey={t.sw} />
+                  <Swatch themeKey={t.key} />
                   <div className="nm">{t.label}</div>
                 </button>
               ))}
             </div>
-            <p className="muted m-0">Pick a colour theme just for you, or Default to follow the one your Admin sets.</p>
+            <p className="muted m-0">Pick a colour theme just for you, or tick the default to follow the one your Admin sets (it changes when they change it).</p>
           </div>
         </div>
 

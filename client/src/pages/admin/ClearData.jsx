@@ -32,6 +32,7 @@ export default function ClearData() {
   };
 
   return (
+    <div className="card mb-12"><div className="card-pad">
     <div className="stack">
       <div className="admin-note">
         Permanently remove records from the areas you tick, within a date range. A compressed copy of everything removed is written to the archive first
@@ -83,5 +84,6 @@ export default function ClearData() {
         />
       ) : null}
     </div>
+    </div></div>
   );
 }
