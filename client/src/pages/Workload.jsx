@@ -331,13 +331,22 @@ function GridCellInput({ def, value, onChange, disabled, ...rest }) {
 
 // One table cell turned into its own editor. Enter or clicking away saves, Esc cancels; dropdowns save as soon as you pick.
 // A failed save (e.g. an invalid value) keeps the editor open with the message shown.
-function CellEditor({ def, initial, lookups, onSave, onCancel, copyText, memo }) {
+function CellEditor({ def, initial, lookups, onSave, onCancel, onUndo, copyText, memo }) {
   const toast = useToast();
   const [val, setValRaw] = useState(() => (memo ? loadCellText('workload', memo, initial ?? '') : initial ?? ''));
   const setVal = (v) => { setValRaw(v); if (memo) saveCellText('workload', memo, v); };
   const [busy, setBusy] = useState(false);
   const box = useRef(null);
   const finished = useRef(false);
+  const latest = useRef({});
+  latest.current = { val, initial, onSave };
+  // the cell is closed by something else (a click on another cell or a row number): what was typed / pasted is still saved, like clicking away
+  useEffect(() => () => {
+    const L = latest.current;
+    if (finished.current || String(L.val ?? '') === String(L.initial ?? '')) return;
+    finished.current = true;
+    Promise.resolve(L.onSave(L.val)).catch(() => { /* the message was already shown */ });
+  }, []);
   const field = () => box.current && box.current.querySelector('input, select, textarea');
   useEffect(() => {
     const el = def.kind === 'date_or_text' && box.current ? box.current.querySelector('input') : field();   // Artwork / STB: the date / text box, not its format dropdown
@@ -398,6 +407,8 @@ function CellEditor({ def, initial, lookups, onSave, onCancel, copyText, memo })
   const paste = (e) => { const t = e.clipboardData ? e.clipboardData.getData('text/plain') : ''; if (applyText(t, e.target)) e.preventDefault(); };
   const blur = (e) => { if (box.current && !box.current.contains(e.relatedTarget)) save(val); };
   const key = (e) => {
+    // Ctrl+Z in a cell you have not changed undoes the last table edit (inside a box with typing in it, it undoes the typing)
+    if (onUndo && (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'z' && String(val ?? '') === String(initial ?? '')) { e.preventDefault(); finished.current = true; onUndo(e.shiftKey); return; }
     pasteFallback(e, applyText);
     if (e.key === 'Escape') { finished.current = true; onCancel(); return; }
     const tag = e.target.tagName;
@@ -1781,7 +1792,7 @@ export default function Workload() {
     if (editing && editing.id === r.id && editing.k === k) {
       return (
         <td key={k} data-k={k} data-label={head(k)} className="editing" onClick={(e) => e.stopPropagation()}>
-          <CellEditor memo={`${r.id}:${k}`} def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} />
+          <CellEditor memo={`${r.id}:${k}`} def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} onUndo={(sh) => { setEditing(null); if (sh) redoTbl(); else undoTbl(); }} />
         </td>
       );
     }
@@ -1818,7 +1829,7 @@ export default function Workload() {
             if (editing && editing.id === r.id && editing.k === k) {
               return (
                 <span key={k} className="cell-editor-inline" onClick={(e) => e.stopPropagation()}>
-                  <CellEditor memo={`${r.id}:${k}`} def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} copyText={k === 'breakdate_vgfx' || k === 'breakdate_vedit' ? `${k === 'breakdate_vgfx' ? 'VGFX' : 'VEDIT'}  ${fmtBdText(r[k])}` : undefined} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} />
+                  <CellEditor memo={`${r.id}:${k}`} def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} copyText={k === 'breakdate_vgfx' || k === 'breakdate_vedit' ? `${k === 'breakdate_vgfx' ? 'VGFX' : 'VEDIT'}  ${fmtBdText(r[k])}` : undefined} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} onUndo={(sh) => { setEditing(null); if (sh) redoTbl(); else undoTbl(); }} />
                 </span>
               );
             }

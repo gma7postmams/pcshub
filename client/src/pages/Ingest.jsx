@@ -174,12 +174,21 @@ function DateRangeInput({ value, onChange, disabled }) {
 }
 
 // One table cell turned into its own editor. Dropdowns save as soon as you pick; a failed save keeps the editor open with the message shown.
-function InlineCell({ def, initial, options, onSave, onCancel, memo }) {
+function InlineCell({ def, initial, options, onSave, onCancel, onUndo, memo }) {
   const [val, setValRaw] = useState(() => (memo ? loadCellText('ingest', memo, initial) : initial));
   const setVal = (v) => { setValRaw(v); if (memo) saveCellText('ingest', memo, v); };
   const [busy, setBusy] = useState(false);
   const box = useRef(null);
   const finished = useRef(false);
+  const latest = useRef({});
+  latest.current = { val, initial, onSave };
+  // the cell is closed by something else (a click on another cell or a row number): what was typed / pasted is still saved, like clicking away
+  useEffect(() => () => {
+    const L = latest.current;
+    if (finished.current || String(L.val ?? '') === String(L.initial ?? '')) return;
+    finished.current = true;
+    Promise.resolve(L.onSave(L.val)).catch(() => { /* the message was already shown */ });
+  }, []);
   const field = () => box.current && box.current.querySelector('input, select, textarea');
   useEffect(() => {
     const el = field();
@@ -216,6 +225,8 @@ function InlineCell({ def, initial, options, onSave, onCancel, memo }) {
   const paste = (e) => { const t = e.clipboardData ? e.clipboardData.getData('text/plain') : ''; if (applyText(t, e.target)) e.preventDefault(); };
   const blur = (e) => { if (box.current && !box.current.contains(e.relatedTarget)) save(val); };
   const key = (e) => {
+    // Ctrl+Z in a cell you have not changed undoes the last table edit (inside a box with typing in it, it undoes the typing)
+    if (onUndo && (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'z' && String(val ?? '') === String(initial ?? '')) { e.preventDefault(); finished.current = true; onUndo(e.shiftKey); return; }
     pasteFallback(e, applyText);
     if (e.key === 'Escape') { finished.current = true; onCancel(); return; }
     const tag = e.target.tagName;
@@ -484,7 +495,7 @@ export default function Ingest() {
       return (
         <td data-k={k} data-r={props['data-r']} data-c={props['data-c']} className="editing" onClick={(e) => e.stopPropagation()}>
           <InlineCell memo={`${r.id}:${k}`} def={def} initial={initial} options={k === 'cm_status' ? CM_OPTIONS : withCurrent(lookups ? lookups.platform : [], r.platform)}
-            onSave={(value, move) => saveCell(r, k, value, initial, move)} onCancel={() => setEditing(null)} />
+            onSave={(value, move) => saveCell(r, k, value, initial, move)} onCancel={() => setEditing(null)} onUndo={(sh) => { setEditing(null); if (sh) redo(); else undo(); }} />
         </td>
       );
     }
