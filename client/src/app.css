@@ -1252,3 +1252,16 @@ td.editing .cell-editor:not(.date) input:not([type="date"]):not([type="datetime-
 td.editing .cell-editor textarea:focus { border-color: transparent; box-shadow: none; outline: none; }
 td.editing .cell-editor:not(.date) .ag input:not([type="date"]):not([type="datetime-local"]):not([type="time"]) { background-color: var(--bg-2); border-color: var(--border-2); }
 td.editing .cell-editor:not(.date) .ag input:not([type="date"]):not([type="datetime-local"]):focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* ---------- phones: Ingest boxes that were not sized for iOS ---------- */
+/* Episode / Breakdate date boxes: iOS Safari shrinks a native date input to its text height unless its own look is switched off */
+.dri input[type=date], .dri-day input[type=date] { -webkit-appearance: none; appearance: none; display: block; box-sizing: border-box; height: 37px; min-height: 37px; margin: 0; text-align: left; }
+.dri input[type=date]::-webkit-date-and-time-value, .dri-day input[type=date]::-webkit-date-and-time-value { text-align: left; min-height: 1.3em; }
+.dri-day .btn { flex: none; height: 37px; min-width: 37px; padding: 0 10px; }
+/* cards: a cell somebody else has open gets room inside its outline, and the ticked card is not also painted cell by cell */
+table.t.wl.cards td { align-self: start; }
+table.t.wl.cards td.peer-on { padding: 6px 8px; margin: -6px -8px; border-radius: 6px; }
+table.t.wl.cards td.xl-sel, table.t.wl.cards td.xl-sel.xl-single, table.t.wl.cards td.xl-sel.xl-active { background: none; }
+table.t.wl.cards td.xl-sel::after { content: none; }
+table.t.wl.cards tbody tr.picked td { box-shadow: none; background: none; }   /* a ticked card is outlined as a whole, not cell by cell */
+@media (max-width: 680px) { .dri-list { gap: 14px; } }   /* each From / To pair reads as one group */
