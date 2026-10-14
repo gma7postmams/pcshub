@@ -45,7 +45,7 @@ const rangeLabel = (period, r, anchor) => {
   if (period === 'day') return dateLabel(anchor);
   if (period === 'week') return `${fmtDate(r.from)} – ${fmtDate(r.to)}`;
   if (period === 'month') return parseIso(anchor).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
-  if (period === 'custom') return r.from || r.to ? `${r.from ? fmtDate(r.from) : '…'} – ${r.to ? fmtDate(r.to) : '…'}` : 'All Days';
+  if (period === 'custom') return r.from || r.to ? `${r.from ? fmtDate(r.from) : 'Any'} – ${r.to ? fmtDate(r.to) : 'Any'}` : 'All Dates';
   return 'All Days';
 };
 const stored = (k, fallback, allowed) => { try { const v = localStorage.getItem(`plugs:${k}`); return allowed.includes(v) ? v : fallback; } catch (e) { return fallback; } };
@@ -110,21 +110,18 @@ function PlugDate({ period, anchor, range, custom, onCustom, onPeriod }) {
     document.addEventListener('keydown', esc);
     return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
   }, [open]);
-  const label = period === 'all' ? 'All Dates' : period === 'custom' && !range.from && !range.to ? 'Pick Dates' : rangeLabel(period, range, anchor);
+  const label = period === 'all' ? 'All Dates' : period === 'custom' && !range.from && !range.to ? 'All Dates' : rangeLabel(period, range, anchor);
+  const shown = period === 'all' ? { from: '', to: '' } : range;   // From / To always show what is being looked at; changing one makes it a custom range
   return (
     <div className="daterange" ref={ref}>
       <button type="button" className="daterange-btn" id="plug-date-btn" title="Choose the dates" onClick={() => setOpen((o) => !o)}><CalendarIcon /><span>{label}</span></button>
       {open ? (
         <div className="popover daterange-pop">
           <div className="presets">
-            {PERIODS.map((o) => <button key={o.value} type="button" className={`btn sm${period === o.value ? ' primary' : ''}`} onClick={() => { onPeriod(o.value); if (o.value !== 'custom') setOpen(false); }}>{o.label}</button>)}
+            {PERIODS.filter((o) => o.value !== 'custom').map((o) => <button key={o.value} type="button" className="btn sm" onClick={() => { onPeriod(o.value); setOpen(false); }}>{o.label}</button>)}
           </div>
-          {period === 'custom' ? (
-            <>
-              <label className="f"><span>From</span><input type="date" value={custom.from} max={custom.to || undefined} onChange={(e) => onCustom({ from: e.target.value, to: custom.to })} /></label>
-              <label className="f"><span>To</span><input type="date" value={custom.to} min={custom.from || undefined} onChange={(e) => onCustom({ from: custom.from, to: e.target.value })} /></label>
-            </>
-          ) : null}
+          <label className="f"><span>From</span><input type="date" value={shown.from} onChange={(e) => onCustom({ from: e.target.value, to: shown.to })} /></label>
+          <label className="f"><span>To</span><input type="date" value={shown.to} onChange={(e) => onCustom({ from: shown.from, to: e.target.value })} /></label>
         </div>
       ) : null}
     </div>
@@ -188,6 +185,11 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const offset = pageState.key === viewKey ? pageState.offset : 0;
   const setOffset = async (o) => { if (!(await okToLeave())) return; setPageState({ key: viewKey, offset: o }); };
   const setPeriod = async (p) => { if (!(await okToLeave())) return; setPeriodState(p); remember('period', p); };
+  const pickCustom = async (r) => {   // typing a From / To date = a custom range (both empty = every day)
+    if (!(await okToLeave())) return;
+    if (!r.from && !r.to) { setPeriodState('all'); remember('period', 'all'); return; }
+    setCustom(r); setPeriodState('custom');
+  };
   const setF = (k) => (e) => { setFilt((f) => ({ ...f, [k]: e.target.value })); };
   const setSize = async (s) => { if (!(await okToLeave())) return; setSizeState(s); remember('size3', s); };
 
@@ -654,7 +656,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
           <FilterSelect label="PSD" value={filt.psd} onChange={setF('psd')}><Options list={opts.psd} blank="All" /></FilterSelect>
           <FilterSelect label="Account by" value={filt.account_by} onChange={setF('account_by')}><Options list={opts.account_by} blank="All" /></FilterSelect>
         </FiltersMenu>
-        <PlugDate period={period} anchor={anchor} range={range} custom={custom} onCustom={setCustom} onPeriod={setPeriod} />
+        <PlugDate period={period} anchor={anchor} range={range} custom={custom} onCustom={pickCustom} onPeriod={setPeriod} />
         {period === 'day' || period === 'week' || period === 'month' ? (
           <div className="plug-date">
             <button type="button" className="btn sm" disabled={!canPrev} onClick={() => go(-1)} title={`Previous ${period === 'day' ? 'day with a list' : period}`}>‹</button>
