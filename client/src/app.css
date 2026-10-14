@@ -1244,11 +1244,11 @@ table.t.wl.cards .bd-chips .chip { display: inline-flex; align-items: center; ga
 .linkish:disabled { opacity: .5; cursor: default; }
 
 
-/* An open cell is ONE box: the cell's own highlight. A plain text / number box, a textarea and a dropdown inside it lose their own border so there is no box within the box
-   (date and time boxes, and the Episode / Breakdate pair, keep theirs: there are several fields in those cells). */
-td.editing .cell-editor input:not([type="date"]):not([type="datetime-local"]):not([type="time"]),
-td.editing .cell-editor textarea,
-td.editing .cell-editor select { border-color: transparent; background-color: transparent; box-shadow: none; outline: none; }
-td.editing .cell-editor input:not([type="date"]):not([type="datetime-local"]):focus,
-td.editing .cell-editor textarea:focus,
-td.editing .cell-editor select:focus { border-color: transparent; box-shadow: none; outline: none; }
+/* An open cell is ONE box: the cell's own highlight. A plain text / number box or a textarea inside it loses its own border so there is no box within the box.
+   Dropdowns, date and time boxes and cells that hold several fields (the Episode / Breakdate pair, the Artwork / STB format dropdown over its date box) keep theirs. */
+td.editing .cell-editor:not(.date) input:not([type="date"]):not([type="datetime-local"]):not([type="time"]),
+td.editing .cell-editor textarea { border-color: transparent; background-color: transparent; box-shadow: none; outline: none; }
+td.editing .cell-editor:not(.date) input:not([type="date"]):not([type="datetime-local"]):focus,
+td.editing .cell-editor textarea:focus { border-color: transparent; box-shadow: none; outline: none; }
+td.editing .cell-editor .ag input { background-color: var(--bg-2); border-color: var(--border-2); }
+td.editing .cell-editor .ag input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
