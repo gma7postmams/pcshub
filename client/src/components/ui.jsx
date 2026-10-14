@@ -1,4 +1,5 @@
 import { createPortal } from 'react-dom';
+import { loadDialogValues, saveDialogValues } from '../lib/viewstate.js';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { CloseIcon } from './Icons.jsx';
 
@@ -205,8 +206,13 @@ export function ConfirmProvider({ children }) {
 
 // ---------- Small hooks ----------
 /** Controlled form state: const [f, set, setAll] = useForm({...}); <input value={f.x} onChange={set('x')}> */
-export function useForm(initial) {
-  const [f, setF] = useState(initial);
+/** `draftPage`: also keep what is typed (see lib/viewstate.js), so a refresh brings the dialog back with its text. */
+export function useForm(initial, draftPage) {
+  const [f, setF] = useState(() => {
+    const kept = draftPage ? loadDialogValues(draftPage) : null;
+    return kept && typeof kept === 'object' ? { ...initial, ...kept } : initial;
+  });
+  useEffect(() => { if (draftPage) saveDialogValues(draftPage, f); }, [f]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (k) => (e) => {
     const v = e && e.target ? (e.target.type === 'checkbox' ? e.target.checked : e.target.value) : e;
     setF((prev) => ({ ...prev, [k]: v }));

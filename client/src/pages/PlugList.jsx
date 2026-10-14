@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
-import { loadView, saveView } from '../lib/viewstate.js';
+import { loadView, saveView, loadDialog, syncDialog } from '../lib/viewstate.js';
 import { CalendarIcon, DownloadIcon, ExitFullscreenIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive } from '../lib/live.js';
 import { ExportButton, FilterSelect, FiltersMenu, pickerHeld, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
 import { useSession } from '../context.jsx';
 import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
-import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
+import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
 // PSD Daily Plug List — the PSD's daily plug list (imported from their workbook: NO / PLUG ID / PROG NAME/PROJ TITLE / PSD / Account By),
 // one row per plug with its DATE in a column of its own. The "View" dropdown chooses the period shown: All, Daily, Weekly, Monthly or a
@@ -162,8 +162,9 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const [needYear, setNeedYear] = useState(null);    // file waiting for a year (its name has none)
   const [year, setYear] = useState(new Date().getFullYear());
   const [summary, setSummary] = useState(null);      // result of the last import
-  const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState(null);      // the plug being edited
+  const [adding, setAdding] = useState(() => { const d = loadDialog('plugs'); return !!(d && d.rec && d.rec.adding); });   // an open Add / Edit dialog comes back after a refresh
+  const [editing, setEditing] = useState(() => { const d = loadDialog('plugs'); return d && d.rec && d.rec.editing ? d.rec.editing : null; });      // the plug being edited
+  useEffect(() => { syncDialog('plugs', editing ? { editing } : adding ? { adding: true } : null); }, [adding, editing]);
   const okToLeave = async () => true;   // Excel mode (and its unsaved-grid prompt) is gone: the list is the Table only
   const [draft, setDraft] = useState(null);          // the empty row Add Row put at the top, not saved yet
   const [cellEd, setCellEd] = useState(null);        // { id, k } while one cell is open for editing
@@ -182,11 +183,11 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const limit = size === 'all' ? ALL_CAP : Number(size);
   const narrow = useNarrow();
   const [sort, setSort] = useState(saved.sort || { k: '', dir: 'asc' });   // clicked column header
-  useEffect(() => { saveView('plugs', { filt, q, sort, custom, anchor, period }); }, [filt, q, sort, custom, anchor, period]);
   const viewKey = `${period}|${range.from}|${range.to}|${query}|${filt.in_workload}|${filt.psd}|${filt.account_by}|${size}|${sort.k}|${sort.dir}`;
-  const [pageState, setPageState] = useState({ key: '', offset: 0 });   // the page resets to the first whenever the view changes
+  const [pageState, setPageState] = useState(() => ({ key: viewKey, offset: saved.offset || 0 }));   // the page you were on is kept across a refresh   // the page resets to the first whenever the view changes
   const offset = pageState.key === viewKey ? pageState.offset : 0;
   const setOffset = async (o) => { if (!(await okToLeave())) return; setPageState({ key: viewKey, offset: o }); };
+  useEffect(() => { saveView('plugs', { filt, q, sort, custom, anchor, period, offset }); }, [filt, q, sort, custom, anchor, period, offset]);
   const setPeriod = async (p) => { if (!(await okToLeave())) return; setPeriodState(p); remember('period', p); };
   const pickCustom = async (r) => {   // typing a From / To date = a custom range (both empty = every day)
     if (!(await okToLeave())) return;
@@ -853,9 +854,9 @@ function DeleteAllPlugs({ viewTotal, listTotal, hasView, viewText, view, onClose
 
 function PlugModal({ date, plug, onClose, onSaved }) {
   const toast = useToast();
-  const [f, setF] = useState(plug
+  const [f, , setF] = useForm(plug
     ? { plug_date: plug.plug_date, plug_id: plug.plug_id, prog_name: plug.prog_name || '', psd: plug.psd || '' }
-    : { plug_date: date || isoDate(), plug_id: '', prog_name: '', psd: '' });
+    : { plug_date: date || isoDate(), plug_id: '', prog_name: '', psd: '' }, 'plugs');
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const save = async () => {

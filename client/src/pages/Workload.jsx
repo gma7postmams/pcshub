@@ -1,6 +1,6 @@
 import { cloneElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { loadView as loadViewState, saveView as saveViewState } from '../lib/viewstate.js';
+import { loadView as loadViewState, saveView as saveViewState, loadDialog, syncDialog } from '../lib/viewstate.js';
 import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
@@ -421,14 +421,15 @@ export default function Workload() {
   const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('wl:rows3')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
   const [filt, setFilt] = useState(() => ({ q: '', units: '', platform: '', plug_type: '', from: '', to: '', ...(loadViewState('workload', {}).filt || {}) }));   // kept across a refresh
   const [stats, setStats] = useState(null);   // summary cards + tab badges
-  const [offset, setOffset] = useState(0);
+  const [offset, setOffset] = useState(() => loadViewState('workload', {}).offset || 0);   // the page you were on is kept across a refresh
   const [sort, setSortState] = useState(() => loadViewState('workload', {}).sort || { k: '', dir: 'asc' });   // clicked column header (Table mode)
-  useEffect(() => { saveViewState('workload', { filt, sort }); }, [filt, sort]);
+  useEffect(() => { saveViewState('workload', { filt, sort, offset }); }, [filt, sort, offset]);
   const setSort = (s2) => { setSortState(s2); setOffset(0); };
   const [data, setData] = useState(null);   // table mode: { total, rows } | { error }
   const [grid, setGrid] = useState(null);   // excel mode: { total, rows } | { error }
   const [gridSel, setGridSel] = useState(null);   // { r0, c0, r1, c1 } — row/col INDICES into (grid.rows, cols); null = nothing selected
-  const [form, setForm] = useState(null);   // null | { rec } (rec null = new)
+  const [form, setForm] = useState(() => { const d = loadDialog('workload'); return d ? d.rec : null; });   // null | { rec } (rec null = new); an open one comes back after a refresh
+  useEffect(() => { syncDialog('workload', form); }, [form]);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState(null);   // Table mode: the empty row Add Row put at the top, not saved yet
   const [editing, setEditing] = useState(null);
@@ -2320,7 +2321,7 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
   const initial = Object.keys(meta.fields).reduce((o, k) => ({ ...o, [k]: (rec && rec[k]) ?? (duplicateFrom && duplicateFrom[k]) ?? '' }), {});
   if (!rec && !duplicateFrom) { initial.work_date = isoDate(); initial.units_concerned = defaultUnits; }
   initial.is_priority = !!(rec && rec.is_priority);   // a duplicate is a new item, so it starts un-prioritised
-  const [f, , setAll] = useForm(initial);
+  const [f, , setAll] = useForm(initial, 'workload');
   // Plug ID is not typed: it is picked from the PSD Daily Plug List of the chosen Work Date, which fills PSD and PROG. NAME / PROJ. TITLE too
   const session = useSession();
   const [plugs, setPlugs] = useState(null);   // null = loading

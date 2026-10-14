@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
-import { loadView, saveView } from '../lib/viewstate.js';
+import { loadView, saveView, loadDialog, syncDialog } from '../lib/viewstate.js';
 import { ago, downloadFile, fmtDate, fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { PlusIcon, SearchIcon, DownloadIcon, UploadIcon, TrashIcon, FullscreenIcon, ExitFullscreenIcon } from '../components/Icons.jsx';
@@ -197,14 +197,15 @@ export default function Ingest() {
     if (params.get('approval')) base.approval = /^pending$/i.test(params.get('approval')) ? 'pending' : params.get('approval');
     return base;
   });
-  const [offset, setOffset] = useState(0);
+  const [offset, setOffset] = useState(() => loadView('ingest', {}).offset || 0);   // the page you were on is kept across a refresh
   const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('ing:rows3')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
   const changeSize = (e) => { const n = Number(e.target.value); try { localStorage.setItem('ing:rows3', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
   const [sort, setSortState] = useState(() => loadView('ingest', {}).sort || { k: '', dir: 'asc' });   // clicked column header
-  useEffect(() => { saveView('ingest', { filt, sort }); }, [filt, sort]);
+  useEffect(() => { saveView('ingest', { filt, sort, offset }); }, [filt, sort, offset]);
   const setSort = (s2) => { setSortState(s2); setOffset(0); };
   const [data, setData] = useState(null);
-  const [form, setForm] = useState(null);     // null | {} (new) | record (edit)
+  const [form, setForm] = useState(() => { const d = loadDialog('ingest'); return d ? d.rec : null; });     // null | {} (new) | record (edit); an open one comes back after a refresh
+  useEffect(() => { syncDialog('ingest', form); }, [form]);
   const [detail, setDetail] = useState(null);
   const [reasonFor, setReasonFor] = useState(null);   // the record whose NON-COMPLIANT reason is being asked for
   const [editing, setEditing] = useState(null);   // { id, k }: the one cell being edited in the table
@@ -898,7 +899,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
     cm_reason: r.cm_non_compliant_reason || '',
     remarks: r.remarks || '',
   };
-  const [f, set] = useForm(initialForm);
+  const [f, set] = useForm(initialForm, 'ingest');
   const [busy, setBusy] = useState(false);
   const dirty = JSON.stringify(f) !== JSON.stringify(initialForm);
 
