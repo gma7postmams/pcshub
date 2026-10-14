@@ -52,6 +52,7 @@ export default function RetentionTab({ active }) {
   };
 
   return (
+    <div className="card mb-12"><div className="card-pad">
     <div className="stack">
       <div className="admin-note">
         Choose how long each area keeps its records. Records older than that are copied to a compressed archive file and then removed.
@@ -110,5 +111,6 @@ export default function RetentionTab({ active }) {
         />
       ) : null}
     </div>
+    </div></div>
   );
 }
