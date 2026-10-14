@@ -1319,3 +1319,14 @@ body { padding-bottom: env(safe-area-inset-bottom, 0px); }
 .prof-pic .pp-av { font-size: 54px; letter-spacing: 1px; }
 @media (max-width: 680px) { .prof-pic .pp-av { font-size: 48px; } .prof-pic .stack p { margin-top: 14px; } }
 .push-note{color:var(--warn,#b45309);line-height:1.45}
+
+/* Profile → Notification settings */
+.mt-14 { margin-top: 14px; }
+.np-all { display: inline-flex; gap: 8px; }
+.np-list { margin-top: 12px; }
+.np-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px 64px; align-items: center; gap: 8px; padding: 12px 2px; border-top: 1px solid var(--border); }
+.np-row.np-head { border-top: 0; padding: 6px 2px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-2); }
+.np-row.np-head span:not(:first-child), .np-sw { justify-self: center; }
+.np-what { display: grid; gap: 3px; line-height: 1.4; }
+.np-sw input { width: 20px; height: 20px; cursor: pointer; }
+@media (max-width: 520px) { .np-row { grid-template-columns: minmax(0, 1fr) 48px 48px; } .np-all .btn { padding-left: 10px; padding-right: 10px; } }

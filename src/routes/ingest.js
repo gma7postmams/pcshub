@@ -378,7 +378,7 @@ router.post('/import', requireAction('ingest.write'), upload.single('file'), one
       await notifyCapable('ingest.approve', {
         title: `${created} new ingest request${created === 1 ? '' : 's'} imported`,
         body: `${req.user.full_name} imported ${created} ingest request${created === 1 ? '' : 's'} from ${req.file.originalname}. They are waiting for approval.`,
-        link: '/ingest?approval=1',
+        link: '/ingest?approval=1', kind: 'ingest_new',
       }, { excludeUserId: req.user.id });
     } catch (e) { console.error('[ingest] import notification failed:', e.message); }
   }
@@ -409,7 +409,7 @@ router.post('/', requireAction('ingest.write'), asyncH(async (req, res) => {
     await notifyCapable('ingest.approve', {
       title: `New ingest: ${r.program}`,
       body: `${req.user.full_name} added a new ingest request (${r.platform}). ${filled(r.destination_folder) ? 'It is waiting for your approval.' : 'Destination Folder and Approved By are waiting.'}`,
-      link: `/ingest?id=${rows[0].id}`,
+      link: `/ingest?id=${rows[0].id}`, kind: 'ingest_new',
     }, { excludeUserId: req.user.id }, c);
     return rows[0];
   });
@@ -429,7 +429,7 @@ async function notifyReady(c, actor, id, r) {
   await notifyCapable('ingest.approve', {
     title: `For approval: ${r.program}`,
     body: `${actor.full_name} filled in the Destination Folder${r.platform ? ` (${r.platform})` : ''}. This ingest request is waiting for your approval.`,
-    link: `/ingest?id=${id}`,
+    link: `/ingest?id=${id}`, kind: 'ingest_for_approval',
   }, { excludeUserId: actor.id }, c);
 }
 
@@ -545,13 +545,13 @@ router.post('/:id/approve', requireAction('ingest.approve'), asyncH(async (req, 
     await notifyUsers(interested(r, req.user.id), {
       title: `Ingest approved: ${r.program}`,
       body: `${req.user.full_name} approved this ingest request`,
-      link: `/ingest?id=${id}`,
+      link: `/ingest?id=${id}`, kind: 'ingest_approval',
     }, c);
     // Approval is what puts the request in front of CM, so the people who set the CM Status need to know it is ready.
     await notifyCapable('ingest.cm_complete', {
       title: `Ready for CM: ${r.program}`,
       body: `${req.user.full_name} approved an ingest request${r.platform ? ` (${r.platform})` : ''}. It is waiting for the CM Status.`,
-      link: `/ingest?id=${id}`,
+      link: `/ingest?id=${id}`, kind: 'ingest_ready_cm',
     }, { excludeUserId: req.user.id }, c);
   });
   res.json({ ok: true });
@@ -570,7 +570,7 @@ router.post('/:id/unapprove', requireAction('ingest.approve'), asyncH(async (req
     await notifyUsers(interested(r, req.user.id), {
       title: `Approval withdrawn: ${r.program}`,
       body: `${req.user.full_name} withdrew the approval of this ingest request`,
-      link: `/ingest?id=${id}`,
+      link: `/ingest?id=${id}`, kind: 'ingest_approval',
     }, c);
   });
   res.json({ ok: true });
@@ -596,7 +596,7 @@ router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(asyn
       await notifyUsers(interested(cur.rows[0], req.user.id), {
         title: `Ingest back to Pending: ${cur.rows[0].program}`,
         body: `${req.user.full_name} cleared the CM Status (was ${cur.rows[0].cm_status})`,
-        link: `/ingest?id=${id}`,
+        link: `/ingest?id=${id}`, kind: 'ingest_cm',
       }, c);
     });
     return res.json({ ok: true, status: 'Pending' });
@@ -627,7 +627,7 @@ router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(asyn
     await notifyUsers(interested(r, req.user.id), {
       title: `Ingest ${decision}: ${r.program}`,
       body: `${req.user.full_name} marked this ingest request ${decision}${reasonSuffix}`,
-      link: `/ingest?id=${id}`,
+      link: `/ingest?id=${id}`, kind: 'ingest_cm',
     }, c);
   });
   res.json({ ok: true, status: decision });

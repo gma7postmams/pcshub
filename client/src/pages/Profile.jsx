@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, del, post, put } from '../lib/api.js';
 import PushSetup from '../components/PushSetup.jsx';
+import NotifPrefs from '../components/NotifPrefs.jsx';
 import { avatarUrl, colorFor, makeAvatar } from '../lib/avatar.js';
 import { initials } from '../lib/util.js';
 import { useBranding, useSession } from '../context.jsx';
@@ -166,6 +167,7 @@ export default function Profile() {
 
         </div>
       </div>
+      <NotifPrefs />
 
       {emailSetup ? (
         <EmailSetupModal
