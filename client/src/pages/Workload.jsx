@@ -328,6 +328,7 @@ function GridCellInput({ def, value, onChange, disabled, ...rest }) {
 // One table cell turned into its own editor. Enter or clicking away saves, Esc cancels; dropdowns save as soon as you pick.
 // A failed save (e.g. an invalid value) keeps the editor open with the message shown.
 function CellEditor({ def, initial, lookups, onSave, onCancel, copyText, memo }) {
+  const toast = useToast();
   const [val, setValRaw] = useState(() => (memo ? loadCellText('workload', memo, initial ?? '') : initial ?? ''));
   const setVal = (v) => { setValRaw(v); if (memo) saveCellText('workload', memo, v); };
   const [busy, setBusy] = useState(false);
@@ -379,6 +380,14 @@ function CellEditor({ def, initial, lookups, onSave, onCancel, copyText, memo })
     if (el.tagName === 'INPUT' && el.type === 'date') {
       const d = normDate(text);
       if (/^\d{4}-\d{2}-\d{2}$/.test(d)) { change({ target: { value: d } }); return true; }
+    }
+    if (el.tagName === 'INPUT' && el.type === 'datetime-local') {   // a Breakdate / Time: "Sep 28, 2026 4:00 PM", "VGFX  Sep 28, 2026 4:00 PM", "VGFX: Sep 1, 10am" or ISO
+      const mine = memo ? memo.split(':')[1] : '';
+      const pairs = parseBreakdatePairs(normBreakdate(text, new Date().getFullYear()));
+      const keys = Object.keys(pairs);
+      if (keys.length && !pairs[mine]) { toast(`That time is for ${keys[0] === 'breakdate_vgfx' ? 'VGFX' : 'VEDIT'}, not this cell`, 'err'); return true; }
+      const iso = pairs[mine] || toBreakdateIso(text);
+      if (iso) { change({ target: { value: iso } }); return true; }
     }
     return false;
   };

@@ -3,7 +3,7 @@
 export function pasteFallback(e, apply) {
   if (!(e.ctrlKey || e.metaKey) || String(e.key).toLowerCase() !== 'v') return;
   const el = e.target;
-  if (!el || !(el.tagName === 'SELECT' || (el.tagName === 'INPUT' && el.type === 'date'))) return;
+  if (!el || !(el.tagName === 'SELECT' || (el.tagName === 'INPUT' && (el.type === 'date' || el.type === 'datetime-local')))) return;
   const ne = e.nativeEvent || e;
   if (ne.__pasteBox) return;   // nested handlers see the same key press: one hidden box only
   ne.__pasteBox = true;
