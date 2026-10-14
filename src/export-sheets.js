@@ -27,14 +27,13 @@ function groupByDate(rows, dateOf) {
   });
 }
 
-/** The dates an export covers, for its file name: "Sep_1", "Sep_2-30", "Sep_28-Oct_5", a whole month "Sep_2026" ("Sep_2026-Nov_2026" for several),
-    "from_Sep_1", "until_Sep_30", or "" when no dates are selected. The year is added ("Sep_2-30_2025") only when the dates are outside the current year. */
+/** The dates an export covers, for its file name: "Sep_1_2026", "Sep_2-30_2026", "Sep_28-Oct_5_2026", a whole month "Sep_2026" ("Sep_2026-Nov_2026" for several),
+    "from_Sep_1_2026", "until_Sep_30_2026", or "" when no dates are selected. The year always ends the name ("Sep_2-30_2026"). */
 const dateTag = (from, to) => {
   const ok = (x) => (/^\d{4}-\d{2}-\d{2}$/.test(String(x || '')) ? String(x) : '');
   const a = ok(from); const b = ok(to);
-  const thisYear = String(new Date().getFullYear());
   const md = (iso) => `${MONTHS[+iso.slice(5, 7) - 1]}_${+iso.slice(8, 10)}`;
-  const yr = (iso) => (iso.slice(0, 4) === thisYear ? '' : `_${iso.slice(0, 4)}`);
+  const yr = (iso) => `_${iso.slice(0, 4)}`;
   const lastDay = (iso) => new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7), 0)).getUTCDate();
   if (a && b) {
     if (a.slice(8, 10) === '01' && +b.slice(8, 10) === lastDay(b)) {   // whole months: month and year
