@@ -27,13 +27,16 @@ function groupByDate(rows, dateOf) {
   });
 }
 
-/** The dates an export covers, for its file name: "2026-09-01", "2026-09-01_to_2026-09-30", "from_2026-09-01", "until_2026-09-30" or "All_dates". */
+/** The dates an export covers, for its file name: "Sep_1", "Sep_1_to_Sep_30", "from_Sep_1", "until_Sep_30" or "All_dates". The year is added
+    ("Sep_1_2025") only for a date outside the current year. */
 const dateTag = (from, to) => {
   const ok = (x) => (/^\d{4}-\d{2}-\d{2}$/.test(String(x || '')) ? String(x) : '');
   const a = ok(from); const b = ok(to);
-  if (a && b) return a === b ? a : `${a}_to_${b}`;
-  if (a) return `from_${a}`;
-  if (b) return `until_${b}`;
+  const thisYear = String(new Date().getFullYear());
+  const nice = (iso) => `${MONTHS[+iso.slice(5, 7) - 1]}_${+iso.slice(8, 10)}${iso.slice(0, 4) === thisYear ? '' : `_${iso.slice(0, 4)}`}`;
+  if (a && b) return a === b ? nice(a) : `${nice(a)}_to_${nice(b)}`;
+  if (a) return `from_${nice(a)}`;
+  if (b) return `until_${nice(b)}`;
   return 'All_dates';
 };
 const truthy = (x) => x === '1' || x === 'true' || x === 'yes' || x === 'on';
