@@ -118,6 +118,7 @@ const ACTION_LABELS = {
   'admin.retention_update': 'Changed Data Retention',
   'admin.retention_run': 'Removed Old Records',
   'admin.retention_download': 'Downloaded Retention Archive',
+  'admin.clear_data': 'Cleared Data',
   'admin.user_bulk': 'Changed Several Users',
   'admin.user_signout': 'Signed User Out',
   'admin.dropdown_merge': 'Merged Dropdown Options',
@@ -312,6 +313,11 @@ function formatDetails(row) {
       const r = d.results || {};
       const n = Object.entries(r).map(([k, x]) => `${k}: ${x.deleted}`).join(', ');
       return `${d.trigger === 'scheduled' ? 'Scheduled' : 'Manual'} removal of old records${n ? ` (${n})` : ''}`;
+    }
+
+    case 'admin.clear_data': {
+      const n = Object.entries(d.results || {}).map(([k, x]) => `${k}: ${x.deleted}`).join(', ');
+      return `Cleared ${n || (d.areas || []).join(', ')} · ${d.from || d.to ? `${d.from || 'start'} to ${d.to || 'today'}` : 'all dates'}`;
     }
 
     case 'admin.retention_download':

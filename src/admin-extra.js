@@ -307,6 +307,35 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
     res.json({ results });
   }));
 
+  // ---------- Clear data (pick areas + a date range) ----------
+  const clearData = require('./clear-data');
+  const isDate = (x) => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x) && !Number.isNaN(Date.parse(x));
+  function clearScope(src) {
+    const areas = (Array.isArray(src.areas) ? src.areas : String(src.areas || '').split(',')).filter((a) => clearData.AREAS[a]);
+    const from = src.from || null; const to = src.to || null;
+    if ((from && !isDate(from)) || (to && !isDate(to))) throw new HttpError(400, 'Enter the dates as YYYY-MM-DD');
+    if (from && to && from > to) throw new HttpError(400, 'The From date is after the To date');
+    return { areas, from, to, all: !from && !to };
+  }
+  router.get('/clear-data', asyncH(async (req, res) => {
+    const { from, to } = clearScope(req.query);
+    res.json({
+      areas: Object.fromEntries(clearData.ORDER.map((k) => [k, { label: clearData.AREAS[k].label, basis: clearData.AREAS[k].basis }])),
+      order: clearData.ORDER, preview: await clearData.preview(from, to, req.user.id),
+    });
+  }));
+  router.post('/clear-data', asyncH(async (req, res) => {
+    const { areas, from, to, all } = clearScope(req.body || {});
+    if (!areas.length) throw new HttpError(400, 'Choose at least one area to clear');
+    if (all && req.body.allDates !== true) throw new HttpError(400, 'Choose a date range, or tick All dates');
+    if (req.body.confirm !== 'DELETE') throw new HttpError(400, 'Type DELETE to confirm');
+    await stepUp.verify(req, { action: 'admin.clear_data', entity: 'clear_data', id: null }, req.body);
+    let results;
+    try { results = await clearData.run(areas, from, to, req.user.id); } catch (e) { throw new HttpError(409, e.message); }
+    await audit(req, 'admin.clear_data', 'clear_data', null, { areas, from, to, results });   // written after the clear, so it survives an Audit Log clear
+    res.json({ results });
+  }));
+
   router.get('/retention/archives/:name', asyncH(async (req, res) => {
     const abs = retention.archivePath(req.params.name);
     if (!abs) throw new HttpError(404, 'Archive not found');
