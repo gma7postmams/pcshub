@@ -197,6 +197,20 @@ function InlineCell({ def, initial, options, onSave, onCancel, memo }) {
     }
   };
   const change = (e) => { const nv = e.target.value; setVal(nv); if (def.kind === 'select') save(nv); };
+  // Ctrl+V while a dropdown or date box is open: the copied text picks the matching option / sets the date (these boxes can't take pasted text themselves)
+  const paste = (e) => {
+    const el = e.target;
+    const text = String((e.clipboardData && e.clipboardData.getData('text/plain')) || '').replace(/\s*\n\s*/g, ' ').trim();
+    if (!text || !el) return;
+    if (el.tagName === 'SELECT') {
+      const opt = [...el.options].find((o) => o.value && (o.value.toLowerCase() === text.toLowerCase() || o.text.trim().toLowerCase() === text.toLowerCase()));
+      e.preventDefault();
+      if (opt) change({ target: { value: opt.value } });
+    } else if (el.tagName === 'INPUT' && el.type === 'date') {
+      const d = normDate(text);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) { e.preventDefault(); change({ target: { value: d } }); }
+    }
+  };
   const blur = (e) => { if (box.current && !box.current.contains(e.relatedTarget)) save(val); };
   const key = (e) => {
     if (e.key === 'Escape') { finished.current = true; onCancel(); return; }
@@ -211,7 +225,7 @@ function InlineCell({ def, initial, options, onSave, onCancel, memo }) {
   else if (def.kind === 'number') input = <input type="number" min="0" step="1" value={val} disabled={busy} onChange={change} />;
   else if (def.kind === 'area') input = <textarea className="mono" maxLength={def.max} value={val} disabled={busy} onChange={change} />;
   else input = <input maxLength={def.max} value={val} disabled={busy} onChange={change} />;
-  return <div className={`cell-editor${def.kind === 'number' ? ' num' : def.kind === 'date' || def.kind === 'daterange' ? ' date' : ''}${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key}>{input}</div>;
+  return <div className={`cell-editor${def.kind === 'number' ? ' num' : def.kind === 'date' || def.kind === 'daterange' ? ' date' : ''}${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key} onPaste={paste}>{input}</div>;
 }
 
 // NON-COMPLIANT needs a reason: asked here right after it is picked in the Status (CM) cell.

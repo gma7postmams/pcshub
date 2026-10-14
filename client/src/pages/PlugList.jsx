@@ -94,7 +94,8 @@ function PlugCellEditor({ k, initial, onSave, onCancel, memo }) {
   };
   return (
     <div className="cell-editor" onClick={(e) => e.stopPropagation()}>
-      <input ref={ref} type={k === 'plug_date' ? 'date' : 'text'} value={val} maxLength={MAXLEN[k]} onChange={(e) => setVal(e.target.value)} onKeyDown={key} onBlur={() => finish(null)} />
+      <input ref={ref} type={k === 'plug_date' ? 'date' : 'text'} value={val} maxLength={MAXLEN[k]} onChange={(e) => setVal(e.target.value)} onKeyDown={key} onBlur={() => finish(null)}
+        onPaste={k === 'plug_date' ? (e) => { const d = normDate(String(e.clipboardData.getData('text/plain') || '').trim()); if (/^\d{4}-\d{2}-\d{2}$/.test(d)) { e.preventDefault(); setVal(d); } } : undefined} />
     </div>
   );
 }

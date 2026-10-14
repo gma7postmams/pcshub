@@ -1,5 +1,6 @@
 import { cloneElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { normDate } from '../components/PlugGrid.jsx';
 import { loadView as loadViewState, saveView as saveViewState, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
 import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
@@ -366,6 +367,20 @@ function CellEditor({ def, initial, lookups, onSave, onCancel, copyText, memo })
     e.clipboardData.setData('text/plain', text || '');
     e.preventDefault();
   };
+  // Ctrl+V while a dropdown or date box is open: the copied text picks the matching option / sets the date (these boxes can't take pasted text themselves)
+  const paste = (e) => {
+    const el = e.target;
+    const text = String((e.clipboardData && e.clipboardData.getData('text/plain')) || '').replace(/\s*\n\s*/g, ' ').trim();
+    if (!text || !el) return;
+    if (el.tagName === 'SELECT') {
+      const opt = [...el.options].find((o) => o.value && (o.value.toLowerCase() === text.toLowerCase() || o.text.trim().toLowerCase() === text.toLowerCase()));
+      e.preventDefault();
+      if (opt) change({ target: { value: opt.value } });
+    } else if (el.tagName === 'INPUT' && el.type === 'date') {
+      const d = normDate(text);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) { e.preventDefault(); change({ target: { value: d } }); }
+    }
+  };
   const blur = (e) => { if (box.current && !box.current.contains(e.relatedTarget)) save(val); };
   const key = (e) => {
     if (e.key === 'Escape') { finished.current = true; onCancel(); return; }
@@ -385,7 +400,7 @@ function CellEditor({ def, initial, lookups, onSave, onCancel, copyText, memo })
     else if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); save(val, { dr: 0, dc: e.shiftKey ? -1 : 1 }); }
   };
   return (
-    <div className={`cell-editor${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key} onCopy={copy}>
+    <div className={`cell-editor${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key} onCopy={copy} onPaste={paste}>
       <FieldInput auto def={def} value={val} lookups={lookups} disabled={busy} onChange={change} />
     </div>
   );
