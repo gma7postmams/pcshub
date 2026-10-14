@@ -201,7 +201,6 @@ const fmtMDY = (iso) => `${iso.slice(5, 7)}${iso.slice(8, 10)}${iso.slice(2, 4)}
 const VIEW_KEY = 'wl:mode';
 const TAB_KEYS = ['ALL', 'VGFX', 'VEDIT', 'AUDIO', 'PREP'];
 // PREP tab: VO, Script, Artwork / STB and Audio Guide are not shown there; they decide whether a row sits in the upper part (all four available) or the lower part (waiting for the ones listed).
-const PREP_LABEL = { vo: 'VO', script: 'Script', art_stb: 'Artwork / STB', audio_guide: 'Audio Guide' };
 const readView = (sessionKey) => {
   const fresh = { mode: 'table', tab: 'ALL' };
   if (!sessionKey) return fresh;
@@ -1756,11 +1755,19 @@ export default function Workload() {
       <tr key={key} className={`prep-divider ${cls}`}><td colSpan={tableCols.length + 4}><strong>{title}</strong> <span className="dim">({n}) {note}</span></td></tr>
     );
     const up = band('up', 'ready', 'Ready', nReady, 'VO, Script, Artwork / STB and Audio Guide are all available');
-    const low = band('low', 'waiting', 'For followup', nWait, 'at least one of the four is not available yet; each row lists what is missing');
+    const low = band('low', 'waiting', 'For followup', nWait, 'at least one of the four is not available yet');
     if (ready && (first || wasReady === null)) return up;
     if (!ready && (first || wasReady === true || wasReady === null)) return <>{first && wasReady === null && !ready ? up : null}{low}</>;
     return null;
   };
+  // PREP: rows for followup sort after every ready row, so with many ready rows they start on a later page. Say so at the foot of this page.
+  const prepNextWait = (() => {
+    if (!isPrep || !data || !data.rows.length) return null;
+    const nReady = data.prepReady || 0; const nWait = (data.total || 0) - nReady;
+    if (nWait <= 0 || offset + data.rows.length > nReady) return null;   // none, or this page already shows some
+    const o = Math.floor(nReady / size) * size;
+    return { n: nWait, offset: o, page: Math.floor(o / size) + 1 };
+  })();
   const selNow = isGrid ? normSel() : null;                                   // Excel mode: what is selected right now
   const selRows = selNow && grid && grid.rows ? grid.rows.slice(selNow.rLo, selNow.rHi + 1) : [];
   const allPrio = selRows.length > 0 && selRows.every((r) => r.is_priority);
@@ -2102,7 +2109,7 @@ export default function Workload() {
                   : !data.rows.length && !draft ? <Empty>No workload items match these filters.</Empty>
                     : (
                       <table className={`t wl v-${viewKey.toLowerCase()}${cards ? ' cards' : ''}`}>
-                        <thead><tr>{!cards ? <th className="rn" title={pageAllPicked ? 'Click to unselect all' : 'Select all rows on this page (Ctrl+A)'} onClick={() => (pageAllPicked ? clearPicks() : selectPage())} /> : null}{canWrite && cards ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{isPrep ? <th data-k="prep_missing">For followup</th> : null}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
+                        <thead><tr>{!cards ? <th className="rn" title={pageAllPicked ? 'Click to unselect all' : 'Select all rows on this page (Ctrl+A)'} onClick={() => (pageAllPicked ? clearPicks() : selectPage())} /> : null}{canWrite && cards ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {draft ? (
                             <tr key="draft" className="draft-row" data-draft="1">
@@ -2134,11 +2141,6 @@ export default function Workload() {
                                 </td>
                               ) : null}
                               {tableCols.map((k, ci) => { const td = k === 'breakdate_vgfx' ? breakdateCell(r) : cell(r, k); const n = normCells(); return cloneElement(td, { 'data-r': idx, 'data-c': ci, 'data-sel': n && idx >= n.r0 && idx <= n.r1 && ci >= n.c0 && ci <= n.c1 ? '1' : undefined }); })}
-                              {isPrep ? (
-                                <td className="prep-missing">
-                                  {(r.prep_missing || []).length ? r.prep_missing.map((f) => <span key={f} className="chip c-amber">{PREP_LABEL[f] || f}</span>) : <span className="dim">All available</span>}
-                                </td>
-                              ) : null}
                               {canWrite ? (
                                 <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
                                   <RowMenu
@@ -2151,6 +2153,11 @@ export default function Workload() {
                             </tr>
                             </Fragment>
                           ))}
+                          {isPrep && prepNextWait ? (
+                            <tr className="prep-divider waiting jump" onClick={() => goOffset(prepNextWait.offset)} title="Go to the first page with rows for followup">
+                              <td colSpan={tableCols.length + 4}><strong>For followup</strong> <span className="dim">({prepNextWait.n}) continues on page {prepNextWait.page}: click to go there</span></td>
+                            </tr>
+                          ) : null}
                         </tbody>
                       </table>
                     )}

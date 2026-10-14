@@ -1339,5 +1339,7 @@ body { padding-bottom: env(safe-area-inset-bottom, 0px); }
 /* Workload PREP tab: the Ready / Waiting bands and the "For followup" chips */
 .prep-divider td{padding:8px 12px;font-size:12.5px;letter-spacing:.02em;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--surface-2,rgba(127,127,127,.08))}
 .prep-divider.waiting td{border-top-width:2px}
+.prep-divider.jump{cursor:pointer}
+.prep-divider.jump:hover td{background:var(--surface-3,rgba(127,127,127,.16))}
 .prep-missing{white-space:normal}
 .prep-missing .chip{margin:0 4px 2px 0}
