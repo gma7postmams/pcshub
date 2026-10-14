@@ -1,16 +1,24 @@
 // Filters, search, dates and sort stay put when the page is refreshed. Kept in sessionStorage (per browser tab, gone when the tab / app is
 // closed), so a shared computer never shows the last person's filters; where storage is blocked the page simply starts fresh.
 const KEY = (page) => `pulse:view:${page}`;
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 export function loadView(page, fallback) {
   try {
     const raw = sessionStorage.getItem(KEY(page));
     if (!raw) return fallback;
     const v = JSON.parse(raw);
-    return v && typeof v === 'object' ? { ...fallback, ...v } : fallback;
+    if (!v || typeof v !== 'object') return fallback;
+    // Saved on an earlier day (an installed app or a tab left open overnight): the date filters, the day being looked at and the page
+    // start over, so every list opens on today. Search text, other filters and sort stay.
+    if (v.day !== today()) {
+      delete v.anchor; delete v.custom; delete v.period; delete v.offset;
+      if (v.filt && typeof v.filt === 'object') { v.filt = { ...v.filt }; delete v.filt.from; delete v.filt.to; }
+    }
+    return { ...fallback, ...v };
   } catch (e) { return fallback; }
 }
 export function saveView(page, value) {
-  try { sessionStorage.setItem(KEY(page), JSON.stringify(value)); } catch (e) { /* storage unavailable */ }
+  try { sessionStorage.setItem(KEY(page), JSON.stringify({ ...value, day: today() })); } catch (e) { /* storage unavailable */ }
 }
 
 // ---- a dialog that is open (Add / Edit form) and what has been typed in it: reopened after a refresh, dropped when it is closed or saved ----
