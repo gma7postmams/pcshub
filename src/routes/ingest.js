@@ -24,9 +24,17 @@ const SELECT = `
     LEFT JOIN users uu ON uu.id = i.updated_by
     LEFT JOIN users cmu ON cmu.id = i.cm_decided_by`;
 
-// Episode / Breakdate: one date (YYYY-MM-DD) or a range (YYYY-MM-DD/YYYY-MM-DD, start first). Returns the text as stored and its first day.
+// Episode / Breakdate: one date (YYYY-MM-DD), a range (YYYY-MM-DD/YYYY-MM-DD, start first) or separate days (YYYY-MM-DD,YYYY-MM-DD,... oldest first).
+// Returns the text as stored and its first day. A list that ends up with one day is stored as that one date.
+const LIST_RE = /^\d{4}-\d{2}-\d{2}(?:,\d{4}-\d{2}-\d{2})+$/;
+const datesOf = (t) => { const x = String(t || ''); const m = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/.exec(x); return LIST_RE.test(x) ? x.split(',') : m ? [m[1]] : /^\d{4}-\d{2}-\d{2}/.test(x) ? [x.slice(0, 10)] : []; };
 function episodeRange(x) {
-  const raw = x == null ? '' : String(x).trim();
+  const raw = x == null ? '' : String(x).trim().replace(/\s*,\s*/g, ',');
+  if (raw.includes(',')) {
+    const days = [...new Set(raw.split(',').filter(Boolean).map((d) => v.date(d, { field: 'Episode / Breakdate' })))].sort();
+    if (days.length > 60) throw new HttpError(400, 'Episode / Breakdate: at most 60 separate days');
+    return { text: days.join(','), start: days[0] };
+  }
   const m = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/.exec(raw);
   if (!m) { const d = v.date(raw, { field: 'Episode / Breakdate' }); return { text: d, start: d }; }
   const a = v.date(m[1], { field: 'Episode / Breakdate (from)' });
@@ -129,8 +137,18 @@ function ingestFilter(q) {
   if (req.query.platform) add('i.platform = ?', String(req.query.platform));
   // a range counts when it overlaps the filter: it ends on/after "from" and starts on/before "to"
   const epEnd = `COALESCE(CASE WHEN i.episode_break_date_text ~ '^\\d{4}-\\d{2}-\\d{2}/\\d{4}-\\d{2}-\\d{2}$' THEN split_part(i.episode_break_date_text, '/', 2)::date END, i.episode_date)`;
-  if (req.query.from) add(`${epEnd} >= ?`, v.date(req.query.from, { field: 'from' }));
-  if (req.query.to) add('i.episode_date <= ?', v.date(req.query.to, { field: 'to' }));
+  const fromD = req.query.from ? v.date(req.query.from, { field: 'from' }) : null;
+  const toD = req.query.to ? v.date(req.query.to, { field: 'to' }) : null;
+  if (fromD || toD) {
+    // separate days count when ANY of them falls inside the filter; a single date or a range keeps its old overlap test
+    const lc = [];
+    const bare = [];
+    if (fromD) { params.push(fromD); lc.push(`d::date >= $${params.length}`); bare.push(`${epEnd} >= $${params.length}`); }
+    if (toD) { params.push(toD); lc.push(`d::date <= $${params.length}`); bare.push(`i.episode_date <= $${params.length}`); }
+    where.push(`(CASE WHEN i.episode_break_date_text ~ '^\\d{4}-\\d{2}-\\d{2}(,\\d{4}-\\d{2}-\\d{2})+$'
+                      THEN EXISTS (SELECT 1 FROM unnest(string_to_array(i.episode_break_date_text, ',')) d WHERE ${lc.join(' AND ')})
+                      ELSE (${bare.join(' AND ')}) END)`);
+  }
   if (req.query.q) {
     params.push(v.like(req.query.q, 100));
     const p = `$${params.length}`;
@@ -161,7 +179,7 @@ router.get('/export', asyncH(async (req, res) => {
   const dayText = (r) => {
     const t = r.episode_break_date_text || (r.episode_date ? new Date(r.episode_date).toISOString().slice(0, 10) : '');
     const m = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/.exec(t || '');
-    return m ? `${m[1]} to ${m[2]}` : (t || '');
+    return m ? `${m[1]} to ${m[2]}` : (t || '').split(',').join('; ');
   };
   // Styled like the Workload export (and like the web table): tinted header, vertical grid lines, centred cells, bold names, coloured Platform and
   // Status (CM) text (Excel can't give a cell a pill background), the decision / approval time on a second line, nothing cropped.
@@ -171,8 +189,10 @@ router.get('/export', asyncH(async (req, res) => {
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const nice = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); return m ? `${MON[+m[2] - 1]} ${+m[3]}, ${m[1]}` : String(iso || ''); };
   const niceDay = (r) => {
+    if (r._on) return `${nice(r._on)}\n(also ${r._also.join(', ')})`;
     const t = r.episode_break_date_text || (r.episode_date ? new Date(r.episode_date).toISOString().slice(0, 10) : '');
     const m = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/.exec(t || '');
+    if (LIST_RE.test(t || '')) return t.split(',').map(nice).join('; ');   // separate days: "Sep 1, 2026; Sep 7, 2026" (the import reads this back)
     return m ? `${nice(m[1])} – ${nice(m[2])}` : (/^\d{4}-\d{2}-\d{2}/.test(t || '') ? nice(t) : (t || ''));
   };
   const niceTime = (ts) => { if (!ts) return ''; const d = new Date(ts); const h = d.getHours(); return `${nice(d.toISOString())} ${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`; };
@@ -183,7 +203,7 @@ router.get('/export', asyncH(async (req, res) => {
   const fill = (ws, rows) => {
   const COLS = [
     { header: 'PROG. NAME / PROJ. TITLE', key: 'program' }, { header: 'Platform', key: 'platform' },
-    { header: 'Billable Party', key: 'billable_party' }, { header: 'Episode / Breakdate', key: 'ep' },
+    { header: 'Billable Party', key: 'billable_party' }, { header: 'Episode / Breakdate', key: 'ep', wrap: true },
     { header: 'Source', key: 'source', wrap: true }, { header: 'No. of Materials', key: 'materials_count' },
     { header: 'Requested By', key: 'req' }, { header: 'Destination Folder', key: 'destination_folder', wrap: true },
     { header: 'Approved By', key: 'approved_by' }, { header: 'Status (CM)', key: 'cm' }, { header: 'Updated', key: 'updated' },
@@ -235,7 +255,22 @@ router.get('/export', asyncH(async (req, res) => {
   ws.columns.forEach((column, i) => { column.width = Math.ceil(lens[i] * 1.15) + 3; });   // wide enough that nothing is cropped (long Source / Folder text wraps)
   ws.autoFilter = { from: 'A1', to: { row: 1, column: ws.columns.length } };
   };
-  if (truthy(req.query.by_date) && rows.length) groupByDate(rows, (r) => r.episode_date).forEach((g) => fill(wb.addWorksheet(g.name), g.rows));
+  if (truthy(req.query.by_date) && rows.length) {
+    // a record with separate days goes on the tab of EACH of those days (only days inside the date filter), the others listed in the Episode cell
+    const lo = req.query.from ? String(req.query.from).slice(0, 10) : '';
+    const hi = req.query.to ? String(req.query.to).slice(0, 10) : '';
+    const spread = [];
+    for (const r of rows) {
+      if (!LIST_RE.test(r.episode_break_date_text || '')) { spread.push(r); continue; }
+      const all = r.episode_break_date_text.split(',');
+      for (const d of all) {
+        if ((lo && d < lo) || (hi && d > hi)) continue;
+        const also = all.filter((x) => x !== d).map((x) => nice(x).replace(/, \d{4}$/, ''));
+        spread.push({ ...r, episode_date: d, _on: d, _also: also });
+      }
+    }
+    groupByDate(spread, (r) => r.episode_date).forEach((g) => fill(wb.addWorksheet(g.name), g.rows));
+  }
   else fill(wb.addWorksheet('Ingest'), rows);
   const buffer = await wb.xlsx.writeBuffer();
   const filename = `${['Ingest', dateTag(req.query.from, req.query.to)].filter(Boolean).join('_')}${truthy(req.query.by_date) && rows.length ? '_tabs' : ''}.xlsx`;
@@ -274,6 +309,7 @@ function oneDay(part) {   // "2026-10-10", "Oct 10, 2026", "10/10/2026" or an Ex
 function episodeFromCell(val) {   // one date, or "start – end" / "start to end" / "start/end" → what the table stores
   if (val == null || val === '') return '';
   if (val instanceof Date) return val.toISOString().slice(0, 10);
+  if (/;/.test(String(val)) || LIST_RE.test(String(val).replace(/\s+/g, ''))) return String(val).split(/;|,(?=\d{4}-)/).map((x) => x.trim()).filter(Boolean).map(oneDay).join(',');   // separate days
   const parts = String(val).split(/\s+(?:–|—|-|to)\s+|\//).map((x) => x.trim()).filter(Boolean);
   if (parts.length === 1) return oneDay(parts[0]);
   if (parts.length === 2) return `${oneDay(parts[0])}/${oneDay(parts[1])}`;

@@ -1234,3 +1234,10 @@ table.t.wl.cards .bd-chips .chip { display: inline-flex; align-items: center; ga
   .pager, .wl-card .pager, .plug-list .pager { flex-wrap: wrap; row-gap: 6px; height: auto; min-height: 46px; padding: 6px 12px; box-sizing: border-box; }
   .pager .grow { flex: 1 1 0; min-width: 0; }
 }
+/* Ingest Episode / Breakdate: separate days */
+.dri-wrap, .dri-list { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dri-day { display: flex; align-items: center; gap: 6px; }
+.dri-day input[type=date] { flex: 1 1 0; min-width: 0; width: auto; }
+.dri-links { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; }
+.linkish { background: none; border: 0; padding: 0; color: var(--accent, #2563eb); cursor: pointer; font: inherit; text-decoration: underline; }
+.linkish:disabled { opacity: .5; cursor: default; }

@@ -47,8 +47,17 @@ const ApprovedBy = ({ r, canApprove }) => {
   return canApprove ? <span className="dim">Awaiting approval</span> : null;
 };
 const RANGE = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/;
+const LIST = /^\d{4}-\d{2}-\d{2}(,\d{4}-\d{2}-\d{2})+$/;   // separate days: "2026-09-01,2026-09-07,2026-09-14"
+const EPFMT = { test: (x) => RANGE.test(x) || LIST.test(x) };   // a stored range or list is kept as it is
+const MONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// "Sep 1, 7, 14, 2026" — days grouped by month, the year once per year
+const listText = (x) => {
+  const out = []; let ym = '';
+  String(x).split(',').forEach((d) => { const [y, m, dd] = d.split('-'); const k = `${y}-${m}`; if (k !== ym) { const last = out[out.length - 1]; if (last && last.y !== y) last.t += `, ${last.y}`; out.push({ y, t: `${MONS[+m - 1]} ${+dd}` }); ym = k; } else out[out.length - 1].t += `, ${+dd}`; });
+  return out.map((o, i) => (i === out.length - 1 || out[i + 1].y !== o.y ? `${o.t}, ${o.y}` : o.t)).join(', ');
+};
 const splitRange = (x) => { const m = RANGE.exec(String(x || '')); return m ? { from: m[1], to: m[2] } : { from: isoDate(x) || '', to: '' }; };
-const dayText = (x) => { const m = RANGE.exec(String(x || '')); return m ? `${fmtDate(m[1])} – ${fmtDate(m[2])}` : (isoDate(x) ? fmtDate(isoDate(x)) : (x || '')); };   // a single date, a range, or old free text as written; a real date reads like the Workload Tracker's; old free text is shown as written
+const dayText = (x) => { if (LIST.test(String(x || ''))) return listText(x); const m = RANGE.exec(String(x || '')); return m ? `${fmtDate(m[1])} – ${fmtDate(m[2])}` : (isoDate(x) ? fmtDate(isoDate(x)) : (x || '')); };   // a single date, a range, or old free text as written; a real date reads like the Workload Tracker's; old free text is shown as written
 
 // Columns that can be edited right in the table, like the Workload Tracker: click a cell, change it, Enter or click away saves, Esc cancels.
 // Requested By is not one of them — it is filled in from whoever created the request. Destination Folder and Approved By are for PCS / OCS only.
@@ -62,7 +71,7 @@ const CELLS = {
   destination_folder: { kind: 'area', max: 1000, approve: true },
   cm_status: { kind: 'select', cm: true, blank: 'PENDING' },   // Status (CM): a dropdown for CM users; NON-COMPLIANT then asks for its reason
 };
-const cellInitial = (r, k) => (k === 'cm_status' ? (r.cm_status || '') : k === 'episode_break_date_text' ? (RANGE.test(r.episode_break_date_text || '') ? r.episode_break_date_text : (isoDate(r.episode_break_date_text) || isoDate(r.episode_date)))
+const cellInitial = (r, k) => (k === 'cm_status' ? (r.cm_status || '') : k === 'episode_break_date_text' ? (EPFMT.test(r.episode_break_date_text || '') ? r.episode_break_date_text : (isoDate(r.episode_break_date_text) || isoDate(r.episode_date)))
   : r[k] == null ? '' : String(r[k]));
 
 // The table's columns in order (for cell blocks, copy and paste). Only some can be written from the table: Requested By is the person who created the request,
@@ -71,7 +80,7 @@ const COLS = ['program', 'platform', 'billable_party', 'episode_break_date_text'
 const WRITE = new Set(['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', 'destination_folder']);
 const REQUIRED = new Set(['program', 'platform']);   // can't be cleared
 const textOf = (r, k) => (k === 'requested_by' ? (r.requested_by_psd || r.requested_by_name || '') : k === 'approved_by' ? (r.approved_by || '') : k === 'cm_status' ? (r.cm_status || 'PENDING') : cellInitial(r, k));
-const cleanVal = (k, raw) => { const t = String(raw ?? '').replace(/\s*\n\s*/g, ' ').trim(); return k === 'episode_break_date_text' ? (RANGE.test(t) ? t : normDate(t)) : t; };
+const cleanVal = (k, raw) => { const t = String(raw ?? '').replace(/\s*\n\s*/g, ' ').trim(); return k === 'episode_break_date_text' ? (EPFMT.test(t) ? t : normDate(t)) : t; };
 async function writeClipboard(text) {   // the async API where the page may use it (https / localhost), else a hidden textarea + the copy command
   try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; } } catch (e) { /* fall through */ }
   const ta = document.createElement('textarea');
@@ -99,15 +108,39 @@ function CellMenu({ x, y, children, ...rest }) {   // a right-click menu that al
   return <div ref={ref} className="xl-menu" style={{ left: x, top: y }} {...rest}>{children}</div>;
 }
 
-// Episode / Breakdate: a date, or a from – to range (the second date is optional). The value is "YYYY-MM-DD" or "YYYY-MM-DD/YYYY-MM-DD".
+// Episode / Breakdate: a date, a from – to range (the second date is optional) or separate days. The value is "YYYY-MM-DD", "YYYY-MM-DD/YYYY-MM-DD"
+// or "YYYY-MM-DD,YYYY-MM-DD,..." (oldest first).
 function DateRangeInput({ value, onChange, disabled }) {
   const { from, to } = splitRange(value);
   const join = (a, b) => (a && b ? `${a}/${b}` : a || '');
+  const [list, setList] = useState(() => (LIST.test(value || '') ? String(value).split(',') : null));   // null = range mode; else the day boxes (may include empty ones)
+  const emit = (days) => { const u = [...new Set(days.filter(Boolean))].sort(); onChange(u.join(',')); };
+  if (list) {
+    const edit = (i, nv) => { const n = list.map((d, j) => (j === i ? nv : d)); setList(n); emit(n); };
+    const del = (i) => { const n = list.filter((_, j) => j !== i); setList(n.length ? n : ['']); emit(n); };
+    return (
+      <span className="dri-list">
+        {list.map((d, i) => (
+          <span className="dri-day" key={i}>
+            <input type="date" value={d} disabled={disabled} aria-label={`Day ${i + 1}`} onChange={(e) => edit(i, e.target.value)} />
+            {list.length > 1 ? <button type="button" className="btn ibtn" aria-label="Remove this day" title="Remove this day" disabled={disabled} onClick={() => del(i)}>×</button> : null}
+          </span>
+        ))}
+        <span className="dri-links">
+          <button type="button" className="linkish" disabled={disabled || list.length >= 60} onClick={() => setList([...list, ''])}>+ Add day</button>
+          <button type="button" className="linkish" disabled={disabled} onClick={() => { const u = [...new Set(list.filter(Boolean))].sort(); setList(null); onChange(u[0] || ''); }}>Back to date / range</button>
+        </span>
+      </span>
+    );
+  }
   return (
-    <span className="dri">
-      <input type="date" value={from} disabled={disabled} max={to || undefined} aria-label="From" onChange={(e) => onChange(join(e.target.value, to))} />
-      <span className="dim dri-dash">–</span>
-      <input type="date" value={to} disabled={disabled || !from} min={from || undefined} aria-label="To (optional)" onChange={(e) => onChange(join(from, e.target.value))} />
+    <span className="dri-wrap">
+      <span className="dri">
+        <input type="date" value={from} disabled={disabled} max={to || undefined} aria-label="From" onChange={(e) => onChange(join(e.target.value, to))} />
+        <span className="dim dri-dash">–</span>
+        <input type="date" value={to} disabled={disabled || !from} min={from || undefined} aria-label="To (optional)" onChange={(e) => onChange(join(from, e.target.value))} />
+      </span>
+      <span className="dri-links"><button type="button" className="linkish" disabled={disabled} onClick={() => { setList([from, '']); }}>Separate days (e.g. Sep 1, 7, 14)</button></span>
     </span>
   );
 }
@@ -891,7 +924,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
   const canApprove = s.can('ingest.approve');   // Destination Folder + Approved By (PCS / OCS)
   const canCm = s.can('ingest.cm_complete');    // Status (CM)
   const r = rec || {};
-  const initialEpisodeText = rec ? (RANGE.test(r.episode_break_date_text || '') ? r.episode_break_date_text : (isoDate(r.episode_break_date_text) || isoDate(r.episode_date))) : '';
+  const initialEpisodeText = rec ? (EPFMT.test(r.episode_break_date_text || '') ? r.episode_break_date_text : (isoDate(r.episode_break_date_text) || isoDate(r.episode_date))) : '';
   const requester = rec ? (r.requested_by_psd || r.requested_by_name || '') : (s.user.full_name || s.user.username);
   const initialForm = {
     program: r.program || '', platform: r.platform || '', billable_party: r.billable_party || '',
