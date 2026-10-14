@@ -32,7 +32,7 @@ export default function ClearData() {
   };
 
   return (
-    <div className="stack">
+    <div className="stack clear-data">
       <div className="admin-note">
         Permanently remove records from the areas you tick, within a date range. A compressed copy of everything removed is written to the archive first
         (password hashes and 2FA secrets are left out of user copies). The Audit Log keeps a line saying what was cleared.

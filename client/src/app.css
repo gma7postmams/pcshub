@@ -1252,3 +1252,10 @@ td.editing .cell-editor:not(.date) input:not([type="date"]):not([type="datetime-
 td.editing .cell-editor textarea:focus { border-color: transparent; box-shadow: none; outline: none; }
 td.editing .cell-editor:not(.date) .ag input:not([type="date"]):not([type="datetime-local"]):not([type="time"]) { background-color: var(--bg-2); border-color: var(--border-2); }
 td.editing .cell-editor:not(.date) .ag input:not([type="date"]):not([type="datetime-local"]):focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* Clear Data: same 14px gutter as the notes in the other Administration tabs */
+.clear-data{padding:14px}
+.clear-data .admin-note{padding:0;border:0}
+.clear-data .ret-tbl th:first-child,.clear-data .ret-tbl td:first-child{padding-left:0}
+.clear-data .ret-tbl th:last-child,.clear-data .ret-tbl td:last-child{padding-right:0}
+.clear-data fieldset{margin-top:14px!important}.clear-data legend{padding:0;margin-bottom:10px!important}
