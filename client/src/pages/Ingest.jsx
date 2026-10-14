@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
+import { parseEpisodeText } from '../lib/episode.js';
 import { loadView, saveView, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
 import { ago, downloadFile, fmtDate, fmtDateTime } from '../lib/util.js';
 import { useSession } from '../context.jsx';
@@ -47,14 +48,22 @@ const ApprovedBy = ({ r, canApprove }) => {
   return canApprove ? <span className="dim">Awaiting approval</span> : null;
 };
 const RANGE = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/;
-const LIST = /^\d{4}-\d{2}-\d{2}(,\d{4}-\d{2}-\d{2})+$/;   // separate days: "2026-09-01,2026-09-07,2026-09-14"
+const SEG = '\\d{4}-\\d{2}-\\d{2}(?:/\\d{4}-\\d{2}-\\d{2})?';
+const LIST = new RegExp(`^${SEG}(?:,${SEG})+$`);   // several dates / ranges: "2026-09-14/2026-09-18,2026-09-21/2026-09-25"
 const EPFMT = { test: (x) => RANGE.test(x) || LIST.test(x) };   // a stored range or list is kept as it is
 const MONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-// "Sep 1, 7, 14, 2026" — days grouped by month, the year once per year
+// "Sep 14–18, 21–25, 2026" — the month and year are written once while they stay the same
 const listText = (x) => {
-  const out = []; let ym = '';
-  String(x).split(',').forEach((d) => { const [y, m, dd] = d.split('-'); const k = `${y}-${m}`; if (k !== ym) { const last = out[out.length - 1]; if (last && last.y !== y) last.t += `, ${last.y}`; out.push({ y, t: `${MONS[+m - 1]} ${+dd}` }); ym = k; } else out[out.length - 1].t += `, ${+dd}`; });
-  return out.map((o, i) => (i === out.length - 1 || out[i + 1].y !== o.y ? `${o.t}, ${o.y}` : o.t)).join(', ');
+  const segs = String(x).split(',').map((g) => { const [a, b] = g.split('/'); const P = (d) => { const [y, m, dd] = d.split('-'); return { y: +y, m: +m, d: +dd }; }; return { a: P(a), b: b ? P(b) : null }; });
+  let cm = 0; let cy = 0; let out = '';
+  segs.forEach((g, i) => {
+    const part = (d, first) => `${d.m !== cm || d.y !== cy ? `${MONS[d.m - 1]} ` : ''}${d.d}`;
+    if (i) out += ', ';
+    if (g.a.y !== cy && i) out = out.replace(/, $/, `, ${cy}, `);
+    out += part(g.a); cm = g.a.m; cy = g.a.y;
+    if (g.b) { out += `–${g.b.m !== cm || g.b.y !== cy ? `${MONS[g.b.m - 1]} ` : ''}${g.b.d}`; if (g.b.y !== cy) out += `, ${cy}`; cm = g.b.m; cy = g.b.y; }
+  });
+  return `${out}, ${cy}`;
 };
 const splitRange = (x) => { const m = RANGE.exec(String(x || '')); return m ? { from: m[1], to: m[2] } : { from: isoDate(x) || '', to: '' }; };
 const dayText = (x) => { if (LIST.test(String(x || ''))) return listText(x); const m = RANGE.exec(String(x || '')); return m ? `${fmtDate(m[1])} – ${fmtDate(m[2])}` : (isoDate(x) ? fmtDate(isoDate(x)) : (x || '')); };   // a single date, a range, or old free text as written; a real date reads like the Workload Tracker's; old free text is shown as written
@@ -80,7 +89,7 @@ const COLS = ['program', 'platform', 'billable_party', 'episode_break_date_text'
 const WRITE = new Set(['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', 'destination_folder']);
 const REQUIRED = new Set(['program', 'platform']);   // can't be cleared
 const textOf = (r, k) => (k === 'requested_by' ? (r.requested_by_psd || r.requested_by_name || '') : k === 'approved_by' ? (r.approved_by || '') : k === 'cm_status' ? (r.cm_status || 'PENDING') : cellInitial(r, k));
-const cleanVal = (k, raw) => { const t = String(raw ?? '').replace(/\s*\n\s*/g, ' ').trim(); return k === 'episode_break_date_text' ? (EPFMT.test(t) ? t : normDate(t)) : t; };
+const cleanVal = (k, raw) => { const t = String(raw ?? '').replace(/\s*\n\s*/g, ' ').trim(); return k === 'episode_break_date_text' ? (EPFMT.test(t) ? t : (parseEpisodeText(t) || normDate(t))) : t; };
 async function writeClipboard(text) {   // the async API where the page may use it (https / localhost), else a hidden textarea + the copy command
   try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; } } catch (e) { /* fall through */ }
   const ta = document.createElement('textarea');
@@ -108,27 +117,31 @@ function CellMenu({ x, y, children, ...rest }) {   // a right-click menu that al
   return <div ref={ref} className="xl-menu" style={{ left: x, top: y }} {...rest}>{children}</div>;
 }
 
-// Episode / Breakdate: a date, a from – to range (the second date is optional) or separate days. The value is "YYYY-MM-DD", "YYYY-MM-DD/YYYY-MM-DD"
-// or "YYYY-MM-DD,YYYY-MM-DD,..." (oldest first).
+// Episode / Breakdate: a date, a from – to range (the second date is optional), or several of those. The value is "YYYY-MM-DD", "YYYY-MM-DD/YYYY-MM-DD"
+// or several joined by commas, oldest first.
 function DateRangeInput({ value, onChange, disabled }) {
   const { from, to } = splitRange(value);
   const join = (a, b) => (a && b ? `${a}/${b}` : a || '');
-  const [list, setList] = useState(() => (LIST.test(value || '') ? String(value).split(',') : null));   // null = range mode; else the day boxes (may include empty ones)
-  const emit = (days) => { const u = [...new Set(days.filter(Boolean))].sort(); onChange(u.join(',')); };
-  if (list) {
-    const edit = (i, nv) => { const n = list.map((d, j) => (j === i ? nv : d)); setList(n); emit(n); };
-    const del = (i) => { const n = list.filter((_, j) => j !== i); setList(n.length ? n : ['']); emit(n); };
+  const [rows, setRows] = useState(() => (LIST.test(value || '') ? String(value).split(',').map((g) => { const [a, b] = g.split('/'); return { a, b: b || '' }; }) : null));   // null = one date / range; else the rows (may include empty ones)
+  const emit = (rs) => onChange([...new Set(rs.filter((r) => r.a).map((r) => join(r.a, r.b && r.b >= r.a ? r.b : '')))].sort().join(','));
+  if (rows) {
+    const edit = (i, part) => { const n = rows.map((r, j) => (j === i ? { ...r, ...part } : r)); setRows(n); emit(n); };
+    const del = (i) => { const n = rows.filter((_, j) => j !== i); setRows(n.length ? n : [{ a: '', b: '' }]); emit(n); };
     return (
       <span className="dri-list">
-        {list.map((d, i) => (
+        {rows.map((r, i) => (
           <span className="dri-day" key={i}>
-            <input type="date" value={d} disabled={disabled} aria-label={`Day ${i + 1}`} onChange={(e) => edit(i, e.target.value)} />
-            {list.length > 1 ? <button type="button" className="btn ibtn" aria-label="Remove this day" title="Remove this day" disabled={disabled} onClick={() => del(i)}>×</button> : null}
+            <span className="dri">
+              <input type="date" value={r.a} disabled={disabled} max={r.b || undefined} aria-label={`From (${i + 1})`} onChange={(e) => edit(i, { a: e.target.value })} />
+              <span className="dim dri-dash">–</span>
+              <input type="date" value={r.b} disabled={disabled || !r.a} min={r.a || undefined} aria-label={`To (${i + 1}, optional)`} onChange={(e) => edit(i, { b: e.target.value })} />
+            </span>
+            {rows.length > 1 ? <button type="button" className="btn ibtn" aria-label="Remove this date" title="Remove this date" disabled={disabled} onClick={() => del(i)}>×</button> : null}
           </span>
         ))}
         <span className="dri-links">
-          <button type="button" className="linkish" disabled={disabled || list.length >= 60} onClick={() => setList([...list, ''])}>+ Add day</button>
-          <button type="button" className="linkish" disabled={disabled} onClick={() => { const u = [...new Set(list.filter(Boolean))].sort(); setList(null); onChange(u[0] || ''); }}>Back to date / range</button>
+          <button type="button" className="linkish" disabled={disabled || rows.length >= 60} onClick={() => setRows([...rows, { a: '', b: '' }])}>+ Add another date / range</button>
+          <button type="button" className="linkish" disabled={disabled} onClick={() => { const f = rows.find((r) => r.a); setRows(null); onChange(f ? join(f.a, f.b) : ''); }}>Back to one date / range</button>
         </span>
       </span>
     );
@@ -140,7 +153,7 @@ function DateRangeInput({ value, onChange, disabled }) {
         <span className="dim dri-dash">–</span>
         <input type="date" value={to} disabled={disabled || !from} min={from || undefined} aria-label="To (optional)" onChange={(e) => onChange(join(from, e.target.value))} />
       </span>
-      <span className="dri-links"><button type="button" className="linkish" disabled={disabled} onClick={() => { setList([from, '']); }}>Separate days (e.g. Sep 1, 7, 14)</button></span>
+      <span className="dri-links"><button type="button" className="linkish" disabled={disabled} onClick={() => setRows([{ a: from, b: to }, { a: '', b: '' }])}>Several dates / ranges (e.g. Sep 14–18, 21–25)</button></span>
     </span>
   );
 }

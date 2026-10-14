@@ -24,16 +24,19 @@ const SELECT = `
     LEFT JOIN users uu ON uu.id = i.updated_by
     LEFT JOIN users cmu ON cmu.id = i.cm_decided_by`;
 
-// Episode / Breakdate: one date (YYYY-MM-DD), a range (YYYY-MM-DD/YYYY-MM-DD, start first) or separate days (YYYY-MM-DD,YYYY-MM-DD,... oldest first).
-// Returns the text as stored and its first day. A list that ends up with one day is stored as that one date.
-const LIST_RE = /^\d{4}-\d{2}-\d{2}(?:,\d{4}-\d{2}-\d{2})+$/;
-const datesOf = (t) => { const x = String(t || ''); const m = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/.exec(x); return LIST_RE.test(x) ? x.split(',') : m ? [m[1]] : /^\d{4}-\d{2}-\d{2}/.test(x) ? [x.slice(0, 10)] : []; };
+// Episode / Breakdate: one date (YYYY-MM-DD), a range (YYYY-MM-DD/YYYY-MM-DD, start first) or several dates / ranges joined by commas, oldest first
+// ("2026-09-14/2026-09-18,2026-09-21/2026-09-25"). Returns the text as stored and its first day. Several that end up as one are stored as that one.
+const { parseEpisodeText } = require('../episode');
+const MULTI_RE = /^\d{4}-\d{2}-\d{2}(?:\/\d{4}-\d{2}-\d{2})?(?:,\d{4}-\d{2}-\d{2}(?:\/\d{4}-\d{2}-\d{2})?)+$/;
+const segStart = (seg) => seg.slice(0, 10);
+const segEnd = (seg) => seg.slice(-10);
 function episodeRange(x) {
-  const raw = x == null ? '' : String(x).trim().replace(/\s*,\s*/g, ',');
+  const raw = x == null ? '' : String(x).trim();
   if (raw.includes(',')) {
-    const days = [...new Set(raw.split(',').filter(Boolean).map((d) => v.date(d, { field: 'Episode / Breakdate' })))].sort();
-    if (days.length > 60) throw new HttpError(400, 'Episode / Breakdate: at most 60 separate days');
-    return { text: days.join(','), start: days[0] };
+    const text = parseEpisodeText(raw);
+    if (!text) throw new HttpError(400, 'Episode / Breakdate must be dates or date ranges (e.g. Sep 14-18, 21-25)');
+    if (text.split(',').length > 60) throw new HttpError(400, 'Episode / Breakdate: at most 60 dates or ranges');
+    return { text, start: text.slice(0, 10) };
   }
   const m = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/.exec(raw);
   if (!m) { const d = v.date(raw, { field: 'Episode / Breakdate' }); return { text: d, start: d }; }
@@ -140,12 +143,12 @@ function ingestFilter(q) {
   const fromD = req.query.from ? v.date(req.query.from, { field: 'from' }) : null;
   const toD = req.query.to ? v.date(req.query.to, { field: 'to' }) : null;
   if (fromD || toD) {
-    // separate days count when ANY of them falls inside the filter; a single date or a range keeps its old overlap test
+    // several dates / ranges count when ANY of them overlaps the filter; a single date or a range keeps its old overlap test
     const lc = [];
     const bare = [];
-    if (fromD) { params.push(fromD); lc.push(`d::date >= $${params.length}`); bare.push(`${epEnd} >= $${params.length}`); }
-    if (toD) { params.push(toD); lc.push(`d::date <= $${params.length}`); bare.push(`i.episode_date <= $${params.length}`); }
-    where.push(`(CASE WHEN i.episode_break_date_text ~ '^\\d{4}-\\d{2}-\\d{2}(,\\d{4}-\\d{2}-\\d{2})+$'
+    if (fromD) { params.push(fromD); lc.push(`COALESCE(NULLIF(split_part(d, '/', 2), ''), d)::date >= $${params.length}`); bare.push(`${epEnd} >= $${params.length}`); }
+    if (toD) { params.push(toD); lc.push(`split_part(d, '/', 1)::date <= $${params.length}`); bare.push(`i.episode_date <= $${params.length}`); }
+    where.push(`(CASE WHEN i.episode_break_date_text ~ '^\\d{4}-\\d{2}-\\d{2}(/\\d{4}-\\d{2}-\\d{2})?(,\\d{4}-\\d{2}-\\d{2}(/\\d{4}-\\d{2}-\\d{2})?)+$'
                       THEN EXISTS (SELECT 1 FROM unnest(string_to_array(i.episode_break_date_text, ',')) d WHERE ${lc.join(' AND ')})
                       ELSE (${bare.join(' AND ')}) END)`);
   }
@@ -179,7 +182,7 @@ router.get('/export', asyncH(async (req, res) => {
   const dayText = (r) => {
     const t = r.episode_break_date_text || (r.episode_date ? new Date(r.episode_date).toISOString().slice(0, 10) : '');
     const m = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/.exec(t || '');
-    return m ? `${m[1]} to ${m[2]}` : (t || '').split(',').join('; ');
+    return m ? `${m[1]} to ${m[2]}` : (t || '').split(',').map((g) => g.replace('/', ' to ')).join('; ');
   };
   // Styled like the Workload export (and like the web table): tinted header, vertical grid lines, centred cells, bold names, coloured Platform and
   // Status (CM) text (Excel can't give a cell a pill background), the decision / approval time on a second line, nothing cropped.
@@ -189,10 +192,10 @@ router.get('/export', asyncH(async (req, res) => {
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const nice = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); return m ? `${MON[+m[2] - 1]} ${+m[3]}, ${m[1]}` : String(iso || ''); };
   const niceDay = (r) => {
-    if (r._on) return `${nice(r._on)}\n(also ${r._also.join(', ')})`;
+    if (r._on) return `${r._text}\n(also ${r._also.join('; ')})`;
     const t = r.episode_break_date_text || (r.episode_date ? new Date(r.episode_date).toISOString().slice(0, 10) : '');
     const m = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/.exec(t || '');
-    if (LIST_RE.test(t || '')) return t.split(',').map(nice).join('; ');   // separate days: "Sep 1, 2026; Sep 7, 2026" (the import reads this back)
+    if (MULTI_RE.test(t || '')) return t.split(',').map((g) => (g.includes('/') ? `${nice(segStart(g))} – ${nice(segEnd(g))}` : nice(g))).join('; ');   // several: "Sep 1, 2026; Sep 14, 2026 – Sep 18, 2026" (the import reads this back)
     return m ? `${nice(m[1])} – ${nice(m[2])}` : (/^\d{4}-\d{2}-\d{2}/.test(t || '') ? nice(t) : (t || ''));
   };
   const niceTime = (ts) => { if (!ts) return ''; const d = new Date(ts); const h = d.getHours(); return `${nice(d.toISOString())} ${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`; };
@@ -259,14 +262,16 @@ router.get('/export', asyncH(async (req, res) => {
     // a record with separate days goes on the tab of EACH of those days (only days inside the date filter), the others listed in the Episode cell
     const lo = req.query.from ? String(req.query.from).slice(0, 10) : '';
     const hi = req.query.to ? String(req.query.to).slice(0, 10) : '';
+    const short = (g) => (g.includes('/') ? `${nice(segStart(g)).replace(/, \d{4}$/, '')} – ${nice(segEnd(g)).replace(/, \d{4}$/, '')}` : nice(g).replace(/, \d{4}$/, ''));
+    const full = (g) => (g.includes('/') ? `${nice(segStart(g))} – ${nice(segEnd(g))}` : nice(g));
     const spread = [];
     for (const r of rows) {
-      if (!LIST_RE.test(r.episode_break_date_text || '')) { spread.push(r); continue; }
+      if (!MULTI_RE.test(r.episode_break_date_text || '')) { spread.push(r); continue; }
       const all = r.episode_break_date_text.split(',');
-      for (const d of all) {
-        if ((lo && d < lo) || (hi && d > hi)) continue;
-        const also = all.filter((x) => x !== d).map((x) => nice(x).replace(/, \d{4}$/, ''));
-        spread.push({ ...r, episode_date: d, _on: d, _also: also });
+      for (const g of all) {
+        if ((lo && segEnd(g) < lo) || (hi && segStart(g) > hi)) continue;
+        const tab = lo && segStart(g) < lo ? lo : segStart(g);   // each date / range goes on the tab of its first day (a range that began before the filter: the first filtered day)
+        spread.push({ ...r, episode_date: tab, _on: tab, _text: full(g), _also: all.filter((x) => x !== g).map(short) });
       }
     }
     groupByDate(spread, (r) => r.episode_date).forEach((g) => fill(wb.addWorksheet(g.name), g.rows));
@@ -309,7 +314,7 @@ function oneDay(part) {   // "2026-10-10", "Oct 10, 2026", "10/10/2026" or an Ex
 function episodeFromCell(val) {   // one date, or "start – end" / "start to end" / "start/end" → what the table stores
   if (val == null || val === '') return '';
   if (val instanceof Date) return val.toISOString().slice(0, 10);
-  if (/;/.test(String(val)) || LIST_RE.test(String(val).replace(/\s+/g, ''))) return String(val).split(/;|,(?=\d{4}-)/).map((x) => x.trim()).filter(Boolean).map(oneDay).join(',');   // separate days
+  { const many = parseEpisodeText(String(val)); if (many && (many.includes(',') || many.includes('/'))) return many; }   // several dates / ranges, or a range in words ("Sep 14-18")
   const parts = String(val).split(/\s+(?:–|—|-|to)\s+|\//).map((x) => x.trim()).filter(Boolean);
   if (parts.length === 1) return oneDay(parts[0]);
   if (parts.length === 2) return `${oneDay(parts[0])}/${oneDay(parts[1])}`;
