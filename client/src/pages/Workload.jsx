@@ -2135,7 +2135,7 @@ export default function Workload() {
                             <Fragment key={r.id}>
                             {isPrep ? prepDivider(r, idx > 0 ? data.rows[idx - 1] : null, idx === 0 && offset === 0) : null}
                             <tr data-id={r.id}
-                              className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}`.trim()}
+                              className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}${isPrep && (r.prep_missing || []).length ? ' prep-wait' : ''}`.trim()}
                               onMouseDown={cellDown}
                               onContextMenu={(e) => rowMenu(e, r)}
                               onClick={canWrite ? undefined : (e) => { if (!(e.target.closest && e.target.closest('.rn'))) setForm({ rec: r }); }}>
