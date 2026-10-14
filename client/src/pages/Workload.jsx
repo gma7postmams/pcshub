@@ -114,6 +114,14 @@ function bdApply(row, text, unitTeams, replace) {
   });
   return patch;
 }
+/** A VGFX time pasted onto a VEDIT-only row (or the other way round) is refused: returns the message, or '' when the text fits the row. */
+function bdMismatch(row, text, unitTeams) {
+  if (!row.units_concerned) return '';
+  const teams = bdTeams(unitTeams, row.units_concerned);
+  const raw = normBreakdate(text, /^\d{4}/.test(row.work_date || '') ? row.work_date.slice(0, 4) : new Date().getFullYear());
+  const bad = Object.keys(parseBreakdatePairs(raw)).map((k) => (k === 'breakdate_vgfx' ? 'VGFX' : 'VEDIT')).filter((t) => !teams.includes(t));
+  return bad.length ? `Can't paste a ${bad.join(' / ')} time into a "${row.units_concerned}" row — it has no ${bad.join(' / ')} Breakdate / Time. Change its Units Concerned first.` : '';
+}
 const BD_DEF = { multiline: true, max: 300, hint: 'VGFX  Sep 28, 2026 4:00 PM' };
 /** The merged Breakdate / Time grid cell. While it is being edited it shows exactly what was typed; when it loses focus (or a paste /
     undo changes it) it shows the times as the row now holds them. */
@@ -316,7 +324,7 @@ function GridCellInput({ def, value, onChange, disabled, ...rest }) {
 
 // One table cell turned into its own editor. Enter or clicking away saves, Esc cancels; dropdowns save as soon as you pick.
 // A failed save (e.g. an invalid value) keeps the editor open with the message shown.
-function CellEditor({ def, initial, lookups, onSave, onCancel }) {
+function CellEditor({ def, initial, lookups, onSave, onCancel, copyText }) {
   const [val, setVal] = useState(initial ?? '');
   const [busy, setBusy] = useState(false);
   const box = useRef(null);
@@ -345,6 +353,17 @@ function CellEditor({ def, initial, lookups, onSave, onCancel }) {
     setVal(nv);
     if (def.kind === 'select') save(nv);
   };
+  // Ctrl+C in an open editor with nothing selected copies the whole cell (a date / time box or a dropdown has no text to select)
+  const copy = (e) => {
+    const el = field();
+    if (!el) return;
+    let sel = '';
+    try { sel = el.selectionStart != null && el.selectionEnd != null ? el.value.slice(el.selectionStart, el.selectionEnd) : ''; } catch (err) { sel = ''; }
+    if (sel) return;
+    const text = copyText != null ? copyText : el.tagName === 'SELECT' ? ((el.selectedOptions && el.selectedOptions[0]) || {}).text || '' : el.value;
+    e.clipboardData.setData('text/plain', text || '');
+    e.preventDefault();
+  };
   const blur = (e) => { if (box.current && !box.current.contains(e.relatedTarget)) save(val); };
   const key = (e) => {
     if (e.key === 'Escape') { finished.current = true; onCancel(); return; }
@@ -364,7 +383,7 @@ function CellEditor({ def, initial, lookups, onSave, onCancel }) {
     else if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); save(val, { dr: 0, dc: e.shiftKey ? -1 : 1 }); }
   };
   return (
-    <div className={`cell-editor${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key}>
+    <div className={`cell-editor${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key} onCopy={copy}>
       <FieldInput auto def={def} value={val} lookups={lookups} disabled={busy} onChange={change} />
     </div>
   );
@@ -757,9 +776,14 @@ export default function Workload() {
     return id ? (plugCache.current.get(date) || []).find((p) => p.plug_id.toUpperCase() === id) || null : null;
   };
   // one place that knows how to put a value into a grid cell (the merged Breakdate / Time cell is text for both teams' times)
+  const bdErrs = useRef(new Set());   // refused Breakdate / Time pastes, shown once the paste is done
+  const flushBdErrs = () => setTimeout(() => { const m = [...bdErrs.current]; bdErrs.current.clear(); if (m.length) toast(m[0], 'err'); }, 0);
   const setCellValue = (row, k, val, replace) => {
     if (xlLocked(row)) return row;   // a locked row never changes
-    if (k === 'breakdate_vgfx') return { ...row, ...bdApply(row, val, meta.unitTeams, replace) };
+    if (k === 'breakdate_vgfx') {
+      if (replace) { const bad = bdMismatch(row, val, meta.unitTeams); if (bad) { bdErrs.current.add(bad); return row; } }
+      return { ...row, ...bdApply(row, val, meta.unitTeams, replace) };
+    }
     if (replace && k === 'units_concerned') val = canonUnit(meta, val);
     const next = withAutoPlatform(meta.platformRules, row, k, val);
     return k === 'plug_id' || k === 'work_date' ? fillFromPlug(next, row, findPlug) : next;
@@ -929,7 +953,12 @@ export default function Workload() {
   const gridCopy = (cols, cut) => (e) => {
     const n = normSel();
     if (!n) return;
-    if (n.rLo === n.rHi && n.cLo === n.cHi && isTextTarget(e.target)) return;
+    if (n.rLo === n.rHi && n.cLo === n.cHi && isTextTarget(e.target)) {   // one cell open for typing: the browser copies the text selected in it; with nothing selected the whole cell is copied
+      const t = e.target;
+      let sel = '';
+      try { sel = t.selectionStart != null && t.selectionEnd != null ? t.value.slice(t.selectionStart, t.selectionEnd) : ''; } catch (err) { sel = ''; }
+      if (sel) return;
+    }
     const text = selectionTsv(cols);
     e.clipboardData.setData('text/plain', text);
     internalClip.current = text;
@@ -975,7 +1004,8 @@ export default function Workload() {
       if (lockNotice(sel0.rLo, sel0.rHi, 'Pasted')) return true;
       pushHistory(null);
       setEpoch((v) => v + 1);
-      setGrid((g) => ({ ...g, rows: g.rows.map((row, ri) => (ri >= sel0.rLo && ri <= sel0.rHi && !xlLocked(row) ? { ...row, ...bdApply(row, rawText, meta.unitTeams, true), _dirty: true } : row)) }));
+      setGrid((g) => ({ ...g, rows: g.rows.map((row, ri) => (ri >= sel0.rLo && ri <= sel0.rHi && !xlLocked(row) ? { ...setCellValue(row, 'breakdate_vgfx', rawText, true), _dirty: true } : row)) }));
+      flushBdErrs();
       return true;
     }
     const block = parseTsvBlock(rawText);
@@ -1011,6 +1041,7 @@ export default function Workload() {
       }));
       setGridSel({ r0: n.rLo, c0: n.cLo, r1: n.rHi, c1: n.cHi });
       focusBox();
+      flushBdErrs();
       return true;
     }
     if (!canWrite) return true;
@@ -1043,6 +1074,7 @@ export default function Workload() {
     });
     setGridSel({ r0, c0, r1: r0 + tileR - 1, c1: Math.min(c0 + tileC - 1, cols.length - 1) });
     focusBox();
+    flushBdErrs();
     return true;
   };
   // Right-click on a row number: put the copied rows in ABOVE this row as new rows (nothing is overwritten)
@@ -1474,6 +1506,7 @@ export default function Workload() {
         const k = tableCols[ci];
         const val = valueAt(ri - n.r0, ci - n.c0, k);
         if (val === undefined) continue;
+        if (k === 'breakdate_vgfx' && label === 'pasted') { const bad = bdMismatch(r, val, meta.unitTeams); if (bad) { bdErrs.current.add(bad); continue; } }
         if (String(cellText(r, k) ?? '') === String(val ?? '')) continue;   // already that value
         row = setCellValue(row, k, val, true);
         changed = true;
@@ -1481,7 +1514,9 @@ export default function Workload() {
       }
       if (changed) { olds.push({ id: r.id, ...toPayload(r) }); list.push(row); }
     }
-    if (!list.length) { toast(note ? `Nothing changed. ${note}` : 'Nothing changed (the cells already hold that, or the rows are locked)', 'err'); return; }
+    const refused = [...bdErrs.current]; bdErrs.current.clear();
+    if (refused.length) note = [note, refused[0]].filter(Boolean).join('; ');
+    if (!list.length) { toast(refused.length ? refused[0] : note ? `Nothing changed. ${note}` : 'Nothing changed (the cells already hold that, or the rows are locked)', 'err'); return; }
     try {
       const out = await post('/api/workload/batch', { rows: list });
       // PSD / Prog. Name / Platform are filled in again by the server when the plug is on the PSD Daily Plug List (or the Plug ID gives the Platform): say so
@@ -1742,7 +1777,7 @@ export default function Workload() {
             if (editing && editing.id === r.id && editing.k === k) {
               return (
                 <span key={k} className="cell-editor-inline" onClick={(e) => e.stopPropagation()}>
-                  <CellEditor def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} />
+                  <CellEditor def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} copyText={k === 'breakdate_vgfx' || k === 'breakdate_vedit' ? `${k === 'breakdate_vgfx' ? 'VGFX' : 'VEDIT'}  ${fmtBdText(r[k])}` : undefined} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} />
                 </span>
               );
             }
