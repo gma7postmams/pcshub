@@ -1,5 +1,6 @@
 import { cloneElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { pasteFallback } from '../lib/pasteFallback.js';
 import { normDate } from '../components/PlugGrid.jsx';
 import { loadView as loadViewState, saveView as saveViewState, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
 import { del, get, patch, post, put } from '../lib/api.js';
@@ -368,21 +369,24 @@ function CellEditor({ def, initial, lookups, onSave, onCancel, copyText, memo })
     e.preventDefault();
   };
   // Ctrl+V while a dropdown or date box is open: the copied text picks the matching option / sets the date (these boxes can't take pasted text themselves)
-  const paste = (e) => {
-    const el = e.target;
-    const text = String((e.clipboardData && e.clipboardData.getData('text/plain')) || '').replace(/\s*\n\s*/g, ' ').trim();
-    if (!text || !el) return;
+  const applyText = (raw, el) => {
+    const text = String(raw || '').replace(/\s*\n\s*/g, ' ').trim();
+    if (!text || !el) return false;
     if (el.tagName === 'SELECT') {
       const opt = [...el.options].find((o) => o.value && (o.value.toLowerCase() === text.toLowerCase() || o.text.trim().toLowerCase() === text.toLowerCase()));
-      e.preventDefault();
       if (opt) change({ target: { value: opt.value } });
-    } else if (el.tagName === 'INPUT' && el.type === 'date') {
-      const d = normDate(text);
-      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) { e.preventDefault(); change({ target: { value: d } }); }
+      return true;
     }
+    if (el.tagName === 'INPUT' && el.type === 'date') {
+      const d = normDate(text);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) { change({ target: { value: d } }); return true; }
+    }
+    return false;
   };
+  const paste = (e) => { const t = e.clipboardData ? e.clipboardData.getData('text/plain') : ''; if (applyText(t, e.target)) e.preventDefault(); };
   const blur = (e) => { if (box.current && !box.current.contains(e.relatedTarget)) save(val); };
   const key = (e) => {
+    pasteFallback(e, applyText);
     if (e.key === 'Escape') { finished.current = true; onCancel(); return; }
     const tag = e.target.tagName;
     // Like the grid in Excel mode: Alt+Enter is a line break inside a multi-line cell; Enter saves and moves to the cell below (Shift+Enter: above);

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
+import { pasteFallback } from '../lib/pasteFallback.js';
 import { parseEpisodeText } from '../lib/episode.js';
 import { loadView, saveView, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
 import { ago, downloadFile, fmtDate, fmtDateTime } from '../lib/util.js';
@@ -129,19 +130,20 @@ function DateRangeInput({ value, onChange, disabled }) {
   const [rows, setRows] = useState(() => (LIST.test(value || '') ? String(value).split(',').map((g) => { const [a, b] = g.split('/'); return { a, b: b || '' }; }) : null));   // null = one date / range; else the rows (may include empty ones)
   const emit = (rs) => onChange([...new Set(rs.filter((r) => r.a).map((r) => join(r.a, r.b && r.b >= r.a ? r.b : '')))].sort().join(','));
   // Ctrl+V while the field is open: text such as "Sep 14-18, 21-25" or "Sep 1, 7, 14" fills it (the date boxes themselves can't take pasted text)
-  const onPaste = (e) => {
-    const t = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
+  const applyEp = (t) => {
     const parsed = t ? parseEpisodeText(t) : null;
-    if (!parsed) return;
-    e.preventDefault();
+    if (!parsed) return false;
     if (parsed.includes(',')) setRows(parsed.split(',').map((g) => { const [a, b] = g.split('/'); return { a, b: b || '' }; })); else if (rows) setRows([{ a: parsed.slice(0, 10), b: parsed.includes('/') ? parsed.slice(-10) : '' }]);
     onChange(parsed);
+    return true;
   };
+  const onPaste = (e) => { if (applyEp(e.clipboardData ? e.clipboardData.getData('text/plain') : '')) e.preventDefault(); };
+  const onKey = (e) => pasteFallback(e, (t) => applyEp(t));
   if (rows) {
     const edit = (i, part) => { const n = rows.map((r, j) => (j === i ? { ...r, ...part } : r)); setRows(n); emit(n); };
     const del = (i) => { const n = rows.filter((_, j) => j !== i); setRows(n.length ? n : [{ a: '', b: '' }]); emit(n); };
     return (
-      <span className="dri-list" onPaste={onPaste}>
+      <span className="dri-list" onPaste={onPaste} onKeyDown={onKey}>
         {rows.map((r, i) => (
           <span className="dri-day" key={i}>
             <span className="dri">
@@ -160,7 +162,7 @@ function DateRangeInput({ value, onChange, disabled }) {
     );
   }
   return (
-    <span className="dri-wrap" onPaste={onPaste}>
+    <span className="dri-wrap" onPaste={onPaste} onKeyDown={onKey}>
       <span className="dri">
         <input type="date" value={from} disabled={disabled} max={to || undefined} aria-label="From" onChange={(e) => onChange(join(e.target.value, to))} />
         <span className="dim dri-dash">–</span>
@@ -198,21 +200,24 @@ function InlineCell({ def, initial, options, onSave, onCancel, memo }) {
   };
   const change = (e) => { const nv = e.target.value; setVal(nv); if (def.kind === 'select') save(nv); };
   // Ctrl+V while a dropdown or date box is open: the copied text picks the matching option / sets the date (these boxes can't take pasted text themselves)
-  const paste = (e) => {
-    const el = e.target;
-    const text = String((e.clipboardData && e.clipboardData.getData('text/plain')) || '').replace(/\s*\n\s*/g, ' ').trim();
-    if (!text || !el) return;
+  const applyText = (raw, el) => {
+    const text = String(raw || '').replace(/\s*\n\s*/g, ' ').trim();
+    if (!text || !el) return false;
     if (el.tagName === 'SELECT') {
       const opt = [...el.options].find((o) => o.value && (o.value.toLowerCase() === text.toLowerCase() || o.text.trim().toLowerCase() === text.toLowerCase()));
-      e.preventDefault();
       if (opt) change({ target: { value: opt.value } });
-    } else if (el.tagName === 'INPUT' && el.type === 'date') {
-      const d = normDate(text);
-      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) { e.preventDefault(); change({ target: { value: d } }); }
+      return true;
     }
+    if (el.tagName === 'INPUT' && el.type === 'date') {
+      const d = normDate(text);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) { change({ target: { value: d } }); return true; }
+    }
+    return false;
   };
+  const paste = (e) => { const t = e.clipboardData ? e.clipboardData.getData('text/plain') : ''; if (applyText(t, e.target)) e.preventDefault(); };
   const blur = (e) => { if (box.current && !box.current.contains(e.relatedTarget)) save(val); };
   const key = (e) => {
+    pasteFallback(e, applyText);
     if (e.key === 'Escape') { finished.current = true; onCancel(); return; }
     const tag = e.target.tagName;
     if (e.key === 'Enter' && tag !== 'SELECT' && (tag !== 'TEXTAREA' || e.ctrlKey || e.metaKey)) { e.preventDefault(); save(val, def.kind === 'daterange' ? undefined : { dr: e.shiftKey ? -1 : 1, dc: 0 }); }   // Enter saves and moves down (Shift+Enter up)

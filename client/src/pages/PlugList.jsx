@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
+import { pasteFallback } from '../lib/pasteFallback.js';
 import { loadView, saveView, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
 import { CalendarIcon, DownloadIcon, ExitFullscreenIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
@@ -88,6 +89,7 @@ function PlugCellEditor({ k, initial, onSave, onCancel, memo }) {
   useEffect(() => { const el = ref.current; if (el) { el.focus(); if (el.setSelectionRange && k !== 'plug_date') el.setSelectionRange(el.value.length, el.value.length); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const finish = (move) => { if (done.current) return; done.current = true; onSave(val, move); };
   const key = (e) => {
+    if (k === 'plug_date') pasteFallback(e, (t) => { const d = normDate(String(t).trim()); if (/^\d{4}-\d{2}-\d{2}$/.test(d)) setVal(d); });
     if (e.key === 'Escape') { done.current = true; onCancel(); return; }
     if (e.key === 'Enter') { e.preventDefault(); finish({ dr: e.shiftKey ? -1 : 1, dc: 0 }); }
     else if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); finish({ dr: 0, dc: e.shiftKey ? -1 : 1 }); }
