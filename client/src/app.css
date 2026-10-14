@@ -250,7 +250,7 @@ h3 { font-size: 15px; }
 .btn.danger { background: color-mix(in srgb, var(--red) 18%, var(--surface-2)); border-color: color-mix(in srgb, var(--red) 45%, transparent); color: var(--red); }
 .btn.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
 .btn.ghost:hover { background: var(--surface-2); color: var(--text); }
-.btn.sm { height: 29px; padding: 0 10px; font-size: 12.5px; border-radius: 7px; }
+.btn.sm { height: 32px; padding: 0 12px; font-size: 13px; border-radius: 8px; }
 .btn svg { width: 16px; height: 16px; }
 .segmented { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; padding: 3px; }
 .segmented button { border: 0; background: transparent; color: var(--text-2); font: 550 13px var(--font); padding: 6px 13px; border-radius: 6px; cursor: pointer; }

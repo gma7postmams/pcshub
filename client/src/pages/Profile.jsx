@@ -176,7 +176,7 @@ function EmailSetupModal({ sentTo, onClose, onEnabled }) {
           <input id="tok" className="otp-input" inputMode="numeric" maxLength={6} autoComplete="one-time-code" value={code}
             onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} />
         </label>
-        <div><button type="button" className="btn sm" onClick={again}>Send the code again</button></div>
+        <div><button type="button" className="btn" onClick={again}>Send the code again</button></div>
         <label className="f"><span>3. Confirm with your password</span>
           <input id="tokpw" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </label>

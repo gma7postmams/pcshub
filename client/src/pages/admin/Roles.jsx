@@ -38,7 +38,7 @@ export default function Roles({ model, refreshModel }) {
 
   return (
     <>
-      <div className="admin-bar"><span className="grow" /><button type="button" className="btn primary sm" id="role-new" onClick={() => setEditing({})}>New role</button></div>
+      <div className="admin-bar"><span className="grow" /><button type="button" className="btn primary" id="role-new" onClick={() => setEditing({})}>New role</button></div>
       <div className="card">
         <div className="table-wrap">
           <table className="t wl perm-matrix">

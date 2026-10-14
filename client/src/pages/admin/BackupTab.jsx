@@ -25,7 +25,7 @@ function PreviewCard({ preview, onCreate, busy }) {
     <div className="card mb-12">
       <div className="card-head">
         <h2 className="sr-only">Backup preview</h2>
-        <button type="button" className="btn primary sm" disabled={busy || !env.pgDump.ok || !env.storageWritable} onClick={onCreate}>Create backup</button>
+        <button type="button" className="btn primary" disabled={busy || !env.pgDump.ok || !env.storageWritable} onClick={onCreate}>Create backup</button>
       </div>
       <div className="card-pad">
         <Environment env={env} />
@@ -106,7 +106,7 @@ function ScheduleCard({ onSaved }) {
   };
   return (
     <div className="card mb-12">
-      <div className="card-head"><h2>Automatic backups</h2><button type="button" className="btn primary sm" disabled={busy} onClick={save}>Save schedule</button></div>
+      <div className="card-head"><h2>Automatic backups</h2><button type="button" className="btn primary" disabled={busy} onClick={save}>Save schedule</button></div>
       <div className="card-pad">
         <div className="sched-grid">
           <label className="f"><span>How often</span>

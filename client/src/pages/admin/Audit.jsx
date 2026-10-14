@@ -739,8 +739,8 @@ export default function Audit() {
           aria-label="To date"
           onChange={set('to')}
         />
-        {any ? <button type="button" className="btn sm ghost" onClick={() => { setF({ action: '', category: '', user: '', q: '', record: '', from: '', to: '' }); setOffset(0); }}>Clear</button> : null}
-        {!isActivityHistory ? <a className="btn sm" href={`/api/admin/audit/export?${params()}`} download>Export to Excel</a> : null}
+        {any ? <button type="button" className="btn ghost" onClick={() => { setF({ action: '', category: '', user: '', q: '', record: '', from: '', to: '' }); setOffset(0); }}>Clear</button> : null}
+        {!isActivityHistory ? <a className="btn" href={`/api/admin/audit/export?${params()}`} download>Export to Excel</a> : null}
       </div>
 
 

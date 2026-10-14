@@ -91,7 +91,7 @@ export default function Users({ model }) {
         <select aria-label="Filter by group" value={fGroup} onChange={(e) => setFGroup(e.target.value)}><option value="">All groups</option><option value="none">Not enrolled</option>{groups.map((g) => <option key={g.id} value={String(g.id)}>{g.name}</option>)}</select>
         <select aria-label="Filter by status" value={fStatus} onChange={(e) => setFStatus(e.target.value)}><option value="">Any status</option><option value="active">Active</option><option value="disabled">Disabled</option><option value="locked">Locked</option><option value="never">Never signed in</option></select>
         <select aria-label="Filter by 2FA" value={f2fa} onChange={(e) => setF2fa(e.target.value)}><option value="">Any 2FA</option><option value="on">2FA on</option><option value="off">2FA off</option></select>
-        {filtered ? <button type="button" className="btn sm ghost" onClick={clearFilters}>Clear</button> : null}
+        {filtered ? <button type="button" className="btn ghost" onClick={clearFilters}>Clear</button> : null}
         <span className="users-actions">
           {picked.size ? (
             <>
@@ -101,12 +101,12 @@ export default function Users({ model }) {
               </select>
               {bulk.action === 'role' ? <select className="sm" aria-label="New role" value={bulk.value} onChange={(e) => setBulk({ ...bulk, value: e.target.value })}><option value="">Role…</option><Options list={model.roles} /></select> : null}
               {bulk.action === 'group' ? <select className="sm" aria-label="New group" value={bulk.value} onChange={(e) => setBulk({ ...bulk, value: e.target.value })}><Options list={groups.map((x) => ({ value: String(x.id), label: x.name }))} blank="— Not enrolled —" /></select> : null}
-              <button type="button" className="btn primary sm" id="bulk-go" disabled={!bulk.action} onClick={runBulk}>Apply</button>
-              <button type="button" className="btn danger sm" id="del-sel" onClick={removePicked}>Delete ({picked.size})</button>
+              <button type="button" className="btn primary" id="bulk-go" disabled={!bulk.action} onClick={runBulk}>Apply</button>
+              <button type="button" className="btn danger" id="del-sel" onClick={removePicked}>Delete ({picked.size})</button>
             </>
           ) : null}
           <JsonTools path="/api/admin/users" onDone={load} summary={(r) => `Imported: ${r.added} added, ${r.existing} already there${r.skipped ? `, ${r.skipped} skipped` : ''}`} />
-          <button type="button" className="btn primary sm" id="add" onClick={() => setEditing({})}><PlusIcon /> Add user</button>
+          <button type="button" className="btn primary" id="add" onClick={() => setEditing({})}><PlusIcon /> Add user</button>
         </span>
       </div>
       <div className="table-wrap">
@@ -222,29 +222,29 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
           <>
             <h3 className="mt-16 mb-12">Security</h3>
             <div className="row">
-              <button type="button" className="btn sm" id="rpw" onClick={() => { setRpMode('generate'); setRpPw(''); setRpEmail(false); setRpForce(true); setResetOpen(true); }}>Reset password</button>
+              <button type="button" className="btn" id="rpw" onClick={() => { setRpMode('generate'); setRpPw(''); setRpEmail(false); setRpForce(true); setResetOpen(true); }}>Reset password</button>
               <select aria-label="2FA method" id="tfa-method" value={method} onChange={(e) => setMethod(e.target.value)}>
                 <option value="app">2FA by authenticator app</option>
                 <option value="email" disabled={!emailOk && method !== 'email'}>2FA by emailed code{emailOk ? '' : ' (not enabled)'}</option>
               </select>
               {u.twofa_required && method !== (u.twofa_method || 'app')
-                ? <button type="button" className="btn sm" id="tfa-switch"
+                ? <button type="button" className="btn" id="tfa-switch"
                   onClick={() => action('2fa', '2FA method changed', ['Change 2FA method', `Switch ${u.full_name} to ${method === 'email' ? 'emailed codes' : 'an authenticator app'}? They must set it up again at their next use.`, { okText: 'Change' }],
                     { enabled: true, method })}>Change method</button>
                 : null}
               {u.twofa_required
-                ? <button type="button" className="btn sm" id="tfa-off"
+                ? <button type="button" className="btn" id="tfa-off"
                   onClick={() => action('2fa', '2FA disabled', ['Disable 2FA', `Turn 2FA off for ${u.full_name}? Their authenticator is removed.`, { okText: 'Disable 2FA', danger: true }],
                     { enabled: false })}>Disable 2FA</button>
-                : <button type="button" className="btn sm" id="tfa-on"
+                : <button type="button" className="btn" id="tfa-on"
                   onClick={() => action('2fa', '2FA enabled', ['Enable 2FA', `Turn 2FA on for ${u.full_name}? They must set up an authenticator at their next use.`, { okText: 'Enable 2FA' }],
                     { enabled: true, method })}>Enable 2FA</button>}
-              <button type="button" className="btn sm" id="r2fa" disabled={!u.totp_enabled}
+              <button type="button" className="btn" id="r2fa" disabled={!u.totp_enabled}
                 onClick={() => action('reset-2fa', '2FA reset', ['Reset 2FA', `Remove 2FA from ${u.full_name}? They can set it up again from Profile.`, { okText: 'Reset 2FA', danger: true }])}>Reset 2FA</button>
-              <button type="button" className="btn sm" id="signout" disabled={!u.sessions} title={u.sessions ? undefined : 'Not signed in anywhere'}
+              <button type="button" className="btn" id="signout" disabled={!u.sessions} title={u.sessions ? undefined : 'Not signed in anywhere'}
                 onClick={() => action('sign-out', 'Signed out everywhere', ['Sign out everywhere', `Sign ${u.full_name} out of ${u.sessions} ${u.sessions === 1 ? 'device' : 'devices'}? They sign in again with their password.`, { okText: 'Sign out' }])}>Sign out everywhere{u.sessions ? ` (${u.sessions})` : ''}</button>
-              <button type="button" className="btn sm" id="unlock" disabled={!(u.locked_until && new Date(u.locked_until) > new Date())} title={u.locked_until && new Date(u.locked_until) > new Date() ? undefined : 'This account is not locked'} onClick={() => action('unlock', 'Account unlocked')}>Unlock</button>
-              {!self ? <button type="button" className="btn sm danger" id="del-user" onClick={async () => {
+              <button type="button" className="btn" id="unlock" disabled={!(u.locked_until && new Date(u.locked_until) > new Date())} title={u.locked_until && new Date(u.locked_until) > new Date() ? undefined : 'This account is not locked'} onClick={() => action('unlock', 'Account unlocked')}>Unlock</button>
+              {!self ? <button type="button" className="btn danger" id="del-user" onClick={async () => {
                 if (!(await confirm('Delete user', `Permanently delete ${u.full_name}? Their records stay, but they can no longer sign in. This cannot be undone.`, { okText: 'Delete', danger: true }))) return;
                 try { await post('/api/admin/users/delete', { ids: [u.id] }); toast('User deleted'); onSaved(); } catch (e) { toast(e.message, 'err'); }
               }}>Delete user</button> : null}

@@ -32,7 +32,7 @@ export default function ReauthDialog({ title, intro, okText, danger, typed, onCl
         {children}
         {typed ? <label className="f"><span>Type <strong>{typed}</strong> to confirm</span><input autoComplete="off" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></label> : null}
         <label className="f"><span>Your password</span><input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
-        {viaEmail ? <div className="row"><button type="button" className="btn sm" onClick={sendCode}>{sent ? 'Send again' : 'Email me a code'}</button><span className="dim">{sent ? `Sent to ${sent}` : 'The code is sent to your account email'}</span></div> : null}
+        {viaEmail ? <div className="row"><button type="button" className="btn" onClick={sendCode}>{sent ? 'Send again' : 'Email me a code'}</button><span className="dim">{sent ? `Sent to ${sent}` : 'The code is sent to your account email'}</span></div> : null}
         {needCode ? <label className="f"><span>{viaEmail ? 'Code from your email' : 'Authentication code'}</span><input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value)} /></label> : null}
       </form>
     </Modal>

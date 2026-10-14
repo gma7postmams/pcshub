@@ -41,7 +41,7 @@ export default function Groups({ model }) {
         <div className="card-head">
           <h2 className="sr-only">Groups</h2>
           <JsonTools path="/api/admin/groups" onDone={load} summary={(r) => `Imported: ${r.added} added, ${r.existing} already there`} />
-          <button type="button" className="btn primary sm" id="add" onClick={() => setEditing({})}><PlusIcon /> Add group</button>
+          <button type="button" className="btn primary" id="add" onClick={() => setEditing({})}><PlusIcon /> Add group</button>
         </div>
         <div className="table-wrap">
           {!list.length ? <Empty>No groups yet. Add one, tick the pages it can open, then enroll users in it.</Empty> : (
@@ -127,8 +127,8 @@ function GroupForm({ g, catalog, onClose, onSaved }) {
         <div>
           <div className="row mb-12">
             <strong className="grow">Pages &amp; sections this group can open</strong>
-            <button type="button" className="btn sm ghost" id="all" onClick={all}>Select all</button>
-            <button type="button" className="btn sm ghost" id="none" onClick={() => setPerms(new Set())}>Clear</button>
+            <button type="button" className="btn ghost" id="all" onClick={all}>Select all</button>
+            <button type="button" className="btn ghost" id="none" onClick={() => setPerms(new Set())}>Clear</button>
           </div>
           <div className="perm-tree">
             {catalog.map((p) => (
