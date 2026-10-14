@@ -28,3 +28,23 @@ export function syncDialog(page, rec) {
 }
 export const loadDialogValues = (page) => { const d = readDlg(page); return d ? d.values : null; };
 export function saveDialogValues(page, values) { const d = readDlg(page); if (d) writeDlg(page, { ...d, values }); }
+
+// ---- an inline cell editor that is open, its typed text, and the not-yet-saved "Add Row" row: all come back after a refresh ----
+const EKEY = (page) => `pulse:edit:${page}`;
+export const loadEdit = (page) => { try { return JSON.parse(sessionStorage.getItem(EKEY(page))) || {}; } catch (e) { return {}; } };
+export function patchEdit(page, part) {
+  try { sessionStorage.setItem(EKEY(page), JSON.stringify({ ...loadEdit(page), ...part })); } catch (e) { /* storage unavailable */ }
+}
+/** Text typed into the open cell editor `cellKey` ("id:field"), or `fallback` when nothing was typed / another cell is remembered. */
+export function loadCellText(page, cellKey, fallback) {
+  const v = loadEdit(page).val;
+  return v && v.key === cellKey ? v.text : fallback;
+}
+export const saveCellText = (page, cellKey, text) => patchEdit(page, { val: { key: cellKey, text } });
+/** Keeps the remembered open cell + draft row in step with the page's state; `first` marks the restored cell so its typed text is not wiped on load. */
+export function syncEdit(page, cell, draft, prevKey) {
+  const key = cell ? `${cell.id}:${cell.k}` : null;
+  if (key !== prevKey) patchEdit(page, { cell: cell ? { id: cell.id, k: cell.k } : null, val: null });
+  patchEdit(page, { draft: draft || null });
+  return key;
+}

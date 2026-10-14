@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
-import { loadView, saveView, loadDialog, syncDialog } from '../lib/viewstate.js';
+import { loadView, saveView, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
 import { CalendarIcon, DownloadIcon, ExitFullscreenIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive } from '../lib/live.js';
@@ -80,8 +80,9 @@ function CellMenu({ x, y, children, ...rest }) {
   return <div ref={ref} className="xl-menu" style={{ left: x, top: y }} {...rest}>{children}</div>;
 }
 // One cell being edited: Enter saves and moves down (Shift+Enter up), Tab / Shift+Tab move sideways, Esc cancels, clicking away saves.
-function PlugCellEditor({ k, initial, onSave, onCancel }) {
-  const [val, setVal] = useState(initial ?? '');
+function PlugCellEditor({ k, initial, onSave, onCancel, memo }) {
+  const [val, setValRaw] = useState(() => (memo ? loadCellText('plugs', memo, initial ?? '') : initial ?? ''));
+  const setVal = (v) => { setValRaw(v); if (memo) saveCellText('plugs', memo, v); };
   const ref = useRef(null);
   const done = useRef(false);
   useEffect(() => { const el = ref.current; if (el) { el.focus(); if (el.setSelectionRange && k !== 'plug_date') el.setSelectionRange(el.value.length, el.value.length); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -166,9 +167,12 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const [editing, setEditing] = useState(() => { const d = loadDialog('plugs'); return d && d.rec && d.rec.editing ? d.rec.editing : null; });      // the plug being edited
   useEffect(() => { syncDialog('plugs', editing ? { editing } : adding ? { adding: true } : null); }, [adding, editing]);
   const okToLeave = async () => true;   // Excel mode (and its unsaved-grid prompt) is gone: the list is the Table only
-  const [draft, setDraft] = useState(null);          // the empty row Add Row put at the top, not saved yet
-  const [cellEd, setCellEd] = useState(null);        // { id, k } while one cell is open for editing
+  const [draft, setDraft] = useState(() => loadEdit('plugs').draft || null);          // the empty row Add Row put at the top, not saved yet (kept across a refresh)
+  const [cellEd, setCellEd] = useState(() => loadEdit('plugs').cell || null);        // { id, k } while one cell is open for editing (comes back after a refresh)
+  const prevEd = useRef(cellEd ? `${cellEd.id}:${cellEd.k}` : null);
+  useEffect(() => { prevEd.current = syncEdit('plugs', cellEd, draft, prevEd.current); }, [cellEd, draft]);
   const [ctx, setCtx] = useState(null);              // right-click menu position
+  useEffect(() => { if (cellEd && cellEd.id !== 'draft' && data && data.rows && !data.rows.some((r) => r.id === cellEd.id)) setCellEd(null); }, [data]);   // eslint-disable-line react-hooks/exhaustive-deps
   const hist = useRef({ past: [], future: [] });
   const internalClip = useRef(null);
   const lastPick = useRef(null);
@@ -632,7 +636,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       if (n && r.__i >= n.r0 && r.__i <= n.r1 && ci >= n.c0 && ci <= n.c1) td['data-sel'] = '1';
     }
     if (canWrite && cellEd && cellEd.id === r.id && cellEd.k === k) {
-      return <td key={k} {...td} className={`editing ${extra.className || ''}`.trim()} onClick={(e) => e.stopPropagation()}><PlugCellEditor k={k} initial={r[k]} onSave={(v, move) => saveCell(r, k, v, move)} onCancel={() => setCellEd(null)} /></td>;
+      return <td key={k} {...td} className={`editing ${extra.className || ''}`.trim()} onClick={(e) => e.stopPropagation()}><PlugCellEditor memo={`${r.id}:${k}`} k={k} initial={r[k]} onSave={(v, move) => saveCell(r, k, v, move)} onCancel={() => setCellEd(null)} /></td>;
     }
     if (!canWrite) return <td key={k} {...td}>{content}</td>;
     return <td key={k} {...td} className={`editable ${extra.className || ''}`.trim()} title="Click to edit" tabIndex={0}

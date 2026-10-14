@@ -1,6 +1,6 @@
 import { cloneElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { loadView as loadViewState, saveView as saveViewState, loadDialog, syncDialog } from '../lib/viewstate.js';
+import { loadView as loadViewState, saveView as saveViewState, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
 import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
@@ -325,8 +325,9 @@ function GridCellInput({ def, value, onChange, disabled, ...rest }) {
 
 // One table cell turned into its own editor. Enter or clicking away saves, Esc cancels; dropdowns save as soon as you pick.
 // A failed save (e.g. an invalid value) keeps the editor open with the message shown.
-function CellEditor({ def, initial, lookups, onSave, onCancel, copyText }) {
-  const [val, setVal] = useState(initial ?? '');
+function CellEditor({ def, initial, lookups, onSave, onCancel, copyText, memo }) {
+  const [val, setValRaw] = useState(() => (memo ? loadCellText('workload', memo, initial ?? '') : initial ?? ''));
+  const setVal = (v) => { setValRaw(v); if (memo) saveCellText('workload', memo, v); };
   const [busy, setBusy] = useState(false);
   const box = useRef(null);
   const finished = useRef(false);
@@ -431,8 +432,11 @@ export default function Workload() {
   const [form, setForm] = useState(() => { const d = loadDialog('workload'); return d ? d.rec : null; });   // null | { rec } (rec null = new); an open one comes back after a refresh
   useEffect(() => { syncDialog('workload', form); }, [form]);
   const [saving, setSaving] = useState(false);
-  const [draft, setDraft] = useState(null);   // Table mode: the empty row Add Row put at the top, not saved yet
-  const [editing, setEditing] = useState(null);
+  const [draft, setDraft] = useState(() => loadEdit('workload').draft || null);   // Table mode: the empty row Add Row put at the top, not saved yet (kept across a refresh)
+  const [editing, setEditing] = useState(() => loadEdit('workload').cell || null);   // an open cell editor comes back after a refresh
+  const prevEd = useRef(editing ? `${editing.id}:${editing.k}` : null);
+  useEffect(() => { prevEd.current = syncEdit('workload', editing, draft, prevEd.current); }, [editing, draft]);
+  useEffect(() => { if (editing && editing.id !== 'draft' && data && data.rows && !data.rows.some((r) => r.id === editing.id)) setEditing(null); }, [data]);   // eslint-disable-line react-hooks/exhaustive-deps
   const curCell = useRef(null);   // the cell I have open or selected, kept up to date every render (announced to the others by useCellPresence)
   const peers = useCellPresence('workload', curCell);   // cells other people have open or selected   // { id, k } while one table cell is open for editing
   const [addingColumn, setAddingColumn] = useState(false);
@@ -463,7 +467,8 @@ export default function Workload() {
   const hist = useRef({ past: [], future: [], tag: null });   // Excel mode: undo / redo snapshots of the grid rows
   const [epoch, setEpoch] = useState(0);   // bumped whenever the grid is changed from outside a cell's own typing (paste, undo, clear …)
   const [ctx, setCtx] = useState(null);   // Excel mode: right-click menu position { x, y } | null
-  useEffect(() => { setEditing(null); setGridSel(null); }, [tab, mode, offset]);
+  const firstTab = useRef(true);
+  useEffect(() => { if (firstTab.current) { firstTab.current = false; return; } setEditing(null); setGridSel(null); }, [tab, mode, offset]);   // not on first load: a restored cell editor stays open
   useEffect(() => {
     if (!tctx) return undefined;
     const close = () => setTctx(null);
@@ -1744,7 +1749,7 @@ export default function Workload() {
     if (editing && editing.id === r.id && editing.k === k) {
       return (
         <td key={k} data-k={k} data-label={head(k)} className="editing" onClick={(e) => e.stopPropagation()}>
-          <CellEditor def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} />
+          <CellEditor memo={`${r.id}:${k}`} def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} />
         </td>
       );
     }
@@ -1781,7 +1786,7 @@ export default function Workload() {
             if (editing && editing.id === r.id && editing.k === k) {
               return (
                 <span key={k} className="cell-editor-inline" onClick={(e) => e.stopPropagation()}>
-                  <CellEditor def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} copyText={k === 'breakdate_vgfx' || k === 'breakdate_vedit' ? `${k === 'breakdate_vgfx' ? 'VGFX' : 'VEDIT'}  ${fmtBdText(r[k])}` : undefined} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} />
+                  <CellEditor memo={`${r.id}:${k}`} def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} copyText={k === 'breakdate_vgfx' || k === 'breakdate_vedit' ? `${k === 'breakdate_vgfx' ? 'VGFX' : 'VEDIT'}  ${fmtBdText(r[k])}` : undefined} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} />
                 </span>
               );
             }
