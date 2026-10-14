@@ -1211,3 +1211,13 @@ table.t.wl.cards .bd-chips .chip { display: inline-flex; align-items: center; ga
 .export-opt { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; cursor: pointer; text-align: left; }
 .export-opt input { width: 16px; height: 16px; margin: 0; flex: none; }
 @media (max-width: 680px) { .export-pop { left: auto; right: 0; width: 250px; } }
+
+/* phones: a dialog is never wider than the screen, whatever its fields want (Android date fields have a wide natural size) */
+@media (max-width: 680px) {
+  .modal { width: calc(100vw - 32px); max-width: calc(100vw - 32px); }
+  .modal.sm { max-width: calc(100vw - 32px); }
+  .modal-body, .modal-head, .modal-foot { min-width: 0; }
+  .modal-foot { flex-wrap: wrap; }
+  .modal-body p, .modal-body .dim { overflow-wrap: anywhere; }
+  .modal input[type=date], .modal input[type=datetime-local], .modal input[type=time] { display: block; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; -webkit-appearance: none; appearance: none; }
+}
