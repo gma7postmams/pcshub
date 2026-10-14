@@ -107,7 +107,7 @@ export default function Profile() {
                 </button>
               ))}
             </div>
-            <p className="muted m-0">Pick a colour theme just for you, or tick the default to follow the one your Admin sets (it changes when they change it).</p>
+            <p className="muted m-0 mt-12">Pick a colour theme just for you, or tick the default to follow the one your Admin sets (it changes when they change it).</p>
           </div>
         </div>
 
