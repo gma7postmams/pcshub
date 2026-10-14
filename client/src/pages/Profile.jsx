@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { post, put } from '../lib/api.js';
+import { api, del, post, put } from '../lib/api.js';
+import { avatarUrl, colorFor, makeAvatar } from '../lib/avatar.js';
+import { initials } from '../lib/util.js';
 import { useBranding, useSession } from '../context.jsx';
 import { Swatch } from '../components/ThemeSwatch.jsx';
 import { AppearanceSeg } from '../components/TopNav.jsx';
@@ -19,6 +21,24 @@ export default function Profile() {
   const [setup, setSetup] = useState(null);   // { secret, qr }
   const [emailSetup, setEmailSetup] = useState(null);   // { sentTo } when enrolling by email
   const byEmail = u.twofa_method === 'email';
+  const picRef = useRef(null);
+  const [picBusy, setPicBusy] = useState(false);
+  const choosePic = async (file) => {
+    if (!file) return;
+    setPicBusy(true);
+    try {
+      const blob = await makeAvatar(file);
+      if (!blob) { toast('That file is not a picture the browser can read. Choose a JPEG, PNG or WebP.', 'err'); return; }
+      const fd = new FormData(); fd.append('avatar', blob, 'avatar.jpg');
+      const out = await api('POST', '/api/profile/avatar', fd);
+      s.patchUser({ avatar_v: out.avatar_v });
+      toast('Profile picture saved');
+    } catch (e) { toast(e.message, 'err'); } finally { setPicBusy(false); if (picRef.current) picRef.current.value = ''; }
+  };
+  const removePic = async () => {
+    setPicBusy(true);
+    try { await del('/api/profile/avatar'); s.patchUser({ avatar_v: null }); toast('Profile picture removed'); } catch (e) { toast(e.message, 'err'); } finally { setPicBusy(false); }
+  };
 
   const startSetup = async () => {
     try {
@@ -90,6 +110,25 @@ export default function Profile() {
             <div><button className="btn primary">Update password</button></div>
             <div className="dim">Other sessions are signed out when you change your password.</div>
           </form>
+        </div>
+
+        <div className="card">
+          <div className="card-head"><h2>Profile picture</h2></div>
+          <div className="card-pad stack">
+            <div className="prof-pic">
+              <span className="pp-av" style={{ background: colorFor(u.id) }}>
+                {u.avatar_v ? <img className="av-img" src={avatarUrl(u.id, u.avatar_v)} alt="Your profile picture" /> : initials(u.full_name).slice(0, 2)}
+              </span>
+              <div className="stack">
+                <input ref={picRef} type="file" id="pic-file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => choosePic(e.target.files[0])} />
+                <div className="row gap-8">
+                  <button type="button" className="btn primary" id="pic-upload" disabled={picBusy} onClick={() => picRef.current && picRef.current.click()}>{u.avatar_v ? 'Change picture' : 'Upload picture'}</button>
+                  {u.avatar_v ? <button type="button" className="btn" id="pic-remove" disabled={picBusy} onClick={removePic}>Remove</button> : null}
+                </div>
+              </div>
+            </div>
+            <p className="muted m-0">JPEG, PNG or WebP. It is cropped to a square from the middle. The ring around it is your own colour: the same one other people see on the cell you have selected.</p>
+          </div>
         </div>
 
         <div className="card">

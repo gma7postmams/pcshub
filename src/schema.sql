@@ -420,6 +420,8 @@ INSERT INTO app_settings (key, value) VALUES ('theme_default_graphite_v1', '1') 
 
 -- Personal colour theme: NULL = follow the Admin default theme
 ALTER TABLE users ADD COLUMN IF NOT EXISTS theme TEXT;
+-- Profile picture: NULL = none (initials); otherwise the time it was set (the picture is uploads/avatars/<id>.jpg; the number is only used to refresh caches)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_v BIGINT;
 UPDATE app_settings SET value = '' WHERE key = 'accent_color' AND lower(value) = '#4f8cff';
 
 -- Custom Workload columns: admins can add extra columns beyond the template's fixed fields. Values live in

@@ -78,13 +78,13 @@ const unitsFor = (team) => Object.entries(UNIT_TEAMS).filter(([, teams]) => team
 // light GET /api/dashboard/users the page polls every few seconds so people's locations stay current.
 async function activeUsers(u) {
   const { rows } = await db.query(
-    `SELECT p.user_id AS id, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name, u.role, p.page, p.last_active_at,
+    `SELECT p.user_id AS id, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name, u.role, u.avatar_v AS av, p.page, p.last_active_at,
             (p.left_at IS NULL AND p.last_active_at >= now() - ($1 || ' minutes')::interval) AS active
        FROM user_presence p JOIN users u ON u.id = p.user_id
       WHERE u.is_active AND p.last_active_at >= now() - interval '24 hours'
       ORDER BY p.last_active_at DESC LIMIT 60`, [String(ACTIVE_MINUTES)]
   );
-  const row = (r) => ({ id: r.id, name: r.name, role: r.role, page: r.page && PAGE_BY_PATH[r.page] ? PAGE_BY_PATH[r.page].label : null, path: r.page && PAGE_BY_PATH[r.page] ? r.page : null, lastActiveAt: r.last_active_at, you: r.id === u.id });
+  const row = (r) => ({ id: r.id, name: r.name, role: r.role, av: r.av ? Number(r.av) : null, page: r.page && PAGE_BY_PATH[r.page] ? PAGE_BY_PATH[r.page].label : null, path: r.page && PAGE_BY_PATH[r.page] ? r.page : null, lastActiveAt: r.last_active_at, you: r.id === u.id });
   return { windowMinutes: ACTIVE_MINUTES, active: rows.filter((r) => r.active).map(row), earlier: rows.filter((r) => !r.active).slice(0, 12).map(row) };
 }
 
@@ -118,7 +118,7 @@ async function recentActivity(u) {
   // join keys are compared as text, so a non-numeric entity_id on some other kind of row can never make the cast fail
   const { rows } = await db.query(
     `SELECT x.id, x.user_id, x.action, x.entity_id, x.details, x.created_at,
-            COALESCE(NULLIF(btrim(u.full_name), ''), x.username, 'Someone') AS name,
+            COALESCE(NULLIF(btrim(u.full_name), ''), x.username, 'Someone') AS name, u.avatar_v AS av,
             COALESCE(i.program, w.prog_name, x.details->>'program', x.details->>'prog_name', x.details->>'title', x.details->>'filename') AS label
        FROM (SELECT a.*, CASE WHEN a.entity = 'approval_request' THEN a.details->>'ingest_record_id'
                               WHEN a.entity = 'ingest_record' THEN a.entity_id END AS ingest_key
@@ -136,7 +136,7 @@ async function recentActivity(u) {
     if (seen.has(k)) continue;
     seen.add(k);
     const a = ACTIVITY[r.action];
-    items.push({ id: r.id, uid: r.user_id, name: r.name, verb: a.verb, label: r.label || null, hue: a.hue, path: a.page, at: r.created_at, you: r.user_id === u.id });
+    items.push({ id: r.id, uid: r.user_id, av: r.av ? Number(r.av) : null, name: r.name, verb: a.verb, label: r.label || null, hue: a.hue, path: a.page, at: r.created_at, you: r.user_id === u.id });
     if (items.length >= ACTIVITY_SHOWN) break;
   }
   return items;

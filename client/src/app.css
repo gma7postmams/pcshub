@@ -1277,3 +1277,13 @@ table.t.wl.cards td.editing { padding: 6px 8px; margin: -6px -8px; border-radius
 .wl-card.full, .plug-list.full { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); box-sizing: border-box; }
 body { padding-bottom: env(safe-area-inset-bottom, 0px); }
 #toasts { bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+
+/* profile pictures: the picture sits inside a ring in the person's own colour (the same colour as the cell they have selected) */
+.has-img { padding: 2.5px; }
+.av-img { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; background: #fff; }
+.avatar.has-img { padding: 2px; }
+.dsh-avatar.has-img { padding: 3px; }
+.dsh-act-av.has-img { padding: 2px; }
+.pa.has-img { padding: 2.5px; }
+.prof-pic { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.prof-pic .pp-av { flex: none; width: 88px; height: 88px; border-radius: 50%; display: grid; place-items: center; font-size: 28px; font-weight: 700; color: #fff; padding: 4px; }

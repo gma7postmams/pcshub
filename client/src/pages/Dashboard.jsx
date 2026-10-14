@@ -1,4 +1,4 @@
-import { colorFor } from '../lib/avatar.js';
+import { avatarUrl, colorFor } from '../lib/avatar.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { get, post } from '../lib/api.js';
@@ -366,7 +366,7 @@ export default function Dashboard() {
                     return (
                       <Tag key={p.id} type={target ? 'button' : undefined} className={`dsh-user${target ? ' link' : ''}`} onClick={target ? () => navigate(target) : undefined}
                         title={`${p.name} · ${p.role}${where ? ` · on ${where}` : ''} · ${p.you ? 'just now' : ago(p.lastActiveAt)}`}>
-                        <span className="dsh-avatar" style={{ background: colorFor(p.id) }}>{initials(p.name).slice(0, 2)}<i className="dsh-status" /></span>
+                        <span className={`dsh-avatar${p.av ? ' has-img' : ''}`} style={{ background: colorFor(p.id) }}>{p.av ? <img className="av-img" src={avatarUrl(p.id, p.av)} alt="" draggable="false" /> : initials(p.name).slice(0, 2)}<i className="dsh-status" /></span>
                         <span className="dsh-user-info">
                           <span className="dsh-user-name"><span className="dsh-user-nm">{p.name}</span>{p.you ? <span className="dsh-you">You</span> : null}</span>
                           <span className="dsh-user-meta"><RoleBadge role={p.role} />{where ? <span className="dim">on {where}</span> : null}</span>
@@ -389,7 +389,7 @@ export default function Dashboard() {
                   {act.map((a) => (
                     <li key={a.id}>
                       <Link to={a.path} className="dsh-act">
-                        <span className="dsh-act-av" style={{ background: colorFor(a.uid ?? a.name) }}>{initials(a.name).slice(0, 2)}</span>
+                        <span className={`dsh-act-av${a.av ? ' has-img' : ''}`} style={{ background: colorFor(a.uid ?? a.name) }}>{a.av ? <img className="av-img" src={avatarUrl(a.uid, a.av)} alt="" draggable="false" /> : initials(a.name).slice(0, 2)}</span>
                         <span className="dsh-act-name">{a.you ? 'You' : a.name}</span>
                         <span className="dsh-act-text">{a.verb}{a.label ? <> <b>{a.label}</b></> : null}</span>
                         <span className="dsh-act-time">{ago(a.at)}</span>

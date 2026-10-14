@@ -53,13 +53,13 @@ function checkPage(req, res) {
 
 async function usersOn(path, me) {
   const { rows } = await db.query(
-    `SELECT p.user_id AS id, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name, u.role, p.last_active_at
+    `SELECT p.user_id AS id, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name, u.role, u.avatar_v AS av, p.last_active_at
        FROM user_presence p JOIN users u ON u.id = p.user_id
       WHERE u.is_active AND p.left_at IS NULL AND p.page = $1 AND p.last_active_at >= now() - ($2 || ' minutes')::interval
       ORDER BY (p.user_id = $3) DESC, p.last_active_at DESC LIMIT 30`,
     [path, String(ACTIVE_MINUTES), me]
   );
-  return rows.map((r) => ({ id: r.id, name: r.name, role: r.role, lastActiveAt: r.last_active_at, you: r.id === me }));
+  return rows.map((r) => ({ id: r.id, name: r.name, role: r.role, av: r.av ? Number(r.av) : null, lastActiveAt: r.last_active_at, you: r.id === me }));
 }
 
 // GET /api/presence?path=/workload
@@ -93,7 +93,7 @@ router.get('/stream', (req, res) => {
     busy = true;
     try {
       const users = await usersOn(path, req.user.id);
-      const body = JSON.stringify(users.map((u) => [u.id, u.name, u.role, u.you]));
+      const body = JSON.stringify(users.map((u) => [u.id, u.name, u.role, u.you, u.av]));
       if (!closed && body !== last) { last = body; res.write(`data: ${JSON.stringify({ users })}\n\n`); }
       else if (!closed) res.write(': ping\n\n');
     } catch (e) { /* the next change or tick tries again */ }
