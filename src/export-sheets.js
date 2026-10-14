@@ -3,6 +3,7 @@
 // when the data spans more than one year, so the names stay unique), oldest date first. Rows with no date go on a "No date" sheet.
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+const FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const isoOf = (d) => {
   if (!d) return '';
   if (d instanceof Date) return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
@@ -34,6 +35,12 @@ const dateTag = (from, to) => {
   const a = ok(from); const b = ok(to);
   const thisYear = String(new Date().getFullYear());
   const nice = (iso) => `${MONTHS[+iso.slice(5, 7) - 1]}_${+iso.slice(8, 10)}${iso.slice(0, 4) === thisYear ? '' : `_${iso.slice(0, 4)}`}`;
+  // whole months selected (1st to the last day): the month name, e.g. "September" or "September_to_November"
+  const last = (iso) => { const d = new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7), 0)).getUTCDate(); return +iso.slice(8, 10) === d; };
+  if (a && b && a.slice(8, 10) === '01' && last(b)) {
+    const full = (iso) => `${FULL[+iso.slice(5, 7) - 1]}${iso.slice(0, 4) === thisYear ? '' : `_${iso.slice(0, 4)}`}`;
+    return a.slice(0, 7) === b.slice(0, 7) ? full(a) : `${full(a)}_to_${full(b)}`;
+  }
   if (a && b) return a === b ? nice(a) : `${nice(a)}_to_${nice(b)}`;
   if (a) return `from_${nice(a)}`;
   if (b) return `until_${nice(b)}`;
