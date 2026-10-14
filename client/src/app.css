@@ -1293,4 +1293,24 @@ body { padding-bottom: env(safe-area-inset-bottom, 0px); }
 .prof-pic .stack { min-width: 0; flex: 1 1 220px; gap: 12px; }
 @media (max-width: 520px) { .prof-pic { flex-direction: column; align-items: flex-start; } }
 .prof-pic .stack p { margin-top: 6px; line-height: 1.5; }
-.prof-pic-wrap { padding-bottom: 4px; }
+
+/* Profile page: two independent columns (no stretched, half-empty cards) and a roomier picture block */
+.prof-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.prof-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.prof-col > .card { margin: 0; }
+.prof-pic-wrap { padding-bottom: 0; }
+.prof-pic { display: flex; align-items: center; gap: 20px; }
+.prof-pic .pp-av { width: 116px; height: 116px; font-size: 40px; padding: 5px; }
+.prof-pic .stack { flex: 1 1 0; min-width: 0; gap: 10px; }
+.prof-pic .stack > * + * { margin-top: 0; }
+.prof-pic .stack p { margin: 0; line-height: 1.45; }
+@media (max-width: 680px) {
+  .prof-cols { grid-template-columns: minmax(0, 1fr); }
+  .prof-pic { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .prof-pic .stack { flex: none; width: 100%; }
+  .prof-pic .pp-av { width: 104px; height: 104px; font-size: 36px; }
+  .prof-cols .card-pad.stack > * + * { margin-top: 10px; }
+  .prof-cols .kv { gap: 2px 0; }
+  .prof-cols .kv dt { margin-top: 8px; }
+  .prof-cols .kv dd { margin: 0; }
+}

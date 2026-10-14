@@ -80,7 +80,8 @@ export default function Profile() {
       {forced ? <div className="alert warn mb-12"><strong>Password change required.</strong> Set a new password to continue using the app.</div> : null}
       {!forced && needs2fa ? <div className="alert warn mb-12"><strong>Two-factor authentication is required for your account.</strong> Set it up below to continue using the app.</div> : null}
 
-      <div className="grid grid-2">
+      <div className="prof-cols">
+        <div className="prof-col">
         <div className="card">
           <div className="card-head"><h2>Account</h2><RoleBadge role={u.role} /></div>
           <div className="card-pad stack prof-pic-wrap">
@@ -117,6 +118,21 @@ export default function Profile() {
         </div>
 
         <div className="card">
+          <div className="card-head">
+            <h2>Two-factor authentication</h2>
+            {u.totp_enabled ? <span className="pill s-approved">Enabled</span> : <span className="pill s-hold">Off</span>}
+          </div>
+          <div className="card-pad stack">
+            <p className="muted m-0">{u.totp_enabled
+              ? (byEmail ? 'Your account requires a 6-digit code emailed to your account address at sign-in.' : 'Your account requires a 6-digit code from your authenticator app at sign-in.')
+              : u.totp_required ? (byEmail ? 'An Admin has turned on 2FA for your account. Set it up with a code sent to your email to continue.' : 'An Admin has turned on 2FA for your account. Set it up with an authenticator app to continue.')
+                : '2FA is off for your account. Only an Admin can turn it on or off.'}</p>
+            {!u.totp_enabled && u.totp_required ? <div><button type="button" className="btn primary" id="tfa" disabled={forced} onClick={startSetup}>Set up 2FA</button></div> : null}
+          </div>
+        </div>
+        </div>
+        <div className="prof-col">
+        <div className="card">
           <div className="card-head"><h2>Change password</h2></div>
           <form className="card-pad stack" id="pwf" autoComplete="off" onSubmit={changePassword}>
             <label className="f"><span>Current password</span><input name="current" type="password" autoComplete="current-password" value={pw.current} onChange={setPw('current')} /></label>
@@ -146,18 +162,6 @@ export default function Profile() {
           </div>
         </div>
 
-        <div className="card">
-          <div className="card-head">
-            <h2>Two-factor authentication</h2>
-            {u.totp_enabled ? <span className="pill s-approved">Enabled</span> : <span className="pill s-hold">Off</span>}
-          </div>
-          <div className="card-pad stack">
-            <p className="muted m-0">{u.totp_enabled
-              ? (byEmail ? 'Your account requires a 6-digit code emailed to your account address at sign-in.' : 'Your account requires a 6-digit code from your authenticator app at sign-in.')
-              : u.totp_required ? (byEmail ? 'An Admin has turned on 2FA for your account. Set it up with a code sent to your email to continue.' : 'An Admin has turned on 2FA for your account. Set it up with an authenticator app to continue.')
-                : '2FA is off for your account. Only an Admin can turn it on or off.'}</p>
-            {!u.totp_enabled && u.totp_required ? <div><button type="button" className="btn primary" id="tfa" disabled={forced} onClick={startSetup}>Set up 2FA</button></div> : null}
-          </div>
         </div>
       </div>
 
