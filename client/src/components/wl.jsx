@@ -124,11 +124,11 @@ export function DateRange({ from, to, onChange, title = 'Work date range' }) {
   const monthEnd = shift(`${shift(monthStart, 32).slice(0, 7)}-01`, -1);
   const presets = [
     ['Today', { from: today, to: today }],
-    ['Last 7 days', { from: shift(today, -6), to: today }],
-    ['This month', { from: monthStart, to: monthEnd }],
-    ['All dates', { from: '', to: '' }],
+    ['Last 7 Days', { from: shift(today, -6), to: today }],
+    ['This Month', { from: monthStart, to: monthEnd }],
+    ['All Dates', { from: '', to: '' }],
   ];
-  const label = from || to ? `${from ? fmtDate(from) : 'Any'} – ${to ? fmtDate(to) : 'Any'}` : 'All dates';
+  const label = from || to ? `${from ? fmtDate(from) : 'Any'} – ${to ? fmtDate(to) : 'Any'}` : 'All Dates';
   return (
     <div className="daterange" ref={ref}>
       <button type="button" className="daterange-btn" title={title} onClick={() => setOpen((o) => !o)}><CalendarIcon /><span>{label}</span></button>

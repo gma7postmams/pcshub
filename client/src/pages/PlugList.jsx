@@ -31,7 +31,7 @@ const ALL_CAP = 5000;   // "All rows" shows at most this many at once (the serve
 
 const PERIODS = [
   { value: 'all', label: 'All' }, { value: 'day', label: 'Daily' }, { value: 'week', label: 'Weekly' },
-  { value: 'month', label: 'Monthly' }, { value: 'custom', label: 'Custom range' },
+  { value: 'month', label: 'Monthly' }, { value: 'custom', label: 'Custom Range' },
 ];
 
 const rangeOf = (period, anchor, custom) => {
@@ -45,8 +45,8 @@ const rangeLabel = (period, r, anchor) => {
   if (period === 'day') return dateLabel(anchor);
   if (period === 'week') return `${fmtDate(r.from)} – ${fmtDate(r.to)}`;
   if (period === 'month') return parseIso(anchor).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
-  if (period === 'custom') return r.from || r.to ? `${r.from ? fmtDate(r.from) : '…'} – ${r.to ? fmtDate(r.to) : '…'}` : 'All days';
-  return 'All days';
+  if (period === 'custom') return r.from || r.to ? `${r.from ? fmtDate(r.from) : '…'} – ${r.to ? fmtDate(r.to) : '…'}` : 'All Days';
+  return 'All Days';
 };
 const stored = (k, fallback, allowed) => { try { const v = localStorage.getItem(`plugs:${k}`); return allowed.includes(v) ? v : fallback; } catch (e) { return fallback; } };
 const EDIT_COLS = ['plug_date', 'plug_id', 'prog_name', 'psd'];   // the cells you can edit / copy / paste; REQUESTED BY and IN WORKLOAD are set by the server
@@ -110,7 +110,7 @@ function PlugDate({ period, anchor, range, custom, onCustom, onPeriod }) {
     document.addEventListener('keydown', esc);
     return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
   }, [open]);
-  const label = period === 'all' ? 'All dates' : period === 'custom' && !range.from && !range.to ? 'Pick dates' : rangeLabel(period, range, anchor);
+  const label = period === 'all' ? 'All Dates' : period === 'custom' && !range.from && !range.to ? 'Pick Dates' : rangeLabel(period, range, anchor);
   return (
     <div className="daterange" ref={ref}>
       <button type="button" className="daterange-btn" id="plug-date-btn" title="Choose the dates" onClick={() => setOpen((o) => !o)}><CalendarIcon /><span>{label}</span></button>
