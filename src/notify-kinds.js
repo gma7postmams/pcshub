@@ -5,10 +5,10 @@ const isAdminRole = (u) => u.role === 'Admin' || u.role === 'System Admin';
 
 const KINDS = [
   { key: 'plugs_added', label: 'New plugs added', desc: 'Someone adds plugs to the PSD Daily Plug List.', relevant: (u, k) => k.has('plugs') },
-  { key: 'workload_vo', label: 'Workload: VO', desc: 'VO is filled in or changed on a workload item that involves your team (VGFX, VEDIT or AUDIO).', relevant: (u, k) => !isAdminRole(u) && [...k].some((x) => /^workload\.(vgfx|vedit|audio)$/i.test(x)) },
-  { key: 'workload_script', label: 'Workload: Script', desc: 'Script is filled in or changed on a workload item that involves your team.', relevant: (u, k) => !isAdminRole(u) && [...k].some((x) => /^workload\.(vgfx|vedit|audio)$/i.test(x)) },
-  { key: 'workload_art_stb', label: 'Workload: Artwork / STB', desc: 'Artwork / STB is filled in or changed on a workload item that involves your team.', relevant: (u, k) => !isAdminRole(u) && [...k].some((x) => /^workload\.(vgfx|vedit|audio)$/i.test(x)) },
-  { key: 'workload_audio_guide', label: 'Workload: Audio Guide', desc: 'Audio Guide is filled in or changed on a workload item that involves your team.', relevant: (u, k) => !isAdminRole(u) && [...k].some((x) => /^workload\.(vgfx|vedit|audio)$/i.test(x)) },
+  { key: 'workload_vo', label: 'Workload: VO', desc: 'VO is filled in or changed on any workload item.', relevant: (u, k) => k.has('workload') },
+  { key: 'workload_script', label: 'Workload: Script', desc: 'Script is filled in or changed on any workload item.', relevant: (u, k) => k.has('workload') },
+  { key: 'workload_art_stb', label: 'Workload: Artwork / STB', desc: 'Artwork / STB is filled in or changed on any workload item.', relevant: (u, k) => k.has('workload') },
+  { key: 'workload_audio_guide', label: 'Workload: Audio Guide', desc: 'Audio Guide is filled in or changed on any workload item.', relevant: (u, k) => k.has('workload') },
   { key: 'ingest_new', label: 'New ingest requests', desc: 'An ingest request is added or imported and needs approval.', relevant: (u) => can(u, 'ingest.approve') },
   { key: 'ingest_for_approval', label: 'Ingest ready for approval', desc: 'A Destination Folder is filled in, so the request waits for your approval.', relevant: (u) => can(u, 'ingest.approve') },
   { key: 'ingest_approval', label: 'Approval on my ingest requests', desc: 'An ingest request you created or requested is approved, or its approval is withdrawn.', relevant: (u, k) => k.has('ingest') },

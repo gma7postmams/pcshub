@@ -5,7 +5,7 @@ const v = require('../validate');
 const { groupByDate, truthy, dateTag } = require('../export-sheets');
 const { asyncH, HttpError, requireAction } = require('../middleware');
 const { audit } = require('../audit');
-const { notifyWorkloadTeams } = require('../notify');
+const { notifyPageUsers } = require('../notify');
 const { workloadTabs } = require('../permissions');
 
 const { logRun } = require('../transferlog');   // action logging (audit entry + server log line) for bulk delete
@@ -269,8 +269,8 @@ async function insertRow(client, rec, userId) {
   return rows[0].id;
 }
 
-// Tell the teams involved in a row (its Units Concerned: VGFX / VEDIT / Audio) when VO, Script, Artwork / STB or Audio Guide is filled in or changed.
-// Best effort: never fails the save. `items` = [{ units, plug_id, work_date, fields: ['vo', ...] }] (see fieldsSet).
+// Tell everyone who can open the Workload Tracker (their group has the page) when VO, Script, Artwork / STB or Audio Guide is filled in or changed.
+// Units Concerned plays no part. Best effort: never fails the save. `items` = [{ plug_id, work_date, fields: ['vo', ...] }] (see fieldsSet).
 const NOTIFY_FIELDS = { vo: ['workload_vo', 'VO'], script: ['workload_script', 'Script'], art_stb: ['workload_art_stb', 'Artwork / STB'], audio_guide: ['workload_audio_guide', 'Audio Guide'] };
 /** Which of those four fields were given a value (or a different one) by this save. `prev` is the row before (null for a new row). */
 function fieldsSet(prev, rec) {
@@ -281,23 +281,14 @@ async function notifyFieldsSet(req, items) {
   try {
     const first = (x) => String(x.plug_id || '').split('\n')[0].trim() || 'a row';
     const day = (x) => (x.work_date instanceof Date ? x.work_date.toISOString().slice(0, 10) : String(x.work_date || '').slice(0, 10));
-    // team -> field -> rows
-    const by = new Map();
-    for (const x of items) {
-      const teams = UNIT_TEAMS[x.units];
-      if (!x || !teams || !x.fields || !x.fields.length) continue;
-      for (const t of teams) for (const f of x.fields) {
-        if (!by.has(t)) by.set(t, new Map());
-        if (!by.get(t).has(f)) by.get(t).set(f, []);
-        by.get(t).get(f).push(x);
-      }
-    }
-    for (const [team, fm] of by) for (const [f, xs] of fm) {
+    const by = new Map();   // field -> rows
+    for (const x of items) for (const f of (x && x.fields) || []) { if (!by.has(f)) by.set(f, []); by.get(f).push(x); }
+    for (const [f, xs] of by) {
       const [kind, label] = NOTIFY_FIELDS[f];
       const one = xs.length === 1;
-      await notifyWorkloadTeams([team], {
+      await notifyPageUsers('workload', {
         title: one ? `${label} updated: ${first(xs[0])}` : `${label} updated on ${xs.length} workload items`,
-        body: one ? `${req.user.full_name} set ${label} on ${first(xs[0])} (${day(xs[0])}, ${xs[0].units}).` : `${req.user.full_name} set ${label} on ${xs.length} workload rows for ${team}.`,
+        body: one ? `${req.user.full_name} set ${label} on ${first(xs[0])} (${day(xs[0])}).` : `${req.user.full_name} set ${label} on ${xs.length} workload rows.`,
         link: '/workload', kind,
       }, { excludeUserId: req.user.id });
     }
@@ -641,7 +632,7 @@ router.post('/', requireAction('workload.write'), asyncH(async (req, res) => {
     made = rec;
     return newId;
   });
-  await notifyFieldsSet(req, [{ units: made.units_concerned, plug_id: made.plug_id, work_date: made.work_date, fields: fieldsSet(null, made) }]);
+  await notifyFieldsSet(req, [{ plug_id: made.plug_id, work_date: made.work_date, fields: fieldsSet(null, made) }]);
   res.status(201).json({ ok: true, id });
 }));
 
@@ -670,7 +661,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           assertNotLocked(locks, rec.work_date);
           await updateRow(c, id, rec, req.user.id);
           await audit(req, 'workload.update', 'workload_item', id, rec, c);
-          fieldsChanged.push({ units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur.rows[0], rec) });
+          fieldsChanged.push({ plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur.rows[0], rec) });
           results.push({ id, psd: rec.psd || '', prog_name: rec.prog_name || '', platform: rec.platform || '' });
           updated++;
         } else {
@@ -679,7 +670,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           const id = await insertRow(c, rec, req.user.id);
           await audit(req, 'workload.create', 'workload_item', id, rec, c);
           createdIds.push(id);
-          fieldsChanged.push({ units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(null, rec) });
+          fieldsChanged.push({ plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(null, rec) });
           created++;
         }
       } catch (e) {
@@ -737,7 +728,7 @@ router.patch('/:id', requireAction('workload.write'), asyncH(async (req, res) =>
       [id, ...changed.map((k) => rec[k]), req.user.id]
     );
     await audit(req, 'workload.update', 'workload_item', id, { field, value: rec[field] }, c);
-    if (NOTIFY_FIELDS[field]) fieldsChanged = { units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur, { [field]: rec[field] }) };
+    if (NOTIFY_FIELDS[field]) fieldsChanged = { plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur, { [field]: rec[field] }) };
     // hand back values in the same shape the list uses ('YYYY-MM-DDTHH:MM' for Breakdate/Time)
     const shape = (k) => (FIELDS[k].kind === 'datetime' && rec[k] ? rec[k].slice(0, 16).replace(' ', 'T') : rec[k]);
     return Object.fromEntries(changed.map((k) => [k, shape(k)]));
@@ -759,7 +750,7 @@ router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
     assertNotLocked(locks, rec.work_date);
     await updateRow(c, id, rec, req.user.id);
     await audit(req, 'workload.update', 'workload_item', id, rec, c);
-    fieldsChanged = { units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur.rows[0], rec) };
+    fieldsChanged = { plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur.rows[0], rec) };
   });
   if (fieldsChanged) await notifyFieldsSet(req, [fieldsChanged]);
   res.json({ ok: true });
