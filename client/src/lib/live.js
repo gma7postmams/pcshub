@@ -1,3 +1,4 @@
+import { colorFor } from './avatar.js';
 import { useEffect, useRef, useState } from 'react';
 import { post } from './api.js';
 
@@ -86,8 +87,6 @@ export function onLive(fn) {
   return () => subs.delete(fn);
 }
 
-const CELL_HUES = ['#4f8cff', '#a78bfa', '#34c38f', '#f0883e', '#e5568f', '#26b5ad', '#f1b44c'];
-const cellHue = (name) => CELL_HUES[[...String(name)].reduce((a, c) => a + c.charCodeAt(0), 0) % CELL_HUES.length];
 
 /**
  * Cells other people have open or selected right now.
@@ -104,7 +103,7 @@ export function useCellPresence(topic, curRef) {
       setPeers((cur) => {
         const n = { ...cur };
         Object.keys(n).forEach((k) => { if (n[k].by === m.by) delete n[k]; });   // a person has one cell at a time
-        if (m.on) (m.cells || [m.key]).forEach((c, i) => { const [key, edges = 'tblr'] = String(c).split('|'); n[key] = { name: m.name, uid: m.uid, kind: m.kind, hue: cellHue(m.name), by: m.by, at: Date.now(), edges, first: i === 0 }; });
+        if (m.on) (m.cells || [m.key]).forEach((c, i) => { const [key, edges = 'tblr'] = String(c).split('|'); n[key] = { name: m.name, uid: m.uid, kind: m.kind, hue: colorFor(m.uid ?? m.name), by: m.by, at: Date.now(), edges, first: i === 0 }; });
         return n;
       });
     });

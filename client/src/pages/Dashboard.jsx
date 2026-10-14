@@ -1,3 +1,4 @@
+import { colorFor } from '../lib/avatar.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { get, post } from '../lib/api.js';
@@ -18,8 +19,6 @@ const TEAMS = [
   { key: 'VEDIT', label: 'VEDIT', color: '#f0883e' },
   { key: 'AUDIO', label: 'Audio', color: '#26b5ad' },
 ];
-const HUES = ['#4f8cff', '#a78bfa', '#34c38f', '#f0883e', '#e5568f', '#26b5ad', '#f1b44c'];
-const hueFor = (name) => HUES[[...String(name)].reduce((a, c) => a + c.charCodeAt(0), 0) % HUES.length];
 const pct = (n, of) => (of ? Math.round((n / of) * 100) : 0);
 const monthOf = (iso) => new Date(`${String(iso).slice(0, 10)}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', timeZone: 'UTC' });
 const dayParts = (iso) => {
@@ -103,7 +102,7 @@ function EarlierPill({ people }) {
     <span className="dsh-earlier" tabIndex={0} aria-label={`Earlier today: ${people.map((p) => p.name).join(', ')}`}>
       Earlier today<b>{people.length}</b>
       <span className="dsh-earlier-pop" role="tooltip">
-        {people.map((p) => <span key={p.id}><i style={{ background: hueFor(p.name) }} />{p.name}<em title="Last active">{ago(p.lastActiveAt)}</em></span>)}
+        {people.map((p) => <span key={p.id}><i style={{ background: colorFor(p.id) }} />{p.name}<em title="Last active">{ago(p.lastActiveAt)}</em></span>)}
       </span>
     </span>
   );
@@ -353,7 +352,7 @@ export default function Dashboard() {
                     return (
                       <Tag key={p.id} type={target ? 'button' : undefined} className={`dsh-user${target ? ' link' : ''}`} onClick={target ? () => navigate(target) : undefined}
                         title={`${p.name} · ${p.role}${where ? ` · on ${where}` : ''} · ${p.you ? 'just now' : ago(p.lastActiveAt)}`}>
-                        <span className="dsh-avatar" style={{ background: hueFor(p.name) }}>{initials(p.name).slice(0, 2)}<i className="dsh-status" /></span>
+                        <span className="dsh-avatar" style={{ background: colorFor(p.id) }}>{initials(p.name).slice(0, 2)}<i className="dsh-status" /></span>
                         <span className="dsh-user-info">
                           <span className="dsh-user-name"><span className="dsh-user-nm">{p.name}</span>{p.you ? <span className="dsh-you">You</span> : null}</span>
                           <span className="dsh-user-meta"><RoleBadge role={p.role} />{where ? <span className="dim">on {where}</span> : null}</span>
@@ -376,7 +375,7 @@ export default function Dashboard() {
                   {act.map((a) => (
                     <li key={a.id}>
                       <Link to={a.path} className="dsh-act">
-                        <span className="dsh-act-av" style={{ background: hueFor(a.name) }}>{initials(a.name).slice(0, 2)}</span>
+                        <span className="dsh-act-av" style={{ background: colorFor(a.uid ?? a.name) }}>{initials(a.name).slice(0, 2)}</span>
                         <span className="dsh-act-name">{a.you ? 'You' : a.name}</span>
                         <span className="dsh-act-text">{a.verb}{a.label ? <> <b>{a.label}</b></> : null}</span>
                         <span className="dsh-act-time">{ago(a.at)}</span>

@@ -136,7 +136,7 @@ async function recentActivity(u) {
     if (seen.has(k)) continue;
     seen.add(k);
     const a = ACTIVITY[r.action];
-    items.push({ id: r.id, name: r.name, verb: a.verb, label: r.label || null, hue: a.hue, path: a.page, at: r.created_at, you: r.user_id === u.id });
+    items.push({ id: r.id, uid: r.user_id, name: r.name, verb: a.verb, label: r.label || null, hue: a.hue, path: a.page, at: r.created_at, you: r.user_id === u.id });
     if (items.length >= ACTIVITY_SHOWN) break;
   }
   return items;
