@@ -151,13 +151,14 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
   const LABEL = keyLabels(model);
   const [f, set] = useForm({
     full_name: u ? u.full_name : '', email: u ? u.email || '' : '', username: '', password: '',
-    role: u ? u.role : 'Viewer', group_id: u && u.group_id ? String(u.group_id) : '', is_active: u ? u.is_active : true,
+    role: u ? u.role : 'Viewer', force_change: true, group_id: u && u.group_id ? String(u.group_id) : '', is_active: u ? u.is_active : true,
   });
   const [temp, setTemp] = useState(null);
   const [resetOpen, setResetOpen] = useState(false);   // the Reset password window
   const [rpMode, setRpMode] = useState('generate');   // 'generate' | 'manual'
   const [rpEmail, setRpEmail] = useState(false);
   const [rpPw, setRpPw] = useState('');
+  const [rpForce, setRpForce] = useState(true);   // typed password only: must the user change it at next sign-in?
   const [rpBusy, setRpBusy] = useState(false);
   const [method, setMethod] = useState(u && u.twofa_method === 'email' ? 'email' : 'app');
   const emailOk = s.user.email_2fa_available;
@@ -203,8 +204,9 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
           {!u ? (
             <label className="f full"><span>Temporary password <span className="req">*</span></span>
               <input name="password" type="text" autoComplete="new-password" placeholder="Letters and numbers" value={f.password} onChange={set('password')} />
-              <span className="dim mt-6">User must change it at first sign-in.</span></label>
+            </label>
           ) : null}
+          {!u ? <label className="check full"><input type="checkbox" id="force-change" name="force_change" checked={f.force_change} onChange={set('force_change')} /> User must change this password at first sign-in</label> : null}
           <label className="check full"><input type="checkbox" name="is_active" checked={self ? true : f.is_active} disabled={self} onChange={set('is_active')} /> Active</label>
           {self ? <div className="full alert info">You cannot deactivate or demote yourself if you are the last Admin.</div> : null}
         </form>
@@ -212,7 +214,7 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
           <>
             <h3 className="mt-16 mb-12">Security</h3>
             <div className="row">
-              <button type="button" className="btn sm" id="rpw" onClick={() => { setRpMode('generate'); setRpPw(''); setRpEmail(false); setResetOpen(true); }}>Reset password</button>
+              <button type="button" className="btn sm" id="rpw" onClick={() => { setRpMode('generate'); setRpPw(''); setRpEmail(false); setRpForce(true); setResetOpen(true); }}>Reset password</button>
               <select aria-label="2FA method" id="tfa-method" value={method} onChange={(e) => setMethod(e.target.value)}>
                 <option value="app">2FA by authenticator app</option>
                 <option value="email" disabled={!emailOk && method !== 'email'}>2FA by emailed code{emailOk ? '' : ' (not enabled)'}</option>
@@ -247,18 +249,19 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
           footer={<><button type="button" className="btn" onClick={() => setResetOpen(false)}>Cancel</button>
             <button type="button" className="btn primary" id="rp-go" disabled={rpBusy || (rpMode === 'manual' && !rpPw)} onClick={async () => {
               setRpBusy(true);
-              const r = await action('reset-password', null, null, { mode: rpMode, email: rpEmail, ...(rpMode === 'manual' ? { password: rpPw } : {}) });
+              const r = await action('reset-password', null, null, { mode: rpMode, email: rpEmail, ...(rpMode === 'manual' ? { password: rpPw, force_change: rpForce } : {}) });
               setRpBusy(false);
               if (!r) return;
               setResetOpen(false);
               if (r.temporary_password) setTemp({ pw: r.temporary_password, sentTo: r.sentTo });   // list refreshes when this is closed
               else { onSaved(); toast(r.emailed ? `Temporary password set and emailed to ${r.sentTo}` : 'Temporary password set'); }
 }}>Reset password</button></>}>
-          <p className="m-0">Their current password stops working now, every device is signed out, and they must choose their own password at their next sign-in.</p>
+          <p className="m-0">Their current password stops working now, every device is signed out, and they must choose their own password at their next sign-in{rpMode === 'manual' ? ', unless you untick the box below' : ''}.</p>
           <div className="stack mt-12">
             <label className="rp-opt"><input type="radio" name="rpmode" value="generate" checked={rpMode === 'generate'} onChange={() => setRpMode('generate')} /><span>Generate a temporary password <span className="dim">— shown once, for you to pass on</span></span></label>
             <label className="rp-opt"><input type="radio" name="rpmode" value="manual" checked={rpMode === 'manual'} onChange={() => setRpMode('manual')} /><span>Type a temporary password myself</span></label>
             {rpMode === 'manual' ? <input id="rp-manual" type="text" autoComplete="new-password" placeholder="Letters and numbers" value={rpPw} onChange={(e) => setRpPw(e.target.value)} /> : null}
+            {rpMode === 'manual' ? <label className="rp-opt"><input type="checkbox" id="rp-force" checked={rpForce} onChange={(e) => setRpForce(e.target.checked)} /><span>User must change it at next sign-in</span></label> : null}
             <hr className="rp-sep" />
             <label className="rp-opt"><input type="checkbox" id="rp-email" disabled={!u.email} checked={rpEmail && !!u.email} onChange={(e) => setRpEmail(e.target.checked)} /><span>Also email it to the user <span className="dim">{u.email ? `— ${u.email}` : '— this account has no email address'}</span></span></label>
           </div>

@@ -353,8 +353,8 @@ router.post('/users', asyncH(async (req, res) => {
   try {
     const { rows } = await db.query(
       `INSERT INTO users (username, full_name, email, password_hash, role, group_id, is_active, must_change_password)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE) RETURNING id`,
-      [u.username, u.full_name, u.email, hash, u.role, u.group_id, u.is_active]
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [u.username, u.full_name, u.email, hash, u.role, u.group_id, u.is_active, req.body.force_change !== false]   // the Admin typed this password: forcing a change is the default, not a must
     );
     await audit(req, 'admin.user_create', 'user', rows[0].id, { username: u.username, role: u.role, group_id: u.group_id });
     res.status(201).json({ ok: true, id: rows[0].id });
@@ -424,7 +424,7 @@ router.post('/users/delete', asyncH(async (req, res) => {
 }));
 
 // Reset a password. mode: 'generate' (random; shown once), 'manual' (the Admin types it; `password`), 'email' (random, emailed to the user and never shown).
-// Either way the user must choose their own password at the next sign-in, every device is signed out and a lock is cleared.
+// The user must choose their own password at the next sign-in (always for a generated one; optional for one typed by the Admin), every device is signed out and a lock is cleared.
 router.post('/users/:id/reset-password', asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const target = (await db.query('SELECT username, full_name, email FROM users WHERE id=$1', [id])).rows[0];
@@ -439,10 +439,12 @@ router.post('/users/:id/reset-password', asyncH(async (req, res) => {
   const temp = mode === 'manual' ? v.password(req.body.password, { username: target.username, fullName: target.full_name })
     : `${crypto.randomBytes(12).toString('base64url')}${crypto.randomInt(10, 99)}`;
   const hash = await bcrypt.hash(temp, 12);
+  // A generated password is always temporary. One the Admin typed can be kept as is (force_change: false).
+  const force = mode === 'generate' || req.body.force_change !== false;
   await db.tx(async (c) => {
     const r = await c.query(
-      `UPDATE users SET password_hash=$2, must_change_password=TRUE, failed_attempts=0, locked_until=NULL, updated_at=now()
-        WHERE id=$1`, [id, hash]
+      `UPDATE users SET password_hash=$2, must_change_password=$3, failed_attempts=0, locked_until=NULL, updated_at=now()
+        WHERE id=$1`, [id, hash, force]
     );
     if (!r.rowCount) throw new HttpError(404, 'User not found');
     if (sendMail) {   // sent before the change is committed: if the email cannot be sent, the old password stays
@@ -453,7 +455,7 @@ router.post('/users/:id/reset-password', asyncH(async (req, res) => {
     }
   });
   await db.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = $1`, [id]);
-  await audit(req, 'admin.user_reset_password', 'user', id, { username: target.username, via: mode, emailed: sendMail || undefined });
+  await audit(req, 'admin.user_reset_password', 'user', id, { username: target.username, via: mode, emailed: sendMail || undefined, must_change: force });
   res.json({ ok: true, ...(mode === 'generate' ? { temporary_password: temp } : {}), ...(sendMail ? { emailed: true, sentTo: mailer.mask(target.email) } : {}) });
 }));
 
