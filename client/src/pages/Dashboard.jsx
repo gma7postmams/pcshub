@@ -36,10 +36,17 @@ const readRange = (sessionKey) => {
 const saveRange = (sessionKey, r) => { if (!sessionKey) return; try { localStorage.setItem(RANGE_KEY, JSON.stringify({ k: sessionKey, r })); } catch (e) { /* storage unavailable */ } };
 
 /** A card's heading: a tinted icon chip, the title, a little grey hint and an optional control at the right. */
-// the time of day beside the date, kept current (changes once a minute)
+// the time of day beside the date, kept current (changes the moment the minute changes)
 function ClockText() {
   const [t, setT] = useState(() => new Date());
-  useEffect(() => { const id = setInterval(() => setT(new Date()), 15000); return () => clearInterval(id); }, []);
+  useEffect(() => {   // wake exactly when the minute changes (and again when the tab comes back into view)
+    let id;
+    const tick = () => { const n = new Date(); setT(n); id = setTimeout(tick, 60000 - (n.getSeconds() * 1000 + n.getMilliseconds()) + 20); };
+    const back = () => { if (document.visibilityState === 'visible') { clearTimeout(id); tick(); } };
+    tick();
+    document.addEventListener('visibilitychange', back);
+    return () => { clearTimeout(id); document.removeEventListener('visibilitychange', back); };
+  }, []);
   return <span>{t.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>;
 }
 
