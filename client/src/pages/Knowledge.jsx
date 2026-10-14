@@ -215,7 +215,7 @@ export default function Knowledge() {
           {docs ? <span className="dim kb-count" aria-live="polite">{q.trim() && shown.length !== docs.length ? `${shown.length} of ${docs.length}` : docs.length} item{docs.length === 1 ? '' : 's'}</span> : null}
         </div>
         {docs === null ? <Empty>Loading…</Empty> : !shown.length ? (
-          <Empty>{docs.length ? 'No documents match your search.' : canWrite ? 'Nothing here yet. Use New Item to add one.' : 'No documents have been added yet.'}</Empty>
+          <Empty>{docs.length ? 'No documents match your search.' : canWrite ? <>Nothing here yet. Use <strong>New Item</strong> to add one.</> : 'No documents have been added yet.'}</Empty>
         ) : (
           <div className="table-wrap">
             <table className="t wl">
