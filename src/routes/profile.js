@@ -22,7 +22,12 @@ const router = express.Router();
 // ---- Phone notifications (Web Push) ----
 router.get('/push', asyncH(async (req, res) => {
   const { rows } = await db.query('SELECT endpoint FROM push_subscriptions WHERE user_id=$1', [req.user.id]);
-  res.json({ key: await require('../push').publicKey(), endpoints: rows.map((r) => r.endpoint) });
+  let key;
+  try { key = await require('../push').publicKey(); } catch (e) {
+    console.error('push setup failed:', e.message);
+    throw new HttpError(400, e.code === 'MODULE_NOT_FOUND' ? 'Push notifications are not installed on the server yet (an Admin needs to run npm install and restart)' : 'Push notifications are not available right now');
+  }
+  res.json({ key, endpoints: rows.map((r) => r.endpoint) });
 }));
 router.post('/push', asyncH(async (req, res) => {
   const sub = req.body || {};
