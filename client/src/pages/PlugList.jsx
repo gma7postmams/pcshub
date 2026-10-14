@@ -613,6 +613,10 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   return (
     <div className={`plug-list${full ? ' full' : ''}`}>
       <div className="plug-bar">
+        <label className="wl-search">
+          <SearchIcon />
+          <input type="search" placeholder="Search plugs…" title="Search plug ID, program, PSD" value={q} onChange={(e) => setQ(e.target.value)} />
+        </label>
         <FilterSelect label="View" value={period} onChange={(e) => setPeriod(e.target.value)}><Options list={PERIODS} /></FilterSelect>
         {period === 'day' || period === 'week' || period === 'month' ? (
           <div className="plug-date">
@@ -627,10 +631,6 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
             <label className="plug-from">To <input type="date" value={custom.to} min={custom.from || undefined} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} /></label>
           </div>
         ) : null}
-        <label className="wl-search">
-          <SearchIcon />
-          <input type="search" placeholder="Search plugs…" title="Search plug ID, program, PSD" value={q} onChange={(e) => setQ(e.target.value)} />
-        </label>
         <span className="grow" />
         <div className="wl-presence"><PresenceAvatars path="/plug-list" /></div>
         <div className="wl-iconbar">
