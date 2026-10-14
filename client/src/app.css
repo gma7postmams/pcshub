@@ -272,7 +272,9 @@ input[type="color"] { padding: 3px; width: 60px; }
 input[type="file"] { height: auto; padding: 7px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .form-grid .full { grid-column: 1 / -1; }
-@media (max-width: 680px) { .form-grid { grid-template-columns: 1fr; } }
+@media (max-width: 680px) { .form-grid { grid-template-columns: minmax(0, 1fr); } .form-grid input, .form-grid select, .form-grid textarea { min-width: 0; max-width: 100%; box-sizing: border-box; } }
+.modal-backdrop { grid-template-columns: minmax(0, 1fr); }
+.modal { min-width: 0; box-sizing: border-box; }
 .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .filters input, .filters select { width: auto; min-width: 140px; height: 34px; font-size: 13px; }
 .filters input[type="search"] { min-width: 200px; flex: 1; }
