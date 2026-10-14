@@ -1287,3 +1287,10 @@ body { padding-bottom: env(safe-area-inset-bottom, 0px); }
 .pa.has-img { padding: 2.5px; }
 .prof-pic { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .prof-pic .pp-av { flex: none; width: 88px; height: 88px; border-radius: 50%; display: grid; place-items: center; font-size: 28px; font-weight: 700; color: #fff; padding: 4px; }
+
+.prof-pic-wrap { padding-bottom: 0; }
+.prof-pic { display: flex; align-items: center; gap: 22px; }
+.prof-pic .stack { min-width: 0; flex: 1 1 220px; gap: 12px; }
+@media (max-width: 520px) { .prof-pic { flex-direction: column; align-items: flex-start; } }
+.prof-pic .stack p { margin-top: 6px; line-height: 1.5; }
+.prof-pic-wrap { padding-bottom: 4px; }

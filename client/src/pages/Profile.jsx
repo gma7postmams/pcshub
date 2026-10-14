@@ -83,6 +83,21 @@ export default function Profile() {
       <div className="grid grid-2">
         <div className="card">
           <div className="card-head"><h2>Account</h2><RoleBadge role={u.role} /></div>
+          <div className="card-pad stack prof-pic-wrap">
+            <div className="prof-pic">
+              <span className="pp-av" style={{ background: colorFor(u.id) }}>
+                {u.avatar_v ? <img className="av-img" src={avatarUrl(u.id, u.avatar_v)} alt="Your profile picture" /> : initials(u.full_name).slice(0, 2)}
+              </span>
+              <div className="stack">
+                <input ref={picRef} type="file" id="pic-file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => choosePic(e.target.files[0])} />
+                <div className="row gap-8">
+                  <button type="button" className="btn primary" id="pic-upload" disabled={picBusy} onClick={() => picRef.current && picRef.current.click()}>{u.avatar_v ? 'Change picture' : 'Upload picture'}</button>
+                  {u.avatar_v ? <button type="button" className="btn" id="pic-remove" disabled={picBusy} onClick={removePic}>Remove</button> : null}
+                </div>
+                <p className="muted m-0">JPEG, PNG or WebP, cropped to a square from the middle. Your ring colour is your own, the same one others see on the cell you have selected.</p>
+              </div>
+            </div>
+          </div>
           <form className="card-pad stack" id="pf" onSubmit={saveAccount}>
             <label className="f"><span>Username</span><input value={u.username} disabled /></label>
             <label className="f"><span>Full name</span><input name="full_name" maxLength={120} value={acct.full_name} onChange={setAcct('full_name')} /></label>
@@ -110,25 +125,6 @@ export default function Profile() {
             <div><button className="btn primary">Update password</button></div>
             <div className="dim">Other sessions are signed out when you change your password.</div>
           </form>
-        </div>
-
-        <div className="card">
-          <div className="card-head"><h2>Profile picture</h2></div>
-          <div className="card-pad stack">
-            <div className="prof-pic">
-              <span className="pp-av" style={{ background: colorFor(u.id) }}>
-                {u.avatar_v ? <img className="av-img" src={avatarUrl(u.id, u.avatar_v)} alt="Your profile picture" /> : initials(u.full_name).slice(0, 2)}
-              </span>
-              <div className="stack">
-                <input ref={picRef} type="file" id="pic-file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => choosePic(e.target.files[0])} />
-                <div className="row gap-8">
-                  <button type="button" className="btn primary" id="pic-upload" disabled={picBusy} onClick={() => picRef.current && picRef.current.click()}>{u.avatar_v ? 'Change picture' : 'Upload picture'}</button>
-                  {u.avatar_v ? <button type="button" className="btn" id="pic-remove" disabled={picBusy} onClick={removePic}>Remove</button> : null}
-                </div>
-              </div>
-            </div>
-            <p className="muted m-0">JPEG, PNG or WebP. It is cropped to a square from the middle. The ring around it is your own colour: the same one other people see on the cell you have selected.</p>
-          </div>
         </div>
 
         <div className="card">
