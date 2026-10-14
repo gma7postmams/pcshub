@@ -153,7 +153,7 @@ function DateRangeInput({ value, onChange, disabled }) {
         <span className="dim dri-dash">–</span>
         <input type="date" value={to} disabled={disabled || !from} min={from || undefined} aria-label="To (optional)" onChange={(e) => onChange(join(from, e.target.value))} />
       </span>
-      <span className="dri-links"><button type="button" className="linkish" disabled={disabled} onClick={() => setRows([{ a: from, b: to }, { a: '', b: '' }])}>Several dates / ranges (e.g. Sep 14–18, 21–25)</button></span>
+      <span className="dri-links"><button type="button" className="linkish" disabled={disabled} onClick={() => setRows([{ a: from, b: to }, { a: '', b: '' }])}>Several dates / ranges</button></span>
     </span>
   );
 }
