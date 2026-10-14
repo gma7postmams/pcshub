@@ -4,7 +4,7 @@ import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
 import { CalendarIcon, DownloadIcon, ExitFullscreenIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive } from '../lib/live.js';
-import { FilterSelect, FiltersMenu, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
+import { DateRange, FilterSelect, FiltersMenu, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
 import { useSession } from '../context.jsx';
 import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
@@ -26,10 +26,6 @@ const monthStart = (iso) => `${iso.slice(0, 8)}01`;
 const monthEnd = (iso) => { const d = parseIso(monthStart(iso)); d.setUTCMonth(d.getUTCMonth() + 1, 0); return toIso(d); };
 const addMonths = (iso, n) => { const d = parseIso(monthStart(iso)); d.setUTCMonth(d.getUTCMonth() + n, 1); return toIso(d); };
 
-const PERIODS = [
-  { value: 'all', label: 'All' }, { value: 'day', label: 'Daily' }, { value: 'week', label: 'Weekly' },
-  { value: 'month', label: 'Monthly' }, { value: 'custom', label: 'Custom range' },
-];
 const SIZES = [{ value: '25', label: '25' }, { value: '50', label: '50' }, { value: '100', label: '100' }, { value: '250', label: '250' }, { value: '500', label: '500' }, { value: 'all', label: 'All' }];
 const ALL_CAP = 5000;   // "All rows" shows at most this many at once (the server's limit)
 
@@ -48,9 +44,9 @@ const rangeLabel = (period, r, anchor) => {
   return 'All days';
 };
 const stored = (k, fallback, allowed) => { try { const v = localStorage.getItem(`plugs:${k}`); return allowed.includes(v) ? v : fallback; } catch (e) { return fallback; } };
-const EDIT_COLS = ['plug_date', 'plug_id', 'prog_name', 'psd', 'account_by'];   // the cells you can edit / copy / paste; REQUESTED BY and IN WORKLOAD are set by the server
-const MAXLEN = { plug_id: 200, prog_name: 300, psd: 200, account_by: 100 };
-const recOf = (r) => ({ plug_date: r.plug_date, plug_id: r.plug_id || '', prog_name: r.prog_name || '', psd: r.psd || '', account_by: r.account_by || '' });
+const EDIT_COLS = ['plug_date', 'plug_id', 'prog_name', 'psd'];   // the cells you can edit / copy / paste; REQUESTED BY and IN WORKLOAD are set by the server
+const MAXLEN = { plug_id: 200, prog_name: 300, psd: 200 };
+const recOf = (r) => ({ plug_date: r.plug_date, plug_id: r.plug_id || '', prog_name: r.prog_name || '', psd: r.psd || '' });
 async function writeClipboard(text) {   // the async API where the page may use it (https / localhost), else a hidden textarea + the copy command
   try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; } } catch (e) { /* fall through */ }
   const ta = document.createElement('textarea');
@@ -97,35 +93,6 @@ function PlugCellEditor({ k, initial, onSave, onCancel }) {
 }
 const remember = (k, v) => { try { localStorage.setItem(`plugs:${k}`, v); } catch (e) { /* storage unavailable */ } };
 
-/** The date button of the toolbar, styled like "All dates" on the Workload / Ingest trackers. It shows what is being looked at (the View chosen in
-    Filters decides that); with View = Custom range, click it to pick From – To. The ‹ › arrows next to it step through days, weeks or months. */
-function PlugDate({ period, anchor, range, custom, onCustom }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useEffect(() => {
-    if (!open) return undefined;
-    const away = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
-    document.addEventListener('mousedown', away);
-    document.addEventListener('keydown', esc);
-    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
-  }, [open]);
-  const isCustom = period === 'custom';
-  const label = period === 'all' ? 'All dates' : isCustom && !range.from && !range.to ? 'Pick dates' : rangeLabel(period, range, anchor);
-  return (
-    <div className="daterange" ref={ref}>
-      <button type="button" className="daterange-btn" id="plug-date-btn" title={isCustom ? 'Pick the dates' : 'Dates shown (change the View in Filters)'}
-        style={isCustom ? undefined : { cursor: 'default' }} onClick={() => { if (isCustom) setOpen((o) => !o); }}><CalendarIcon /><span>{label}</span></button>
-      {open && isCustom ? (
-        <div className="popover daterange-pop">
-          <label className="f"><span>From</span><input type="date" value={custom.from} max={custom.to || undefined} onChange={(e) => onCustom({ from: e.target.value, to: custom.to })} /></label>
-          <label className="f"><span>To</span><input type="date" value={custom.to} min={custom.from || undefined} onChange={(e) => onCustom({ from: custom.from, to: e.target.value })} /></label>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const toast = useToast();
   const confirm = useConfirm();
@@ -133,10 +100,13 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const fileRef = useRef(null);
   const [days, setDays] = useState(null);            // [{ date, n }] newest first (the latest 366 days with a list); null = loading
   const [totals, setTotals] = useState({ plugs: 0, days: 0, first: '', last: '' });   // across every day
-  const [period, setPeriodState] = useState(() => stored('period', 'day', PERIODS.map((p) => p.value)));
+  const [period, setPeriodState] = useState(() => stored('period', 'day', ['day', 'all']));
   const [size, setSizeState] = useState(() => stored('size3', '25', SIZES.map((s) => s.value)));
   const [anchor, setAnchor] = useState('');          // the day / a day of the week / of the month being looked at
   const [custom, setCustom] = useState({ from: '', to: '' });
+  const [filt, setFilt] = useState({ in_workload: '', psd: '', account_by: '' });   // the Filters menu
+  const [opts, setOpts] = useState({ psd: [], account_by: [] });
+  const filtCount = Object.values(filt).filter(Boolean).length
   const [q, setQ] = useState('');
   const query = useDebounced(q, 250);
   const [data, setData] = useState(null);            // { rows, total }; null = loading
@@ -175,11 +145,16 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const limit = size === 'all' ? ALL_CAP : Number(size);
   const narrow = useNarrow();
   const [sort, setSort] = useState({ k: '', dir: 'asc' });   // clicked column header
-  const viewKey = `${period}|${range.from}|${range.to}|${query}|${size}|${sort.k}|${sort.dir}`;
+  const viewKey = `${period}|${range.from}|${range.to}|${query}|${filt.in_workload}|${filt.psd}|${filt.account_by}|${size}|${sort.k}|${sort.dir}`;
   const [pageState, setPageState] = useState({ key: '', offset: 0 });   // the page resets to the first whenever the view changes
   const offset = pageState.key === viewKey ? pageState.offset : 0;
   const setOffset = async (o) => { if (!(await okToLeave())) return; setPageState({ key: viewKey, offset: o }); };
-  const setPeriod = async (p) => { if (!(await okToLeave())) return; setPeriodState(p); remember('period', p); };
+  const setF = (k) => (e) => { setFilt((f) => ({ ...f, [k]: e.target.value })); };
+  const pickRange = async (r) => {   // the date button: a preset or From / To; no dates = every day
+    if (!(await okToLeave())) return;
+    if (!r.from && !r.to) { setPeriodState('all'); remember('period', 'all'); return; }
+    setCustom(r); setPeriodState('custom');
+  };
   const setSize = async (s) => { if (!(await okToLeave())) return; setSizeState(s); remember('size3', s); };
 
   const loadDays = useCallback(async (quiet) => {   // quiet = a re-read because somebody else changed the list: no error pop-up
@@ -195,6 +170,8 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     } catch (e) { if (!quiet) { setDays([]); toast(e.message, 'err'); } }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { loadDays(); }, [loadDays]);
+  const loadOpts = useCallback(() => { get('/api/plugs/options').then(setOpts).catch(() => {}); }, []);
+  useEffect(() => { loadOpts(); }, [loadOpts]);
 
   const loadRows = useCallback(async (quiet) => {
     if (!anchor) return;
@@ -203,13 +180,14 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       if (range.from) p.set('from', range.from);
       if (range.to) p.set('to', range.to);
       if (query) p.set('q', query);
+      Object.entries(filt).forEach(([k, val]) => { if (val) p.set(k, val); });
       if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
       setData(await get(`/api/plugs?${p}`));
     } catch (e) { if (!quiet) { setData({ rows: [], total: 0 }); toast(e.message, 'err'); } }
-  }, [anchor, range.from, range.to, query, limit, offset, period, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [anchor, range.from, range.to, query, filt, limit, offset, period, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setData(null); setPicked(new Set()); setAllMatching(false); loadRows(); }, [loadRows]);
   // other people's changes appear by themselves (Workload changes too: the "In Workload" flag) — not while a cell, form or dialog is open here
-  useLive(['plugs'], () => { loadDays(true); return loadRows(true); }, () => {
+  useLive(['plugs'], () => { loadDays(true); loadOpts(); return loadRows(true); }, () => {
     const el = document.activeElement;
     return !!(adding || editing || draft || cellEd || needYear || summary || importing || document.querySelector('.modal-backdrop') || (el && el.closest && el.closest('td') && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)));
   });
@@ -218,21 +196,9 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     if (range.from) p.set('from', range.from);
     if (range.to) p.set('to', range.to);
     if (query) p.set('q', query);
+    Object.entries(filt).forEach(([k, val]) => { if (val) p.set(k, val); });
     if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
     try { await downloadFile(`/api/plugs/export?${p}`, 'PSD_Plug_List.xlsx'); } catch (e) { toast(e.message, 'err'); }
-  };
-
-  // ---- moving through time ----
-  const dayList = days || [];
-  const prevDay = dayList.find((d) => d.date < anchor);
-  const nextDay = [...dayList].reverse().find((d) => d.date > anchor);
-  const canPrev = period === 'day' ? !!prevDay : !!totals.first && range.from > totals.first;
-  const canNext = period === 'day' ? !!nextDay : !!totals.last && range.to < totals.last;
-  const go = async (dir) => {
-    if (!(await okToLeave())) return;
-    if (period === 'day') setAnchor((dir < 0 ? prevDay : nextDay).date);   // the previous / next day that has a list
-    else if (period === 'week') setAnchor(addDays(anchor, dir * 7));
-    else if (period === 'month') setAnchor(addMonths(anchor, dir));
   };
 
   const upload = async (file, yr) => {
@@ -353,7 +319,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
         if (!o.plug_date) o.plug_date = targets[i].plug_date;
         return o;
       }
-      const o = cellsOf({ plug_date: '', plug_id: '', prog_name: '', psd: '', account_by: '' }, cells);
+      const o = cellsOf({ plug_date: '', plug_id: '', prog_name: '', psd: '' }, cells);
       if (!o.plug_date) o.plug_date = (anchorRow && anchorRow.plug_date) || defaultDate();
       return o;
     });
@@ -411,7 +377,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const addDraft = () => {
     if (!canWrite) return;
     if (draft) { setCellEd({ id: 'draft', k: 'plug_id' }); return; }
-    setDraft({ id: 'draft', plug_date: defaultDate(), plug_id: '', prog_name: '', psd: '', account_by: '' });
+    setDraft({ id: 'draft', plug_date: defaultDate(), plug_id: '', prog_name: '', psd: '' });
     setCellEd({ id: 'draft', k: 'plug_id' });
     requestAnimationFrame(() => { const box = document.querySelector('.plug-list .wl-fit'); if (box) box.scrollTop = 0; });
   };
@@ -624,7 +590,6 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     editCell(r, 'plug_id', <>{r.plug_id}{r.is_additional ? <span className="chip c-orange plug-add" title="Listed under “Additional for …”">Added</span> : null}</>, { 'data-label': 'Plug ID', className: 'mono' }),
     editCell(r, 'prog_name', r.prog_name, { 'data-label': 'PROG. NAME / PROJ. TITLE' }),
     editCell(r, 'psd', r.psd, { 'data-label': 'PSD' }),
-    editCell(r, 'account_by', r.account_by, { 'data-label': 'Account By' }),
     <td key="requested_by" data-label="Requested By">{r.requested_by}</td>,
     <td key="in_workload" data-label="In Workload" className="plug-inwl">{r.id === 'draft' ? null : r.in_workload ? <span className="chip c-green">In workload</span> : <span className="dim">—</span>}</td>,
   ]; };
@@ -636,16 +601,12 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
           <SearchIcon />
           <input type="search" placeholder="Search plugs…" title="Search plug ID, program, PSD" value={q} onChange={(e) => setQ(e.target.value)} />
         </label>
-        <FiltersMenu count={0} onClear={() => {}}>
-          <FilterSelect label="View" value={period} onChange={(e) => setPeriod(e.target.value)}><Options list={PERIODS} /></FilterSelect>
+        <FiltersMenu count={filtCount} onClear={() => setFilt({ in_workload: '', psd: '', account_by: '' })}>
+          <FilterSelect label="In workload" value={filt.in_workload} onChange={setF('in_workload')}><Options list={[{ value: 'yes', label: 'In workload' }, { value: 'no', label: 'Not in workload' }]} blank="All" /></FilterSelect>
+          <FilterSelect label="PSD" value={filt.psd} onChange={setF('psd')}><Options list={opts.psd} blank="All" /></FilterSelect>
+          <FilterSelect label="Account by" value={filt.account_by} onChange={setF('account_by')}><Options list={opts.account_by} blank="All" /></FilterSelect>
         </FiltersMenu>
-        <PlugDate period={period} anchor={anchor} range={range} custom={custom} onCustom={setCustom} />
-        {period === 'day' || period === 'week' || period === 'month' ? (
-          <div className="plug-date">
-            <button type="button" className="btn sm" disabled={!canPrev} onClick={() => go(-1)} title={`Previous ${period === 'day' ? 'day with a list' : period}`}>‹</button>
-            <button type="button" className="btn sm" disabled={!canNext} onClick={() => go(1)} title={`Next ${period === 'day' ? 'day with a list' : period}`}>›</button>
-          </div>
-        ) : null}
+        <DateRange from={range.from} to={range.to} onChange={pickRange} title="Plug dates" />
         <span className="grow" />
         <div className="wl-presence"><PresenceAvatars path="/plug-list" /></div>
         <div className="wl-iconbar">
@@ -688,7 +649,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
                   <tr>
                     {canWrite && !narrow ? <th className="rn" title={allOn ? 'Click to unselect all' : 'Select every plug on this page (Ctrl+A)'} onClick={() => (allOn ? clearPicks() : setPicked(new Set(rows.map((r) => r.id))))} /> : null}
                     {canWrite && narrow ? <th className="chk"><input type="checkbox" checked={allOn} disabled={!rows.length} onChange={() => setPicked(allOn ? new Set() : new Set(rows.map((r) => r.id)))} title="Select every plug on this page" /></th> : null}
-                    <SortTh k="plug_date" sort={sort} onSort={setSort}>DATE</SortTh><SortTh k="plug_id" sort={sort} onSort={setSort}>PLUG ID</SortTh><SortTh k="prog_name" sort={sort} onSort={setSort}>PROG. NAME / PROJ. TITLE</SortTh><SortTh k="psd" sort={sort} onSort={setSort}>PSD</SortTh><SortTh k="account_by" sort={sort} onSort={setSort}>ACCOUNT BY</SortTh><SortTh k="requested_by" sort={sort} onSort={setSort}>REQUESTED BY</SortTh><SortTh k="in_workload" sort={sort} onSort={setSort} className="plug-inwl">IN WORKLOAD</SortTh>{canWrite ? <th className="plug-actions" /> : null}
+                    <SortTh k="plug_date" sort={sort} onSort={setSort}>DATE</SortTh><SortTh k="plug_id" sort={sort} onSort={setSort}>PLUG ID</SortTh><SortTh k="prog_name" sort={sort} onSort={setSort}>PROG. NAME / PROJ. TITLE</SortTh><SortTh k="psd" sort={sort} onSort={setSort}>PSD</SortTh><SortTh k="requested_by" sort={sort} onSort={setSort}>REQUESTED BY</SortTh><SortTh k="in_workload" sort={sort} onSort={setSort} className="plug-inwl">IN WORKLOAD</SortTh>{canWrite ? <th className="plug-actions" /> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -715,7 +676,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
                         </td>
                       ) : null}
                     </tr>
-                  )) : !draft ? <tr><td colSpan={canWrite ? 9 : 7} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr> : null}
+                  )) : !draft ? <tr><td colSpan={canWrite ? 8 : 6} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr> : null}
                 </tbody>
               </table>
             </div>
@@ -834,8 +795,8 @@ function DeleteAllPlugs({ viewTotal, listTotal, hasView, viewText, view, onClose
 function PlugModal({ date, plug, onClose, onSaved }) {
   const toast = useToast();
   const [f, setF] = useState(plug
-    ? { plug_date: plug.plug_date, plug_id: plug.plug_id, prog_name: plug.prog_name || '', psd: plug.psd || '', account_by: plug.account_by || '' }
-    : { plug_date: date || isoDate(), plug_id: '', prog_name: '', psd: '', account_by: '' });
+    ? { plug_date: plug.plug_date, plug_id: plug.plug_id, prog_name: plug.prog_name || '', psd: plug.psd || '' }
+    : { plug_date: date || isoDate(), plug_id: '', prog_name: '', psd: '' });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const save = async () => {
@@ -854,7 +815,6 @@ function PlugModal({ date, plug, onClose, onSaved }) {
         <label className="f"><span>Plug ID <span className="req">*</span></span><input value={f.plug_id} onChange={set('plug_id')} maxLength={200} autoFocus /></label>
         <label className="f full"><span>PROG. NAME / PROJ. TITLE</span><input value={f.prog_name} onChange={set('prog_name')} maxLength={300} autoComplete="off" /></label>
         <label className="f"><span>PSD</span><input value={f.psd} onChange={set('psd')} maxLength={200} /></label>
-        <label className="f"><span>Account By</span><input value={f.account_by} onChange={set('account_by')} maxLength={100} /></label>
       </form>
       {plug ? <p className="dim m-0 mt-12">Workload rows already filled from this plug keep what they have; only blank PSD / PROG. NAME fields get filled.</p> : null}
     </Modal>

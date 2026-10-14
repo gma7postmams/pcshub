@@ -219,6 +219,13 @@ function plugFilter(query) {
     params.push(v.like(query.q, 80));
     where.push(`(p.plug_id ILIKE $${params.length} OR p.prog_name ILIKE $${params.length} OR p.psd ILIKE $${params.length})`);
   }
+  // exact (case-insensitive) PSD / Account By, and in_workload=yes|no (is the plug already in the Workload Tracker)
+  if (query.psd) add('lower(btrim(p.psd)) = ?', v.str(query.psd, { field: 'PSD', max: 200 }).trim().toLowerCase());
+  if (query.account_by) add('lower(btrim(p.account_by)) = ?', v.str(query.account_by, { field: 'Account By', max: 100 }).trim().toLowerCase());
+  if (query.in_workload === 'yes' || query.in_workload === 'no') {
+    where.push(`${query.in_workload === 'no' ? 'NOT ' : ''}EXISTS (SELECT 1 FROM workload_items w WHERE w.work_date = p.plug_date
+      AND upper(p.plug_id) IN (SELECT upper(btrim(x)) FROM unnest(string_to_array(w.plug_id, E'\\n')) AS x))`);
+  }
   return { where, params };
 }
 const whereSql = (where) => (where.length ? `WHERE ${where.join(' AND ')}` : '');
@@ -245,6 +252,12 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
   }));
 
   // ---- list: ?date=YYYY-MM-DD, or ?from=&to=, optional ?q= and ?used=1 (adds in_workload: is it already in the Workload Tracker) ----
+  // distinct PSD / Account By values, for the Filters menu
+  router.get('/options', asyncH(async (req, res) => {
+    const pick = async (col) => (await db.query(`SELECT min(btrim(${col})) AS v FROM workload_plugs WHERE btrim(${col}) <> '' GROUP BY lower(btrim(${col})) ORDER BY lower(btrim(${col}))`)).rows.map((r) => r.v);
+    res.json({ psd: await pick('psd'), account_by: await pick('account_by') });
+  }));
+
   router.get('/', asyncH(async (req, res) => {
     const { where, params } = plugFilter(req.query);
     const used = req.query.used === '1'
@@ -290,7 +303,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     const ws = wb.addWorksheet('PSD Daily Plug List');
     const COLS = [
       { header: 'DATE', key: 'd' }, { header: 'PLUG ID', key: 'plug_id' }, { header: 'PROG. NAME / PROJ. TITLE', key: 'prog_name' },
-      { header: 'PSD', key: 'psd' }, { header: 'ACCOUNT BY', key: 'account_by' }, { header: 'REQUESTED BY', key: 'requested_by' }, { header: 'IN WORKLOAD', key: 'in_workload' },
+      { header: 'PSD', key: 'psd' }, { header: 'REQUESTED BY', key: 'requested_by' }, { header: 'IN WORKLOAD', key: 'in_workload' },
     ];
     ws.columns = COLS.map((c) => ({ ...c, width: 16, style: c.key === 'd' ? { numFmt: 'ddd, mmm d, yyyy' } : {} }));
     ws.getRow(1).eachCell((cell) => {
@@ -302,7 +315,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     ws.views = [{ state: 'frozen', ySplit: 1 }];
     const asDate = (v) => { const t = v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10); return new Date(`${t}T00:00:00Z`); };
     for (const r of rows) {
-      const row = ws.addRow({ d: asDate(r.plug_date), plug_id: r.plug_id, prog_name: r.prog_name || '', psd: r.psd || '', account_by: r.account_by || '', requested_by: r.requested_by || '', in_workload: r.in_workload ? 'In workload' : '—' });
+      const row = ws.addRow({ d: asDate(r.plug_date), plug_id: r.plug_id, prog_name: r.prog_name || '', psd: r.psd || '', requested_by: r.requested_by || '', in_workload: r.in_workload ? 'In workload' : '—' });
       row.alignment = { wrapText: false, vertical: 'middle', horizontal: 'center' };
       row.eachCell({ includeEmpty: true }, (cell) => { cell.border = { right: thin }; });
       const pid = row.getCell('plug_id');
@@ -401,7 +414,8 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     plug_id: (v.str(body.plug_id, { field: 'Plug ID', max: 200, required: true }) || '').replace(/\s+/g, ' ').trim(),
     prog_name: v.str(body.prog_name, { field: 'PROG. NAME / PROJ. TITLE', max: 300 }) || '',
     psd: v.str(body.psd, { field: 'PSD', max: 200 }) || '',
-    account_by: v.str(body.account_by, { field: 'Account By', max: 100 }) || '',
+    // Account By is no longer shown or edited in the app; when a request leaves it out, an edit keeps what is stored (null = keep)
+    account_by: body.account_by === undefined ? null : (v.str(body.account_by, { field: 'Account By', max: 100 }) || ''),
   });
   const dupe = (e) => { if (e && e.code === '23505') throw new HttpError(409, 'That plug (same Plug ID, program and PSD) is already on this day\'s list'); throw e; };
 
@@ -413,7 +427,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
       ({ rows: [row] } = await db.query(
         `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by, requested_by)
          VALUES ($1, (SELECT COALESCE(MAX(seq), 0) + 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6, $7) RETURNING id`,
-        [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by, req.user.id, whoIs(req)]
+        [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by || '', req.user.id, whoIs(req)]
       ));
     } catch (e) { dupe(e); }
     await audit(req, 'workload.plug_add', 'workload_plug', row.id, { plug_date: b.plug_date, plug_id: b.plug_id });
@@ -442,7 +456,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
             const id = v.id(row.id);
             const cur = await c.query('SELECT prog_name FROM workload_plugs WHERE id=$1 FOR UPDATE', [id]);
             if (!cur.rows.length) throw new HttpError(404, 'Plug no longer exists (deleted by someone else?)');
-            await c.query('UPDATE workload_plugs SET plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=$6, updated_at=now() WHERE id=$1',
+            await c.query('UPDATE workload_plugs SET plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=COALESCE($6, account_by), updated_at=now() WHERE id=$1',
               [id, b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by]);
             await audit(req, 'workload.plug_edit', 'workload_plug', id, { plug_date: b.plug_date, plug_id: b.plug_id }, c);
             updated++;
@@ -450,7 +464,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
             const ins = await c.query(
               `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by, requested_by)
                VALUES ($1, (SELECT COALESCE(MAX(seq), 0) + 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6, $7) RETURNING id`,
-              [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by, req.user.id, whoIs(req)]);
+              [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by || '', req.user.id, whoIs(req)]);
             await audit(req, 'workload.plug_add', 'workload_plug', ins.rows[0].id, { plug_date: b.plug_date, plug_id: b.plug_id }, c);
             addedIds.push(ins.rows[0].id);
           }
@@ -473,7 +487,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     const cur = await db.query('SELECT prog_name FROM workload_plugs WHERE id=$1', [req.params.id]);
     try {
       const r = await db.query(
-        `UPDATE workload_plugs SET plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=$6, updated_at=now() WHERE id=$1`,
+        `UPDATE workload_plugs SET plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=COALESCE($6, account_by), updated_at=now() WHERE id=$1`,
         [req.params.id, b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by]
       );
       if (!r.rowCount) throw new HttpError(404, 'Plug not found');
