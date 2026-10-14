@@ -339,8 +339,7 @@ function CellEditor({ def, initial, lookups, onSave, onCancel, copyText, memo })
     if (!el) return;
     el.focus();
     if (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type === 'text')) el.setSelectionRange(el.value.length, el.value.length);
-    // dropdowns open straight away; date fields open focused (the browser's own picker would swallow Enter while it is open)
-    try { if (el.tagName === 'SELECT') el.showPicker(); } catch (e) { /* needs a user gesture; the field is focused anyway */ }
+    // a dropdown stays closed (so Ctrl+V can paste into it); click it again, or Alt+Down, to open the list
   }, []);
   const save = async (value, move) => {
     if (finished.current) return;

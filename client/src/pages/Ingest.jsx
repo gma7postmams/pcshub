@@ -186,7 +186,6 @@ function InlineCell({ def, initial, options, onSave, onCancel, memo }) {
     if (!el) return;
     el.focus();
     if (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type === 'text')) el.setSelectionRange(el.value.length, el.value.length);
-    try { if (el.tagName === 'SELECT') el.showPicker(); } catch (e) { /* needs a user gesture; the field is focused anyway */ }
   }, []);
   const save = async (value, move) => {
     if (finished.current) return;
