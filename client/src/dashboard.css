@@ -284,3 +284,9 @@ button.dsh-stat:hover { transform: translateY(-2px); box-shadow: 0 10px 22px col
 @media (max-width: 760px) { .dsh-stats.five { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .dsh-stats.five { grid-template-columns: minmax(0, 1fr); } }
 .dsh-team-card { overflow: hidden; }
+
+/* phones and small windows: the "Earlier today" list opens from the pill's left edge (it sits at the left there) and never wider than the screen, so it is not cut off */
+@media (max-width: 900px) {
+  .dsh-earlier-pop { left: 0; right: auto; max-width: calc(100vw - 48px); min-width: min(230px, calc(100vw - 48px)); }
+  .dsh-earlier-pop span { min-width: 0; }
+}

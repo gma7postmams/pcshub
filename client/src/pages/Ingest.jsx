@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
-import { pasteFallback } from '../lib/pasteFallback.js';
+import { isBlockText, pasteFallback } from '../lib/pasteFallback.js';
 import { parseEpisodeText } from '../lib/episode.js';
 import { loadView, saveView, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
 import { ago, downloadFile, fmtDate, fmtDateTime } from '../lib/util.js';
@@ -174,12 +174,21 @@ function DateRangeInput({ value, onChange, disabled }) {
 }
 
 // One table cell turned into its own editor. Dropdowns save as soon as you pick; a failed save keeps the editor open with the message shown.
-function InlineCell({ def, initial, options, onSave, onCancel, memo }) {
+function InlineCell({ def, initial, options, onSave, onCancel, onUndo, memo }) {
   const [val, setValRaw] = useState(() => (memo ? loadCellText('ingest', memo, initial) : initial));
   const setVal = (v) => { setValRaw(v); if (memo) saveCellText('ingest', memo, v); };
   const [busy, setBusy] = useState(false);
   const box = useRef(null);
   const finished = useRef(false);
+  const latest = useRef({});
+  latest.current = { val, initial, onSave };
+  // the cell is closed by something else (a click on another cell or a row number): what was typed / pasted is still saved, like clicking away
+  useEffect(() => () => {
+    const L = latest.current;
+    if (finished.current || String(L.val ?? '') === String(L.initial ?? '')) return;
+    finished.current = true;
+    Promise.resolve(L.onSave(L.val)).catch(() => { /* the message was already shown */ });
+  }, []);
   const field = () => box.current && box.current.querySelector('input, select, textarea');
   useEffect(() => {
     const el = field();
@@ -216,6 +225,8 @@ function InlineCell({ def, initial, options, onSave, onCancel, memo }) {
   const paste = (e) => { const t = e.clipboardData ? e.clipboardData.getData('text/plain') : ''; if (applyText(t, e.target)) e.preventDefault(); };
   const blur = (e) => { if (box.current && !box.current.contains(e.relatedTarget)) save(val); };
   const key = (e) => {
+    // Ctrl+Z in a cell you have not changed undoes the last table edit (inside a box with typing in it, it undoes the typing)
+    if (onUndo && (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'z' && String(val ?? '') === String(initial ?? '')) { e.preventDefault(); finished.current = true; onUndo(e.shiftKey); return; }
     pasteFallback(e, applyText);
     if (e.key === 'Escape') { finished.current = true; onCancel(); return; }
     const tag = e.target.tagName;
@@ -484,7 +495,7 @@ export default function Ingest() {
       return (
         <td data-k={k} data-r={props['data-r']} data-c={props['data-c']} className="editing" onClick={(e) => e.stopPropagation()}>
           <InlineCell memo={`${r.id}:${k}`} def={def} initial={initial} options={k === 'cm_status' ? CM_OPTIONS : withCurrent(lookups ? lookups.platform : [], r.platform)}
-            onSave={(value, move) => saveCell(r, k, value, initial, move)} onCancel={() => setEditing(null)} />
+            onSave={(value, move) => saveCell(r, k, value, initial, move)} onCancel={() => setEditing(null)} onUndo={(sh) => { setEditing(null); if (sh) redo(); else undo(); }} />
         </td>
       );
     }
@@ -596,8 +607,8 @@ export default function Ingest() {
     return ok;
   };
   const clearCells = async () => { const n = normCells(); if (!n) return; const { ops, skipped } = blockOps(n, () => ''); await applyOps(ops, 'cells cleared', skipped); };
-  const pasteCells = async (text) => {
-    const n = normCells();
+  const pasteCells = async (text, sel) => {
+    const n = sel || normCells();
     if (!n) return;
     const block = parseTsv(text);
     if (!block.length) return;
@@ -751,6 +762,12 @@ export default function Ingest() {
     }
   };
   pasteRef.current = (e) => {
+    const text0 = e.clipboardData && e.clipboardData.getData('text/plain');
+    // several cells copied from a spreadsheet while one cell is open: they are pasted from that cell down and across, like in Excel
+    if (canWrite && editing && editing.id !== 'draft' && text0 && isBlockText(text0)) {
+      const r0 = rows.findIndex((x) => x.id === editing.id); const c0 = COLS.indexOf(editing.k);
+      if (r0 >= 0 && c0 >= 0) { e.preventDefault(); setEditing(null); pasteCells(text0, { r0, c0, r1: r0, c1: c0 }); return; }
+    }
     if (!canWrite || !keysOk(e)) return;
     const text = e.clipboardData && e.clipboardData.getData('text/plain');
     if (!text || !text.trim()) return;

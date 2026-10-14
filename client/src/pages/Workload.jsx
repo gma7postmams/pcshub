@@ -1,6 +1,6 @@
 import { cloneElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { pasteFallback } from '../lib/pasteFallback.js';
+import { isBlockText, pasteFallback } from '../lib/pasteFallback.js';
 import { normDate, parseLooseDate } from '../components/PlugGrid.jsx';
 import { loadView as loadViewState, saveView as saveViewState, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
 import { del, get, patch, post, put } from '../lib/api.js';
@@ -331,13 +331,22 @@ function GridCellInput({ def, value, onChange, disabled, ...rest }) {
 
 // One table cell turned into its own editor. Enter or clicking away saves, Esc cancels; dropdowns save as soon as you pick.
 // A failed save (e.g. an invalid value) keeps the editor open with the message shown.
-function CellEditor({ def, initial, lookups, onSave, onCancel, copyText, memo }) {
+function CellEditor({ def, initial, lookups, onSave, onCancel, onUndo, copyText, memo }) {
   const toast = useToast();
   const [val, setValRaw] = useState(() => (memo ? loadCellText('workload', memo, initial ?? '') : initial ?? ''));
   const setVal = (v) => { setValRaw(v); if (memo) saveCellText('workload', memo, v); };
   const [busy, setBusy] = useState(false);
   const box = useRef(null);
   const finished = useRef(false);
+  const latest = useRef({});
+  latest.current = { val, initial, onSave };
+  // the cell is closed by something else (a click on another cell or a row number): what was typed / pasted is still saved, like clicking away
+  useEffect(() => () => {
+    const L = latest.current;
+    if (finished.current || String(L.val ?? '') === String(L.initial ?? '')) return;
+    finished.current = true;
+    Promise.resolve(L.onSave(L.val)).catch(() => { /* the message was already shown */ });
+  }, []);
   const field = () => box.current && box.current.querySelector('input, select, textarea');
   useEffect(() => {
     const el = def.kind === 'date_or_text' && box.current ? box.current.querySelector('input') : field();   // Artwork / STB: the date / text box, not its format dropdown
@@ -398,6 +407,8 @@ function CellEditor({ def, initial, lookups, onSave, onCancel, copyText, memo })
   const paste = (e) => { const t = e.clipboardData ? e.clipboardData.getData('text/plain') : ''; if (applyText(t, e.target)) e.preventDefault(); };
   const blur = (e) => { if (box.current && !box.current.contains(e.relatedTarget)) save(val); };
   const key = (e) => {
+    // Ctrl+Z in a cell you have not changed undoes the last table edit (inside a box with typing in it, it undoes the typing)
+    if (onUndo && (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'z' && String(val ?? '') === String(initial ?? '')) { e.preventDefault(); finished.current = true; onUndo(e.shiftKey); return; }
     pasteFallback(e, applyText);
     if (e.key === 'Escape') { finished.current = true; onCancel(); return; }
     const tag = e.target.tagName;
@@ -1590,8 +1601,8 @@ export default function Workload() {
     const skipped = tableCols.slice(n.c0, n.c1 + 1).filter((k) => REQUIRED_KEYS.includes(k)).map((k) => head(k));
     await writeCells(n, (ri, ci, k) => (REQUIRED_KEYS.includes(k) ? undefined : ''), 'cleared', skipped.length ? `${skipped.join(', ')} can't be blank` : '');
   };
-  const pasteCells = async (text) => {
-    const n = normCells();
+  const pasteCells = async (text, sel) => {
+    const n = sel || normCells();
     if (!n) return;
     const block = parseTsvBlock(text);
     if (!block.length) return;
@@ -1706,6 +1717,13 @@ export default function Workload() {
     }
   };
   pasteRef.current = (e) => {
+    const text0 = e.clipboardData && e.clipboardData.getData('text/plain');
+    // several cells copied from a spreadsheet while one cell is open: they are pasted from that cell down and across, like in Excel
+    if (canWrite && editing && editing.id !== 'draft' && text0 && isBlockText(text0)) {
+      const r0 = pageRows.findIndex((x) => x.id === editing.id);
+      const c0 = tableCols.findIndex((c) => c === editing.k || (c === 'breakdate_vgfx' && editing.k === 'breakdate_vedit'));
+      if (r0 >= 0 && c0 >= 0) { e.preventDefault(); setEditing(null); pasteCells(text0, { r0, c0, r1: r0, c1: c0 }); return; }
+    }
     if (!canWrite || !tableKeysOk(e)) return;   // pasting is for people who can edit
     const text = e.clipboardData && e.clipboardData.getData('text/plain');
     if (!text || !text.trim()) return;
@@ -1781,7 +1799,7 @@ export default function Workload() {
     if (editing && editing.id === r.id && editing.k === k) {
       return (
         <td key={k} data-k={k} data-label={head(k)} className="editing" onClick={(e) => e.stopPropagation()}>
-          <CellEditor memo={`${r.id}:${k}`} def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} />
+          <CellEditor memo={`${r.id}:${k}`} def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} onUndo={(sh) => { setEditing(null); if (sh) redoTbl(); else undoTbl(); }} />
         </td>
       );
     }
@@ -1818,7 +1836,7 @@ export default function Workload() {
             if (editing && editing.id === r.id && editing.k === k) {
               return (
                 <span key={k} className="cell-editor-inline" onClick={(e) => e.stopPropagation()}>
-                  <CellEditor memo={`${r.id}:${k}`} def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} copyText={k === 'breakdate_vgfx' || k === 'breakdate_vedit' ? `${k === 'breakdate_vgfx' ? 'VGFX' : 'VEDIT'}  ${fmtBdText(r[k])}` : undefined} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} />
+                  <CellEditor memo={`${r.id}:${k}`} def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} copyText={k === 'breakdate_vgfx' || k === 'breakdate_vedit' ? `${k === 'breakdate_vgfx' ? 'VGFX' : 'VEDIT'}  ${fmtBdText(r[k])}` : undefined} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} onUndo={(sh) => { setEditing(null); if (sh) redoTbl(); else undoTbl(); }} />
                 </span>
               );
             }
