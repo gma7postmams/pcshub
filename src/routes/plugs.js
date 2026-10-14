@@ -9,6 +9,7 @@ const { assertSafeXlsx, oneImportAtATime } = require('../xlsx-guard');
 const db = require('../db');
 const v = require('../validate');
 const express = require('express');
+const { groupByDate, truthy } = require('../export-sheets');
 const { asyncH, HttpError, requireAction, requireAnyPage } = require('../middleware');
 const { audit } = require('../audit');
 const { logRun } = require('../transferlog');
@@ -300,7 +301,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     const thin = { style: 'thin', color: { argb: pal.gridBorder } };
     const wb = new ExcelJS.Workbook();
     wb.creator = 'PromoHub';
-    const ws = wb.addWorksheet('PSD Daily Plug List');
+    const fill = (ws, rows) => {
     const COLS = [
       { header: 'DATE', key: 'd' }, { header: 'PLUG ID', key: 'plug_id' }, { header: 'PROG. NAME / PROJ. TITLE', key: 'prog_name' },
       { header: 'PSD', key: 'psd' }, { header: 'REQUESTED BY', key: 'requested_by' }, { header: 'IN WORKLOAD', key: 'in_workload' },
@@ -333,6 +334,9 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
       column.width = Math.ceil(max * 1.15) + 3;
     });
     ws.autoFilter = { from: 'A1', to: { row: 1, column: COLS.length } };
+    };
+    if (truthy(req.query.by_date) && rows.length) groupByDate(rows, (r) => r.plug_date).forEach((g) => fill(wb.addWorksheet(g.name), g.rows));
+    else fill(wb.addWorksheet('PSD Daily Plug List'), rows);
     const buffer = await wb.xlsx.writeBuffer();
     const filename = `PSD_Plug_List_${new Date().toISOString().slice(0, 10)}.xlsx`;
     await audit(req, 'workload.plugs_export', 'workload_plug', null, { rows: rows.length, truncated: rows.length >= 20000, filters: { date: req.query.date, from: req.query.from, to: req.query.to, q: req.query.q }, file: filename });

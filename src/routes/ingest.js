@@ -1,4 +1,5 @@
 const express = require('express');
+const { groupByDate, truthy } = require('../export-sheets');
 const db = require('../db');
 const v = require('../validate');
 const { asyncH, HttpError, requireAction } = require('../middleware');
@@ -179,7 +180,7 @@ router.get('/export', asyncH(async (req, res) => {
   const grey = { color: { argb: pal.pillFg('gray') }, size: 9 };
   const wb = new ExcelJS.Workbook();
   wb.creator = 'PromoHub';
-  const ws = wb.addWorksheet('Ingest');
+  const fill = (ws, rows) => {
   const COLS = [
     { header: 'PROG. NAME / PROJ. TITLE', key: 'program' }, { header: 'Platform', key: 'platform' },
     { header: 'Billable Party', key: 'billable_party' }, { header: 'Episode / Breakdate', key: 'ep' },
@@ -233,6 +234,9 @@ router.get('/export', asyncH(async (req, res) => {
   }
   ws.columns.forEach((column, i) => { column.width = Math.ceil(lens[i] * 1.15) + 3; });   // wide enough that nothing is cropped (long Source / Folder text wraps)
   ws.autoFilter = { from: 'A1', to: { row: 1, column: ws.columns.length } };
+  };
+  if (truthy(req.query.by_date) && rows.length) groupByDate(rows, (r) => r.episode_date).forEach((g) => fill(wb.addWorksheet(g.name), g.rows));
+  else fill(wb.addWorksheet('Ingest'), rows);
   const buffer = await wb.xlsx.writeBuffer();
   const filename = `Ingest_${new Date().toISOString().slice(0, 10)}.xlsx`;
   await audit(req, 'ingest.export', 'ingest_record', null, { rows: rows.length, truncated: rows.length >= 20000, filters: { ...req.query, sort: undefined, dir: undefined }, file: filename });

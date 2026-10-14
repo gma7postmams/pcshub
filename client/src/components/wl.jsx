@@ -226,6 +226,26 @@ function useDismiss(open, setOpen, ref) {
   }, [open, setOpen, ref]);
 }
 
+/** The Export button. Clicking it opens a small panel with "Separate data by date into tabs" (off = everything on one sheet, as usual) and an Export
+    button; onExport(byDate) does the download. */
+export function ExportButton({ onExport, id = 'export-btn', title = 'Export to Excel', className = 'btn ibtn', disabled, children }) {
+  const [open, setOpen] = useState(false);
+  const [byDate, setByDate] = useState(false);
+  const ref = useRef(null);
+  useDismiss(open, setOpen, ref);
+  return (
+    <div className="export-wrap" ref={ref}>
+      <button type="button" className={className} id={id} aria-label={title} title={title} aria-haspopup="dialog" aria-expanded={open} disabled={disabled} onClick={() => setOpen((o) => !o)}>{children}</button>
+      {open ? (
+        <div className="popover export-pop" role="dialog" aria-label="Export options">
+          <label className="export-opt"><input type="checkbox" id="export-by-date" checked={byDate} onChange={(e) => setByDate(e.target.checked)} /><span>Separate data by date into tabs</span></label>
+          <button type="button" className="btn primary" id="export-go" onClick={() => { setOpen(false); onExport(byDate); }}>Export</button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** "Filters" button: opens a small panel holding the filter dropdowns (children). `count` = how many filters are on; `onClear` resets them. */
 export function FiltersMenu({ count, onClear, children }) {
   const [open, setOpen] = useState(false);

@@ -4,7 +4,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FlagIcon, FullscreenIcon, LockIcon, PlusIcon, SaveIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, FilterSelect, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
+import { DateChip, DateRange, ExportButton, FilterSelect, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive, useCellPresence, rangeCells, peerStyle } from '../lib/live.js';
@@ -681,9 +681,10 @@ export default function Workload() {
   };
 
   // ---- Excel export (sheets mirror the template: MAIN + AUDIO, or just the open team tab) ----
-  const exportXlsx = async () => {
+  const exportXlsx = async (byDate) => {
     try {
       const qs = query();
+      if (byDate) qs.set('by_date', '1');
       if (sort.k) { qs.set('sort', sort.k); qs.set('dir', sort.dir); }   // the export follows the order on screen
       const res = await fetch(`/api/workload/export?${qs}`, { credentials: 'same-origin', headers: { 'X-Requested-With': 'PromoHub' } });
       if (!res.ok) {
@@ -1812,7 +1813,7 @@ export default function Workload() {
               {canWrite && isGrid ? <button type="button" className="btn ibtn" id="add-row" aria-label="Add row" title="Add row" onClick={addRow}><PlusIcon /></button> : null}
               {canWrite ? <button type="button" className="btn ibtn primary" id="new-btn" aria-label="New Workload" title="New Workload" onClick={() => setForm({ rec: null })}><PlusIcon /></button> : null}
               {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import from Excel" title="Import from Excel" disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}><UploadIcon /></button> : null}
-              <button type="button" className="btn ibtn" id="export-btn" aria-label="Export to Excel" title="Export to Excel" onClick={exportXlsx}><DownloadIcon /></button>
+              <ExportButton onExport={exportXlsx}><DownloadIcon /></ExportButton>
               {canWrite && !isGrid && pickedCount ? (
                 <button type="button" className="btn ibtn danger" id="delete-selected-btn" onClick={() => deleteSelected()}
                   aria-label="Delete selected rows" title={`Delete Selected (${pickedCount})`}><TrashIcon /></button>
@@ -1860,7 +1861,7 @@ export default function Workload() {
                 </button>
               </>
             ) : null}
-            <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
+            <ExportButton onExport={exportXlsx} className="btn"><DownloadIcon /> Export</ExportButton>
             {s.canPage('/admin') ? (
               <>
                 <button type="button" className="btn" id="add-column-btn" onClick={() => setAddingColumn(true)}><ColumnIcon /> Add Column</button>

@@ -1202,3 +1202,10 @@ table.t.wl.cards .bd-chips .chip { display: inline-flex; align-items: center; ga
 .daterange-pop .f > span { margin: 0; padding: 0; text-align: left; }
 .daterange-pop .f input[type=date] { display: block; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; margin: 0; -webkit-appearance: none; appearance: none; }
 @media (max-width: 680px) { .daterange-pop { left: 0; right: 0; width: auto; } }
+
+/* Export button: a small panel with "Separate data by date into tabs" */
+.export-wrap { position: relative; display: inline-flex; }
+.export-pop { right: 0; left: auto; width: 270px; max-width: calc(100vw - 24px); box-sizing: border-box; gap: 12px; }
+.export-opt { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; cursor: pointer; text-align: left; }
+.export-opt input { width: 16px; height: 16px; margin: 0; flex: none; }
+@media (max-width: 680px) { .export-pop { left: auto; right: 0; width: 250px; } }

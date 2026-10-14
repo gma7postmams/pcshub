@@ -4,7 +4,7 @@ import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
 import { CalendarIcon, DownloadIcon, ExitFullscreenIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive } from '../lib/live.js';
-import { FilterSelect, FiltersMenu, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
+import { ExportButton, FilterSelect, FiltersMenu, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
 import { useSession } from '../context.jsx';
 import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useToast } from '../components/ui.jsx';
@@ -225,13 +225,14 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     const el = document.activeElement;
     return !!(adding || editing || draft || cellEd || needYear || summary || importing || document.querySelector('.modal-backdrop') || (el && el.closest && el.closest('td') && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)));
   });
-  const exportXlsx = async () => {   // the days and search on screen, in the sort on screen
+  const exportXlsx = async (byDate) => {   // the days and search on screen, in the sort on screen
     const p = new URLSearchParams({ order: period === 'all' ? 'desc' : 'asc' });
     if (range.from) p.set('from', range.from);
     if (range.to) p.set('to', range.to);
     if (query) p.set('q', query);
     Object.entries(filt).forEach(([k, val]) => { if (val) p.set(k, val); });
     if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
+    if (byDate) p.set('by_date', '1');
     try { await downloadFile(`/api/plugs/export?${p}`, 'PSD_Plug_List.xlsx'); } catch (e) { toast(e.message, 'err'); }
   };
 
@@ -666,7 +667,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
           {canWrite ? <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files[0])} /> : null}
           {canWrite ? <button type="button" className="btn ibtn primary" id="add-plug-btn" aria-label="Add Plug" title="Add Plug" onClick={() => setAdding(true)}><PlusIcon /></button> : null}
           {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import Plug List" title={importing ? 'Importing…' : 'Import Plug List'} disabled={importing} onClick={() => fileRef.current.click()}><UploadIcon /></button> : null}
-          <button type="button" className="btn ibtn" id="export-btn" aria-label="Export to Excel" title="Export to Excel" onClick={exportXlsx} disabled={!total}><DownloadIcon /></button>
+          <ExportButton onExport={exportXlsx} disabled={!total}><DownloadIcon /></ExportButton>
           {canWrite && (pickedCount || allMatching) ? (
             <button type="button" className="btn ibtn danger" id="delete-selected-btn" onClick={removeChosen} aria-label="Delete selected plugs" title={`Delete Selected (${allMatching ? total : pickedCount})`}><TrashIcon /></button>
           ) : null}

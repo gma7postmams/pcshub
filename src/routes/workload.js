@@ -2,6 +2,7 @@ const express = require('express');
 const validator = require('validator');
 const db = require('../db');
 const v = require('../validate');
+const { groupByDate, truthy } = require('../export-sheets');
 const { asyncH, HttpError, requireAction } = require('../middleware');
 const { audit } = require('../audit');
 const { workloadTabs } = require('../permissions');
@@ -459,7 +460,16 @@ router.get('/export', asyncH(async (req, res) => {
     return String(v);
   };
   exportInfo.sheets = {};
-  for (const sh of sheets) {
+  // "Separate data by date into tabs": one sheet per Work Date holding only that date's rows, named like "September 1". With no team picked the
+  // MAIN, AUDIO and UNASSIGNED layouts differ, so a date's Audio-only / unassigned rows go on "September 1 Audio" / "September 1 Unassigned"
+  // (only when that date has some).
+  let sheetList = sheets;
+  if (truthy(req.query.by_date) && rows.length) {
+    sheetList = groupByDate(rows, (r) => r.work_date).flatMap((g) => { const inG = new Set(g.rows); return sheets.map((sh, i) => ({
+      ...sh, name: (i === 0 ? g.name : `${g.name} ${sh.name[0]}${sh.name.slice(1).toLowerCase()}`).slice(0, 31), pick: (r) => inG.has(r) && sh.pick(r),
+    })).filter((sh) => g.rows.some(sh.pick)); });
+  }
+  for (const sh of sheetList) {
     const ws = wb.addWorksheet(sh.name);
     ws.columns = sh.cols.map((k) => {
       const f = fieldsExt[k];
