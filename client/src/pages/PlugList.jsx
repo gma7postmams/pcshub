@@ -233,7 +233,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     Object.entries(filt).forEach(([k, val]) => { if (val) p.set(k, val); });
     if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
     if (byDate) p.set('by_date', '1');
-    try { await downloadFile(`/api/plugs/export?${p}`, 'PSD_Plug_List.xlsx'); } catch (e) { toast(e.message, 'err'); }
+    try { await downloadFile(`/api/plugs/export?${p}`, byDate ? 'PSD_Plug_List_by_date.xlsx' : 'PSD_Plug_List.xlsx'); } catch (e) { toast(e.message, 'err'); }
   };
 
   // ---- moving through time ----

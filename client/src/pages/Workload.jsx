@@ -696,7 +696,7 @@ export default function Workload() {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       const now = new Date();
-      a.download = `Workload_${tab}_${MONTH_ABBR[now.getMonth()]}_${now.getFullYear()}.xlsx`;   // tab is already 'ALL' or a team key like 'VGFX', both already upper case
+      a.download = `Workload_${tab}_${MONTH_ABBR[now.getMonth()]}_${now.getFullYear()}${byDate ? '_by_date' : ''}.xlsx`;   // tab is already 'ALL' or a team key like 'VGFX', both already upper case
       document.body.appendChild(a);
       a.click();
       setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);

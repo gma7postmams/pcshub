@@ -1,7 +1,7 @@
 'use strict';
-// "Separate data by date into tabs" for the Excel exports: one sheet per unique date, named like "September 1" (with the year added only
+// "Separate data by date into tabs" for the Excel exports: one sheet per unique date, named like "Sep 1" (with the year added only
 // when the data spans more than one year, so the names stay unique), oldest date first. Rows with no date go on a "No date" sheet.
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 const isoOf = (d) => {
   if (!d) return '';

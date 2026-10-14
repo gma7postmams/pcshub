@@ -460,13 +460,12 @@ router.get('/export', asyncH(async (req, res) => {
     return String(v);
   };
   exportInfo.sheets = {};
-  // "Separate data by date into tabs": one sheet per Work Date holding only that date's rows, named like "September 1". With no team picked the
-  // MAIN, AUDIO and UNASSIGNED layouts differ, so a date's Audio-only / unassigned rows go on "September 1 Audio" / "September 1 Unassigned"
-  // (only when that date has some).
+  // "Separate data by date into tabs": one sheet per Work Date holding only that date's rows, per sheet type, named like "Sep 1 - MAIN" / "Sep 1 - AUDIO" (a
+  // sheet type with no rows that date is left out).
   let sheetList = sheets;
   if (truthy(req.query.by_date) && rows.length) {
-    sheetList = groupByDate(rows, (r) => r.work_date).flatMap((g) => { const inG = new Set(g.rows); return sheets.map((sh, i) => ({
-      ...sh, name: (i === 0 ? g.name : `${g.name} ${sh.name[0]}${sh.name.slice(1).toLowerCase()}`).slice(0, 31), pick: (r) => inG.has(r) && sh.pick(r),
+    sheetList = groupByDate(rows, (r) => r.work_date).flatMap((g) => { const inG = new Set(g.rows); return sheets.map((sh) => ({
+      ...sh, name: `${g.name} - ${sh.name}`.slice(0, 31), pick: (r) => inG.has(r) && sh.pick(r),
     })).filter((sh) => g.rows.some(sh.pick)); });
   }
   for (const sh of sheetList) {
@@ -580,7 +579,8 @@ router.get('/export', asyncH(async (req, res) => {
   // transfer encoding straight to res: some reverse proxies (this app is commonly deployed behind one) can
   // truncate or mishandle a chunked response, which shows up as "the file format is invalid" when opened.
   const buffer = await wb.xlsx.writeBuffer();
-  const filename = `Workload_${team || 'ALL'}_${stamp}.xlsx`;
+  const byDate = truthy(req.query.by_date) && rows.length;
+  const filename = `Workload_${team || 'ALL'}_${stamp}${byDate ? '_by_date' : ''}.xlsx`;
   await emitTransfer(req, 'workload.export', { ...exportInfo, file: filename, bytes: buffer.length, ms: Date.now() - t0 });
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.set('Content-Disposition', `attachment; filename="${filename}"`);
@@ -867,7 +867,7 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
       const label = String(cellText(headerRow.getCell(Number(colNumber)).value) ?? '').trim();
       // this app's export puts VGFX + VEDIT times in one 'Breakdate / Time' column (one labelled line per team)
       colKeyAt[colNumber] = label.toLowerCase() === 'breakdate / time' ? '__breakdate'
-        : label.toLowerCase() === 'remarks' && ws.name && /^audio$/i.test(String(ws.name).trim()) ? 'others'   // on the AUDIO sheet, Remarks is the Audio Remarks column
+        : label.toLowerCase() === 'remarks' && ws.name && /(^|\s-\s)audio$/i.test(String(ws.name).trim()) ? 'others'   // on the AUDIO sheet, Remarks is the Audio Remarks column
         : await keyForHeader(label);
     }
     for (let r = 2; r <= ws.rowCount; r++) {

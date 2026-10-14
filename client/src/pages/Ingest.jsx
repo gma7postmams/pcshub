@@ -247,7 +247,7 @@ export default function Ingest() {
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
     if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
     if (byDate) p.set('by_date', '1');
-    try { await downloadFile(`/api/ingest/export?${p}`, 'Ingest.xlsx'); } catch (e) { toast(e.message, 'err'); }
+    try { await downloadFile(`/api/ingest/export?${p}`, byDate ? 'Ingest_by_date.xlsx' : 'Ingest.xlsx'); } catch (e) { toast(e.message, 'err'); }
   };
 
   const openDetail = useCallback(async (id) => {

@@ -338,7 +338,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     if (truthy(req.query.by_date) && rows.length) groupByDate(rows, (r) => r.plug_date).forEach((g) => fill(wb.addWorksheet(g.name), g.rows));
     else fill(wb.addWorksheet('PSD Daily Plug List'), rows);
     const buffer = await wb.xlsx.writeBuffer();
-    const filename = `PSD_Plug_List_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `PSD_Plug_List_${new Date().toISOString().slice(0, 10)}${truthy(req.query.by_date) && rows.length ? '_by_date' : ''}.xlsx`;
     await audit(req, 'workload.plugs_export', 'workload_plug', null, { rows: rows.length, truncated: rows.length >= 20000, filters: { date: req.query.date, from: req.query.from, to: req.query.to, q: req.query.q }, file: filename });
     res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="${filename}"` });
     res.send(Buffer.from(buffer));

@@ -238,7 +238,7 @@ router.get('/export', asyncH(async (req, res) => {
   if (truthy(req.query.by_date) && rows.length) groupByDate(rows, (r) => r.episode_date).forEach((g) => fill(wb.addWorksheet(g.name), g.rows));
   else fill(wb.addWorksheet('Ingest'), rows);
   const buffer = await wb.xlsx.writeBuffer();
-  const filename = `Ingest_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  const filename = `Ingest_${new Date().toISOString().slice(0, 10)}${truthy(req.query.by_date) && rows.length ? '_by_date' : ''}.xlsx`;
   await audit(req, 'ingest.export', 'ingest_record', null, { rows: rows.length, truncated: rows.length >= 20000, filters: { ...req.query, sort: undefined, dir: undefined }, file: filename });
   res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="${filename}"` });
   res.send(Buffer.from(buffer));
