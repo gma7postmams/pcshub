@@ -28,7 +28,7 @@ function groupByDate(rows, dateOf) {
 }
 
 /** The dates an export covers, for its file name: "Sep_1", "Sep_2-30", "Sep_28-Oct_5", a whole month "Sep_2026" ("Sep_2026-Nov_2026" for several),
-    "from_Sep_1", "until_Sep_30" or "All_dates". The year is added ("Sep_2-30_2025") only when the dates are outside the current year. */
+    "from_Sep_1", "until_Sep_30", or "" when no dates are selected. The year is added ("Sep_2-30_2025") only when the dates are outside the current year. */
 const dateTag = (from, to) => {
   const ok = (x) => (/^\d{4}-\d{2}-\d{2}$/.test(String(x || '')) ? String(x) : '');
   const a = ok(from); const b = ok(to);
@@ -48,7 +48,7 @@ const dateTag = (from, to) => {
   }
   if (a) return `from_${md(a)}${yr(a)}`;
   if (b) return `until_${md(b)}${yr(b)}`;
-  return 'All_dates';
+  return '';   // no dates selected: nothing is added to the name
 };
 const truthy = (x) => x === '1' || x === 'true' || x === 'yes' || x === 'on';
 module.exports = { groupByDate, truthy, isoOf, dateTag };
