@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
-import { pasteFallback } from '../lib/pasteFallback.js';
+import { isBlockText, pasteFallback } from '../lib/pasteFallback.js';
 import { loadView, saveView, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
 import { CalendarIcon, DownloadIcon, ExitFullscreenIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
@@ -515,8 +515,8 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     } catch (e) { toast(e.message, 'err'); }
   };
   const clearCells = async () => { const n = normCells(); if (n) await writeCells(n, (ri, ci, k) => (k === 'plug_date' || k === 'plug_id' ? undefined : ''), 'cells cleared'); };
-  const pasteCells = async (text) => {
-    const n = normCells();
+  const pasteCells = async (text, sel) => {
+    const n = sel || normCells();
     if (!n) return;
     const block = parseTsv(text);
     if (!block.length) return;
@@ -597,6 +597,12 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     }
   };
   pasteRef.current = (e) => {
+    const text0 = e.clipboardData && e.clipboardData.getData('text/plain');
+    // several cells copied from a spreadsheet while one cell is open: they are pasted from that cell down and across, like in Excel
+    if (canWrite && cellEd && cellEd.id !== 'draft' && text0 && isBlockText(text0)) {
+      const r0 = rows.findIndex((x) => x.id === cellEd.id); const c0 = EDIT_COLS.indexOf(cellEd.k);
+      if (r0 >= 0 && c0 >= 0) { e.preventDefault(); setCellEd(null); pasteCells(text0, { r0, c0, r1: r0, c1: c0 }); return; }
+    }
     if (!keysOk(e)) return;
     const text = e.clipboardData && e.clipboardData.getData('text/plain');
     if (!text || !text.trim()) return;

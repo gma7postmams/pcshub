@@ -1,6 +1,6 @@
 import { cloneElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { pasteFallback } from '../lib/pasteFallback.js';
+import { isBlockText, pasteFallback } from '../lib/pasteFallback.js';
 import { normDate, parseLooseDate } from '../components/PlugGrid.jsx';
 import { loadView as loadViewState, saveView as saveViewState, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
 import { del, get, patch, post, put } from '../lib/api.js';
@@ -1601,8 +1601,8 @@ export default function Workload() {
     const skipped = tableCols.slice(n.c0, n.c1 + 1).filter((k) => REQUIRED_KEYS.includes(k)).map((k) => head(k));
     await writeCells(n, (ri, ci, k) => (REQUIRED_KEYS.includes(k) ? undefined : ''), 'cleared', skipped.length ? `${skipped.join(', ')} can't be blank` : '');
   };
-  const pasteCells = async (text) => {
-    const n = normCells();
+  const pasteCells = async (text, sel) => {
+    const n = sel || normCells();
     if (!n) return;
     const block = parseTsvBlock(text);
     if (!block.length) return;
@@ -1717,6 +1717,13 @@ export default function Workload() {
     }
   };
   pasteRef.current = (e) => {
+    const text0 = e.clipboardData && e.clipboardData.getData('text/plain');
+    // several cells copied from a spreadsheet while one cell is open: they are pasted from that cell down and across, like in Excel
+    if (canWrite && editing && editing.id !== 'draft' && text0 && isBlockText(text0)) {
+      const r0 = pageRows.findIndex((x) => x.id === editing.id);
+      const c0 = tableCols.findIndex((c) => c === editing.k || (c === 'breakdate_vgfx' && editing.k === 'breakdate_vedit'));
+      if (r0 >= 0 && c0 >= 0) { e.preventDefault(); setEditing(null); pasteCells(text0, { r0, c0, r1: r0, c1: c0 }); return; }
+    }
     if (!canWrite || !tableKeysOk(e)) return;   // pasting is for people who can edit
     const text = e.clipboardData && e.clipboardData.getData('text/plain');
     if (!text || !text.trim()) return;

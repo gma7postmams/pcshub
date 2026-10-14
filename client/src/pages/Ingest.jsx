@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
-import { pasteFallback } from '../lib/pasteFallback.js';
+import { isBlockText, pasteFallback } from '../lib/pasteFallback.js';
 import { parseEpisodeText } from '../lib/episode.js';
 import { loadView, saveView, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
 import { ago, downloadFile, fmtDate, fmtDateTime } from '../lib/util.js';
@@ -607,8 +607,8 @@ export default function Ingest() {
     return ok;
   };
   const clearCells = async () => { const n = normCells(); if (!n) return; const { ops, skipped } = blockOps(n, () => ''); await applyOps(ops, 'cells cleared', skipped); };
-  const pasteCells = async (text) => {
-    const n = normCells();
+  const pasteCells = async (text, sel) => {
+    const n = sel || normCells();
     if (!n) return;
     const block = parseTsv(text);
     if (!block.length) return;
@@ -762,6 +762,12 @@ export default function Ingest() {
     }
   };
   pasteRef.current = (e) => {
+    const text0 = e.clipboardData && e.clipboardData.getData('text/plain');
+    // several cells copied from a spreadsheet while one cell is open: they are pasted from that cell down and across, like in Excel
+    if (canWrite && editing && editing.id !== 'draft' && text0 && isBlockText(text0)) {
+      const r0 = rows.findIndex((x) => x.id === editing.id); const c0 = COLS.indexOf(editing.k);
+      if (r0 >= 0 && c0 >= 0) { e.preventDefault(); setEditing(null); pasteCells(text0, { r0, c0, r1: r0, c1: c0 }); return; }
+    }
     if (!canWrite || !keysOk(e)) return;
     const text = e.clipboardData && e.clipboardData.getData('text/plain');
     if (!text || !text.trim()) return;
