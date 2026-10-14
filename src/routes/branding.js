@@ -15,7 +15,7 @@ router.get('/', asyncH(async (req, res) => {
   res.json({
     app_name: s.app_name || 'PULSE',
     tagline: s.tagline || '',
-    theme: THEME_KEYS.includes(s.theme) ? s.theme : 'midnight',
+    theme: THEME_KEYS.includes(s.theme) ? s.theme : 'graphite',
     accent_color: s.accent_color || '', // optional override of the theme accent
     themes: THEMES,
     // One upload is used in both modes; two uploads give each mode its own. With none, the built-in PULSE logo (black lettering for light, white for dark).

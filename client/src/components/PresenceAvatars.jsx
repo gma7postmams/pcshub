@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { get } from '../lib/api.js';
 import { initials } from '../lib/util.js';
-import { colorFor } from '../lib/avatar.js';
+import { avatarUrl, colorFor } from '../lib/avatar.js';
 
 // Who is on this page right now — round avatars in a row, like the collaborators at the top of a Google Sheet. Hover one to see the name.
 // There are no profile pictures in the app, so each avatar is the person's initials on a colour of their own.
@@ -61,9 +61,9 @@ export default function PresenceAvatars({ path, peers, describe }) {
   return (
     <div className="presence" role="list" aria-label="People on this page right now">
       {shown.map((u) => (
-        <span key={u.id} role="listitem" className={`pa${u.you ? ' you' : ''}${peers && !u.you && where(u) ? ' clickable' : ''}`} style={{ background: colorFor(u.id) }} data-tip={`${nameOf(u)}${peers && !u.you && where(u) ? ` · ${where(u)[1].kind === 'select' ? 'selected' : 'editing'} a cell — click to jump` : ''}`} aria-label={nameOf(u)}
+        <span key={u.id} role="listitem" className={`pa${u.av ? ' has-img' : ''}${u.you ? ' you' : ''}${peers && !u.you && where(u) ? ' clickable' : ''}`} style={{ background: colorFor(u.id) }} data-tip={`${nameOf(u)}${peers && !u.you && where(u) ? ` · ${where(u)[1].kind === 'select' ? 'selected' : 'editing'} a cell — click to jump` : ''}`} aria-label={nameOf(u)}
           onClick={peers && !u.you ? () => locate(u) : undefined}>
-          {initials(u.name).slice(0, 2)}
+          {u.av ? <img className="av-img" src={avatarUrl(u.id, u.av)} alt="" draggable="false" /> : initials(u.name).slice(0, 2)}
         </span>
       ))}
       {rest.length ? <span role="listitem" className="pa more" data-tip={rest.map(nameOf).join(', ')} aria-label={rest.map(nameOf).join(', ')}>+{rest.length}</span> : null}

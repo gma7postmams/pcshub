@@ -44,8 +44,8 @@ export function Pager({ total, offset, size, onOffset, onSize, label = 'Rows per
           {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
       </label>
-      <button type="button" className="btn sm" disabled={offset === 0} onClick={() => onOffset(Math.max(0, offset - size))}>Previous</button>
-      <button type="button" className="btn sm" disabled={offset + size >= total} onClick={() => onOffset(offset + size)}>Next</button>
+      <button type="button" className="btn" disabled={offset === 0} onClick={() => onOffset(Math.max(0, offset - size))}>Previous</button>
+      <button type="button" className="btn" disabled={offset + size >= total} onClick={() => onOffset(offset + size)}>Next</button>
     </div>
   );
 }

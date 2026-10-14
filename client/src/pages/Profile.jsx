@@ -1,12 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { post, put } from '../lib/api.js';
-import { useSession } from '../context.jsx';
+import { api, del, post, put } from '../lib/api.js';
+import PushSetup from '../components/PushSetup.jsx';
+import { avatarUrl, colorFor, makeAvatar } from '../lib/avatar.js';
+import { initials } from '../lib/util.js';
+import { useBranding, useSession } from '../context.jsx';
+import { Swatch } from '../components/ThemeSwatch.jsx';
 import { AppearanceSeg } from '../components/TopNav.jsx';
 import { Modal, RoleBadge, useForm, useToast } from '../components/ui.jsx';
 
 export default function Profile() {
   const s = useSession();
+  const { branding } = useBranding();
   const toast = useToast();
   const [params, setParams] = useSearchParams();
   const u = s.user;
@@ -17,6 +22,24 @@ export default function Profile() {
   const [setup, setSetup] = useState(null);   // { secret, qr }
   const [emailSetup, setEmailSetup] = useState(null);   // { sentTo } when enrolling by email
   const byEmail = u.twofa_method === 'email';
+  const picRef = useRef(null);
+  const [picBusy, setPicBusy] = useState(false);
+  const choosePic = async (file) => {
+    if (!file) return;
+    setPicBusy(true);
+    try {
+      const blob = await makeAvatar(file);
+      if (!blob) { toast('That file is not a picture the browser can read. Choose a JPEG, PNG or WebP.', 'err'); return; }
+      const fd = new FormData(); fd.append('avatar', blob, 'avatar.jpg');
+      const out = await api('POST', '/api/profile/avatar', fd);
+      s.patchUser({ avatar_v: out.avatar_v });
+      toast('Profile picture saved');
+    } catch (e) { toast(e.message, 'err'); } finally { setPicBusy(false); if (picRef.current) picRef.current.value = ''; }
+  };
+  const removePic = async () => {
+    setPicBusy(true);
+    try { await del('/api/profile/avatar'); s.patchUser({ avatar_v: null }); toast('Profile picture removed'); } catch (e) { toast(e.message, 'err'); } finally { setPicBusy(false); }
+  };
 
   const startSetup = async () => {
     try {
@@ -58,9 +81,25 @@ export default function Profile() {
       {forced ? <div className="alert warn mb-12"><strong>Password change required.</strong> Set a new password to continue using the app.</div> : null}
       {!forced && needs2fa ? <div className="alert warn mb-12"><strong>Two-factor authentication is required for your account.</strong> Set it up below to continue using the app.</div> : null}
 
-      <div className="grid grid-2">
+      <div className="prof-cols">
+        <div className="prof-col">
         <div className="card">
           <div className="card-head"><h2>Account</h2><RoleBadge role={u.role} /></div>
+          <div className="card-pad stack prof-pic-wrap">
+            <div className="prof-pic">
+              <span className="pp-av" style={{ background: colorFor(u.id) }}>
+                {u.avatar_v ? <img className="av-img" src={avatarUrl(u.id, u.avatar_v)} alt="Your profile picture" /> : initials(u.full_name).slice(0, 2)}
+              </span>
+              <div className="stack">
+                <input ref={picRef} type="file" id="pic-file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => choosePic(e.target.files[0])} />
+                <div className="row gap-8">
+                  <button type="button" className="btn primary" id="pic-upload" disabled={picBusy} onClick={() => picRef.current && picRef.current.click()}>{u.avatar_v ? 'Change picture' : 'Upload picture'}</button>
+                  {u.avatar_v ? <button type="button" className="btn" id="pic-remove" disabled={picBusy} onClick={removePic}>Remove</button> : null}
+                </div>
+                <p className="muted m-0">JPEG, PNG or WebP, cropped to a square from the middle. Your ring colour is your own, the same one others see on the cell you have selected.</p>
+              </div>
+            </div>
+          </div>
           <form className="card-pad stack" id="pf" onSubmit={saveAccount}>
             <label className="f"><span>Username</span><input value={u.username} disabled /></label>
             <label className="f"><span>Full name</span><input name="full_name" maxLength={120} value={acct.full_name} onChange={setAcct('full_name')} /></label>
@@ -80,6 +119,22 @@ export default function Profile() {
         </div>
 
         <div className="card">
+          <div className="card-head">
+            <h2>Two-factor authentication</h2>
+            {u.totp_enabled ? <span className="pill s-approved">Enabled</span> : <span className="pill s-hold">Off</span>}
+          </div>
+          <div className="card-pad stack">
+            <p className="muted m-0">{u.totp_enabled
+              ? (byEmail ? 'Your account requires a 6-digit code emailed to your account address at sign-in.' : 'Your account requires a 6-digit code from your authenticator app at sign-in.')
+              : u.totp_required ? (byEmail ? 'An Admin has turned on 2FA for your account. Set it up with a code sent to your email to continue.' : 'An Admin has turned on 2FA for your account. Set it up with an authenticator app to continue.')
+                : '2FA is off for your account. Only an Admin can turn it on or off.'}</p>
+            {!u.totp_enabled && u.totp_required ? <div><button type="button" className="btn primary" id="tfa" disabled={forced} onClick={startSetup}>Set up 2FA</button></div> : null}
+          </div>
+        </div>
+        <PushSetup />
+        </div>
+        <div className="prof-col">
+        <div className="card">
           <div className="card-head"><h2>Change password</h2></div>
           <form className="card-pad stack" id="pwf" autoComplete="off" onSubmit={changePassword}>
             <label className="f"><span>Current password</span><input name="current" type="password" autoComplete="current-password" value={pw.current} onChange={setPw('current')} /></label>
@@ -94,22 +149,21 @@ export default function Profile() {
           <div className="card-head"><h2>Appearance</h2></div>
           <div className="card-pad stack">
             <div><AppearanceSeg /></div>
-            <p className="muted m-0 mt-12">Dark, Light, or System to follow your device setting. Saved to your account. The colour theme is set by your Admin.</p>
+            <p className="muted m-0 mt-12">Dark, Light, or System to follow your device setting. Saved to your account.</p>
+            <label className="check"><input type="checkbox" id="utheme-default" checked={!u.theme} onChange={(e) => { if (e.target.checked) s.setTheme('').catch((err) => toast(err.message, 'err')); else s.setTheme(branding.theme).catch((err) => toast(err.message, 'err')); }} /> Use the default theme ({(branding.themes.find((t) => t.key === branding.theme) || {}).label || 'set by your Admin'})</label>
+            <div className="theme-grid" id="utg">
+              {branding.themes.map((t) => (
+                <button type="button" key={t.key} data-user-theme={t.key} className={`theme-card ${u.theme === t.key ? 'on' : ''}`}
+                  onClick={() => s.setTheme(t.key).catch((err) => toast(err.message, 'err'))}>
+                  <Swatch themeKey={t.key} />
+                  <div className="nm">{t.label}</div>
+                </button>
+              ))}
+            </div>
+            <p className="muted m-0 mt-12">Pick a colour theme just for you, or tick the default to follow the one your Admin sets (it changes when they change it).</p>
           </div>
         </div>
 
-        <div className="card">
-          <div className="card-head">
-            <h2>Two-factor authentication</h2>
-            {u.totp_enabled ? <span className="pill s-approved">Enabled</span> : <span className="pill s-hold">Off</span>}
-          </div>
-          <div className="card-pad stack">
-            <p className="muted m-0">{u.totp_enabled
-              ? (byEmail ? 'Your account requires a 6-digit code emailed to your account address at sign-in.' : 'Your account requires a 6-digit code from your authenticator app at sign-in.')
-              : u.totp_required ? (byEmail ? 'An Admin has turned on 2FA for your account. Set it up with a code sent to your email to continue.' : 'An Admin has turned on 2FA for your account. Set it up with an authenticator app to continue.')
-                : '2FA is off for your account. Only an Admin can turn it on or off.'}</p>
-            {!u.totp_enabled && u.totp_required ? <div><button type="button" className="btn primary" id="tfa" disabled={forced} onClick={startSetup}>Set up 2FA</button></div> : null}
-          </div>
         </div>
       </div>
 
@@ -163,7 +217,7 @@ function EmailSetupModal({ sentTo, onClose, onEnabled }) {
           <input id="tok" className="otp-input" inputMode="numeric" maxLength={6} autoComplete="one-time-code" value={code}
             onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} />
         </label>
-        <div><button type="button" className="btn sm" onClick={again}>Send the code again</button></div>
+        <div><button type="button" className="btn" onClick={again}>Send the code again</button></div>
         <label className="f"><span>3. Confirm with your password</span>
           <input id="tokpw" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </label>

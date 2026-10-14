@@ -5,6 +5,7 @@ const v = require('../validate');
 const { groupByDate, truthy, dateTag } = require('../export-sheets');
 const { asyncH, HttpError, requireAction } = require('../middleware');
 const { audit } = require('../audit');
+const { notifyWorkloadTeams } = require('../notify');
 const { workloadTabs } = require('../permissions');
 
 const { logRun } = require('../transferlog');   // action logging (audit entry + server log line) for bulk delete
@@ -268,6 +269,27 @@ async function insertRow(client, rec, userId) {
   return rows[0].id;
 }
 
+// Tell the VGFX / VEDIT / Audio users when a row is given its Units Concerned (new row with it set, or it was blank / changed). Best effort: never fails the save.
+// `items` = [{ units, plug_id, work_date }]
+async function notifyUnitsSet(req, items) {
+  try {
+    const list = items.filter((x) => x && UNIT_TEAMS[x.units]);
+    if (!list.length) return;
+    const first = (x) => String(x.plug_id || '').split('\n')[0].trim() || 'a row';
+    const day = (x) => (x.work_date instanceof Date ? x.work_date.toISOString().slice(0, 10) : String(x.work_date || '').slice(0, 10));
+    const byTeam = new Map();
+    for (const x of list) for (const t of UNIT_TEAMS[x.units]) { if (!byTeam.has(t)) byTeam.set(t, []); byTeam.get(t).push(x); }
+    for (const [team, xs] of byTeam) {
+      const one = xs.length === 1;
+      await notifyWorkloadTeams([team], {
+        title: one ? `New ${team} workload item` : `${xs.length} new ${team} workload items`,
+        body: one ? `${req.user.full_name} set ${first(xs[0])} (${day(xs[0])}) to ${xs[0].units}.` : `${req.user.full_name} set Units Concerned to include ${team} on ${xs.length} workload rows.`,
+        link: '/workload',
+      }, { excludeUserId: req.user.id });
+    }
+  } catch (e) { console.error('[workload] notification failed:', e.message); }
+}
+
 async function updateRow(client, id, rec, userId) {
   const sets = COLS.map((c, i) => `"${c}"=$${i + 2}`).join(', ');
   const params = [id, ...COLS.map((c) => rec[c]), !!rec.is_priority, JSON.stringify(rec.custom_fields || {}), userId];
@@ -337,8 +359,9 @@ function orderBy(q, params) {
   else if (k === 'updated_at') col = 'w.updated_at';
   else if (COLS.includes(k)) col = ['date', 'datetime'].includes(FIELDS[k].kind) ? `w."${k}"` : `lower(w."${k}"::text)`;
   else if (/^[A-Za-z0-9_]{1,64}$/.test(k)) { params.push(k); col = `lower(w.custom_fields ->> $${params.length})`; }
-  if (!col) return 'w.work_date DESC NULLS LAST, w.id ASC';
-  return col.split(', ').map((c) => `${c} ${dir} NULLS LAST`).join(', ') + ', w.work_date DESC NULLS LAST, w.id ASC';
+  // newest saved first within a day: rows made together (one import / batch) share a created_at and keep their own order
+  if (!col) return 'w.work_date DESC NULLS LAST, w.created_at DESC, w.id ASC';
+  return col.split(', ').map((c) => `${c} ${dir} NULLS LAST`).join(', ') + ', w.work_date DESC NULLS LAST, w.created_at DESC, w.id ASC';
 }
 
 router.get('/', asyncH(async (req, res) => {
@@ -396,7 +419,7 @@ const oneLineText = (t) => String(t ?? '').replace(/\s*\n+\s*/g, ' \u00b7 ');   
 
 async function exportPalette(db_) {
   const row = await db_.query("SELECT value FROM app_settings WHERE key='theme'");
-  const tint = THEME_TINT[(row.rows[0] || {}).value] || THEME_TINT.midnight;
+  const tint = THEME_TINT[(row.rows[0] || {}).value] || THEME_TINT.graphite;
   const border = mix(tint, 8, 'e1e4ea');    // grid lines
   const headerFill = mix(tint, 9, 'e7eaef'); // header background, tinted like the web table's header
   const pillFg = (hue) => argb(HUE_HEX[hue]);
@@ -595,13 +618,16 @@ router.get('/export', asyncH(async (req, res) => {
 router.post('/', requireAction('workload.write'), asyncH(async (req, res) => {
   const customCols = await loadCustomCols(db);
   const locks = await loadLocks(db);
+  let made;
   const id = await db.tx(async (c) => {
     const rec = await parseRow(c, req.body, null, customCols);
     assertNotLocked(locks, rec.work_date);
     const newId = await insertRow(c, rec, req.user.id);
     await audit(req, 'workload.create', 'workload_item', newId, rec, c);
+    made = rec;
     return newId;
   });
+  await notifyUnitsSet(req, [{ units: made.units_concerned, plug_id: made.plug_id, work_date: made.work_date }]);
   res.status(201).json({ ok: true, id });
 }));
 
@@ -616,6 +642,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
     let created = 0;
     let updated = 0;
     const createdIds = [];
+    const unitsSet = [];   // rows that got a Units Concerned (new, or blank / different before) — the team users are told
     const results = [];   // what was stored for the auto-filled columns, so the table can tell a cleared PSD / Platform that was filled in again
     for (let i = 0; i < list.length; i++) {
       const row = list[i] || {};
@@ -629,6 +656,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           assertNotLocked(locks, rec.work_date);
           await updateRow(c, id, rec, req.user.id);
           await audit(req, 'workload.update', 'workload_item', id, rec, c);
+          if (rec.units_concerned && rec.units_concerned !== cur.rows[0].units_concerned) unitsSet.push({ units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date });
           results.push({ id, psd: rec.psd || '', prog_name: rec.prog_name || '', platform: rec.platform || '' });
           updated++;
         } else {
@@ -637,6 +665,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           const id = await insertRow(c, rec, req.user.id);
           await audit(req, 'workload.create', 'workload_item', id, rec, c);
           createdIds.push(id);
+          if (rec.units_concerned) unitsSet.push({ units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date });
           created++;
         }
       } catch (e) {
@@ -644,9 +673,11 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
         throw e;
       }
     }
-    return { created, updated, createdIds, results };
+    return { created, updated, createdIds, results, unitsSet };
   });
-  res.json({ ok: true, ...out });
+  await notifyUnitsSet(req, out.unitsSet);
+  const { unitsSet, ...shown } = out;
+  res.json({ ok: true, ...shown });
 }));
 
 // Save ONE field of a row (click-to-edit in the table). Only that column is written, so someone else's edit to a
@@ -674,6 +705,7 @@ router.patch('/:id', requireAction('workload.write'), asyncH(async (req, res) =>
     await audit(req, 'workload.update', 'workload_item', id, { field, value });
     return res.json({ ok: true, values: { [field]: value } });
   }
+  let unitsSet = null;
   const values = await db.tx(async (c) => {
     const found = await c.query('SELECT * FROM workload_items WHERE id=$1 FOR UPDATE', [id]);
     if (!found.rows.length) throw new HttpError(404, 'Workload item not found');
@@ -691,10 +723,12 @@ router.patch('/:id', requireAction('workload.write'), asyncH(async (req, res) =>
       [id, ...changed.map((k) => rec[k]), req.user.id]
     );
     await audit(req, 'workload.update', 'workload_item', id, { field, value: rec[field] }, c);
+    if (field === 'units_concerned' && rec.units_concerned && rec.units_concerned !== cur.units_concerned) unitsSet = { units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date };
     // hand back values in the same shape the list uses ('YYYY-MM-DDTHH:MM' for Breakdate/Time)
     const shape = (k) => (FIELDS[k].kind === 'datetime' && rec[k] ? rec[k].slice(0, 16).replace(' ', 'T') : rec[k]);
     return Object.fromEntries(changed.map((k) => [k, shape(k)]));
   });
+  if (unitsSet) await notifyUnitsSet(req, [unitsSet]);
   res.json({ ok: true, values });
 }));
 
@@ -702,6 +736,7 @@ router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const customCols = await loadCustomCols(db);
   const locks = await loadLocks(db);
+  let unitsSet = null;
   await db.tx(async (c) => {
     const cur = await c.query(`SELECT ${CUR_COLS} FROM workload_items WHERE id=$1 FOR UPDATE`, [id]);
     if (!cur.rows.length) throw new HttpError(404, 'Workload item not found');
@@ -710,7 +745,9 @@ router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
     assertNotLocked(locks, rec.work_date);
     await updateRow(c, id, rec, req.user.id);
     await audit(req, 'workload.update', 'workload_item', id, rec, c);
+    if (rec.units_concerned && rec.units_concerned !== cur.rows[0].units_concerned) unitsSet = { units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date };
   });
+  if (unitsSet) await notifyUnitsSet(req, [unitsSet]);
   res.json({ ok: true });
 }));
 

@@ -219,11 +219,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       const out = await get('/api/plugs/dates');
       setDays(out.dates);
       setTotals({ plugs: out.total ?? 0, days: out.days ?? out.dates.length, first: out.first || '', last: out.last || '' });
-      setAnchor((cur) => {   // first visit: today if it has a list, else the latest day that does
-        if (cur) return cur;
-        const today = isoDate();
-        return (out.dates.find((x) => x.date === today) || out.dates[0] || {}).date || today;
-      });
+      setAnchor((cur) => cur || isoDate());   // first visit: today
     } catch (e) { if (!quiet) { setDays([]); toast(e.message, 'err'); } }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { loadDays(); }, [loadDays]);

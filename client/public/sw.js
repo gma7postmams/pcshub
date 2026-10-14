@@ -3,7 +3,7 @@
  * - Never caches /api/* or page HTML (per-user, access-controlled)
  * - Shows /offline.html when a navigation fails offline
  */
-const VERSION = 'phub-react-v4';
+const VERSION = 'phub-react-v5';
 const PRECACHE = ['/offline.html', '/offline.js', '/theme-boot.js', '/icons/icon-192.png?v=3', '/icons/icon-512.png?v=3'];
 
 self.addEventListener('install', (e) => {
@@ -39,4 +39,28 @@ self.addEventListener('fetch', (e) => {
       })
     );
   }
+});
+
+// ---- Push notifications (sent by the server when a notification is created for this user) ----
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (_) { d = { title: 'Notification', body: e.data ? e.data.text() : '' }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'PULSE', {
+    body: d.body || '',
+    icon: '/icons/icon-192.png?v=3',
+    badge: '/icons/icon-192.png?v=3',
+    data: { link: d.link || '/' },
+  }));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const link = (e.notification.data && e.notification.data.link) || '/';
+  const url = new URL(link, self.location.origin).href;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    for (const c of list) {
+      if (new URL(c.url).origin === self.location.origin && 'focus' in c) { return c.focus().then(() => ('navigate' in c ? c.navigate(url) : null)); }
+    }
+    return self.clients.openWindow(url);
+  }));
 });

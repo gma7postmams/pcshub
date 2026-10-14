@@ -203,20 +203,19 @@ export default function Knowledge() {
 
       <div className="card mt-12">
         <div className="filters">
-          <input type="search" placeholder="Search documents" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search documents" />
+          <input type="search" placeholder="Search documents…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search documents" />
           {allTags.length ? (
             <span className="kb-tags">
               <button type="button" className={`tag-filter${!tag ? ' on' : ''}`} onClick={() => setTag('')}>All</button>
               {allTags.map(([t, n]) => <button key={t} type="button" className={`tag-filter${tag === t ? ' on' : ''}`} onClick={() => setTag(tag === t ? '' : t)}>{t} <i>{n}</i></button>)}
             </span>
           ) : null}
-          {canWrite ? <button type="button" className="btn sm" id="kb-upload-btn" disabled={busy} onClick={() => inputRef.current && inputRef.current.click()}><UploadIcon /> {busy ? 'Uploading…' : 'Upload'}</button> : null}
-          {canWrite ? <button type="button" className="btn sm primary" id="kb-new-btn" onClick={() => setBlank({ title: '', tags: [], file: null })}><PlusIcon /> New item</button> : null}
-          {canWrite ? <button type="button" className="btn sm" id="kb-trash-btn" onClick={openTrash}><TrashIcon /> Trash</button> : null}
+          {canWrite ? <button type="button" className="btn primary" id="kb-new-btn" onClick={() => setBlank({ title: '', tags: [], file: null })}><PlusIcon /> New Item</button> : null}
+          {canWrite ? <button type="button" className="btn" id="kb-trash-btn" onClick={openTrash}><TrashIcon /> Trash</button> : null}
           {docs ? <span className="dim kb-count" aria-live="polite">{q.trim() && shown.length !== docs.length ? `${shown.length} of ${docs.length}` : docs.length} item{docs.length === 1 ? '' : 's'}</span> : null}
         </div>
         {docs === null ? <Empty>Loading…</Empty> : !shown.length ? (
-          <Empty>{docs.length ? 'No documents match your search.' : canWrite ? 'Nothing here yet. Use Upload to add files, or New item to start with just a name.' : 'No documents have been added yet.'}</Empty>
+          <Empty>{docs.length ? 'No documents match your search.' : canWrite ? <>Nothing here yet. Use <strong>New Item</strong> to add one.</> : 'No documents have been added yet.'}</Empty>
         ) : (
           <div className="table-wrap">
             <table className="t wl">
@@ -257,13 +256,13 @@ export default function Knowledge() {
 
       {blank ? (
         <Modal
-          title="New item"
+          title="New Item"
           size="md"
           onClose={() => { if (!busy) setBlank(null); }}
           footer={(
             <>
               <button type="button" className="btn" disabled={busy} onClick={() => setBlank(null)}>Cancel</button>
-              <button type="button" className="btn primary" id="kb-new-save" disabled={busy || !blank.title.trim()} onClick={createBlank}>{busy ? 'Saving…' : blank.file ? 'Add item and document' : 'Add item'}</button>
+              <button type="button" className="btn primary" id="kb-new-save" disabled={busy || !blank.title.trim()} onClick={createBlank}>{busy ? 'Saving…' : blank.file ? 'Add Item and Document' : 'Add Item'}</button>
             </>
           )}
         >
@@ -280,8 +279,8 @@ export default function Knowledge() {
           <div className="f mt-12">
             <span>Document <span className="dim">(optional: PDF, Word or PowerPoint, up to {meta.maxMb} MB)</span></span>
             <input ref={blankFileRef} type="file" accept={(meta.exts || DEFAULT_EXTS).join(',')} hidden onChange={(e) => pickBlankFile(e.target.files[0])} />
-            <div className="row">
-              <button type="button" className="btn sm" id="kb-new-browse" disabled={busy} onClick={() => blankFileRef.current && blankFileRef.current.click()}><UploadIcon /> {blank.file ? 'Change file' : 'Browse file'}</button>
+            <div className="row" style={{ marginTop: 8 }}>
+              <button type="button" className="btn" id="kb-new-browse" disabled={busy} onClick={() => blankFileRef.current && blankFileRef.current.click()}><UploadIcon /> {blank.file ? 'Change file' : 'Browse file'}</button>
               {blank.file ? <span className="dim wrap-any" id="kb-new-file">{blank.file.name} · {size(blank.file.size)} <button type="button" className="linkbtn" disabled={busy} onClick={() => setBlank({ ...blank, file: null })}>Remove</button></span> : <span className="dim">None yet. You can add it later with the upload button on the item's row.</span>}
             </div>
           </div>
@@ -365,8 +364,8 @@ export default function Knowledge() {
                     <td><FileIcon /> {d.title}<div className="dim mono doc-file">{d.has_file ? `${d.filename} · ${size(d.size_bytes)}` : 'No document'}</div></td>
                     <td className="dim">{fmtDateTime(d.deleted_at)}{d.deleted_name ? <div>by {d.deleted_name}</div> : null}</td>
                     <td className="doc-actions">
-                      <button type="button" className="btn sm" onClick={() => restore(d)}>Restore</button>
-                      <button type="button" className="btn sm danger" onClick={() => purge(d)}>Delete forever</button>
+                      <button type="button" className="btn" onClick={() => restore(d)}>Restore</button>
+                      <button type="button" className="btn danger" onClick={() => purge(d)}>Delete forever</button>
                     </td>
                   </tr>
                 ))}

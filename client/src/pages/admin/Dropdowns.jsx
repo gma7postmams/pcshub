@@ -55,10 +55,10 @@ export default function Dropdowns() {
   return (
     <>
     <div className="admin-bar">
-      {picked.size ? <button type="button" className="btn danger sm" id="dd-del-sel" onClick={removePicked}>Delete selected ({picked.size})</button> : null}
+      {picked.size ? <button type="button" className="btn danger" id="dd-del-sel" onClick={removePicked}>Delete selected ({picked.size})</button> : null}
       <span className="grow" />
-      <a className="btn sm" href="/api/admin/dropdowns/export" download>Export JSON</a>
-      <button type="button" className="btn sm" onClick={() => fileRef.current && fileRef.current.click()}>Import JSON</button>
+      <a className="btn" href="/api/admin/dropdowns/export" download>Export JSON</a>
+      <button type="button" className="btn" onClick={() => fileRef.current && fileRef.current.click()}>Import JSON</button>
       <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={(e) => importFile(e.target.files[0])} />
     </div>
     <div className="grid grid-2">
@@ -67,7 +67,7 @@ export default function Dropdowns() {
         return (
           <div className="card" key={cat}>
             <div className="card-head"><h2>{LABEL[cat] || cat} <span className="dim">{rows.length}</span></h2>
-              <button type="button" className="btn sm" data-bulk={cat} onClick={() => setAdding(cat)}>Add many</button></div>
+              <button type="button" className="btn" data-bulk={cat} onClick={() => setAdding(cat)}>Add many</button></div>
             <AddForm cat={cat} onAdded={load} />
             <div className="table-wrap">
               <table className="t wl">
@@ -109,7 +109,7 @@ function AddForm({ cat, onAdded }) {
   return (
     <form className="filters" data-add={cat} onSubmit={submit}>
       <input name="value" placeholder={`Add ${LABEL[cat] || cat}…`} maxLength={200} className="grow" value={value} onChange={(e) => setValue(e.target.value)} />
-      <button className="btn sm primary">Add</button>
+      <button className="btn primary">Add</button>
     </form>
   );
 }

@@ -394,7 +394,7 @@ INSERT INTO app_settings (key, value) VALUES ('activity_view_v1', '1') ON CONFLI
 INSERT INTO app_settings (key, value) VALUES
   ('app_name', 'PULSE'),
   ('tagline', 'Ingest · Approval · Workload · Backup and Restore'),
-  ('theme', 'midnight'),
+  ('theme', 'graphite'),
   ('accent_color', ''),
   ('logo_path', ''),
   ('logo_dark_path', '')
@@ -410,7 +410,18 @@ INSERT INTO app_settings (key, value) VALUES ('app_name_pulse_v1', '1') ON CONFL
 -- Nothing is added here, so values an Admin deletes are never brought back on restart.
 
 -- Themes: older installs stored the Midnight accent as an explicit override; clear it so the theme's own accent applies
-INSERT INTO app_settings (key, value) VALUES ('theme', 'midnight') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('theme', 'graphite') ON CONFLICT (key) DO NOTHING;
+
+-- Graphite is the default theme. One time: an install still on the old built-in default (Midnight) moves to Graphite; after this an Admin's choice is never touched.
+UPDATE app_settings SET value = 'graphite', updated_at = now()
+ WHERE key = 'theme' AND value = 'midnight'
+   AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'theme_default_graphite_v1');
+INSERT INTO app_settings (key, value) VALUES ('theme_default_graphite_v1', '1') ON CONFLICT (key) DO NOTHING;
+
+-- Personal colour theme: NULL = follow the Admin default theme
+ALTER TABLE users ADD COLUMN IF NOT EXISTS theme TEXT;
+-- Profile picture: NULL = none (initials); otherwise the time it was set (the picture is uploads/avatars/<id>.jpg; the number is only used to refresh caches)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_v BIGINT;
 UPDATE app_settings SET value = '' WHERE key = 'accent_color' AND lower(value) = '#4f8cff';
 
 -- Custom Workload columns: admins can add extra columns beyond the template's fixed fields. Values live in
@@ -587,3 +598,15 @@ INSERT INTO app_settings (key, value) VALUES ('system_admin_v1', '1') ON CONFLIC
 UPDATE roles SET description = 'Every page and action in the app; in Settings only the Audit Log, Dropdowns and Branding'
  WHERE name = 'Admin' AND description = 'Every page and action in the app; in the Admin area only the Audit Log and the Dropdowns' AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'admin_branding_v1');
 INSERT INTO app_settings (key, value) VALUES ('admin_branding_v1', '1') ON CONFLICT (key) DO NOTHING;
+
+-- Phone / browser push notifications: one row per device a user has switched them on for
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id         SERIAL PRIMARY KEY,
+  user_id    INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint   TEXT NOT NULL UNIQUE,
+  p256dh     TEXT NOT NULL,
+  auth       TEXT NOT NULL,
+  ua         TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions (user_id);

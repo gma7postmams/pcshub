@@ -32,7 +32,7 @@ export default function Security({ go }) {
       </div>
       <Rules policy={p} limits={d.limits} email={d.email} onSaved={load} />
       <div className="card">
-        <div className="card-head"><h2>Recent security events</h2><button type="button" className="btn sm" onClick={load}>Refresh</button></div>
+        <div className="card-head"><h2>Recent security events</h2><button type="button" className="btn" onClick={load}>Refresh</button></div>
         <div className="table-wrap">
           <table className="t wl">
             <thead><tr><th>Time</th><th>Who</th><th>Event</th><th>IP</th></tr></thead>
@@ -84,7 +84,7 @@ function Rules({ policy, limits, email, onSaved }) {
   };
   return (
     <div className="card mb-12">
-      <div className="card-head"><h2>Rules</h2><button type="button" className="btn primary sm" disabled={!dirty || busy || Boolean(bad)} onClick={save}>Save rules</button></div>
+      <div className="card-head"><h2>Rules</h2><button type="button" className="btn primary" disabled={!dirty || busy || Boolean(bad)} onClick={save}>Save rules</button></div>
       <div className="card-pad">
         <div className="sched-grid top">
           {NUM.map(([k, label, unit, hint]) => (
@@ -101,7 +101,7 @@ function Rules({ policy, limits, email, onSaved }) {
           {email.configured ? <>Set up on the server{email.from ? ` (from ${email.from})` : ''}. <button type="button" className="linklike" onClick={testMail}>Send a test to my address</button></> : 'Not set up. Add the SMTP_ lines to the server\u2019s .env (see .env.example) and restart.'}
         </span></div>
         <div className="kv-row mt-12"><span className="kv-label">Also always</span><span className="kv-value">{policy.passwordRules}. {policy.loginRateLimit} sign-in attempts per 15 minutes from one address (set in the server&apos;s .env).</span></div>
-        <div className="row mt-12"><button type="button" className="btn sm danger" onClick={force}>Make everyone change their password</button><span className="dim">at their next sign-in</span></div>
+        <div className="row mt-12"><button type="button" className="btn danger" onClick={force}>Make everyone change their password</button><span className="dim">at their next sign-in</span></div>
       </div>
     </div>
   );

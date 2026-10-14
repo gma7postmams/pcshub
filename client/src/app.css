@@ -99,9 +99,9 @@ h3 { font-size: 15px; }
 /* ---------- Top navigation ---------- */
 .topnav {
   position: sticky; top: 0; z-index: 50;
-  height: var(--nav-h);
+  height: calc(var(--nav-h) + env(safe-area-inset-top, 0px));   /* the installed iPhone app draws under the status bar: keep the bar below it */
   display: flex; align-items: center; gap: 6px;
-  padding: 0 18px;
+  padding: env(safe-area-inset-top, 0px) 18px 0;
   background: var(--nav-bg);
   backdrop-filter: saturate(160%) blur(12px);
   -webkit-backdrop-filter: saturate(160%) blur(12px);
@@ -160,7 +160,7 @@ h3 { font-size: 15px; }
 .menu-toggle { display: none; }
 
 .dropdown {
-  position: absolute; top: calc(var(--nav-h) - 6px); right: 14px; z-index: 60;
+  position: absolute; top: calc(var(--nav-h) + env(safe-area-inset-top, 0px) - 6px); right: 14px; z-index: 60;
   width: 320px; max-width: calc(100vw - 24px);
   background: var(--surface); border: 1px solid var(--border-2); border-radius: 12px; box-shadow: var(--shadow);
   overflow: hidden;
@@ -191,13 +191,13 @@ h3 { font-size: 15px; }
   .menu-toggle { display: grid; }
   .brand .name { display: none; }
   .navlinks {
-    display: none; position: absolute; top: var(--nav-h); left: 0; right: 0;
+    display: none; position: absolute; top: calc(var(--nav-h) + env(safe-area-inset-top, 0px)); left: 0; right: 0;
     flex-direction: column; align-items: stretch; height: auto; gap: 2px; padding: 8px 10px 12px;
     background: var(--bg-2); border-bottom: 1px solid var(--border); box-shadow: var(--shadow);
   }
   .navlinks.open { display: flex; }
   .navlinks a { padding: 11px 12px; }
-  .topnav { padding: 0 10px; }
+  .topnav { padding: env(safe-area-inset-top, 0px) 10px 0; }
 }
 
 /* ---------- Layout ---------- */
@@ -250,7 +250,7 @@ h3 { font-size: 15px; }
 .btn.danger { background: color-mix(in srgb, var(--red) 18%, var(--surface-2)); border-color: color-mix(in srgb, var(--red) 45%, transparent); color: var(--red); }
 .btn.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
 .btn.ghost:hover { background: var(--surface-2); color: var(--text); }
-.btn.sm { height: 29px; padding: 0 10px; font-size: 12.5px; border-radius: 7px; }
+.btn.sm { height: 32px; padding: 0 12px; font-size: 13px; border-radius: 8px; }
 .btn svg { width: 16px; height: 16px; }
 .segmented { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; padding: 3px; }
 .segmented button { border: 0; background: transparent; color: var(--text-2); font: 550 13px var(--font); padding: 6px 13px; border-radius: 6px; cursor: pointer; }
@@ -1252,3 +1252,70 @@ td.editing .cell-editor:not(.date) input:not([type="date"]):not([type="datetime-
 td.editing .cell-editor textarea:focus { border-color: transparent; box-shadow: none; outline: none; }
 td.editing .cell-editor:not(.date) .ag input:not([type="date"]):not([type="datetime-local"]):not([type="time"]) { background-color: var(--bg-2); border-color: var(--border-2); }
 td.editing .cell-editor:not(.date) .ag input:not([type="date"]):not([type="datetime-local"]):focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* ---------- phones: Ingest boxes that were not sized for iOS ---------- */
+/* Episode / Breakdate date boxes: iOS Safari shrinks a native date input to its text height unless its own look is switched off */
+.dri input[type=date], .dri-day input[type=date] { -webkit-appearance: none; appearance: none; display: block; box-sizing: border-box; height: 37px; min-height: 37px; margin: 0; text-align: left; }
+.dri input[type=date]::-webkit-date-and-time-value, .dri-day input[type=date]::-webkit-date-and-time-value { text-align: left; min-height: 1.3em; }
+.dri-day .btn { flex: none; height: 28px; width: 28px; min-width: 28px; padding: 0; line-height: 1; align-self: center; }   /* the × stays small beside the date boxes */
+@media (max-width: 680px) { .dri-day .btn { height: 37px; width: 37px; min-width: 37px; } }
+/* cards: a cell somebody else has open gets room inside its outline, and the ticked card is not also painted cell by cell */
+table.t.wl.cards td { align-self: start; }
+table.t.wl.cards td.peer-on { padding: 6px 8px; margin: -6px -8px; border-radius: 6px; }
+table.t.wl.cards td.xl-sel, table.t.wl.cards td.xl-sel.xl-single, table.t.wl.cards td.xl-sel.xl-active { background: none; }
+table.t.wl.cards td.xl-sel::after { content: none; }
+table.t.wl.cards tbody tr.picked td { box-shadow: none; background: none; }   /* a ticked card is outlined as a whole, not cell by cell */
+@media (max-width: 680px) { .dri-list { gap: 14px; } }   /* each From / To pair reads as one group */
+
+/* cards: the ticked box and the ⋮ menu share the top-right corner — put the menu to the left of the box; an inline editor gets room around its outline */
+table.t.wl.cards tr:has(td.chk) td.actions-cell { right: 46px; top: 8px; }
+table.t.wl.cards tr:has(td.chk) td[data-k="plug_id"] { padding-right: 84px; }
+table.t.wl.cards td.editing { padding: 6px 8px; margin: -6px -8px; border-radius: 6px; }
+
+/* installed iPhone app (home-screen icon): full-screen layers and dialogs also stay clear of the status bar and the home bar */
+.modal-backdrop { padding-top: calc(16px + env(safe-area-inset-top, 0px)); padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+.wl-card.full, .plug-list.full { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); box-sizing: border-box; }
+body { padding-bottom: env(safe-area-inset-bottom, 0px); }
+#toasts { bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+
+/* profile pictures: the picture sits inside a ring in the person's own colour (the same colour as the cell they have selected) */
+.has-img { padding: 2.5px; }
+.av-img { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; background: #fff; }
+.avatar.has-img { padding: 2px; }
+.dsh-avatar.has-img { padding: 3px; }
+.dsh-act-av.has-img { padding: 2px; }
+.pa.has-img { padding: 2.5px; }
+.prof-pic { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.prof-pic .pp-av { flex: none; width: 88px; height: 88px; border-radius: 50%; display: grid; place-items: center; font-size: 28px; font-weight: 700; color: #fff; padding: 4px; }
+
+.prof-pic-wrap { padding-bottom: 0; }
+.prof-pic { display: flex; align-items: center; gap: 22px; }
+.prof-pic .stack { min-width: 0; flex: 1 1 220px; gap: 12px; }
+@media (max-width: 520px) { .prof-pic { flex-direction: column; align-items: flex-start; } }
+.prof-pic .stack p { margin-top: 6px; line-height: 1.5; }
+
+/* Profile page: two independent columns (no stretched, half-empty cards) and a roomier picture block */
+.prof-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.prof-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.prof-col > .card { margin: 0; }
+.prof-pic-wrap { padding-bottom: 0; }
+.prof-pic { display: flex; align-items: center; gap: 20px; }
+.prof-pic .pp-av { width: 116px; height: 116px; font-size: 40px; padding: 5px; }
+.prof-pic .stack { flex: 1 1 0; min-width: 0; gap: 10px; }
+.prof-pic .stack > * + * { margin-top: 0; }
+.prof-pic .stack p { margin: 0; line-height: 1.45; }
+@media (max-width: 680px) {
+  .prof-cols { grid-template-columns: minmax(0, 1fr); }
+  .prof-pic { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .prof-pic .stack { flex: none; width: 100%; }
+  .prof-pic .pp-av { width: 104px; height: 104px; font-size: 36px; }
+  .prof-cols .card-pad.stack > * + * { margin-top: 10px; }
+  .prof-cols .kv { gap: 2px 0; }
+  .prof-cols .kv dt { margin-top: 8px; }
+  .prof-cols .kv dd { margin: 0; }
+}
+/* profile picture: real space between the button row and the note, bigger initials */
+.prof-pic .stack p { margin: 16px 0 0; }
+.prof-pic .pp-av { font-size: 54px; letter-spacing: 1px; }
+@media (max-width: 680px) { .prof-pic .pp-av { font-size: 48px; } .prof-pic .stack p { margin-top: 14px; } }
+.push-note{color:var(--warn,#b45309);line-height:1.45}

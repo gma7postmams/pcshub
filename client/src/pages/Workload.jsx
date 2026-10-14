@@ -462,7 +462,7 @@ export default function Workload() {
   const setMode = () => {};
   const isGrid = false;   // Excel mode = the editable grid; Table mode = rows with the New / Edit form (the layout around both is the same)
   const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('wl:rows3')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
-  const [filt, setFilt] = useState(() => ({ q: '', units: '', platform: '', plug_type: '', from: '', to: '', ...(loadViewState('workload', {}).filt || {}) }));   // kept across a refresh
+  const [filt, setFilt] = useState(() => ({ q: '', units: '', platform: '', plug_type: '', from: isoDate(), to: isoDate(), ...(loadViewState('workload', {}).filt || {}) }));   // a fresh tab starts on today   // kept across a refresh
   const [stats, setStats] = useState(null);   // summary cards + tab badges
   const [offset, setOffset] = useState(() => loadViewState('workload', {}).offset || 0);   // the page you were on is kept across a refresh
   const [sort, setSortState] = useState(() => loadViewState('workload', {}).sort || { k: '', dir: 'asc' });   // clicked column header (Table mode)

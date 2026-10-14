@@ -32,6 +32,7 @@ export default function ClearData() {
   };
 
   return (
+    <div className="card mb-12"><div className="card-pad">
     <div className="stack">
       <div className="admin-note">
         Permanently remove records from the areas you tick, within a date range. A compressed copy of everything removed is written to the archive first
@@ -45,7 +46,7 @@ export default function ClearData() {
           <label className="f"><span>To</span><input type="date" id="cd-to" value={to} disabled={allDates} min={from || undefined} onChange={(e) => setTo(e.target.value)} /></label>
           <label className="check"><input type="checkbox" id="cd-all" checked={allDates} onChange={(e) => { setAllDates(e.target.checked); if (e.target.checked) { setFrom(''); setTo(''); } }} /> All dates</label>
         </div>
-        <span className="dim">Both ends are included. Leave one empty for “everything before” or “everything after”.</span>
+        <span className="dim" style={{ display: "block", marginTop: 10 }}>Both ends are included. Leave one empty for “everything before” or “everything after”.</span>
         {bad ? <span className="warn-text">The From date is after the To date.</span> : null}
       </fieldset>
 
@@ -83,5 +84,6 @@ export default function ClearData() {
         />
       ) : null}
     </div>
+    </div></div>
   );
 }

@@ -430,7 +430,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     try {
       ({ rows: [row] } = await db.query(
         `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by, requested_by)
-         VALUES ($1, (SELECT COALESCE(MAX(seq), 0) + 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6, $7) RETURNING id`,
+         VALUES ($1, (SELECT COALESCE(MIN(seq), 1) - 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6, $7) RETURNING id`,
         [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by || '', req.user.id, whoIs(req)]
       ));
     } catch (e) { dupe(e); }
@@ -451,7 +451,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
       const addedIds = [];
       const days = new Set();
       let updated = 0;
-      for (let i = 0; i < list.length; i++) {
+      for (let i = list.length - 1; i >= 0; i--) {   // backwards: each new plug goes to the top of its day, so a block keeps its order
         const row = list[i] || {};
         try {
           const b = plugBody(row);
@@ -467,7 +467,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
           } else {
             const ins = await c.query(
               `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by, requested_by)
-               VALUES ($1, (SELECT COALESCE(MAX(seq), 0) + 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6, $7) RETURNING id`,
+               VALUES ($1, (SELECT COALESCE(MIN(seq), 1) - 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6, $7) RETURNING id`,
               [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by || '', req.user.id, whoIs(req)]);
             await audit(req, 'workload.plug_add', 'workload_plug', ins.rows[0].id, { plug_date: b.plug_date, plug_id: b.plug_id }, c);
             addedIds.push(ins.rows[0].id);

@@ -1,4 +1,7 @@
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
 const bcrypt = require('bcrypt');
 const QRCode = require('qrcode');
 const validator = require('validator');
@@ -10,11 +13,47 @@ const emailCode = require('../email-code');
 const mailer = require('../mailer');
 const { audit } = require('../audit');
 const totp = require('../totp');
-const { MODES } = require('../themes');
+const { MODES, THEME_KEYS } = require('../themes');
 const { twofaRequired } = require('../config');
 const stepUp = require('../reauth');
 
 const router = express.Router();
+
+// ---- Phone notifications (Web Push) ----
+router.get('/push', asyncH(async (req, res) => {
+  const { rows } = await db.query('SELECT endpoint FROM push_subscriptions WHERE user_id=$1', [req.user.id]);
+  let key;
+  try { key = await require('../push').publicKey(); } catch (e) {
+    console.error('push setup failed:', e.message);
+    throw new HttpError(400, e.code === 'MODULE_NOT_FOUND' ? 'Push notifications are not installed on the server yet (an Admin needs to run npm install and restart)' : 'Push notifications are not available right now');
+  }
+  require('../push').rememberSite(req);
+  res.json({ key, endpoints: rows.map((r) => r.endpoint) });
+}));
+router.post('/push', asyncH(async (req, res) => {
+  const sub = req.body || {};
+  const endpoint = v.str(sub.endpoint, { field: 'Endpoint', max: 1000, required: true });
+  const p256dh = v.str(sub.keys && sub.keys.p256dh, { field: 'Key', max: 200, required: true });
+  const auth = v.str(sub.keys && sub.keys.auth, { field: 'Key', max: 100, required: true });
+  if (!/^https:\/\//.test(endpoint)) throw new HttpError(400, 'Invalid endpoint');
+  await db.query(
+    `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, ua) VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (endpoint) DO UPDATE SET user_id=$1, p256dh=$3, auth=$4, ua=$5`,
+    [req.user.id, endpoint, p256dh, auth, String(req.get('user-agent') || '').slice(0, 200)]);
+  res.json({ ok: true });
+}));
+router.delete('/push', asyncH(async (req, res) => {
+  const endpoint = v.str(req.body && req.body.endpoint, { field: 'Endpoint', max: 1000 });
+  if (endpoint) await db.query('DELETE FROM push_subscriptions WHERE user_id=$1 AND endpoint=$2', [req.user.id, endpoint]);
+  else await db.query('DELETE FROM push_subscriptions WHERE user_id=$1', [req.user.id]);
+  res.json({ ok: true });
+}));
+router.post('/push/test', asyncH(async (req, res) => {
+  const push = require('../push');
+  push.rememberSite(req);
+  const results = await push.sendPush([req.user.id], { title: 'Test notification', body: 'Phone notifications are working.', link: '/profile' });
+  res.json({ ok: true, results });
+}));
 
 router.put('/', asyncH(async (req, res) => {
   const full_name = v.str(req.body.full_name, { field: 'Full name', max: 120, required: true });
@@ -66,6 +105,49 @@ router.put('/appearance', asyncH(async (req, res) => {
   const mode = v.oneOf(req.body.mode, MODES, { field: 'Appearance' });
   await db.query('UPDATE users SET appearance=$2, updated_at=now() WHERE id=$1', [req.user.id, mode]);
   res.json({ ok: true, mode });
+}));
+
+// ---- Profile picture ----
+// The page crops the chosen image to a square and sends it as a small JPEG; the server only keeps a real JPEG of a sane size, as uploads/avatars/<id>.jpg.
+// Any signed-in user may look at any picture (they already see each other's names); nothing else about the account is exposed here.
+const AVATAR_DIR = path.join(__dirname, '..', '..', 'uploads', 'avatars');
+const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 400 * 1024, files: 1 } });
+const avatarFile = (id) => path.join(AVATAR_DIR, `${Number(id)}.jpg`);
+
+router.post('/avatar', (req, res, next) => avatarUpload.single('avatar')(req, res, (err) => {
+  if (err) return next(new HttpError(400, err.code === 'LIMIT_FILE_SIZE' ? 'That picture is too large (400 KB at most after it is cropped).' : 'Could not read that picture.'));
+  return next();
+}), asyncH(async (req, res) => {
+  const f = req.file;
+  if (!f || f.buffer.length < 200 || !(f.buffer[0] === 0xff && f.buffer[1] === 0xd8 && f.buffer[2] === 0xff)) throw new HttpError(400, 'Choose a JPEG, PNG or WebP picture.');
+  await fs.promises.mkdir(AVATAR_DIR, { recursive: true });
+  await fs.promises.writeFile(avatarFile(req.user.id), f.buffer);
+  const v = Date.now();
+  await db.query('UPDATE users SET avatar_v=$2, updated_at=now() WHERE id=$1', [req.user.id, v]);
+  res.json({ ok: true, avatar_v: v });
+}));
+
+router.delete('/avatar', asyncH(async (req, res) => {
+  await fs.promises.unlink(avatarFile(req.user.id)).catch(() => {});
+  await db.query('UPDATE users SET avatar_v=NULL, updated_at=now() WHERE id=$1', [req.user.id]);
+  res.json({ ok: true });
+}));
+
+router.get('/avatar/:id', asyncH(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return res.sendStatus(404);
+  const { rows } = await db.query('SELECT avatar_v FROM users WHERE id=$1 AND is_active', [id]);
+  if (!rows.length || !rows[0].avatar_v) return res.sendStatus(404);
+  res.set({ 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff' });
+  return res.type('jpeg').sendFile(avatarFile(id), (e) => { if (e && !res.headersSent) res.sendStatus(404); });
+}));
+
+// Personal colour theme. Empty/null = no personal choice: the user follows the Admin default theme (which can change at any time).
+router.put('/theme', asyncH(async (req, res) => {
+  const raw = req.body.theme;
+  const theme = raw === null || raw === undefined || raw === '' ? null : v.oneOf(raw, THEME_KEYS, { field: 'Theme' });
+  await db.query('UPDATE users SET theme=$2, updated_at=now() WHERE id=$1', [req.user.id, theme]);
+  res.json({ ok: true, theme });
 }));
 
 // --- TOTP 2FA ---

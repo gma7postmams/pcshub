@@ -161,8 +161,8 @@ function Report({ a, onDiscard, onRestore }) {
       <div className="card mb-12">
         <div className="card-head">
           <h2>Restore readiness report</h2>
-          <button type="button" className="btn sm" onClick={onDiscard}>Discard analysis</button>
-          <button type="button" className="btn danger sm" disabled={r.readiness.state === 'blocked'} title={r.readiness.state === 'blocked' ? 'Resolve the failed checks first' : undefined} onClick={onRestore}>Restore</button>
+          <button type="button" className="btn" onClick={onDiscard}>Discard analysis</button>
+          <button type="button" className="btn danger" disabled={r.readiness.state === 'blocked'} title={r.readiness.state === 'blocked' ? 'Resolve the failed checks first' : undefined} onClick={onRestore}>Restore</button>
         </div>
         <div className="card-pad">
           <div className="readiness">

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { get, post } from '../lib/api.js';
 import { ago, initials, safeLocalLink } from '../lib/util.js';
+import { avatarUrl, colorFor } from '../lib/avatar.js';
 import { useBranding, useSession } from '../context.jsx';
 import { onLive } from '../lib/live.js';
 import { BellIcon, MenuIcon } from './Icons.jsx';
@@ -122,7 +123,7 @@ export default function TopNav() {
           {notif.unread ? <span className={`badge-count${ring ? ' pulse' : ''}`} id="notif-count">{notif.unread > 99 ? '99+' : notif.unread}</span> : null}
         </button>
         <button type="button" className="usermenu-btn" id="user-btn" onClick={toggle('user')}>
-          <span className="avatar">{initials(u.full_name)}</span>
+          <span className={`avatar${u.avatar_v ? ' has-img' : ''}`} style={u.avatar_v ? { background: colorFor(u.id) } : undefined}>{u.avatar_v ? <img className="av-img" src={avatarUrl(u.id, u.avatar_v)} alt="" draggable="false" /> : initials(u.full_name)}</span>
           <span className="uinfo"><span className="uname">{u.full_name}</span><RoleBadge role={u.role} /></span>
           <span className="uchev"><ChevronDownSmall /></span>
         </button>
@@ -151,7 +152,7 @@ export default function TopNav() {
       {open === 'user' ? (
         <div className="dropdown" id="user-dd" onClick={(e) => e.stopPropagation()}>
           <div className="dd-head">
-            <span className="avatar">{initials(u.full_name)}</span>
+            <span className={`avatar${u.avatar_v ? ' has-img' : ''}`} style={u.avatar_v ? { background: colorFor(u.id) } : undefined}>{u.avatar_v ? <img className="av-img" src={avatarUrl(u.id, u.avatar_v)} alt="" draggable="false" /> : initials(u.full_name)}</span>
             <div className="grow"><div><strong>{u.full_name}</strong></div><div className="dim mono">@{u.username}</div></div>
             <RoleBadge role={u.role} />
           </div>

@@ -94,7 +94,8 @@ app.get('/sw.js', (req, res) => {
   res.set('Service-Worker-Allowed', '/');
   res.sendFile(path.join(CLIENT_DIST, 'sw.js'));
 });
-app.get('/manifest.webmanifest', require('./src/app-shell').manifest);   // name follows Administration > Branding
+app.get('/manifest.webmanifest', require('./src/app-shell').manifest);
+app.get('/app-icon/:size.png', require('./src/app-shell').appIconRoute);   // the home-screen icon, logo filling the tile
 // Hashed bundles never change → cache for a year
 app.use('/assets', express.static(path.join(CLIENT_DIST, 'assets'), { immutable: true, maxAge: '365d', index: false }));
 // The app shell is only handed out by the access-controlled page routes further down, never as a plain file

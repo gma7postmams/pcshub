@@ -20,8 +20,8 @@ export default function JsonTools({ path, summary, onDone }) {
   };
   return (
     <>
-      <a className="btn sm" href={`${path}/export`} download>Export JSON</a>
-      <button type="button" className="btn sm" onClick={() => fileRef.current && fileRef.current.click()}>Import JSON</button>
+      <a className="btn" href={`${path}/export`} download>Export JSON</a>
+      <button type="button" className="btn" onClick={() => fileRef.current && fileRef.current.click()}>Import JSON</button>
       <input ref={fileRef} type="file" hidden onChange={(e) => importFile(e.target.files[0])} />
     </>
   );

@@ -1,19 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api, del, get, put } from '../../lib/api.js';
-import { mix, setPalette, THEME_PREVIEW } from '../../lib/theme.js';
+import { setPalette } from '../../lib/theme.js';
+import { Swatch } from '../../components/ThemeSwatch.jsx';
 import { useBranding } from '../../context.jsx';
 import { Empty, useToast } from '../../components/ui.jsx';
 import { makeAppIcon } from '../../lib/appicon.js';
-
-function Swatch({ themeKey }) {
-  const c = THEME_PREVIEW[themeKey] || THEME_PREVIEW.midnight;
-  return (
-    <div className="sw">
-      <span style={{ background: mix(c.tint, 0.08, '#0b0d11') }}><i style={{ background: c.dark }} /><i style={{ background: c.a2 }} /></span>
-      <span style={{ background: mix(c.tint, 0.05, '#f5f6f8'), border: '1px solid #e1e4ea' }}><i style={{ background: c.light }} /><i style={{ background: c.a2 }} /></span>
-    </div>
-  );
-}
 
 function LogoSlot({ mode, label, url, set, onUpload, onRemove }) {
   const [file, setFile] = useState(null);
@@ -44,7 +35,7 @@ export default function Branding() {
   };
   useEffect(() => { load(); }, []);
   // Live preview while editing; restore saved branding when leaving the tab
-  useEffect(() => { if (f) setPalette(f.theme, f.custom ? f.accent : ''); }, [f]);
+  useEffect(() => { if (f) setPalette(f.theme, f.custom ? f.accent : '', true); }, [f]);
   useEffect(() => () => { reload(); }, [reload]);
 
   if (!b || !f) return <Empty>Loading…</Empty>;
@@ -94,8 +85,9 @@ export default function Branding() {
       </div>
 
       <div className="card mt-16">
-        <div className="card-head"><h2 title="Applies to everyone. Each user picks Dark / Light / System in their Profile.">Theme</h2></div>
+        <div className="card-head"><h2 title="The default theme: applies to everyone who has not picked their own theme in their Profile. Each user also picks Dark / Light / System there.">Theme</h2></div>
         <div className="card-pad stack">
+          <p className="muted m-0">Default theme for new users and anyone who has not picked their own. Changing it updates everyone still on the default.</p>
           <div className="theme-grid" id="tg">
             {b.themes.map((t) => (
               <button type="button" key={t.key} className={`theme-card ${f.theme === t.key ? 'on' : ''}`} data-theme-key={t.key} onClick={() => set('theme', t.key)}>

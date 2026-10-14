@@ -231,6 +231,8 @@ router.get('/me', requireAuth, (req, res) => {
       role: u.role, group: u.group_name || null, totp_enabled: u.totp_enabled, twofa_method: u.twofa_method, email_2fa_available: require('../security-settings').get().allowEmail2fa && mailer.configured(), must_change_password: u.must_change_password,
       totp_required: twofaRequired(u),
       appearance: u.appearance || 'system',
+      avatar_v: u.avatar_v ? Number(u.avatar_v) : null,
+      theme: u.theme || null,   // personal colour theme; null = follow the Admin default
     },
     pages: allowedPages(u),
     sections: allowedSections(u),

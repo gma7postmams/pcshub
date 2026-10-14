@@ -11,6 +11,8 @@ async function notifyUsers(userIds, { title, body, link }, client) {
     [ids, title, body || null, link || null]
   );
   try { require('./live').publishNotif(ids); } catch (_) { /* live updates are a bonus */ }
+  // phones: after the caller's transaction (if any) is done; fire and forget
+  setTimeout(() => { try { require('./push').sendPush(ids, { title, body, link }); } catch (e) { console.warn('push unavailable:', e.message); } }, client ? 1500 : 0);
 }
 
 /** Notify every active user who can perform `action` (role grants it AND their group opens its page). */
@@ -40,4 +42,19 @@ async function notifyPageUsers(pageKey, payload, { excludeUserId } = {}, client)
   await notifyUsers(rows.filter((u) => effectiveKeys({ role: u.role, perms: u.perms }).has(pageKey)).map((u) => u.id), payload, client);
 }
 
-module.exports = { notifyPageUsers, notifyUsers, notifyCapable };
+/** Notify the Workload team users (VGFX / VEDIT / AUDIO) whose tab is in `teams`. Admins are left out (they open every tab); `excludeUserId` is the person who made the change. */
+async function notifyWorkloadTeams(teams, payload, { excludeUserId } = {}, client) {
+  const keys = [...new Set(teams)].map((t) => `workload.${String(t).toLowerCase()}`);
+  if (!keys.length) return;
+  const runner = client || db;
+  const { rows } = await runner.query(
+    `SELECT u.id, u.role,
+            COALESCE((SELECT array_agg(gp.perm_key) FROM group_permissions gp WHERE gp.group_id = u.group_id), '{}') AS perms
+       FROM users u
+      WHERE u.is_active AND u.role NOT IN ('Admin', 'System Admin') AND ($1::int IS NULL OR u.id <> $1)`,
+    [excludeUserId || null]
+  );
+  await notifyUsers(rows.filter((u) => { const eff = effectiveKeys({ role: u.role, perms: u.perms }); return keys.some((k) => eff.has(k)); }).map((u) => u.id), payload, client);
+}
+
+module.exports = { notifyPageUsers, notifyUsers, notifyCapable, notifyWorkloadTeams };

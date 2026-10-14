@@ -754,7 +754,7 @@ router.delete('/workload-locks/:id', asyncH(async (req, res) => {
 router.put('/branding', asyncH(async (req, res) => {
   const app_name = v.str(req.body.app_name, { field: 'App name', max: 80, required: true });
   const tagline = v.str(req.body.tagline, { field: 'Tagline', max: 120 }) || '';
-  const theme = v.oneOf(req.body.theme, THEME_KEYS, { field: 'Theme', def: 'midnight' });
+  const theme = v.oneOf(req.body.theme, THEME_KEYS, { field: 'Theme', def: 'graphite' });
   const accent_color = v.str(req.body.accent_color, { field: 'Accent color', max: 7 }) || '';
   if (accent_color && !/^#[0-9a-fA-F]{6}$/.test(accent_color)) throw new HttpError(400, 'Accent color must be a hex value like #4f8cff (or empty to use the theme accent)');
   await db.tx(async (c) => {

@@ -133,7 +133,7 @@ export default function HistoryTab({ active, refreshKey, onRunning, onChanged, o
               ))}
             </div>
             <label className="check"><input type="checkbox" checked={showDeleted} onChange={(e) => { setShowDeleted(e.target.checked); setOffset(0); }} /> Show deleted</label>
-            <button type="button" className="btn sm" onClick={() => load()}>Refresh</button>
+            <button type="button" className="btn" onClick={() => load()}>Refresh</button>
           </div>
         </div>
         <div className="table-wrap">
@@ -180,8 +180,8 @@ export default function HistoryTab({ active, refreshKey, onRunning, onChanged, o
         {hist.total > PAGE ? (
           <div className="row" style={{ padding: 12, justifyContent: 'flex-end' }}>
             <span className="dim">{offset + 1}–{Math.min(offset + PAGE, hist.total)} of {hist.total}</span>
-            <button type="button" className="btn sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Prev</button>
-            <button type="button" className="btn sm" disabled={offset + PAGE >= hist.total} onClick={() => setOffset(offset + PAGE)}>Next</button>
+            <button type="button" className="btn" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Prev</button>
+            <button type="button" className="btn" disabled={offset + PAGE >= hist.total} onClick={() => setOffset(offset + PAGE)}>Next</button>
           </div>
         ) : null}
       </div>
