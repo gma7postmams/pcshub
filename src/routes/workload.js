@@ -5,7 +5,7 @@ const v = require('../validate');
 const { groupByDate, truthy, dateTag } = require('../export-sheets');
 const { asyncH, HttpError, requireAction } = require('../middleware');
 const { audit } = require('../audit');
-const { notifyWorkloadTeams } = require('../notify');
+const { notifyPageUsers } = require('../notify');
 const { workloadTabs } = require('../permissions');
 
 const { logRun } = require('../transferlog');   // action logging (audit entry + server log line) for bulk delete
@@ -257,7 +257,7 @@ async function parseRow(client, body, current, customCols = [], opts = {}) {
 }
 
 const colList = COLS.map((c) => `"${c}"`);
-const CUR_COLS = 'id, units_concerned, platform, plug_type, prog_name, audio_guide, script, art_stb, work_date, is_priority';
+const CUR_COLS = 'id, units_concerned, platform, plug_type, prog_name, vo, script, art_stb, audio_guide, work_date, is_priority';
 
 async function insertRow(client, rec, userId) {
   const params = [...COLS.map((c) => rec[c]), !!rec.is_priority, JSON.stringify(rec.custom_fields || {}), userId];
@@ -269,29 +269,30 @@ async function insertRow(client, rec, userId) {
   return rows[0].id;
 }
 
-// Script / Artwork-STB / Audio Guide: tell the team when one of them goes from empty (or N/A) to filled in. `before` = the row as it was (null for a new row), `after` = the new values.
-const MATERIALS = [['script', 'Script'], ['art_stb', 'Artwork / STB'], ['audio_guide', 'Audio Guide']];
-const hasValue = (x) => { const t = x == null ? '' : String(x).trim(); return t !== '' && !/^n\/?a$/i.test(t); };
-const newlyFilled = (before, after) => MATERIALS.filter(([k]) => !hasValue(before && before[k]) && hasValue(after[k])).map(([, label]) => label);
-const filledItem = (before, rec) => { const labels = newlyFilled(before, rec); return labels.length && rec.units_concerned ? { units: rec.units_concerned, plug_id: rec.plug_id, work_date: rec.work_date, labels } : null; };
-
-async function notifyMaterialsFilled(req, items) {
+// Tell everyone who can open the Workload Tracker (their group has the page) when VO, Script, Artwork / STB or Audio Guide is filled in or changed.
+// Units Concerned plays no part. Best effort: never fails the save. `items` = [{ plug_id, work_date, fields: ['vo', ...] }] (see fieldsSet).
+const NOTIFY_FIELDS = { vo: ['workload_vo', 'VO'], script: ['workload_script', 'Script'], art_stb: ['workload_art_stb', 'Artwork / STB'], audio_guide: ['workload_audio_guide', 'Audio Guide'] };
+/** Which of those four fields were given a value (or a different one) by this save. `prev` is the row before (null for a new row). */
+function fieldsSet(prev, rec) {
+  const val = (x) => (x == null ? '' : String(x).trim());
+  return Object.keys(NOTIFY_FIELDS).filter((f) => val(rec[f]) && val(rec[f]).toUpperCase() !== 'N/A' && val(rec[f]) !== val(prev && prev[f]));
+}
+async function notifyFieldsSet(req, items) {
   try {
-    const list = (items || []).filter((x) => x && UNIT_TEAMS[x.units]);
-    if (!list.length) return;
     const first = (x) => String(x.plug_id || '').split('\n')[0].trim() || 'a row';
     const day = (x) => (x.work_date instanceof Date ? x.work_date.toISOString().slice(0, 10) : String(x.work_date || '').slice(0, 10));
-    const byTeam = new Map();
-    for (const x of list) for (const t of UNIT_TEAMS[x.units]) { if (!byTeam.has(t)) byTeam.set(t, []); byTeam.get(t).push(x); }
-    for (const [team, xs] of byTeam) {
+    const by = new Map();   // field -> rows
+    for (const x of items) for (const f of (x && x.fields) || []) { if (!by.has(f)) by.set(f, []); by.get(f).push(x); }
+    for (const [f, xs] of by) {
+      const [kind, label] = NOTIFY_FIELDS[f];
       const one = xs.length === 1;
-      await notifyWorkloadTeams([team], {
-        title: one ? `${xs[0].labels.join(' / ')} filled in: ${first(xs[0])}` : `${xs.length} ${team} workload rows have new materials`,
-        body: one ? `${req.user.full_name} filled in ${xs[0].labels.join(', ')} for ${first(xs[0])} (${day(xs[0])}).` : `${req.user.full_name} filled in Script, Artwork / STB or Audio Guide on ${xs.length} workload rows.`,
-        link: '/workload', kind: 'workload_materials',
+      await notifyPageUsers('workload', {
+        title: one ? `${label} updated: ${first(xs[0])}` : `${label} updated on ${xs.length} workload items`,
+        body: one ? `${req.user.full_name} set ${label} on ${first(xs[0])} (${day(xs[0])}).` : `${req.user.full_name} set ${label} on ${xs.length} workload rows.`,
+        link: '/workload', kind,
       }, { excludeUserId: req.user.id });
     }
-  } catch (e) { console.error('[workload] materials notification failed:', e.message); }
+  } catch (e) { console.error('[workload] notification failed:', e.message); }
 }
 
 async function updateRow(client, id, rec, userId) {
@@ -631,7 +632,7 @@ router.post('/', requireAction('workload.write'), asyncH(async (req, res) => {
     made = rec;
     return newId;
   });
-  await notifyMaterialsFilled(req, [filledItem(null, made)]);
+  await notifyFieldsSet(req, [{ plug_id: made.plug_id, work_date: made.work_date, fields: fieldsSet(null, made) }]);
   res.status(201).json({ ok: true, id });
 }));
 
@@ -646,7 +647,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
     let created = 0;
     let updated = 0;
     const createdIds = [];
-    const filledSet = [];   // rows whose Script / Artwork / Audio Guide was just filled in
+    const fieldsChanged = [];   // rows where VO / Script / Artwork-STB / Audio Guide was filled in or changed — the teams involved are told
     const results = [];   // what was stored for the auto-filled columns, so the table can tell a cleared PSD / Platform that was filled in again
     for (let i = 0; i < list.length; i++) {
       const row = list[i] || {};
@@ -660,7 +661,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           assertNotLocked(locks, rec.work_date);
           await updateRow(c, id, rec, req.user.id);
           await audit(req, 'workload.update', 'workload_item', id, rec, c);
-          { const f = filledItem(cur.rows[0], rec); if (f) filledSet.push(f); }
+          fieldsChanged.push({ plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur.rows[0], rec) });
           results.push({ id, psd: rec.psd || '', prog_name: rec.prog_name || '', platform: rec.platform || '' });
           updated++;
         } else {
@@ -669,7 +670,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           const id = await insertRow(c, rec, req.user.id);
           await audit(req, 'workload.create', 'workload_item', id, rec, c);
           createdIds.push(id);
-          { const f = filledItem(null, rec); if (f) filledSet.push(f); }
+          fieldsChanged.push({ plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(null, rec) });
           created++;
         }
       } catch (e) {
@@ -677,10 +678,10 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
         throw e;
       }
     }
-    return { created, updated, createdIds, results, filledSet };
+    return { created, updated, createdIds, results, fieldsChanged };
   });
-  await notifyMaterialsFilled(req, out.filledSet);
-  const { filledSet, ...shown } = out;
+  await notifyFieldsSet(req, out.fieldsChanged);
+  const { fieldsChanged, ...shown } = out;
   res.json({ ok: true, ...shown });
 }));
 
@@ -709,7 +710,7 @@ router.patch('/:id', requireAction('workload.write'), asyncH(async (req, res) =>
     await audit(req, 'workload.update', 'workload_item', id, { field, value });
     return res.json({ ok: true, values: { [field]: value } });
   }
-  let filledNow = null;
+  let fieldsChanged = null;
   const values = await db.tx(async (c) => {
     const found = await c.query('SELECT * FROM workload_items WHERE id=$1 FOR UPDATE', [id]);
     if (!found.rows.length) throw new HttpError(404, 'Workload item not found');
@@ -727,12 +728,12 @@ router.patch('/:id', requireAction('workload.write'), asyncH(async (req, res) =>
       [id, ...changed.map((k) => rec[k]), req.user.id]
     );
     await audit(req, 'workload.update', 'workload_item', id, { field, value: rec[field] }, c);
-    if (['script', 'art_stb', 'audio_guide'].includes(field)) filledNow = filledItem(cur, rec);
+    if (NOTIFY_FIELDS[field]) fieldsChanged = { plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur, { [field]: rec[field] }) };
     // hand back values in the same shape the list uses ('YYYY-MM-DDTHH:MM' for Breakdate/Time)
     const shape = (k) => (FIELDS[k].kind === 'datetime' && rec[k] ? rec[k].slice(0, 16).replace(' ', 'T') : rec[k]);
     return Object.fromEntries(changed.map((k) => [k, shape(k)]));
   });
-  if (filledNow) await notifyMaterialsFilled(req, [filledNow]);
+  if (fieldsChanged) await notifyFieldsSet(req, [fieldsChanged]);
   res.json({ ok: true, values });
 }));
 
@@ -740,7 +741,7 @@ router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const customCols = await loadCustomCols(db);
   const locks = await loadLocks(db);
-  let filledNow = null;
+  let fieldsChanged = null;
   await db.tx(async (c) => {
     const cur = await c.query(`SELECT ${CUR_COLS} FROM workload_items WHERE id=$1 FOR UPDATE`, [id]);
     if (!cur.rows.length) throw new HttpError(404, 'Workload item not found');
@@ -749,9 +750,9 @@ router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
     assertNotLocked(locks, rec.work_date);
     await updateRow(c, id, rec, req.user.id);
     await audit(req, 'workload.update', 'workload_item', id, rec, c);
-    filledNow = filledItem(cur.rows[0], rec);
+    fieldsChanged = { plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur.rows[0], rec) };
   });
-  if (filledNow) await notifyMaterialsFilled(req, [filledNow]);
+  if (fieldsChanged) await notifyFieldsSet(req, [fieldsChanged]);
   res.json({ ok: true });
 }));
 
