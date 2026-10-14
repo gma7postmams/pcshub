@@ -139,22 +139,11 @@ function DateRangeInput({ value, onChange, disabled }) {
   };
   const onPaste = (e) => { if (applyEp(e.clipboardData ? e.clipboardData.getData('text/plain') : '')) e.preventDefault(); };
   const onKey = (e) => pasteFallback(e, (t) => applyEp(t));
-  // a plain text box: Ctrl+V works in it in every browser (Firefox sends no paste to a date box); Enter or clicking away reads what was typed
-  const [typed, setTyped] = useState('');
-  const [bad, setBad] = useState(false);
-  const takeTyped = () => { if (!typed.trim()) return; if (applyEp(typed)) { setTyped(''); setBad(false); } else setBad(true); };
-  const pasteBox = (
-    <input type="text" className={`dri-paste${bad ? ' bad' : ''}`} value={typed} disabled={disabled} placeholder="Paste or type dates here" aria-label="Paste or type dates" aria-invalid={bad || undefined}
-      title={bad ? 'Not read as dates. Try Sep 14-18, 21-25' : 'Paste or type dates, then press Enter'} onChange={(e) => { setTyped(e.target.value); setBad(false); }} onBlur={takeTyped}
-      onPaste={(e) => { const t = e.clipboardData ? e.clipboardData.getData('text/plain') : ''; if (applyEp(t)) { e.preventDefault(); e.stopPropagation(); setTyped(''); setBad(false); } }}
-      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); takeTyped(); } else if (e.key === 'Tab' || e.key === 'Escape') { /* handled by the cell */ } else e.stopPropagation(); }} />
-  );
   if (rows) {
     const edit = (i, part) => { const n = rows.map((r, j) => (j === i ? { ...r, ...part } : r)); setRows(n); emit(n); };
     const del = (i) => { const n = rows.filter((_, j) => j !== i); setRows(n.length ? n : [{ a: '', b: '' }]); emit(n); };
     return (
       <span className="dri-list" onPaste={onPaste} onKeyDown={onKey}>
-        {pasteBox}
         {rows.map((r, i) => (
           <span className="dri-day" key={i}>
             <span className="dri">
@@ -174,7 +163,6 @@ function DateRangeInput({ value, onChange, disabled }) {
   }
   return (
     <span className="dri-wrap" onPaste={onPaste} onKeyDown={onKey}>
-      {pasteBox}
       <span className="dri">
         <input type="date" value={from} disabled={disabled} max={to || undefined} aria-label="From" onChange={(e) => onChange(join(e.target.value, to))} />
         <span className="dim dri-dash">–</span>

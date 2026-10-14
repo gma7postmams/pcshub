@@ -1243,5 +1243,3 @@ table.t.wl.cards .bd-chips .chip { display: inline-flex; align-items: center; ga
 .linkish { background: none; border: 0; padding: 0; color: var(--accent, #2563eb); cursor: pointer; font: inherit; text-decoration: underline; }
 .linkish:disabled { opacity: .5; cursor: default; }
 
-.dri-paste { width: 100%; box-sizing: border-box; }
-.dri-paste.bad { border-color: var(--danger, #dc2626); }
