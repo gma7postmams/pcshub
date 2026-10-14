@@ -1,7 +1,7 @@
 import { cloneElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { pasteFallback } from '../lib/pasteFallback.js';
-import { normDate } from '../components/PlugGrid.jsx';
+import { normDate, parseLooseDate } from '../components/PlugGrid.jsx';
 import { loadView as loadViewState, saveView as saveViewState, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
 import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
@@ -41,6 +41,10 @@ function toBreakdateIso(t) {
   if (m) { const mon = MON3.indexOf(m[1].toLowerCase()); return mon < 0 ? null : `${m[3]}-${pad(mon + 1)}-${pad(Number(m[2]))}T${clock(m[4], m[5], m[6])}`; }
   m = /^(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\.?,?\s+(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*(AM|PM)?)?$/i.exec(s);
   if (m) { const mon = MON3.indexOf(m[2].toLowerCase()); return mon < 0 ? null : `${m[3]}-${pad(mon + 1)}-${pad(Number(m[1]))}T${clock(m[4], m[5], m[6])}`; }
+  // a plain date with no year ("SEP 3", "Mon, Oct 12, 2026") and an optional time ("4pm", "4:30 PM"); no time = midnight
+  m = /^(.*?)(?:[ ,]+(\d{1,2})(?::(\d{2}))?\s*(am|pm))?$/i.exec(s);
+  const d = m && parseLooseDate(m[1]);
+  if (d) return `${d}T${clock(m[2], m[3], m[4])}`;
   return null;
 }
 // Both teams' times in one pasted cell ('VGFX  Sep 28, 2026 4:00 PM' / 'VEDIT  Sep 28, 2026 10:00 PM', on separate lines, with
@@ -1540,8 +1544,9 @@ export default function Workload() {
       let changed = false;
       for (let ci = n.c0; ci <= n.c1; ci++) {
         const k = tableCols[ci];
-        const val = valueAt(ri - n.r0, ci - n.c0, k);
+        let val = valueAt(ri - n.r0, ci - n.c0, k);
         if (val === undefined) continue;
+        if (k === 'work_date' && label === 'pasted') val = normDate(String(val).replace(/\s*\n\s*/g, ' '));   // "SEP 3", "Mon, Oct 12, 2026", "10/12/2026" → 2026-...
         if (k === 'breakdate_vgfx' && label === 'pasted') { const bad = bdMismatch(r, val, meta.unitTeams); if (bad) { bdErrs.current.add(bad); continue; } }
         if (String(cellText(r, k) ?? '') === String(val ?? '')) continue;   // already that value
         row = setCellValue(row, k, val, true);

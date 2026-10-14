@@ -14,15 +14,27 @@ const ISO = /^\d{4}-\d{2}-\d{2}$/;
 let keySeq = 0;
 const newKey = () => `n${Date.now()}-${keySeq++}`;
 
-// "2026-10-12", "10/12/2026", "10/12/26", "Oct 12 2026" → 2026-10-12 (anything else is left as typed and rejected on Save)
+// "2026-10-12", "10/12/2026", "10/12/26", "Oct 12 2026", "Mon, Oct 12, 2026", "OCT 12" (no year = this year), "12 Oct" → 2026-10-12 ('' if it isn't a date)
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+export function parseLooseDate(text, year = new Date().getFullYear()) {
+  const t = String(text ?? '').trim().replace(/\s+/g, ' ').replace(/^(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+/i, '').replace(/(\d)(?:st|nd|rd|th)\b/gi, '$1');
+  if (!t) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  const real = (y, m, d) => { const x = new Date(Date.UTC(y, m - 1, d)); return x.getUTCFullYear() === y && x.getUTCMonth() === m - 1 && x.getUTCDate() === d ? `${y}-${pad(m)}-${pad(d)}` : ''; };
+  let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+  if (m) return real(+m[1], +m[2], +m[3]);
+  m = /^(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2}|\d{4}))?$/.exec(t);
+  if (m) return real(m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : year, +m[1], +m[2]);
+  m = /^([a-z]{3,9})\.?\s*(\d{1,2})(?:\s*,?\s*(\d{4}))?$/i.exec(t);
+  if (m && MONTHS[m[1].slice(0, m[1].toLowerCase().startsWith('sept') ? 4 : 3).toLowerCase()]) return real(m[3] ? +m[3] : year, MONTHS[m[1].slice(0, m[1].toLowerCase().startsWith('sept') ? 4 : 3).toLowerCase()], +m[2]);
+  m = /^(\d{1,2})\s*([a-z]{3,9})\.?(?:\s*,?\s*(\d{4}))?$/i.exec(t);
+  if (m && MONTHS[m[2].slice(0, m[2].toLowerCase().startsWith('sept') ? 4 : 3).toLowerCase()]) return real(m[3] ? +m[3] : year, MONTHS[m[2].slice(0, m[2].toLowerCase().startsWith('sept') ? 4 : 3).toLowerCase()], +m[1]);
+  return '';
+}
 export function normDate(text) {
   const t = String(text ?? '').trim();
   if (!t || ISO.test(t)) return t;
-  const pad = (n) => String(n).padStart(2, '0');
-  let m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/.exec(t);
-  if (m) { const y = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]); return `${y}-${pad(m[1])}-${pad(m[2])}`; }
-  if (/[a-z]/i.test(t)) { const d = new Date(`${t} UTC`); if (!Number.isNaN(d.getTime())) return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`; }
-  return t;
+  return parseLooseDate(t) || t;
 }
 
 // Tab-separated text in / out, with Excel's quoting for cells that contain tabs, line breaks or quotes
