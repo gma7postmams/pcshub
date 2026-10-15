@@ -521,7 +521,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     const used = list.filter((d) => String(d.plug_id).trim() || String(d.prog_name).trim() || String(d.psd).trim());
     if (!used.length) { toast('Plug ID is required', 'err'); return; }
     if (!partial && used.some((d) => !String(d.plug_id).trim())) { toast('Plug ID is required on every new row', 'err'); return; }
-    const recs = used.map((d) => (partial ? { ...recOf(d), partial: true } : recOf(d)));   // partial: a row started in a spare row may still be missing its Plug ID
+    const recs = used.map((d) => ({ ...recOf(d), ...(partial ? { partial: true } : {}), ...(d.at === 'bottom' ? { bottom: true } : {}) }));   // a row typed into a blank row at the end stays at the end of its day   // partial: a row started in a spare row may still be missing its Plug ID
     try {
       let ids = (await batch(recs)).addedIds || [];
       if (partial && used.length === 1 && used[0].at === 'bottom' && ids[0]) {

@@ -471,8 +471,9 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
           } else {
             const ins = await c.query(
               `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by, requested_by)
-               VALUES ($1, (SELECT COALESCE(MIN(seq), 1) - 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6, $7) RETURNING id`,
-              [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by || '', req.user.id, whoIs(req)]);
+               VALUES ($1, CASE WHEN $8::boolean THEN (SELECT COALESCE(MAX(seq), 0) + 1 FROM workload_plugs WHERE plug_date = $1)
+                                ELSE (SELECT COALESCE(MIN(seq), 1) - 1 FROM workload_plugs WHERE plug_date = $1) END, $2, $3, $4, $5, 'added by hand', $6, $7) RETURNING id`,
+              [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by || '', req.user.id, whoIs(req), row.bottom === true]);   // `bottom`: typed into a blank row at the end of the table, so it stays there (otherwise a new plug goes to the top of its day)
             await audit(req, 'workload.plug_add', 'workload_plug', ins.rows[0].id, { plug_date: b.plug_date, plug_id: b.plug_id }, c);
             addedIds.push(ins.rows[0].id);
             if (b.plug_id) readyIds.push(ins.rows[0].id);
