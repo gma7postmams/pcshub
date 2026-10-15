@@ -1640,8 +1640,13 @@ export default function Workload() {
   const pasteCells = async (text, sel) => {
     const n = sel || normCells();
     if (!n) return;
-    const block = parseTsvBlock(text);
+    let block = parseTsvBlock(text);
     if (!block.length) return;
+    // A Breakdate / Time cell holds BOTH teams' times (a VGFX line + a VEDIT line): pasting that into a Breakdate cell is ONE value, never dealt out to the rows below
+    if (tableCols[n.c0] === 'breakdate_vgfx' && block.every((x) => x.length === 1) && block.length > 1) {
+      const joined = normBreakdate(block.map((x) => x[0]).join('\n'), new Date().getFullYear());
+      if (Object.keys(parseBreakdatePairs(joined)).length && joined.replace(BD_PAIR, '').replace(/["\s]+/g, '') === '') block = [[block.map((x) => x[0]).join('\n')]];
+    }
     const single = block.length === 1 && block[0].length === 1;
     const bigger = { ...n };
     if (!single) { bigger.r1 = Math.min(pageRows.length - 1, n.r0 + block.length - 1); bigger.c1 = Math.min(tableCols.length - 1, n.c0 + Math.max(...block.map((x) => x.length)) - 1); }
@@ -1913,7 +1918,15 @@ export default function Workload() {
     if (teams.includes('VEDIT')) parts.push({ k: 'breakdate_vedit', hue: 'orange', tag: 'VEDIT' });
     const locked = canWrite && rowLocked(r);
     return (
-      <td key="breakdate_vgfx" data-k="breakdate_vgfx" className={r.is_priority ? 'prio' : undefined} title={locked ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}>
+      <td key="breakdate_vgfx" data-k="breakdate_vgfx" className={r.is_priority ? 'prio' : undefined} title={locked ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}
+        onClick={canWrite && !locked ? (e) => {   // the whole cell is a click target (not just the pills): it selects, so keyboard shortcuts and paste work
+          if (e.target.closest && e.target.closest('.cell-editor-inline')) return;
+          if (tapEdit()) { const ek = editKeyFor(r, 'breakdate_vgfx'); if (ek) setEditing({ id: r.id, k: ek }); return; }
+          if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+          const rr = Number(e.currentTarget.dataset.r); const cc = Number(e.currentTarget.dataset.c);
+          if (Number.isFinite(rr) && Number.isFinite(cc)) setCellSel({ r0: rr, c0: cc, r1: rr, c1: cc });
+        } : undefined}
+        onDoubleClick={canWrite && !locked ? (e) => { if (e.target.closest && e.target.closest('.cell-editor-inline')) return; const ek = editKeyFor(r, 'breakdate_vgfx'); if (ek) setEditing({ id: r.id, k: ek }); } : undefined}>
         <span className="chips bd-chips">
           {!parts.length && !r.units_concerned ? <DateChip hue="gray">PENDING</DateChip> : null}
           {parts.map(({ k, hue, tag }) => {
