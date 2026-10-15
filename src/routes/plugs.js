@@ -451,7 +451,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     if (list.length > MAX_BATCH) throw new HttpError(400, `Save at most ${MAX_BATCH} rows at a time`);
     const out = await db.tx(async (c) => {
       const addedIds = [];
-      const readyIds = [];   // the new ones that already have a Plug ID (a row still without one is not copied to the Workload or announced yet)
+      const readyIds = [];   // the new ones (and the ones that just got their Plug ID) that have a Plug ID (a row still without one is not copied to the Workload or announced yet)
       const days = new Set();
       let updated = 0;
       for (let i = list.length - 1; i >= 0; i--) {   // backwards: each new plug goes to the top of its day, so a block keeps its order
@@ -461,12 +461,13 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
           days.add(b.plug_date);
           if (row.id) {
             const id = v.id(row.id);
-            const cur = await c.query('SELECT prog_name FROM workload_plugs WHERE id=$1 FOR UPDATE', [id]);
+            const cur = await c.query('SELECT prog_name, plug_id FROM workload_plugs WHERE id=$1 FOR UPDATE', [id]);
             if (!cur.rows.length) throw new HttpError(404, 'Plug no longer exists (deleted by someone else?)');
             await c.query('UPDATE workload_plugs SET plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=COALESCE($6, account_by), updated_at=now() WHERE id=$1',
               [id, b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by]);
             await audit(req, 'workload.plug_edit', 'workload_plug', id, { plug_date: b.plug_date, plug_id: b.plug_id }, c);
             updated++;
+            if (b.plug_id && !String(cur.rows[0].plug_id || '').trim()) readyIds.push(id);   // it just got its Plug ID: now it is a real plug (copied to the Workload and announced)
           } else {
             const ins = await c.query(
               `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by, requested_by)
