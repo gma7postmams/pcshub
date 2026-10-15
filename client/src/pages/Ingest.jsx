@@ -986,12 +986,13 @@ export default function Ingest() {
     const out = []; let prev = gapsOn && offset === 0 ? 0 : null;
     let shown = false;   // the row being typed into / just saved is drawn once, in the first block that holds its number
     const block = (key, p0, n) => { const here = !shown && spareProps.at >= p0 && spareProps.at < p0 + n; if (here) shown = true; return <SpareRows key={`${key}-${p0}`} count={n} pos0={p0} {...spareProps} at={here ? spareProps.at : -1} />; };
-    const gaps = (from, to, key) => freeRuns(from, to).forEach(([p0, n]) => out.push(block(key, p0, n)));
+    const done = new Set();   // a blank row is drawn once, however the records happen to be ordered
+    const gaps = (from, to, key) => { if (to >= from) freeRuns(from, to).forEach(([p0, n]) => { if (done.has(p0)) return; done.add(p0); out.push(block(key, p0, n)); }); };
     data.rows.forEach((r0, i) => {
       const pos = r0.row_pos || 0;
       if (gapsOn && prev !== null && pos - prev - 1 > 0) gaps(prev + 1, pos - 1, 'gap');
       out.push(renderRow(r0, i));
-      prev = pos;
+      if (prev !== null) prev = Math.max(prev, pos);   // only ever moves forward
     });
     if (gapsOn && prev !== null && !spareOn && data.nextPos) gaps(prev + 1, data.nextPos - 1, 'gap-tail');   // up to the next page's first record
     if (gapsOn && prev !== null && spareOn && maxPos > prev) gaps(prev + 1, maxPos, 'gap-end');   // free numbers between the last record shown and the highest in use
