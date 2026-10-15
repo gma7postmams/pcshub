@@ -984,7 +984,9 @@ export default function Ingest() {
     const spareProps = { cols: SPARE_COLS, lead: 'rn', onOpen: openSpare, onSelect: selectSpare, sel: spareSel, peerOf: (pos, k) => peers[`spare:${pos}:${k}`],
       onMenu: (e) => setCtx({ x: e.clientX, y: e.clientY }), at: draft && draft.at === 'bottom' ? draft.slot : pinned ? pinned.slot : -1, node: spareNode() };
     const out = []; let prev = gapsOn && offset === 0 ? 0 : null;
-    const gaps = (from, to, key) => freeRuns(from, to).forEach(([p0, n]) => out.push(<SpareRows key={`${key}-${p0}`} count={n} pos0={p0} {...spareProps} />));
+    let shown = false;   // the row being typed into / just saved is drawn once, in the first block that holds its number
+    const block = (key, p0, n) => { const here = !shown && spareProps.at >= p0 && spareProps.at < p0 + n; if (here) shown = true; return <SpareRows key={`${key}-${p0}`} count={n} pos0={p0} {...spareProps} at={here ? spareProps.at : -1} />; };
+    const gaps = (from, to, key) => freeRuns(from, to).forEach(([p0, n]) => out.push(block(key, p0, n)));
     data.rows.forEach((r0, i) => {
       const pos = r0.row_pos || 0;
       if (gapsOn && prev !== null && pos - prev - 1 > 0) gaps(prev + 1, pos - 1, 'gap');
@@ -993,7 +995,7 @@ export default function Ingest() {
     });
     if (gapsOn && prev !== null && !spareOn && data.nextPos) gaps(prev + 1, data.nextPos - 1, 'gap-tail');   // up to the next page's first record
     if (gapsOn && prev !== null && spareOn && maxPos > prev) gaps(prev + 1, maxPos, 'gap-end');   // free numbers between the last record shown and the highest in use
-    if (spareOn) out.push(<SpareRows key="spare-tail" count={spareN} pos0={trailStart} {...spareProps} />);
+    if (spareOn) out.push(block('spare-tail', trailStart, spareN));
     return out;
   };
   return (
