@@ -178,12 +178,13 @@ router.get('/', asyncH(async (req, res) => {
   );
   // for the table's blank rows: the highest row number in use, and (when more records follow this page) the row number of the next one
   const maxQ = await db.query('SELECT COALESCE(MAX(row_pos), 0)::int AS m FROM ingest_records');
+  const usedQ = await db.query('SELECT row_pos FROM ingest_records WHERE row_pos IS NOT NULL ORDER BY row_pos LIMIT 100000');   // every row number in use (also by records this filter hides), so only the really blank rows are shown
   let nextPos = null;
   if (rows.length === limit) {
     const nx = await db.query(`SELECT i.row_pos FROM ingest_records i LEFT JOIN users ru ON ru.id=i.requested_by_user_id ${whereSql} ORDER BY ${orderBy(req.query)} LIMIT 1 OFFSET ${offset + limit}`, params);
     nextPos = nx.rows.length ? nx.rows[0].row_pos : null;
   }
-  res.json({ total: countQ.rows[0].n, rows, maxPos: maxQ.rows[0].m, nextPos });
+  res.json({ total: countQ.rows[0].n, rows, maxPos: maxQ.rows[0].m, nextPos, usedPos: usedQ.rows.map((x) => x.row_pos) });
 }));
 
 // Excel export of what the list shows: same filters, search and sort. Logged in the audit trail.

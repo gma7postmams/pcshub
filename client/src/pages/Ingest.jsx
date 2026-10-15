@@ -791,12 +791,12 @@ export default function Ingest() {
   const spareN = useSpareRows('.wl-card .wl-fit', spareOn, `${offset}|${full}`);
   // Every record has a fixed row number (like a sheet row). With no filter and no sort the table shows those numbers with blank rows in the gaps; with a filter or a sort
   // it lists just the matching records (in row order unless sorted) and the blank rows start after the last number in use.
-  const noFilt = !filt.status && !filt.program && !filt.platform && !filt.from && !filt.to && !filt.approval && !filt.q && !q;
-  const gridMode = noFilt && !sort.k;
-  const gapsOn = canWrite && !narrow && !!data && !!data.rows && gridMode;
+  const gapsOn = canWrite && !narrow && !!data && !!data.rows && !sort.k;   // blank rows for the row numbers nobody uses (not when sorted: the order is then not the row order)
   const lastPos = rows.length ? (rows[rows.length - 1].row_pos || 0) : 0;
   const maxPos = data && data.maxPos ? data.maxPos : 0;
-  const trailStart = gridMode ? lastPos + 1 : maxPos + 1;
+  const usedSet = new Set(data && data.usedPos ? data.usedPos : rows.map((x) => x.row_pos));   // numbers in use, including by records the filter hides
+  const trailStart = maxPos + 1;
+  const freeRuns = (from, to) => { const runs = []; let start = null; for (let p = from; p <= to && p - from < 2000; p++) { if (!usedSet.has(p)) { if (start === null) start = p; } else if (start !== null) { runs.push([start, p - start]); start = null; } } if (start !== null) runs.push([start, Math.min(to, from + 1999) - start + 1]); return runs; };
   const allOn = rows.length > 0 && rows.every((r) => picked.has(r.id));
   const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const removePicked = async () => {
@@ -836,7 +836,7 @@ export default function Ingest() {
         const rec = rows.find((x) => x.row_pos === slot);
         if (rec) { setSpareSel(null); selectCell(rec, kk); return; }   // a saved record sits on that row number
         const end = spareOn ? trailStart + spareN - 1 : (data && data.nextPos ? data.nextPos - 1 : lastPos);
-        if (slot > end || (!gridMode && slot < trailStart)) return;
+        if (slot > end || usedSet.has(slot)) return;   // a number a hidden record uses, or past the rows shown
         setSpareSel({ slot, k: kk });
         requestAnimationFrame(() => { const row = document.querySelector(`.wl-card tr[data-pos="${slot}"]`); if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' }); });
       };
@@ -984,13 +984,15 @@ export default function Ingest() {
     const spareProps = { cols: SPARE_COLS, lead: 'rn', onOpen: openSpare, onSelect: selectSpare, sel: spareSel, peerOf: (pos, k) => peers[`spare:${pos}:${k}`],
       onMenu: (e) => setCtx({ x: e.clientX, y: e.clientY }), at: draft && draft.at === 'bottom' ? draft.slot : pinned ? pinned.slot : -1, node: spareNode() };
     const out = []; let prev = gapsOn && offset === 0 ? 0 : null;
+    const gaps = (from, to, key) => freeRuns(from, to).forEach(([p0, n]) => out.push(<SpareRows key={`${key}-${p0}`} count={n} pos0={p0} {...spareProps} />));
     data.rows.forEach((r0, i) => {
       const pos = r0.row_pos || 0;
-      if (gapsOn && prev !== null && pos - prev - 1 > 0) out.push(<SpareRows key={`gap-${prev}`} count={Math.min(pos - prev - 1, 2000)} pos0={prev + 1} {...spareProps} />);
+      if (gapsOn && prev !== null && pos - prev - 1 > 0) gaps(prev + 1, pos - 1, 'gap');
       out.push(renderRow(r0, i));
       prev = pos;
     });
-    if (gapsOn && !spareOn && prev !== null && data.nextPos && data.nextPos - prev - 1 > 0) out.push(<SpareRows key="gap-tail" count={Math.min(data.nextPos - prev - 1, 2000)} pos0={prev + 1} {...spareProps} />);
+    if (gapsOn && prev !== null && !spareOn && data.nextPos) gaps(prev + 1, data.nextPos - 1, 'gap-tail');   // up to the next page's first record
+    if (gapsOn && prev !== null && spareOn && maxPos > prev) gaps(prev + 1, maxPos, 'gap-end');   // free numbers between the last record shown and the highest in use
     if (spareOn) out.push(<SpareRows key="spare-tail" count={spareN} pos0={trailStart} {...spareProps} />);
     return out;
   };
