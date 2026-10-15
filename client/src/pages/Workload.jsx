@@ -273,6 +273,7 @@ function AutoTextarea({ value, ...props }) {
   const fit = useCallback(() => {
     const el = ref.current;
     if (!el) return;
+    if (!el.value) { el.style.height = '32px'; return; }   // empty: one line, so the centred placeholder sits in the middle of the cell (height:auto would give two rows)
     el.style.height = 'auto';
     el.style.height = `${Math.max(el.scrollHeight + 2, 32)}px`;
   }, []);
