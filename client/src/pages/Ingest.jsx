@@ -316,7 +316,7 @@ export default function Ingest() {
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
     if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); } else if (narrow) p.set('newest', '1');   // phone: newest entries on top
     if (!quiet) { setPicked(new Set()); setAllMatching(false); }
-    try { const res = await get(`/api/ingest?${p}`); setData({ ...res, _seq: !!(sort.k || filt.from || filt.to) }); } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
+    try { const res = await get(`/api/ingest?${p}`); setData({ ...res, _seq: !!sort.k }); } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
   }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset, size, sort.k, sort.dir, narrow]); // eslint-disable-line react-hooks/exhaustive-deps
   const load = useCallback(() => fetchPage(false), [fetchPage]);
 
@@ -791,9 +791,9 @@ export default function Ingest() {
   const spareN = useSpareRows('.wl-card .wl-fit', spareOn, `${offset}|${full}`);
   // Every record has a fixed row number (like a sheet row). With no filter and no sort the table shows those numbers with blank rows in the gaps; with a filter or a sort
   // it lists just the matching records (in row order unless sorted) and the blank rows start after the last number in use.
-  // A picked date (or a sorted list) numbers its rows 1, 2, 3… with no blank rows; with all dates the rows keep their fixed numbers. `_seq` is what the list on screen was read with
-  // (a new filter / sort only shows once its rows arrive).
-  const seqNums = data && data._seq !== undefined ? data._seq : !!(sort.k || filt.from || filt.to);
+  // Only a sorted list is numbered 1, 2, 3… (no blank rows); a date filter keeps every row where it was entered (its fixed row number, blank rows for the free numbers).
+  // `_seq` is what the list on screen was read with (a new sort only shows once its rows arrive).
+  const seqNums = data && data._seq !== undefined ? data._seq : !!sort.k;
   const gapsOn = canWrite && !narrow && !!data && !!data.rows && !seqNums;   // blank rows for the row numbers nobody uses (not when sorted: the order is then not the row order)
   const lastPos = rows.length ? (rows[rows.length - 1].row_pos || 0) : 0;
   const maxPos = data && data.maxPos ? data.maxPos : 0;
