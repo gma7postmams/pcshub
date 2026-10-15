@@ -364,17 +364,25 @@ router.get('/stats', asyncH(async (req, res) => {
 
 // Sort by a clicked column (?sort=<column key>&dir=asc|desc). Dates sort as dates, text case-insensitively, empty values last;
 // a key that is not a built-in column is taken as a custom column.
+// A row's Breakdate / Time cell shows only the teams in its Units Concerned (VGFX / VEDIT; a unit with neither shows both), so the sort
+// must ignore a time stored for a team the cell does not show.
+const sqlList = (list) => `ARRAY[${list.map((u) => `'${String(u).replace(/'/g, "''")}'`).join(',')}]::text[]`;
+function shownBd(team) {
+  const hide = UNITS.filter((u) => { const t = (UNIT_TEAMS[u] || []).filter((x) => x === 'VGFX' || x === 'VEDIT'); return t.length && !t.includes(team); });
+  const col = team === 'VGFX' ? 'w.breakdate_vgfx' : 'w.breakdate_vedit';
+  return hide.length ? `(CASE WHEN w.units_concerned = ANY(${sqlList(hide)}) THEN NULL ELSE ${col} END)` : col;
+}
 function orderBy(q, params) {
   const k = String(q.sort || '');
   const dir = q.dir === 'desc' ? 'DESC' : 'ASC';
   let col = null;
-  if (k === 'breakdate_vgfx') col = 'w.breakdate_vgfx, w.breakdate_vedit';   // the merged "Breakdate / Time" column
+  if (k === 'breakdate_vgfx') col = [shownBd('VGFX'), shownBd('VEDIT')];   // the merged "Breakdate / Time" column
   else if (k === 'updated_at') col = 'w.updated_at';
   else if (COLS.includes(k)) col = ['date', 'datetime'].includes(FIELDS[k].kind) ? `w."${k}"` : `lower(w."${k}"::text)`;
   else if (/^[A-Za-z0-9_]{1,64}$/.test(k)) { params.push(k); col = `lower(w.custom_fields ->> $${params.length})`; }
   // newest saved first within a day: rows made together (one import / batch) share a created_at and keep their own order
   if (!col) return 'w.work_date DESC NULLS LAST, w.created_at DESC, w.id ASC';
-  return col.split(', ').map((c) => `${c} ${dir} NULLS LAST`).join(', ') + ', w.work_date DESC NULLS LAST, w.created_at DESC, w.id ASC';
+  return [].concat(col).map((c) => `${c} ${dir} NULLS LAST`).join(', ') + ', w.work_date DESC NULLS LAST, w.created_at DESC, w.id ASC';
 }
 
 router.get('/', asyncH(async (req, res) => {
