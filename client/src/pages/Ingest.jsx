@@ -417,6 +417,7 @@ export default function Ingest() {
   // other people's changes appear by themselves (not while a cell, form, detail or dialog is open here, so nothing is overwritten under your hands)
   useLive(['ingest'], () => fetchPage(true), () => !!(editing || form || detail || reasonFor || draft || document.querySelector('.modal-backdrop')));
   const [ctx, setCtx] = useState(null);              // right-click menu position
+  const [spareSel, setSpareSel] = useState(null);   // the blank cell picked in a spare row { slot, k }
   const [cellSel, setCellSel] = useState(null);      // a block of cells picked by dragging { r0, c0, r1, c1 }
   const hist = useRef({ past: [], future: [] });
   const internalClip = useRef(null);
@@ -498,9 +499,12 @@ export default function Ingest() {
   const normCells = () => (cellSel ? { r0: Math.min(cellSel.r0, cellSel.r1), r1: Math.max(cellSel.r0, cellSel.r1), c0: Math.min(cellSel.c0, cellSel.c1), c1: Math.max(cellSel.c0, cellSel.c1) } : null);
   { const n = !editing && cellSel ? normCells() : null;
     const cells = n ? rangeCells(rows, COLS, n.r0, n.r1, n.c0, n.c1) : [];
-    curCell.current = editing && editing.id !== 'draft' ? { cells: [`${editing.id}:${editing.k}|tblr`], kind: 'edit' } : cells.length ? { cells, kind: 'select' } : null; }
+    curCell.current = editing && editing.id !== 'draft' ? { cells: [`${editing.id}:${editing.k}|tblr`], kind: 'edit' }
+      : editing && draft && draft.at === 'bottom' ? { cells: [`spare:${draft.slot}:${editing.k}|tblr`], kind: 'edit' }   // a new row typed into a blank spare row: others see that blank cell lit up
+      : !editing && spareSel && !cells.length ? { cells: [`spare:${spareSel.slot}:${spareSel.k}|tblr`], kind: 'select' }
+      : cells.length ? { cells, kind: 'select' } : null; }
   const cell = (r, k, children, props0 = {}) => {
-    const p = peers[`${r.id}:${k}`];
+    const p = peers[r.id === 'draft' && draft && draft.slot !== undefined ? `spare:${draft.slot}:${k}` : `${r.id}:${k}`];
     const props = { 'data-k': k, 'data-label': LBL[k], ...props0 };
     if (p) { props.className = [props.className, 'peer-on'].filter(Boolean).join(' '); props['data-peer'] = p.name; props['data-peer-uid'] = p.first ? p.uid : undefined; props.style = { ...(props.style || {}), ...peerStyle(p) }; }
     const ci = COLS.indexOf(k);
@@ -564,7 +568,6 @@ export default function Ingest() {
     return { added: ids.length, failed, firstErr };
   };
   const SPARE_COLS = ['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', null, canApprove ? 'destination_folder' : null, null, null, null];
-  const [spareSel, setSpareSel] = useState(null);   // the blank cell picked in a spare row { slot, k }
   const selectSpare = (k, slot) => { setSpareSel({ slot, k }); setCellSel(null); clearPicks(); setEditing(null); };
   const draftHasText = (d) => !!d && Object.keys(d).some((x) => !['id', 'at', 'slot'].includes(x) && String(d[x] == null ? '' : d[x]).trim());
   const openSpare = (k, slot, start) => {   // a spare row was opened (double-click / Enter / typing): it becomes a new (unsaved) row right there
@@ -992,7 +995,7 @@ export default function Ingest() {
                           <td data-k="updated" data-label="Updated" className="dim nowrap">{ago(r.updated_at)}</td>
                         </tr>
                       ); })}
-                      {spareOn ? <SpareRows count={spareN} start={offset + data.rows.length} cols={SPARE_COLS} lead="rn" onOpen={openSpare} onSelect={selectSpare} sel={spareSel} onMenu={(e) => setCtx({ x: e.clientX, y: e.clientY })}
+                      {spareOn ? <SpareRows count={spareN} start={offset + data.rows.length} cols={SPARE_COLS} lead="rn" onOpen={openSpare} onSelect={selectSpare} sel={spareSel} peerOf={(i, k) => peers[`spare:${i}:${k}`]} onMenu={(e) => setCtx({ x: e.clientX, y: e.clientY })}
                         at={draft && draft.at === 'bottom' ? draft.slot : -1}
                         node={draft && draft.at === 'bottom' ? (() => { const d = { ...draft, id: 'draft' }; return (
                           <tr key="spare-draft" className="draft-row spare-draft" data-draft="1">

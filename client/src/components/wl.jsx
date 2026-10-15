@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom';
 import { Children, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { fmtDate, isoDate } from '../lib/util.js';
+import { peerStyle } from '../lib/live.js';
 import { CalendarIcon, ChevronDownIcon, CopyIcon, FilterIcon, KebabIcon, MoreHIcon, PencilIcon, TrashIcon } from './Icons.jsx';
 
 // Presentational pieces for the Workload Tracker (pills, summary cards, filters, row menu, pager).
@@ -382,13 +383,14 @@ export function useSpareRows(boxSelector, active, resetKey) {
 }
 /** The spare blank rows. `cols` = one entry per data column (a key, or null for a column nobody can type in); `onOpen(key, i)` is called when a cell of spare row `i` is clicked: the page then turns that row into a real new row IN PLACE.
     `at` + `node`: the spare row at index `at` is shown as `node` (the row being typed into) instead of a blank one. */
-export function SpareRows({ count, start, cols, lead, trail, onOpen, onSelect, onMenu, sel, at, node }) {
+export function SpareRows({ count, start, cols, lead, trail, onOpen, onSelect, onMenu, sel, peerOf, at, node }) {
   // a click only SELECTS a blank cell (like a real one); typing / Enter / F2 / double-click opens its editor; right-click gives the menu
   return Array.from({ length: count }, (_, i) => (at === i && node ? node : (
     <tr key={`spare-${i}`} className="spare-row">
       {lead === 'rn' ? <td className="rn">{start + i + 1}</td> : lead === 'chk' ? <td className="chk" /> : null}
       {cols.map((k, ci) => (k ? (
-        <td key={ci} className={`spare editable${sel && sel.slot === i && sel.k === k ? ' sel' : ''}`}
+        <td key={ci} className={`spare editable${sel && sel.slot === i && sel.k === k ? ' sel' : ''}${peerOf && peerOf(i, k) ? ' peer-on' : ''}`}
+          {...(peerOf && peerOf(i, k) ? { 'data-peer': peerOf(i, k).name, style: peerStyle(peerOf(i, k)) } : {})}
           onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); onSelect(k, i); } }}
           onDoubleClick={() => onOpen(k, i)}
           onContextMenu={(e) => { e.preventDefault(); onSelect(k, i); if (onMenu) onMenu(e, k, i); }} />
