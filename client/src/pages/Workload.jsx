@@ -1647,6 +1647,13 @@ export default function Workload() {
       const joined = normBreakdate(block.map((x) => x[0]).join('\n'), new Date().getFullYear());
       if (Object.keys(parseBreakdatePairs(joined)).length && joined.replace(BD_PAIR, '').replace(/["\s]+/g, '') === '') block = [[block.map((x) => x[0]).join('\n')]];
     }
+    // Text from OUTSIDE the table that is one column with line breaks (a 2-line remark, a pasted paragraph) is ONE value for the cell — never dealt out one line per row.
+    // (Text copied inside the table, and anything with tabs, still goes cell by cell.)
+    const inGrid = internalClip.current != null && String(internalClip.current).replace(/\r\n?/g, '\n') === String(text).replace(/\r\n?/g, '\n');
+    if (!inGrid && block.length > 1 && block.every((x) => x.length === 1) && n.r0 === n.r1 && n.c0 === n.c1) {
+      const f = meta.fields[tableCols[n.c0]];
+      block = [[block.map((x) => x[0]).join(f && f.multiline ? '\n' : ' ')]];
+    }
     const single = block.length === 1 && block[0].length === 1;
     const bigger = { ...n };
     if (!single) { bigger.r1 = Math.min(pageRows.length - 1, n.r0 + block.length - 1); bigger.c1 = Math.min(tableCols.length - 1, n.c0 + Math.max(...block.map((x) => x.length)) - 1); }
