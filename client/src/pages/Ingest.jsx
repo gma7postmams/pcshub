@@ -889,7 +889,7 @@ export default function Ingest() {
           <div className="wl-tabactions">
             <div className="wl-presence"><PresenceAvatars path="/ingest" peers={peers} describe={describePeer} /></div>
             {canWrite ? <button type="button" className="btn ibtn primary" id="new-btn" aria-label="New Ingest" title="New Ingest" onClick={() => setForm({})}><PlusIcon /></button> : null}
-            {canWrite ? <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
+            {canWrite ? <input ref={fileRef} type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
             {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import from Excel" title={importing ? 'Importing…' : 'Import from Excel'} disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}><UploadIcon /></button> : null}
             <ExportButton onExport={exportXlsx}><DownloadIcon /></ExportButton>
             {canDelete && (picked.size || allMatching) ? <button type="button" className="btn ibtn danger" id="del-sel" onClick={removePicked} aria-label="Delete selected records" title={`Delete Selected (${allMatching ? total : picked.size})`}><TrashIcon /></button> : null}
@@ -897,7 +897,7 @@ export default function Ingest() {
               {full ? <ExitFullscreenIcon /> : <FullscreenIcon />}
             </button>
             <ToolMenu items={[
-              canWrite && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
+              canWrite && narrow && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
               canDelete && { id: 'del-all-menu', label: 'Delete All', icon: <TrashIcon />, danger: true, disabled: !total, onClick: () => setDeletingAll(true) },   // everything matching the current search / filters, after typing DELETE
             ]} />
           </div>

@@ -757,7 +757,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
         <span className="grow" />
         <div className="wl-presence"><PresenceAvatars path="/plug-list" /></div>
         <div className="wl-iconbar">
-          {canWrite ? <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files[0])} /> : null}
+          {canWrite ? <input ref={fileRef} type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files[0])} /> : null}
           {canWrite ? <button type="button" className="btn ibtn primary" id="add-plug-btn" aria-label="Add Plug" title="Add Plug" onClick={() => setAdding(true)}><PlusIcon /></button> : null}
           {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import Plug List" title={importing ? 'Importing…' : 'Import Plug List'} disabled={importing} onClick={() => fileRef.current.click()}><UploadIcon /></button> : null}
           <ExportButton onExport={exportXlsx} disabled={!total}><DownloadIcon /></ExportButton>
@@ -769,7 +769,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
           </button>
           {canWrite ? (
             <ToolMenu items={[
-              { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
+              narrow && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
               isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
             ]} />
           ) : null}

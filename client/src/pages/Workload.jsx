@@ -7,7 +7,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FlagIcon, FullscreenIcon, LockIcon, PlusIcon, SaveIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, ExportButton, FilterSelect, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useSpareRows } from '../components/wl.jsx';
+import { DateChip, DateRange, ExportButton, FilterSelect, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useNarrow, useSpareRows } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive, useCellPresence, rangeCells, peerStyle } from '../lib/live.js';
@@ -1714,7 +1714,8 @@ export default function Workload() {
   // bar below the last row, out of sight until you scrolled the whole page down. Measured again when the window, the mode, the tab or a filter changes.
   const hasMeta = !!meta;
   // Google-Sheets style: spare blank rows under the last row (last page, table view); more appear as you scroll down; clicking one makes it a new row
-  const spareOn = canWrite && !cards && !!data && !!data.rows && offset + data.rows.length >= (data.total || 0);
+  const narrowUi = useNarrow();
+  const spareOn = false;   // spare rows are off on Workload
   useEffect(() => {   // a spare row opened but left empty goes back to being a blank spare row
     if (!editing && draft && draft.at === 'bottom' && Object.keys(draft).every((k) => ['id', 'at', 'slot', 'work_date', 'units_concerned'].includes(k) || !String(draft[k] == null ? '' : draft[k]).trim())) setDraft(null);
   }, [editing, draft]);
@@ -2036,7 +2037,7 @@ export default function Workload() {
             <span className="grow" />
             <div className="wl-presence"><PresenceAvatars path="/workload" peers={peers} describe={describePeer} /></div>
             <div className="wl-iconbar">
-              {canWrite ? <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
+              {canWrite ? <input ref={fileRef} type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
               {canWrite && isGrid ? <button type="button" className="btn ibtn" id="add-row" aria-label="Add row" title="Add row" onClick={addRow}><PlusIcon /></button> : null}
               {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import from Excel" title="Import from Excel" disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}><UploadIcon /></button> : null}
               <ExportButton onExport={exportXlsx}><DownloadIcon /></ExportButton>
@@ -2058,7 +2059,7 @@ export default function Workload() {
                 {full ? <ExitFullscreenIcon /> : <FullscreenIcon />}
               </button>
               <ToolMenu items={[
-                canWrite && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
+                canWrite && narrowUi && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
                 s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
                 canWrite && isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
@@ -2081,7 +2082,7 @@ export default function Workload() {
           <div className="wl-tabactions">
             {canWrite ? (
               <>
-                <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} />
+                <input ref={fileRef} type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} />
                 <button type="button" className="btn" id="import-btn" disabled={importing} onClick={() => fileRef.current.click()}>
                   <UploadIcon /> {importing ? 'Importing…' : 'Import'}
                 </button>
@@ -2093,7 +2094,7 @@ export default function Workload() {
                 <button type="button" className="btn" id="add-column-btn" onClick={() => setAddingColumn(true)}><ColumnIcon /> Add Column</button>
               </>
             ) : null}
-            {canWrite && isGrid ? <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add Row</button> : null}
+            {canWrite && isGrid && narrowUi ? <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add Row</button> : null}
             {canWrite && isGrid && selRows.length ? <button type="button" className="btn" id="priority-btn" data-keep-sel onClick={togglePriority} title="Highlights the Breakdate / Time of the selected row(s)">{allPrio ? 'Remove Priority' : 'Set Priority'}</button> : null}
             {canWrite && isGrid && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? <button type="button" className="btn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}>Delete {selRows.filter((r) => !xlLocked(r)).length > 1 ? `${selRows.filter((r) => !xlLocked(r)).length} Rows` : 'Row'}</button> : null}
             {s.canPage('/admin') ? <button type="button" className="btn" id="lock-dates-btn" onClick={() => setManagingLocks(true)}><LockIcon /> Lock Dates</button> : null}
@@ -2173,7 +2174,7 @@ export default function Workload() {
                             {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removeRow(r)} disabled={xlLocked(r)} title={xlLocked(r) ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}>{r._new ? 'Remove' : 'Delete'}</button></td> : null}
                           </tr>
                         )) : (() => {
-                          const text = `No ${isAll ? '' : `${meta.tabs.find((t) => t.key === tab).label} `}rows match these filters.${canWrite ? ' Use “Add Row” to start.' : ''}`;
+                          const text = `No ${isAll ? '' : `${meta.tabs.find((t) => t.key === tab).label} `}rows match these filters.${canWrite && narrowUi ? ' Use “Add Row” to start.' : ''}`;
                           return <tr><td colSpan={tableCols.length + 2} className="empty xl-empty"><div className="xl-empty-msg" title={text}>{text}</div></td></tr>;
                         })()}
                       </tbody>
