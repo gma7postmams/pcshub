@@ -289,7 +289,7 @@ export default function RestoreTab({ onRestoreStarted }) {
 
   return (
     <>
-      <div className="alert info mb-12">Upload a backup to see exactly what a restore would change, before anything is touched. This analysis never modifies the live system.</div>
+      <div className="alert info restore-intro">Upload a backup to see exactly what a restore would change, before anything is touched. This analysis never modifies the live system.</div>
       <UploadCard busy={uploading || Boolean(running)} uploadPct={pct} onAnalyze={analyze} />
       {running ? <div className="card mb-12"><div className="card-pad"><strong>Analyzing…</strong> <span className="dim">{analysis.stage}</span></div></div> : null}
       {analysis && analysis.status === 'failed' ? <div className="alert err mb-12">Analysis failed: {analysis.error}</div> : null}

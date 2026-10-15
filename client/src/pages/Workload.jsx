@@ -653,6 +653,23 @@ export default function Workload() {
 
   const changeTab = async (t) => { if (t === tab || !(await okToLeave())) return; setTab(t); saveView(s.session_key, { t }); setOffset(0); };
   const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setMode(m); saveView(s.session_key, { m }); setOffset(0); };
+  // Ongoing tab: the "For Follow-up" jump line opens the page where that part starts, scrolled so its band sits at the TOP of the table (not wherever the old scroll position was)
+  const jumpWait = useRef(false);
+  useEffect(() => {
+    const box = document.getElementById('tbl');
+    if (box) box.querySelectorAll('.prep-spacer').forEach((x) => x.remove());   // blank space added below by an earlier jump
+    if (!jumpWait.current || !data || !data.rows || !box) return;
+    const band = box.querySelector('.prep-divider.waiting:not(.jump)');
+    if (!band) return;   // still the old page
+    jumpWait.current = false;
+    requestAnimationFrame(() => {
+      const head = box.querySelector('thead');
+      const want = band.getBoundingClientRect().top - box.getBoundingClientRect().top - (head ? head.offsetHeight : 0);   // how far the band is below the header
+      const room = box.scrollHeight - box.clientHeight - box.scrollTop;   // how much further the box can scroll
+      if (want > room) { const sp = document.createElement('div'); sp.className = 'prep-spacer'; sp.style.height = `${Math.ceil(want - room)}px`; box.appendChild(sp); }   // a short last page: leave room (like a spreadsheet) so the band can reach the top
+      box.scrollTop += want;
+    });
+  }, [data]);
   const goOffset = async (o) => { if (o === offset || !(await okToLeave())) return; setOffset(o); };
   const changeSize = async (e) => { const n = Number(e.target.value); if (n === size || !(await okToLeave())) return; try { localStorage.setItem('wl:rows3', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
   const sortBy = async (s2) => { if (!(await okToLeave())) return; setSort(s2); };
@@ -2202,7 +2219,7 @@ export default function Workload() {
                             </Fragment>
                           ))}
                           {isPrep && prepNextWait ? (
-                            <tr className="prep-divider waiting jump" onClick={() => goOffset(prepNextWait.offset)} title="Go to the first page with rows For Follow-up">
+                            <tr className="prep-divider waiting jump" onClick={() => { if (prepNextWait.offset !== offset) { jumpWait.current = true; setTimeout(() => { jumpWait.current = false; }, 6000); } goOffset(prepNextWait.offset); }} title="Go to the first page with rows For Follow-up">
                               <td colSpan={tableCols.length + 4}><strong>For Follow-up</strong> <span className="dim">({prepNextWait.n}): continues on page {prepNextWait.page}. Click to go there.</span></td>
                             </tr>
                           ) : null}
