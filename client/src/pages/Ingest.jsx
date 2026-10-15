@@ -563,10 +563,22 @@ export default function Ingest() {
     }
     return { added: ids.length, failed, firstErr };
   };
-  const openSpare = (k, slot) => {   // a spare row was clicked: it becomes a new (unsaved) row at the bottom, opened on the clicked cell
-    if (draft) { setEditing({ id: 'draft', k }); return; }
+  const SPARE_COLS = ['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', null, canApprove ? 'destination_folder' : null, null, null, null];
+  const [spareSel, setSpareSel] = useState(null);   // the blank cell picked in a spare row { slot, k }
+  const selectSpare = (k, slot) => { setSpareSel({ slot, k }); setCellSel(null); clearPicks(); setEditing(null); };
+  const draftHasText = (d) => !!d && Object.keys(d).some((x) => !['id', 'at', 'slot'].includes(x) && String(d[x] == null ? '' : d[x]).trim());
+  const openSpare = (k, slot, start) => {   // a spare row was opened (double-click / Enter / typing): it becomes a new (unsaved) row right there
+    setSpareSel({ slot, k });
+    if (draft) {
+      if (draft.slot !== slot) {
+        if (draftHasText(draft)) { toast('Finish the new row above first (Program and Platform), or select one of its cells and press Delete to drop it', 'err'); return; }
+        setDraft({ ...draft, slot });
+      }
+      setEditing({ id: 'draft', k, start });
+      return;
+    }
     setDraft({ id: 'draft', at: 'bottom', slot: slot || 0, program: '', platform: '', billable_party: '', episode_break_date_text: '', source: '', materials_count: '', destination_folder: '' });
-    setEditing({ id: 'draft', k });
+    setEditing({ id: 'draft', k, start });
   };
   const saveDraft = async (given) => {
     const dr = given && given.program !== undefined ? given : draft;
@@ -627,7 +639,7 @@ export default function Ingest() {
     if (!at) return;
     if (e.shiftKey && cellSel) { e.preventDefault(); setCellSel((cur) => (cur ? { ...cur, r1: at.r, c1: at.c } : cur)); suppress.current = true; setTimeout(() => { suppress.current = false; }, 150); return; }
     if (picked.size) clearPicks();
-    setCellSel(null);
+    setCellSel(null); setSpareSel(null);
     cellDrag.current = { r: at.r, c: at.c, moved: false };
   };
   const copyCells = async () => {
@@ -679,6 +691,7 @@ export default function Ingest() {
     if (e.target.closest && e.target.closest('.cell-editor, input, select, textarea')) return;
     e.preventDefault();
     if (editing) setEditing(null);
+    setSpareSel(null);
     if (!picked.has(r.id)) { setPicked(new Set([r.id])); lastPick.current = r.id; setCellSel(null); }
     setCtx({ x: e.clientX, y: e.clientY });
   };
@@ -772,6 +785,17 @@ export default function Ingest() {
   keysRef.current = (e) => {
     if (e.defaultPrevented || e.altKey || !keysOk(e)) return;
     const key = e.key.toLowerCase();
+    if (spareSel && !picked.size && !cellSel) {   // a blank cell in a spare row is selected
+      const live = SPARE_COLS.map((c, i) => (c ? i : -1)).filter((i) => i >= 0);
+      const ci = SPARE_COLS.indexOf(spareSel.k); const move = (slot, c) => { if (slot < 0 || slot >= spareN || c < 0 || c >= live.length) return; setSpareSel({ slot, k: SPARE_COLS[live[c]] }); requestAnimationFrame(() => { const el = document.querySelectorAll('tr.spare-row, tr.spare-draft')[0]; const row = document.querySelectorAll('.wl-card tbody tr')[rows.length + slot]; if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' }); }); };
+      const li = live.indexOf(ci);
+      if (!e.ctrlKey && !e.metaKey && ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) { e.preventDefault(); move(spareSel.slot + (key === 'arrowdown' ? 1 : key === 'arrowup' ? -1 : 0), li + (key === 'arrowright' ? 1 : key === 'arrowleft' ? -1 : 0)); return; }
+      if (!e.ctrlKey && !e.metaKey && key === 'tab') { e.preventDefault(); const n = li + (e.shiftKey ? -1 : 1); if (n >= live.length) move(spareSel.slot + 1, 0); else if (n < 0) move(spareSel.slot - 1, live.length - 1); else move(spareSel.slot, n); return; }
+      if (!e.ctrlKey && !e.metaKey && key === 'escape') { setSpareSel(null); return; }
+      if (!e.ctrlKey && !e.metaKey && (key === 'delete' || key === 'backspace')) { if (draft && draft.at === 'bottom' && draft.slot === spareSel.slot) { e.preventDefault(); setDraft(null); } return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && !e.shiftKey && (key === 'enter' || key === 'f2')) { e.preventDefault(); openSpare(spareSel.k, spareSel.slot); return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && e.key.length === 1) { e.preventDefault(); openSpare(spareSel.k, spareSel.slot, e.key); return; }
+    }
     if (cellSel && !picked.size) {   // a block of cells is picked
       if ((e.ctrlKey || e.metaKey) && key === 'c') { if (!(window.getSelection && String(window.getSelection()))) { e.preventDefault(); copyCells(); } return; }
       if ((e.ctrlKey || e.metaKey) && key === 'x') { if (canWrite) { e.preventDefault(); copyCells().then((ok) => { if (ok) clearCells(); }); } return; }
@@ -859,7 +883,7 @@ export default function Ingest() {
     const up = () => { drag.current = null; if (cellDrag.current && cellDrag.current.moved) setTimeout(() => { suppress.current = false; }, 150); cellDrag.current = null; };
     const down = (e) => {   // a click outside the table (and its bar, menus and dialogs) drops the selection
       const t = e.target;
-      if (t && t.closest && !t.closest('.wl-card .table-wrap, .xl-menu, .modal-backdrop, .tpop, #del-sel, .sel-banner')) { clearPicksRef.current(); setCellSel(null); }
+      if (t && t.closest && !t.closest('.wl-card .table-wrap, .xl-menu, .modal-backdrop, .tpop, #del-sel, .sel-banner')) { clearPicksRef.current(); setCellSel(null); setSpareSel(null); }
     };
     window.addEventListener('keydown', key); window.addEventListener('paste', paste); window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up); window.addEventListener('mousedown', down);
@@ -968,7 +992,7 @@ export default function Ingest() {
                           <td data-k="updated" data-label="Updated" className="dim nowrap">{ago(r.updated_at)}</td>
                         </tr>
                       ); })}
-                      {spareOn ? <SpareRows count={spareN} start={offset + data.rows.length} cols={['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', null, canApprove ? 'destination_folder' : null, null, null, null]} lead="rn" onOpen={openSpare}
+                      {spareOn ? <SpareRows count={spareN} start={offset + data.rows.length} cols={SPARE_COLS} lead="rn" onOpen={openSpare} onSelect={selectSpare} sel={spareSel} onMenu={(e) => setCtx({ x: e.clientX, y: e.clientY })}
                         at={draft && draft.at === 'bottom' ? draft.slot : -1}
                         node={draft && draft.at === 'bottom' ? (() => { const d = { ...draft, id: 'draft' }; return (
                           <tr key="spare-draft" className="draft-row spare-draft" data-draft="1">

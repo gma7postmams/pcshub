@@ -482,12 +482,23 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     setCellEd({ id: made[0].id, k: 'plug_id' });
     requestAnimationFrame(() => { const box = document.querySelector('.plug-list .wl-fit'); if (box) box.scrollTop = 0; });
   };
-  const openSpare = (k, slot) => {   // a spare row was clicked: it becomes a new (unsaved) row at the bottom, opened on the clicked cell
+  const [spareSel, setSpareSel] = useState(null);   // the blank cell picked in a spare row { slot, k }
+  const selectSpare = (k, slot) => { setSpareSel({ slot, k }); setCellSel(null); clearPicks(); setCellEd(null); };
+  const draftHasText = (d) => !!d && ['plug_id', 'prog_name', 'psd'].some((x) => String(d[x] == null ? '' : d[x]).trim());
+  const openSpare = (k, slot, start) => {   // a spare row was opened (double-click / Enter / typing): it becomes a new (unsaved) row right there
+    setSpareSel({ slot, k });
     const have = drafts.find((d) => d.at === 'bottom');
-    if (have) { setCellEd({ id: have.id, k }); return; }
+    if (have) {
+      if (slot !== undefined && have.slot !== slot) {
+        if (draftHasText(have)) { toast('Finish the new row first (Plug ID), or select one of its cells and press Delete to drop it', 'err'); return; }
+        setDrafts((ds) => ds.map((x) => (x.id === have.id ? { ...x, slot } : x)));
+      }
+      setCellEd({ id: have.id, k, start });
+      return;
+    }
     const d = { id: `draft-${Date.now()}-${draftSeq.current++}`, at: 'bottom', slot: slot || 0, plug_date: defaultDate(), plug_id: '', prog_name: '', psd: '' };
     setDrafts((ds) => [...ds, d]);
-    setCellEd({ id: d.id, k });
+    setCellEd({ id: d.id, k, start });
   };
   const discardDraft = (d) => { setDrafts((ds) => ds.filter((x) => x.id !== d.id)); setCellEd((cur) => (cur && cur.id === d.id ? null : cur)); };
   // Save one new row, or (list = all of them) every new row that has something in it; rows left completely blank are dropped
@@ -517,7 +528,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     if (!at) return;
     if (e.shiftKey && cellSel) { e.preventDefault(); setCellSel((cur) => (cur ? { ...cur, r1: at.r, c1: at.c } : cur)); suppress.current = true; setTimeout(() => { suppress.current = false; }, 150); return; }
     if (picked.size) clearPicks();
-    setCellSel(null);
+    setCellSel(null); setSpareSel(null);
     cellDrag.current = { r: at.r, c: at.c, moved: false };
   };
   const copyCells = async () => {
@@ -593,6 +604,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     if (e.target.closest && e.target.closest('.cell-editor, input, select, textarea')) return;
     e.preventDefault();
     if (cellEd) setCellEd(null);
+    setSpareSel(null);
     if (!picked.has(r.id)) { setPicked(new Set([r.id])); lastPick.current = r.id; }
     setCtx({ x: e.clientX, y: e.clientY });
   };
@@ -607,6 +619,16 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   keysRef.current = (e) => {
     if (e.defaultPrevented || e.altKey || !keysOk(e)) return;
     const key = e.key.toLowerCase();
+    if (spareSel && !picked.size && !cellSel) {   // a blank cell in a spare row is selected
+      const li = EDIT_COLS.indexOf(spareSel.k);
+      const move = (slot, c) => { if (slot < 0 || slot >= spareN || c < 0 || c >= EDIT_COLS.length) return; setSpareSel({ slot, k: EDIT_COLS[c] }); requestAnimationFrame(() => { const row = document.querySelectorAll('.plug-list tbody tr')[rows.length + slot]; if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' }); }); };
+      if (!e.ctrlKey && !e.metaKey && ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) { e.preventDefault(); move(spareSel.slot + (key === 'arrowdown' ? 1 : key === 'arrowup' ? -1 : 0), li + (key === 'arrowright' ? 1 : key === 'arrowleft' ? -1 : 0)); return; }
+      if (!e.ctrlKey && !e.metaKey && key === 'tab') { e.preventDefault(); const n = li + (e.shiftKey ? -1 : 1); if (n >= EDIT_COLS.length) move(spareSel.slot + 1, 0); else if (n < 0) move(spareSel.slot - 1, EDIT_COLS.length - 1); else move(spareSel.slot, n); return; }
+      if (!e.ctrlKey && !e.metaKey && key === 'escape') { setSpareSel(null); return; }
+      if (!e.ctrlKey && !e.metaKey && (key === 'delete' || key === 'backspace')) { const have = drafts.find((d) => d.at === 'bottom'); if (have && have.slot === spareSel.slot) { e.preventDefault(); discardDraft(have); } return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && !e.shiftKey && (key === 'enter' || key === 'f2')) { e.preventDefault(); openSpare(spareSel.k, spareSel.slot); return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && e.key.length === 1) { e.preventDefault(); openSpare(spareSel.k, spareSel.slot, e.key); return; }
+    }
     if (cellSel && !picked.size) {   // a block of cells is picked
       if ((e.ctrlKey || e.metaKey) && key === 'c') { if (!(window.getSelection && String(window.getSelection()))) { e.preventDefault(); copyCells(); } return; }
       if ((e.ctrlKey || e.metaKey) && key === 'x') { e.preventDefault(); copyCells().then((ok) => { if (ok) clearCells(); }); return; }
@@ -695,7 +717,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     const up = () => { drag.current = null; if (cellDrag.current && cellDrag.current.moved) setTimeout(() => { suppress.current = false; }, 150); cellDrag.current = null; };
     const down = (e) => {   // a click outside the table (and its bar, menus and dialogs) drops the selection
       const t = e.target;
-      if (t && t.closest && !t.closest('.plug-list .table-wrap, .xl-menu, .modal-backdrop, .tpop, #delete-selected-btn, .sel-banner')) { clearPicksRef.current(); setCellSel(null); }
+      if (t && t.closest && !t.closest('.plug-list .table-wrap, .xl-menu, .modal-backdrop, .tpop, #delete-selected-btn, .sel-banner')) { clearPicksRef.current(); setCellSel(null); setSpareSel(null); }
     };
     window.addEventListener('keydown', key); window.addEventListener('paste', paste); window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up); window.addEventListener('mousedown', down);
@@ -825,7 +847,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
                       ) : null}
                     </tr>
                   )) : !draft ? <tr><td colSpan={canWrite ? 8 : 6} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr> : null}
-                  {spareOn ? <SpareRows count={spareN} start={offset + rows.length} cols={EDIT_COLS.concat([null, null])} lead="rn" trail onOpen={openSpare}
+                  {spareOn ? <SpareRows count={spareN} start={offset + rows.length} cols={EDIT_COLS.concat([null, null])} lead="rn" trail onOpen={openSpare} onSelect={selectSpare} sel={spareSel} onMenu={(e) => setCtx({ x: e.clientX, y: e.clientY })}
                     at={drafts.find((d) => d.at === 'bottom') ? drafts.find((d) => d.at === 'bottom').slot : -1}
                     node={drafts.find((d) => d.at === 'bottom') ? (
                       <tr key="spare-draft" className="draft-row spare-draft" data-draft="1">

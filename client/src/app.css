@@ -1357,3 +1357,5 @@ table.t tr.spare-row td { height: 38px; color: var(--text-3); cursor: cell; }
 table.t tr.spare-row td.rn { text-align: center; font-size: 11.5px; cursor: default; }
 table.t tr.spare-row:hover td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 table.t tr.spare-row td.actions-cell { cursor: default; }
+
+table.t tr.spare-row td.spare.sel { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
