@@ -266,19 +266,26 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
            AND upper(p.plug_id) IN (SELECT upper(btrim(x)) FROM unnest(string_to_array(w.plug_id, E'\\n')) AS x)) AS in_workload`
       : '';
     const { limit, offset } = v.paging(req.query, { def: 3000, max: 5000 });
-    let order = req.query.order === 'desc' ? 'p.plug_date DESC, p.seq, p.id' : 'p.plug_date, p.seq, p.id';   // newest day first, or oldest first; list order within a day
+    let order = req.query.newest === '1' ? 'p.plug_date DESC, p.row_pos DESC NULLS LAST, p.id DESC'   // the phone list: the newest entry first
+      : req.query.order === 'desc' ? 'p.plug_date DESC, p.row_pos NULLS LAST, p.seq, p.id' : 'p.plug_date, p.row_pos NULLS LAST, p.seq, p.id';   // rows stay on the row they were entered in   // newest day first, or oldest first; list order within a day
     // a clicked column header (?sort=&dir=) sorts the whole result, text case-insensitively, empty values last
     const SORTS = { plug_date: 'p.plug_date', plug_id: 'lower(p.plug_id)', prog_name: 'lower(p.prog_name)', psd: 'lower(p.psd)', account_by: 'lower(p.account_by)', requested_by: 'lower(p.requested_by)' };
     if (used) SORTS.in_workload = 'in_workload';
     if (Object.prototype.hasOwnProperty.call(SORTS, req.query.sort)) {
-      order = `${SORTS[req.query.sort]} ${req.query.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, p.plug_date, p.seq, p.id`;
+      order = `${SORTS[req.query.sort]} ${req.query.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, p.plug_date, p.row_pos NULLS LAST, p.seq, p.id`;
     }
     const total = (await db.query(`SELECT count(*)::int AS n FROM workload_plugs p ${whereSql(where)}`, params)).rows[0].n;
     const { rows } = await db.query(
-      `SELECT p.id, p.plug_date, p.seq, p.list_no, p.plug_id, p.prog_name, p.psd, p.account_by, p.requested_by, p.is_additional${used}
+      `SELECT p.id, p.plug_date, p.seq, p.row_pos, p.list_no, p.plug_id, p.prog_name, p.psd, p.account_by, p.requested_by, p.is_additional${used}
          FROM workload_plugs p ${whereSql(where)} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params
     );
-    res.json({ rows, total });
+    // one day on screen: the row numbers in use that day (also by plugs a search hides), so only the really blank rows are drawn
+    let maxPos = 0; let usedPos = [];
+    if (req.query.from && req.query.from === req.query.to && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from)) {
+      usedPos = (await db.query('SELECT row_pos FROM workload_plugs WHERE plug_date = $1 AND row_pos IS NOT NULL ORDER BY row_pos LIMIT 20000', [req.query.from])).rows.map((x) => x.row_pos);
+      maxPos = usedPos.length ? usedPos[usedPos.length - 1] : 0;
+    }
+    res.json({ rows, total, maxPos, usedPos });
   }));
 
   // ---- Excel export of what the list shows (same filters, search and sort); logged in the audit trail ----
@@ -287,8 +294,8 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     const { where, params } = plugFilter(req.query);
     const SORTS = { plug_date: 'p.plug_date', plug_id: 'lower(p.plug_id)', prog_name: 'lower(p.prog_name)', psd: 'lower(p.psd)', account_by: 'lower(p.account_by)', requested_by: 'lower(p.requested_by)' };
     const order = Object.prototype.hasOwnProperty.call(SORTS, req.query.sort)
-      ? `${SORTS[req.query.sort]} ${req.query.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, p.plug_date, p.seq, p.id`
-      : (req.query.order === 'desc' ? 'p.plug_date DESC, p.seq, p.id' : 'p.plug_date, p.seq, p.id');
+      ? `${SORTS[req.query.sort]} ${req.query.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, p.plug_date, p.row_pos NULLS LAST, p.seq, p.id`
+      : (req.query.order === 'desc' ? 'p.plug_date DESC, p.row_pos NULLS LAST, p.seq, p.id' : 'p.plug_date, p.row_pos NULLS LAST, p.seq, p.id');
     const { rows } = await db.query(
       `SELECT p.plug_date, p.plug_id, p.prog_name, p.psd, p.account_by, p.requested_by, p.is_additional,
               EXISTS (SELECT 1 FROM workload_items w WHERE w.work_date = p.plug_date
@@ -374,8 +381,9 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
         for (const sh of sheets) {
           const p = sh.plugs;
           const { rows } = await c.query(
-            `INSERT INTO workload_plugs (plug_date, seq, list_no, plug_id, prog_name, psd, account_by, is_additional, source_file, created_by, requested_by)
-             SELECT $1::date, t.seq, t.list_no, t.plug_id, t.prog_name, t.psd, t.account_by, t.addl, $2, $3, COALESCE(NULLIF(t.req, ''), $11)
+            `INSERT INTO workload_plugs (plug_date, seq, list_no, plug_id, prog_name, psd, account_by, is_additional, source_file, created_by, requested_by, row_pos)
+             SELECT $1::date, t.seq, t.list_no, t.plug_id, t.prog_name, t.psd, t.account_by, t.addl, $2, $3, COALESCE(NULLIF(t.req, ''), $11),
+                    (SELECT COALESCE(MAX(x.row_pos), 0) FROM workload_plugs x WHERE x.plug_date = $1::date) + row_number() OVER (ORDER BY t.seq)
                FROM unnest($4::int[], $5::int[], $6::text[], $7::text[], $8::text[], $9::text[], $10::bool[], $12::text[]) AS t(seq, list_no, plug_id, prog_name, psd, account_by, addl, req)
              ON CONFLICT (plug_date, plug_id, prog_name, psd)
              DO UPDATE SET seq = EXCLUDED.seq, list_no = EXCLUDED.list_no, account_by = EXCLUDED.account_by,
@@ -422,6 +430,15 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     // Account By is no longer shown or edited in the app; when a request leaves it out, an edit keeps what is stored (null = keep)
     account_by: body.account_by === undefined ? null : (v.str(body.account_by, { field: 'Account By', max: 100 }) || ''),
   });
+  // The row a new plug takes in its day: the one it was typed into (when free), else the next after the day's last. Call inside a transaction holding the table lock.
+  const posFor = async (c, date, want) => {
+    if (Number.isInteger(want) && want >= 1 && want <= 1000000) {
+      const taken = (await c.query('SELECT 1 FROM workload_plugs WHERE plug_date = $1 AND row_pos = $2', [date, want])).rowCount > 0;
+      if (!taken) return want;
+    }
+    return (await c.query('SELECT COALESCE(MAX(row_pos), 0) + 1 AS p FROM workload_plugs WHERE plug_date = $1', [date])).rows[0].p;
+  };
+  const LOCK_PLUGS = 'LOCK TABLE workload_plugs IN SHARE ROW EXCLUSIVE MODE';
   const dupe = (e) => { if (e && e.code === '23505') throw new HttpError(409, 'That plug (same Plug ID, program and PSD) is already on this day\'s list'); throw e; };
 
 
@@ -429,11 +446,15 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     const b = plugBody(req.body || {}, (req.body || {}).partial === true);
     let row;
     try {
-      ({ rows: [row] } = await db.query(
-        `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by, requested_by)
-         VALUES ($1, (SELECT COALESCE(MIN(seq), 1) - 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6, $7) RETURNING id`,
-        [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by || '', req.user.id, whoIs(req)]
-      ));
+      row = await db.tx(async (c) => {
+        await c.query(LOCK_PLUGS);
+        const pos = await posFor(c, b.plug_date, (req.body || {}).row_pos);
+        return (await c.query(
+          `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by, requested_by, row_pos)
+           VALUES ($1, (SELECT COALESCE(MIN(seq), 1) - 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6, $7, $8) RETURNING id`,
+          [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by || '', req.user.id, whoIs(req), pos]
+        )).rows[0];
+      });
     } catch (e) { dupe(e); }
     await audit(req, 'workload.plug_add', 'workload_plug', row.id, { plug_date: b.plug_date, plug_id: b.plug_id });
     if (!b.plug_id) return res.status(201).json({ id: row.id, workloadRowsFilled: 0, copied: null });   // no Plug ID yet: nothing to copy to the Workload or announce until it has one
@@ -450,11 +471,12 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     if (!Array.isArray(list) || !list.length) throw new HttpError(400, 'No rows to save');
     if (list.length > MAX_BATCH) throw new HttpError(400, `Save at most ${MAX_BATCH} rows at a time`);
     const out = await db.tx(async (c) => {
+      await c.query(LOCK_PLUGS);
       const addedIds = [];
       const readyIds = [];   // the new ones (and the ones that just got their Plug ID) that have a Plug ID (a row still without one is not copied to the Workload or announced yet)
       const days = new Set();
       let updated = 0;
-      for (let i = list.length - 1; i >= 0; i--) {   // backwards: each new plug goes to the top of its day, so a block keeps its order
+      for (let i = 0; i < list.length; i++) {   // in order: a block of new plugs takes consecutive rows
         const row = list[i] || {};
         try {
           const b = plugBody(row, row.partial === true);
@@ -463,17 +485,17 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
             const id = v.id(row.id);
             const cur = await c.query('SELECT prog_name, plug_id FROM workload_plugs WHERE id=$1 FOR UPDATE', [id]);
             if (!cur.rows.length) throw new HttpError(404, 'Plug no longer exists (deleted by someone else?)');
-            await c.query('UPDATE workload_plugs SET plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=COALESCE($6, account_by), updated_at=now() WHERE id=$1',
+            await c.query(`UPDATE workload_plugs SET row_pos = CASE WHEN plug_date = $2::date THEN row_pos ELSE (SELECT COALESCE(MAX(x.row_pos), 0) + 1 FROM workload_plugs x WHERE x.plug_date = $2::date) END,
+                plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=COALESCE($6, account_by), updated_at=now() WHERE id=$1`,
               [id, b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by]);
             await audit(req, 'workload.plug_edit', 'workload_plug', id, { plug_date: b.plug_date, plug_id: b.plug_id }, c);
             updated++;
             if (b.plug_id && !String(cur.rows[0].plug_id || '').trim()) readyIds.push(id);   // it just got its Plug ID: now it is a real plug (copied to the Workload and announced)
           } else {
             const ins = await c.query(
-              `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by, requested_by)
-               VALUES ($1, CASE WHEN $8::boolean THEN (SELECT COALESCE(MAX(seq), 0) + 1 FROM workload_plugs WHERE plug_date = $1)
-                                ELSE (SELECT COALESCE(MIN(seq), 1) - 1 FROM workload_plugs WHERE plug_date = $1) END, $2, $3, $4, $5, 'added by hand', $6, $7) RETURNING id`,
-              [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by || '', req.user.id, whoIs(req), row.bottom === true]);   // `bottom`: typed into a blank row at the end of the table, so it stays there (otherwise a new plug goes to the top of its day)
+              `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by, requested_by, row_pos)
+               VALUES ($1, (SELECT COALESCE(MIN(seq), 1) - 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6, $7, $8) RETURNING id`,
+              [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by || '', req.user.id, whoIs(req), await posFor(c, b.plug_date, row.row_pos)]);   // the row it was typed into, else after the day's last
             await audit(req, 'workload.plug_add', 'workload_plug', ins.rows[0].id, { plug_date: b.plug_date, plug_id: b.plug_id }, c);
             addedIds.push(ins.rows[0].id);
             if (b.plug_id) readyIds.push(ins.rows[0].id);
@@ -498,7 +520,8 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     const b = plugBody(req.body || {}, wasBlank);
     try {
       const r = await db.query(
-        `UPDATE workload_plugs SET plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=COALESCE($6, account_by), updated_at=now() WHERE id=$1`,
+        `UPDATE workload_plugs SET row_pos = CASE WHEN plug_date = $2::date THEN row_pos ELSE (SELECT COALESCE(MAX(x.row_pos), 0) + 1 FROM workload_plugs x WHERE x.plug_date = $2::date) END,
+               plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=COALESCE($6, account_by), updated_at=now() WHERE id=$1`,
         [req.params.id, b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by]
       );
       if (!r.rowCount) throw new HttpError(404, 'Plug not found');

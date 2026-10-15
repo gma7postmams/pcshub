@@ -543,6 +543,12 @@ UPDATE workload_plugs p SET requested_by = COALESCE(NULLIF(btrim(u.full_name), '
   FROM users u WHERE p.requested_by = '' AND p.created_by = u.id;
 CREATE UNIQUE INDEX IF NOT EXISTS workload_plugs_uniq ON workload_plugs (plug_date, plug_id, prog_name, psd);
 CREATE INDEX IF NOT EXISTS workload_plugs_date_idx ON workload_plugs (plug_date, seq);
+-- Every plug keeps the row (position within its day) it was entered in, like a sheet row: a plug typed into row 20 stays on row 20 and the free numbers show as blank rows.
+ALTER TABLE workload_plugs ADD COLUMN IF NOT EXISTS row_pos INT;
+UPDATE workload_plugs p SET row_pos = n.rn
+  FROM (SELECT id, row_number() OVER (PARTITION BY plug_date ORDER BY seq, id) AS rn FROM workload_plugs WHERE row_pos IS NULL) n
+ WHERE p.id = n.id AND p.row_pos IS NULL;
+CREATE INDEX IF NOT EXISTS workload_plugs_pos_idx ON workload_plugs (plug_date, row_pos);
 CREATE INDEX IF NOT EXISTS workload_plugs_lookup_idx ON workload_plugs (plug_date, upper(plug_id));
 
 -- The PSD Daily Plug List is now its own page ('plugs'). Once (flag in app_settings), every group that can open the Workload Tracker

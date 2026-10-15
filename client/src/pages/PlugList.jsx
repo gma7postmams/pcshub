@@ -242,10 +242,10 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       if (range.to) p.set('to', range.to);
       if (query) p.set('q', query);
       Object.entries(filt).forEach(([k, val]) => { if (val) p.set(k, val); });
-      if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
-      setData(await get(`/api/plugs?${p}`));
+      if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); } else if (narrow) p.set('newest', '1');   // phone: newest entries on top
+      setData({ ...(await get(`/api/plugs?${p}`)), _sort: !!sort.k });
     } catch (e) { if (!quiet) { setData({ rows: [], total: 0 }); toast(e.message, 'err'); } }
-  }, [anchor, range.from, range.to, query, filt, limit, offset, period, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [anchor, range.from, range.to, query, filt, limit, offset, period, sort.k, sort.dir, narrow]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setData(null); setPicked(new Set()); setAllMatching(false); loadRows(); }, [loadRows]);
   // other people's changes appear by themselves (Workload changes too: the "In Workload" flag) — not while a cell, form or dialog is open here
   useLive(['plugs'], () => { loadDays(true); loadOpts(); return loadRows(true); }, () => {
@@ -308,6 +308,11 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   // Google-Sheets style: spare blank rows under the last row (only on the last page); more appear as you scroll down; clicking one makes it a new row
   const spareOn = canWrite && !narrow && !!data && offset + rows.length >= data.total;
   const spareN = useSpareRows('.plug-list .wl-fit', spareOn, `${period}|${anchor}|${offset}|${size}`);
+  // One day on screen, not sorted: every plug keeps the row it was entered in (a plug typed into row 20 stays on row 20) and the free numbers show as blank rows.
+  const dayMode = canWrite && !narrow && period === 'day' && !!data && Array.isArray(data.usedPos) && !data._sort;
+  const usedSet = new Set(data && data.usedPos ? data.usedPos : []);
+  const trailStart = (data && data.maxPos ? data.maxPos : 0) + 1;
+  const freeRuns = (from, to) => { const runs = []; let start = null; for (let p = from; p <= to && p - from < 2000; p++) { if (!usedSet.has(p)) { if (start === null) start = p; } else if (start !== null) { runs.push([start, p - start]); start = null; } } if (start !== null) runs.push([start, Math.min(to, from + 1999) - start + 1]); return runs; };
   const chosen = rows.filter((r) => picked.has(r.id));
   const pickedCount = chosen.length;
   const allOn = !!rows.length && rows.every((r) => picked.has(r.id));
@@ -521,11 +526,14 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     const used = list.filter((d) => String(d.plug_id).trim() || String(d.prog_name).trim() || String(d.psd).trim());
     if (!used.length) { toast('Plug ID is required', 'err'); return; }
     if (!partial && used.some((d) => !String(d.plug_id).trim())) { toast('Plug ID is required on every new row', 'err'); return; }
-    const recs = used.map((d) => ({ ...recOf(d), ...(partial ? { partial: true } : {}), ...(d.at === 'bottom' ? { bottom: true } : {}) }));   // a row typed into a blank row at the end stays at the end of its day   // partial: a row started in a spare row may still be missing its Plug ID
+    const recs = used.map((d) => ({ ...recOf(d), ...(partial ? { partial: true } : {}), ...(d.at === 'bottom' && dayMode && d.slot ? { row_pos: d.slot } : {}) }));   // a row typed into a blank row keeps that row's number   // partial: a row started in a spare row may still be missing its Plug ID
     try {
       let ids = (await batch(recs)).addedIds || [];
       if (partial && used.length === 1 && used[0].at === 'bottom' && ids[0]) {
-        setPinned({ id: ids[0], slot: used[0].slot, row: { ...used[0], id: ids[0], at: undefined, requested_by: '' } });   // it stays where I was typing
+        if (dayMode && used[0].slot && used[0].plug_date === anchor) {   // it is on its row at once; the list read that follows confirms it
+          const nr = { ...used[0], id: ids[0], at: undefined, requested_by: '', row_pos: used[0].slot };
+          setData((d) => (d && d.rows ? { ...d, rows: [...d.rows, nr].sort((a, b) => (a.row_pos || 1e9) - (b.row_pos || 1e9)), total: d.total + 1, usedPos: [...(d.usedPos || []), nr.row_pos], maxPos: Math.max(d.maxPos || 0, nr.row_pos) } : d));
+        } else setPinned({ id: ids[0], slot: used[0].slot, row: { ...used[0], id: ids[0], at: undefined, requested_by: '' } });   // it stays where I was typing
         setSpareSel(null);
         const nk = move && move.dc && fromK ? EDIT_COLS[EDIT_COLS.indexOf(fromK) + move.dc] : null;
         if (nk) setCellEd({ id: ids[0], k: nk }); else if (fromK) pendingSel.current = { id: ids[0], k: fromK };   // Tab goes on to the next cell of the same row
@@ -656,7 +664,20 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     const key = e.key.toLowerCase();
     if (spareSel && !picked.size && !cellSel) {   // a blank cell in a spare row is selected
       const li = EDIT_COLS.indexOf(spareSel.k);
-      const move = (slot, c) => { if (slot < 0 || slot >= spareN || c < 0 || c >= EDIT_COLS.length) return; setSpareSel({ slot, k: EDIT_COLS[c] }); requestAnimationFrame(() => { const row = document.querySelectorAll('.plug-list tbody tr')[rows.length + slot]; if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' }); }); };
+      const move = (slot, c) => {
+        if (c < 0 || c >= EDIT_COLS.length) return;
+        if (dayMode) {   // rows have fixed numbers: a saved plug on that number is selected, a free number stays a blank row
+          if (slot < 1 || slot > trailStart + spareN - 1) return;
+          const rec = rows.find((x) => x.row_pos === slot);
+          if (rec) { setSpareSel(null); selectCell(rec, EDIT_COLS[c]); return; }
+          if (usedSet.has(slot)) return;
+          setSpareSel({ slot, k: EDIT_COLS[c] });
+          requestAnimationFrame(() => { const row = document.querySelector(`.plug-list tr[data-pos="${slot}"]`); if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' }); });
+          return;
+        }
+        if (slot < 0 || slot >= spareN) return;
+        setSpareSel({ slot, k: EDIT_COLS[c] }); requestAnimationFrame(() => { const row = document.querySelectorAll('.plug-list tbody tr')[rows.length + slot]; if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' }); });
+      };
       if (!e.ctrlKey && !e.metaKey && ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) { e.preventDefault(); move(spareSel.slot + (key === 'arrowdown' ? 1 : key === 'arrowup' ? -1 : 0), li + (key === 'arrowright' ? 1 : key === 'arrowleft' ? -1 : 0)); return; }
       if (!e.ctrlKey && !e.metaKey && key === 'tab') { e.preventDefault(); const n = li + (e.shiftKey ? -1 : 1); if (n >= EDIT_COLS.length) move(spareSel.slot + 1, 0); else if (n < 0) move(spareSel.slot - 1, EDIT_COLS.length - 1); else move(spareSel.slot, n); return; }
       if (!e.ctrlKey && !e.metaKey && key === 'escape') { setSpareSel(null); return; }
@@ -798,7 +819,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const renderRow = (r, i, rnText) => (
                     <tr key={r.id} data-id={r.id} data-pinned={rnText ? '1' : undefined} className={`${r.in_workload ? 'done' : ''}${picked.has(r.id) ? ' picked' : ''}`.trim()}
                       onMouseDown={canWrite ? cellDown : undefined} onContextMenu={canWrite ? (e) => rowMenu(e, r) : undefined}>
-                      {canWrite && !narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} title="Click to select the row (Shift-click a range, Ctrl-click to add; Ctrl+C copies, Ctrl+V pastes)">{rnText || offset + i + 1}</td> : null}
+                      {canWrite && !narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} title="Click to select the row (Shift-click a range, Ctrl-click to add; Ctrl+C copies, Ctrl+V pastes)">{rnText || (dayMode && r.row_pos ? r.row_pos : offset + i + 1)}</td> : null}
                       {canWrite && narrow ? <td className="chk"><input type="checkbox" checked={picked.has(r.id)} onChange={() => { setPicked((cur) => { const n = new Set(cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; }); lastPick.current = r.id; }} aria-label={`Select ${r.plug_id}`} /></td> : null}
                       {dataCells(r, i)}
                       {canWrite ? (
@@ -808,6 +829,40 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
                       ) : null}
                     </tr>
   );
+  // the rows of the table: the plugs and, in a one-day view, the blank rows of the numbers nobody has used (each drawn once)
+  const renderBody = () => {
+    const bd = drafts.find((d) => d.at === 'bottom');
+    const rnOf = (slot) => (dayMode ? slot : offset + rows.length + slot + 1);
+    const node = pinned && !bd ? (() => { const pr = rows.find((x) => x.id === pinned.id) || pinned.row; const pi = rows.findIndex((x) => x.id === pinned.id); return renderRow(pr, pi >= 0 ? pi : undefined, rnOf(pinned.slot)); })() : bd ? (
+      <tr key="spare-draft" className="draft-row spare-draft" data-draft="1">
+        <td className="rn">{rnOf(bd.slot)}</td>
+        {dataCells(bd)}
+        <td className="plug-actions" />
+      </tr>
+    ) : null;
+    const at = bd ? bd.slot : pinned ? pinned.slot : -1;
+    const props = { cols: EDIT_COLS.concat([null, null]), lead: 'rn', trail: true, onOpen: openSpare, onSelect: selectSpare, sel: spareSel, peerOf: (i, k) => peers[`spare:${i}:${k}`], onMenu: (e) => setCtx({ x: e.clientX, y: e.clientY }) };
+    const out = [];
+    if (!rows.length && !draft && !(dayMode && spareOn)) out.push(<tr key="none"><td colSpan={canWrite ? 8 : 6} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr>);
+    if (!dayMode) {
+      rows.forEach((r, i) => { if (!(pinned && pinned.id === r.id)) out.push(renderRow(r, i)); });
+      if (spareOn) out.push(<SpareRows key="spare-tail" count={spareN} start={offset + rows.length} {...props} at={at} node={node} />);
+      return out;
+    }
+    let shown = false; const done = new Set(); let prev = offset === 0 ? 0 : null;
+    const block = (key, p0, n) => { const here = !shown && at >= p0 && at < p0 + n; if (here) shown = true; return <SpareRows key={`${key}-${p0}`} count={n} pos0={p0} {...props} at={here ? at : -1} node={node} />; };
+    const gaps = (from, to, key) => { if (to >= from) freeRuns(from, to).forEach(([p0, n]) => { if (done.has(p0)) return; done.add(p0); out.push(block(key, p0, n)); }); };
+    rows.forEach((r, i) => {
+      const pos = r.row_pos || 0;
+      if (prev !== null && pos - prev - 1 > 0) gaps(prev + 1, pos - 1, 'gap');
+      out.push(renderRow(r, i));
+      if (prev !== null) prev = Math.max(prev, pos);
+    });
+    if (spareOn && prev !== null && (data.maxPos || 0) > prev) gaps(prev + 1, data.maxPos, 'gap-end');   // free numbers between the last plug shown and the highest in use
+    if (spareOn) out.push(block('spare-tail', trailStart, spareN));
+    return out;
+  };
+
   return (
     <div className={`plug-list${full ? ' full' : ''}`}>
       <div className="plug-bar">
@@ -885,16 +940,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
                       </td>
                     </tr>
                   ))}
-                  {rows.length ? rows.map((r, i) => (pinned && pinned.id === r.id ? null : renderRow(r, i))) : !draft ? <tr><td colSpan={canWrite ? 8 : 6} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr> : null}
-                  {spareOn ? <SpareRows count={spareN} start={offset + rows.length} cols={EDIT_COLS.concat([null, null])} lead="rn" trail onOpen={openSpare} onSelect={selectSpare} sel={spareSel} peerOf={(i, k) => peers[`spare:${i}:${k}`]} onMenu={(e) => setCtx({ x: e.clientX, y: e.clientY })}
-                    at={drafts.find((d) => d.at === 'bottom') ? drafts.find((d) => d.at === 'bottom').slot : pinned ? pinned.slot : -1}
-                    node={pinned && !drafts.find((d) => d.at === 'bottom') ? (() => { const pr = rows.find((x) => x.id === pinned.id) || pinned.row; const pi = rows.findIndex((x) => x.id === pinned.id); return renderRow(pr, pi >= 0 ? pi : undefined, offset + rows.length + pinned.slot + 1); })() : drafts.find((d) => d.at === 'bottom') ? (
-                      <tr key="spare-draft" className="draft-row spare-draft" data-draft="1">
-                        <td className="rn">{offset + rows.length + drafts.find((d) => d.at === 'bottom').slot + 1}</td>
-                        {dataCells(drafts.find((d) => d.at === 'bottom'))}
-                        <td className="plug-actions" />
-                      </tr>
-                    ) : null} /> : null}
+                  {renderBody()}
                 </tbody>
               </table>
             </div>
