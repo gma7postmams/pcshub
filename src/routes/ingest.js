@@ -109,8 +109,8 @@ const SORTS = {
 };
 function orderBy(q) {
   const col = Object.prototype.hasOwnProperty.call(SORTS, q.sort) ? SORTS[q.sort] : null;
-  if (!col) return 'i.created_at DESC, i.id DESC';
-  return `${col} ${q.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, i.created_at DESC, i.id DESC`;
+  if (!col) return 'i.created_at ASC, i.id ASC';   // like a sheet: the order things were entered, so a new row lands at the bottom, where the blank rows are
+  return `${col} ${q.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, i.created_at ASC, i.id ASC`;
 }
 
 // ---- audit helpers ----
