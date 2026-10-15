@@ -1476,7 +1476,7 @@ export default function Workload() {
     e.preventDefault();
     if (editing) setEditing(null);
     if (!lockedForPick(r) && !(allMatching || picked.has(r.id))) { setAllMatching(false); setPicked(new Set([r.id])); lastPick.current = r.id; }
-    setTctx({ x: e.clientX, y: e.clientY });
+    setTctx({ x: e.clientX, y: e.clientY, bd: Boolean(t.closest && t.closest('td[data-k="breakdate_vgfx"]')), rid: r.id });
   };
   const menuPasteRows = async (how) => {
     setTctx(null);
@@ -2024,10 +2024,6 @@ export default function Workload() {
               {canWrite ? <button type="button" className="btn ibtn primary" id="new-btn" aria-label="New Workload" title="New Workload" onClick={() => setForm({ rec: null })}><PlusIcon /></button> : null}
               {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import from Excel" title="Import from Excel" disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}><UploadIcon /></button> : null}
               <ExportButton onExport={exportXlsx}><DownloadIcon /></ExportButton>
-              {canWrite && !isGrid && prioRows.length ? (
-                <button type="button" className="btn ibtn" id="priority-table-btn" data-keep-sel onClick={toggleTablePriority}
-                  aria-label={pickedAllPrio ? 'Remove Priority' : 'Set Priority'} title={pickedAllPrio ? 'Remove Priority' : 'Set Priority'}><FlagIcon /></button>
-              ) : null}
               {canWrite && !isGrid && pickedCount ? (
                 <button type="button" className="btn ibtn danger" id="delete-selected-btn" onClick={() => deleteSelected()}
                   aria-label="Delete selected rows" title={`Delete Selected (${pickedCount})`}><TrashIcon /></button>
@@ -2086,9 +2082,6 @@ export default function Workload() {
             {canWrite && isGrid && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? <button type="button" className="btn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}>Delete {selRows.filter((r) => !xlLocked(r)).length > 1 ? `${selRows.filter((r) => !xlLocked(r)).length} Rows` : 'Row'}</button> : null}
             {s.canPage('/admin') ? <button type="button" className="btn" id="lock-dates-btn" onClick={() => setManagingLocks(true)}><LockIcon /> Lock Dates</button> : null}
             {canWrite && isAdminUser ? <button type="button" className="btn danger" id="delete-all-btn" onClick={() => setDeletingAll(true)} title="Delete every row that matches the filters you have on now (Admin)"><TrashIcon /> Delete All</button> : null}
-            {canWrite && !isGrid && prioRows.length ? (
-              <button type="button" className="btn" id="priority-table-btn" data-keep-sel onClick={toggleTablePriority} title="Highlights the Breakdate / Time of the selected row(s)"><FlagIcon /> {pickedAllPrio ? 'Remove Priority' : 'Set Priority'}</button>
-            ) : null}
             {canWrite && !isGrid && pickedCount ? (
               <button type="button" className="btn danger" id="delete-selected-btn" onClick={() => deleteSelected()} title="Delete the rows ticked in the table">
                 Delete Selected ({pickedCount})
@@ -2275,6 +2268,7 @@ export default function Workload() {
                 <button type="button" disabled={!picked.size} onClick={() => menuPasteRows('above')}>Paste as new row above</button>
                 <button type="button" disabled={!picked.size} onClick={() => menuPasteRows('below')}>Paste as new row below</button>
                 <hr />
+                {tctx.bd ? <button type="button" disabled={!prioRows.length} onClick={() => { setTctx(null); toggleTablePriority(); }}>{pickedAllPrio ? 'Remove priority' : 'Set priority'}</button> : null}
                 <button type="button" disabled={!pickedCount} onClick={() => { setTctx(null); deleteSelected(); }}>Delete {pickedCount > 1 ? `${pickedCount} rows` : 'row'}<span>Del</span></button>
                 </> : null}
               </FitMenu>
