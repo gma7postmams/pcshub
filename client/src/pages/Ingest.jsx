@@ -174,8 +174,8 @@ function DateRangeInput({ value, onChange, disabled }) {
 }
 
 // One table cell turned into its own editor. Dropdowns save as soon as you pick; a failed save keeps the editor open with the message shown.
-function InlineCell({ def, initial, options, onSave, onCancel, onUndo, memo }) {
-  const [val, setValRaw] = useState(() => (memo ? loadCellText('ingest', memo, initial) : initial));
+function InlineCell({ def, initial, options, onSave, onCancel, onUndo, memo, startText }) {
+  const [val, setValRaw] = useState(() => (startText !== undefined ? startText : memo ? loadCellText('ingest', memo, initial) : initial));   // startText: the key pressed on a selected cell, which replaces what was there
   const setVal = (v) => { setValRaw(v); if (memo) saveCellText('ingest', memo, v); };
   const [busy, setBusy] = useState(false);
   const box = useRef(null);
@@ -360,7 +360,23 @@ export default function Ingest() {
 
   const canApprove = s.can('ingest.approve');
   const canCm = s.can('ingest.cm_complete');
-  const closeCell = (r, k) => setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur));
+  // Google-Sheets style: a click only SELECTS a cell; typing, Enter, F2 or a double-click opens its editor
+  const closeCell = (r, k) => { setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur)); if (r.id !== 'draft') selectCell(r, k); };
+  const selectCell = (r, k) => {
+    const ri = rows.findIndex((x) => x.id === r.id); const ci = COLS.indexOf(k);
+    if (ri >= 0 && ci >= 0) setCellSel({ r0: ri, c0: ci, r1: ri, c1: ci });
+  };
+  const tapEdit = () => narrow || (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches);   // a phone / tablet has no double-click or keyboard focus: a tap opens the editor as before
+  const openSelected = (start) => {
+    const n = normCells();
+    if (!n || n.r0 !== n.r1 || n.c0 !== n.c1) return false;
+    const row = rows[n.r0]; const k = COLS[n.c0];
+    if (!row || !k || !WRITE.has(k) && k !== 'cm_status' || !CELLS[k] || !may(row, k)) return false;
+    const kind = CELLS[k].kind;
+    const typed = start !== undefined && (kind === 'text' || kind === 'area' || (kind === 'number' && /^\d$/.test(start))) ? start : undefined;
+    setEditing({ id: row.id, k, start: typed });
+    return true;
+  };
   // Save ONE cell (PATCH writes only that column, so other people's edits to the row are kept)
   const decide = async (r, decision, reason) => {
     await post(`/api/ingest/${r.id}/cm-decision`, { decision, reason: decision === 'NON-COMPLIANT' ? reason : '' });
@@ -445,7 +461,7 @@ export default function Ingest() {
       if (dc) { ci += dc; if (ci >= COLS.length) { ci = 0; ri += 1; } else if (ci < 0) { ci = COLS.length - 1; ri -= 1; } } else ri += dr;
       if (ri < 0 || ri >= list.length) return;
       const kk = COLS[ci]; const rr = list[ri];
-      if (WRITE.has(kk) && (rr.id === 'draft' ? canWrite && (kk !== 'destination_folder' || canApprove) : may(rr, kk))) { setEditing({ id: rr.id, k: kk }); return; }
+      if (WRITE.has(kk) && (rr.id === 'draft' ? canWrite && (kk !== 'destination_folder' || canApprove) : may(rr, kk))) { if (rr.id === 'draft') setEditing({ id: rr.id, k: kk }); else selectCell(rr, kk); return; }   // the unsaved new row keeps opening editors
     }
   };
   // Save ONE cell (PATCH writes only that column, so other people's edits to the row are kept)
@@ -495,16 +511,21 @@ export default function Ingest() {
       const initial = cellInitial(r, k);
       return (
         <td data-k={k} data-r={props['data-r']} data-c={props['data-c']} className="editing" onClick={(e) => e.stopPropagation()}>
-          <InlineCell memo={`${r.id}:${k}`} def={def} initial={initial} options={k === 'cm_status' ? CM_OPTIONS : withCurrent(lookups ? lookups.platform : [], r.platform)}
-            onSave={(value, move) => saveCell(r, k, value, initial, move)} onCancel={() => setEditing(null)} onUndo={(sh) => { setEditing(null); if (sh) redo(); else undo(); }} />
+          <InlineCell memo={`${r.id}:${k}`} startText={editing.start} def={def} initial={initial} options={k === 'cm_status' ? CM_OPTIONS : withCurrent(lookups ? lookups.platform : [], r.platform)}
+            onSave={(value, move) => saveCell(r, k, value, initial, move)} onCancel={() => { setEditing(null); if (r.id !== 'draft') selectCell(r, k); }} onUndo={(sh) => { setEditing(null); if (sh) redo(); else undo(); }} />
         </td>
       );
     }
     const open = () => setEditing({ id: r.id, k });
     return (
-      <td {...props} className={`${props.className || ''} editable`.trim()} title="Click to edit" tabIndex={0}
-        onClick={(e) => { e.stopPropagation(); open(); }}
-        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); open(); } }}>{children}</td>
+      <td {...props} className={`${props.className || ''} editable`.trim()} title="Click to select, double-click or press Enter to edit" tabIndex={0}
+        onClick={(e) => {   // select only; Shift / Ctrl+click and drags are the block selection's (see cellDown)
+          e.stopPropagation();
+          if (isDraft || tapEdit()) { open(); return; }
+          if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+          if (r.__i !== undefined && ci >= 0) setCellSel({ r0: r.__i, c0: ci, r1: r.__i, c1: ci });
+        }}
+        onDoubleClick={(e) => { e.stopPropagation(); open(); }}>{children}</td>
     );
   };
 
@@ -738,6 +759,15 @@ export default function Ingest() {
       if ((e.ctrlKey || e.metaKey) && key === 'x') { if (canWrite) { e.preventDefault(); copyCells().then((ok) => { if (ok) clearCells(); }); } return; }
       if (!e.ctrlKey && !e.metaKey && (key === 'delete' || key === 'backspace')) { if (canWrite) { e.preventDefault(); clearCells(); } return; }
       if (!e.ctrlKey && !e.metaKey && key === 'escape') { setCellSel(null); return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && !e.shiftKey && (key === 'enter' || key === 'f2')) { if (openSelected()) e.preventDefault(); return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && e.key.length === 1) { if (openSelected(e.key)) e.preventDefault(); return; }   // just start typing: the cell opens with what was typed replacing its content
+      if (!e.ctrlKey && !e.metaKey && key === 'tab' && cellSel.r0 === cellSel.r1 && cellSel.c0 === cellSel.c1) {   // Tab / Shift+Tab: the next / previous cell
+        e.preventDefault();
+        const nC = COLS.length; let c = cellSel.c1 + (e.shiftKey ? -1 : 1); let r = cellSel.r1;
+        if (c >= nC) { c = 0; r += 1; } else if (c < 0) { c = nC - 1; r -= 1; }
+        if (r >= 0 && r < rows.length) setCellSel({ r0: r, c0: c, r1: r, c1: c });
+        return;
+      }
       if (!e.ctrlKey && !e.metaKey && ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {   // Shift+arrows grow / shrink the block from the cell it started on; plain arrows move to a single cell
         e.preventDefault();
         const nR = rows.length; const nC = COLS.length;

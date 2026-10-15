@@ -1346,3 +1346,8 @@ table.t.wl:not(.cards) tbody tr.prep-wait:not(.picked):hover td{background:color
 .prep-divider.jump:hover td{background:var(--surface-3,rgba(127,127,127,.16))}
 .prep-missing{white-space:normal}
 .prep-missing .chip{margin:0 4px 2px 0}
+
+/* Cells: a selected cell (Google-Sheets style) gets a clear outline; the "Type or paste anything…" hint is centred in the cell */
+table.t td[data-sel]:focus, table.t td.editable:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+table.t td.editing input:placeholder-shown, table.t td.editing textarea:placeholder-shown,
+.cell-editor input:placeholder-shown, .cell-editor textarea:placeholder-shown { text-align: center; }

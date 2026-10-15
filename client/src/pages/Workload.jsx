@@ -332,9 +332,9 @@ function GridCellInput({ def, value, onChange, disabled, ...rest }) {
 
 // One table cell turned into its own editor. Enter or clicking away saves, Esc cancels; dropdowns save as soon as you pick.
 // A failed save (e.g. an invalid value) keeps the editor open with the message shown.
-function CellEditor({ def, initial, lookups, onSave, onCancel, onUndo, copyText, memo }) {
+function CellEditor({ def, initial, lookups, onSave, onCancel, onUndo, copyText, memo, startText }) {
   const toast = useToast();
-  const [val, setValRaw] = useState(() => (memo ? loadCellText('workload', memo, initial ?? '') : initial ?? ''));
+  const [val, setValRaw] = useState(() => (startText !== undefined ? startText : memo ? loadCellText('workload', memo, initial ?? '') : initial ?? ''));   // startText: the key pressed on a selected cell, which replaces what was there
   const setVal = (v) => { setValRaw(v); if (memo) saveCellText('workload', memo, v); };
   const [busy, setBusy] = useState(false);
   const box = useRef(null);
@@ -676,7 +676,25 @@ export default function Workload() {
     const teams = meta.unitTeams[r.units_concerned] || [];
     return teams.includes('VGFX') ? 'breakdate_vgfx' : teams.includes('VEDIT') ? 'breakdate_vedit' : null;
   };
-  // After Enter / Tab in a cell editor: open the editor of the next cell — below / above (Enter, Shift+Enter) or beside it (Tab, Shift+Tab, wrapping to the next row)
+  // Google-Sheets style: a click only SELECTS a cell (the blue outline); typing, Enter, F2 or a double-click opens its editor
+  const selectCell = (r, k) => {
+    const ri = pageRows.findIndex((x) => x.id === r.id);
+    const ci = tableCols.findIndex((c) => c === k || (c === 'breakdate_vgfx' && k === 'breakdate_vedit'));
+    if (ri >= 0 && ci >= 0) setCellSel({ r0: ri, c0: ci, r1: ri, c1: ci });
+  };
+  const tapEdit = () => cards || (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches);   // a phone / tablet has no double-click or keyboard focus: a tap opens the editor as before
+  const textStart = (k) => ['text', 'date_or_text', 'audio_guide'].includes((meta.fields[k] || {}).kind);   // a typed key can start these off; a dropdown / date box only opens
+  const openSelected = (start) => {
+    const n = normCells();
+    if (!n || n.r0 !== n.r1 || n.c0 !== n.c1) return false;
+    const row = pageRows[n.r0];
+    if (!row || rowLocked(row)) return false;
+    const ek = editKeyFor(row, tableCols[n.c0]);
+    if (!ek) return false;
+    setEditing({ id: row.id, k: ek, start: start !== undefined && textStart(ek) ? start : undefined });
+    return true;
+  };
+  // After Enter / Tab in a cell editor: select the next cell — below / above (Enter, Shift+Enter) or beside it (Tab, Shift+Tab, wrapping to the next row)
   const moveEdit = (r, k, dr, dc) => {
     const rows = [...(draft ? [draft] : []), ...(data && data.rows ? data.rows : [])];
     let ri = rows.findIndex((x) => x.id === r.id);
@@ -688,7 +706,7 @@ export default function Workload() {
       const row = rows[ri];
       if (rowLocked(row)) continue;
       const ek = editKeyFor(row, tableCols[ci]);
-      if (ek) { setEditing({ id: row.id, k: ek }); return; }
+      if (ek) { if (row.id === 'draft') setEditing({ id: row.id, k: ek }); else selectCell(row, ek); return; }   // the unsaved new row keeps opening editors (it has no row number to select)
     }
   };
   const saveCell = async (r, k, value, move) => {
@@ -698,7 +716,7 @@ export default function Workload() {
       if (move) moveEdit(r, k, move.dr, move.dc);
       return;
     }
-    if (String(value ?? '') === String(r[k] ?? '')) { setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur)); if (move) moveEdit(r, k, move.dr, move.dc); return; }
+    if (String(value ?? '') === String(r[k] ?? '')) { setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur)); if (move) moveEdit(r, k, move.dr, move.dc); else selectCell(r, k); return; }
     try {
       const out = await patch(`/api/workload/${r.id}`, { field: k, value });
       const before = r[k] ?? '';
@@ -707,7 +725,7 @@ export default function Workload() {
       // close only THIS cell's editor: the person may already have opened another cell while this one was saving
       setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur));
       if (['work_date', 'units_concerned', 'platform', 'plug_type'].includes(k)) load();   // may change the row's place, filters or the counts
-      if (move) moveEdit(r, k, move.dr, move.dc);
+      if (move) moveEdit(r, k, move.dr, move.dc); else selectCell(r, k);
     } catch (e) { toast(e.message, 'err'); throw e; }
   };
 
@@ -1685,6 +1703,15 @@ export default function Workload() {
       if (canWrite && (e.ctrlKey || e.metaKey) && key === 'x') { e.preventDefault(); copyCells().then((ok) => { if (ok) clearCells(); }); return; }
       if (canWrite && !e.ctrlKey && !e.metaKey && (key === 'delete' || key === 'backspace')) { e.preventDefault(); clearCells(); return; }
       if (!e.ctrlKey && !e.metaKey && key === 'escape') { setCellSel(null); return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && !e.shiftKey && (key === 'enter' || key === 'f2')) { if (openSelected()) e.preventDefault(); return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && e.key.length === 1) { if (openSelected(e.key)) e.preventDefault(); return; }   // just start typing: the cell opens with what was typed replacing its content
+      if (!e.ctrlKey && !e.metaKey && key === 'tab' && cellSel.r0 === cellSel.r1 && cellSel.c0 === cellSel.c1) {   // Tab / Shift+Tab: the next / previous cell
+        e.preventDefault();
+        const nC = tableCols.length; let c = cellSel.c1 + (e.shiftKey ? -1 : 1); let r = cellSel.r1;
+        if (c >= nC) { c = 0; r += 1; } else if (c < 0) { c = nC - 1; r -= 1; }
+        if (r >= 0 && r < pageRows.length) setCellSel({ r0: r, c0: c, r1: r, c1: c });
+        return;
+      }
       if (!e.ctrlKey && !e.metaKey && ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {   // Shift+arrows grow / shrink the block from the cell it started on; plain arrows move to a single cell
         e.preventDefault();
         const nR = pageRows.length; const nC = tableCols.length;
@@ -1761,15 +1788,15 @@ export default function Workload() {
     const nReady = (data && data.prepReady) || 0;
     const nWait = Math.max(0, ((data && data.total) || 0) - nReady);
     const band = (key, cls, title, n, note) => (
-      <tr key={key} className={`prep-divider ${cls}`}><td colSpan={tableCols.length + 4}><strong>{title}</strong> <span className="dim">({n}) {note}</span></td></tr>
+      <tr key={key} className={`prep-divider ${cls}`}><td colSpan={tableCols.length + 4}><strong>{title}</strong> <span className="dim">({n}): {note}.</span></td></tr>
     );
     const up = band('up', 'ready', 'Ready', nReady, 'VO, Script, Artwork / STB and Audio Guide are all available');
-    const low = band('low', 'waiting', 'For followup', nWait, 'at least one of the four is not available yet');
+    const low = band('low', 'waiting', 'For Follow-up', nWait, 'at least one of the four is not available yet');
     if (ready && (first || wasReady === null)) return up;
     if (!ready && (first || wasReady === true || wasReady === null)) return <>{first && wasReady === null && !ready ? up : null}{low}</>;
     return null;
   };
-  // PREP: rows for followup sort after every ready row, so with many ready rows they start on a later page. Say so at the foot of this page.
+  // PREP: rows For Follow-up sort after every ready row, so with many ready rows they start on a later page. Say so at the foot of this page.
   const prepNextWait = (() => {
     if (!isPrep || !data || !data.rows.length) return null;
     const nReady = data.prepReady || 0; const nWait = (data.total || 0) - nReady;
@@ -1833,15 +1860,21 @@ export default function Workload() {
     if (editing && editing.id === r.id && editing.k === k) {
       return (
         <td key={k} data-k={k} data-label={head(k)} className="editing" onClick={(e) => e.stopPropagation()}>
-          <CellEditor memo={`${r.id}:${k}`} def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} onUndo={(sh) => { setEditing(null); if (sh) redoTbl(); else undoTbl(); }} />
+          <CellEditor memo={`${r.id}:${k}`} startText={editing.start} def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => { setEditing(null); selectCell(r, k); }} onUndo={(sh) => { setEditing(null); if (sh) redoTbl(); else undoTbl(); }} />
         </td>
       );
     }
     const open = () => setEditing({ id: r.id, k });
     return cloneElement(td, {
-      className: ['editable', td.props.className].filter(Boolean).join(' '), title: 'Click to edit', tabIndex: 0,
-      onClick: (e) => { e.stopPropagation(); open(); },
-      onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); open(); } },
+      className: ['editable', td.props.className].filter(Boolean).join(' '), title: 'Click to select, double-click or press Enter to edit', tabIndex: 0,
+      onClick: (e) => {   // select only; Shift / Ctrl+click and drags are the block selection's (see cellDown)
+        e.stopPropagation();
+        if (tapEdit()) { open(); return; }
+        if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+        const rr = Number(e.currentTarget.dataset.r); const cc = Number(e.currentTarget.dataset.c);
+        if (Number.isFinite(rr) && Number.isFinite(cc)) setCellSel({ r0: rr, c0: cc, r1: rr, c1: cc });
+      },
+      onDoubleClick: (e) => { e.stopPropagation(); open(); },
     });
   };
 
@@ -1870,16 +1903,22 @@ export default function Workload() {
             if (editing && editing.id === r.id && editing.k === k) {
               return (
                 <span key={k} className="cell-editor-inline" onClick={(e) => e.stopPropagation()}>
-                  <CellEditor memo={`${r.id}:${k}`} def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} copyText={k === 'breakdate_vgfx' || k === 'breakdate_vedit' ? `${k === 'breakdate_vgfx' ? 'VGFX' : 'VEDIT'}  ${fmtBdText(r[k])}` : undefined} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => setEditing(null)} onUndo={(sh) => { setEditing(null); if (sh) redoTbl(); else undoTbl(); }} />
+                  <CellEditor memo={`${r.id}:${k}`} startText={editing.start} def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} copyText={k === 'breakdate_vgfx' || k === 'breakdate_vedit' ? `${k === 'breakdate_vgfx' ? 'VGFX' : 'VEDIT'}  ${fmtBdText(r[k])}` : undefined} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => { setEditing(null); selectCell(r, k); }} onUndo={(sh) => { setEditing(null); if (sh) redoTbl(); else undoTbl(); }} />
                 </span>
               );
             }
             const clickable = canWrite && !locked;
             return (
               <span
-                key={k} className={clickable ? 'wl-pill-edit' : ''} tabIndex={clickable ? 0 : undefined} title={clickable ? 'Click to edit' : undefined}
-                onClick={clickable ? (e) => { e.stopPropagation(); setEditing({ id: r.id, k }); } : undefined}
-                onKeyDown={clickable ? (e) => { if (e.key === 'Enter') { e.preventDefault(); setEditing({ id: r.id, k }); } } : undefined}
+                key={k} className={clickable ? 'wl-pill-edit' : ''} tabIndex={clickable ? 0 : undefined} title={clickable ? 'Click to select, double-click or press Enter to edit' : undefined}
+                onClick={clickable ? (e) => {
+                  e.stopPropagation();
+                  if (tapEdit()) { setEditing({ id: r.id, k }); return; }
+                  if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+                  const td = e.currentTarget.closest('td'); const rr = td ? Number(td.dataset.r) : NaN; const cc = td ? Number(td.dataset.c) : NaN;
+                  if (Number.isFinite(rr) && Number.isFinite(cc)) setCellSel({ r0: rr, c0: cc, r1: rr, c1: cc });
+                } : undefined}
+                onDoubleClick={clickable ? (e) => { e.stopPropagation(); setEditing({ id: r.id, k }); } : undefined}
               >
                 {r[k]
                   ? <DateChip hue={hue}><span className="chip-tag">{tag}</span>{fmtBreakdate(r[k])}</DateChip>
@@ -2163,8 +2202,8 @@ export default function Workload() {
                             </Fragment>
                           ))}
                           {isPrep && prepNextWait ? (
-                            <tr className="prep-divider waiting jump" onClick={() => goOffset(prepNextWait.offset)} title="Go to the first page with rows for followup">
-                              <td colSpan={tableCols.length + 4}><strong>For followup</strong> <span className="dim">({prepNextWait.n}) continues on page {prepNextWait.page}: click to go there</span></td>
+                            <tr className="prep-divider waiting jump" onClick={() => goOffset(prepNextWait.offset)} title="Go to the first page with rows For Follow-up">
+                              <td colSpan={tableCols.length + 4}><strong>For Follow-up</strong> <span className="dim">({prepNextWait.n}): continues on page {prepNextWait.page}. Click to go there.</span></td>
                             </tr>
                           ) : null}
                         </tbody>
