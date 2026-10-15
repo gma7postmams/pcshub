@@ -59,6 +59,7 @@ async function verify(req, log, creds, { passwordOnly = true } = {}) {   // by d
   let ok = Boolean(u) && await bcrypt.compare(password, u.password_hash);
   if (ok && twofa) ok = u.twofa_method === 'email' ? emailCode.check(req.session, req.user.id, 'reauth', c.code) : await totp.verifyAndConsume(db, req.user.id, u.totp_secret, c.code);
   if (!ok) {
+    require('./security-watch').failure(req);
     if (log) await audit(req, log.action, log.entity, log.id, log.details || { outcome: 'denied', reason: 'reauth_failed' });
     throw new HttpError(403, twofa ? 'Password or authentication code is incorrect' : 'Password is incorrect', { reauth: true, twofa });
   }

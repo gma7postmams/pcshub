@@ -32,6 +32,10 @@ const loginLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many login attempts. Try again later.' },
+  handler: (req, res, _next, options) => {
+    require('../security-watch').event(req, 'security.rate_limited', { limiter: 'login', route: `${req.method} ${req.baseUrl}${req.path}` });
+    res.status(options.statusCode).json(options.message);
+  },
 });
 
 function regenerate(req) {
@@ -41,14 +45,19 @@ function save(req) {
   return new Promise((resolve, reject) => req.session.save((e) => (e ? reject(e) : resolve())));
 }
 
-async function recordFailure(user) {
-  const attempts = user.failed_attempts + 1;
-  const lock = attempts >= settings.get().lockAfterFailures;
+async function recordFailure(user, req) {
+  const watch = require('../security-watch');
+  watch.failure(req);
+  const wanted = user.failed_attempts + 1 >= settings.get().lockAfterFailures;
+  // One IP may lock only a few accounts per window: past that its wrong passwords are refused but no longer lock anyone else out
+  const lock = wanted && watch.lockBudgetLeft(req);
+  const attempts = wanted && !lock ? settings.get().lockAfterFailures - 1 : user.failed_attempts + 1;
   await db.query(
     `UPDATE users SET failed_attempts=$2, locked_until=CASE WHEN $3 THEN now() + ($4 || ' minutes')::interval ELSE locked_until END
      WHERE id=$1`,
     [user.id, lock ? 0 : attempts, lock, String(settings.get().lockMinutes)]
   );
+  if (lock) watch.locked(req, user.username);
   return lock;
 }
 
@@ -86,6 +95,7 @@ router.post('/login', loginLimiter, asyncH(async (req, res) => {
 
   if (!user) {
     await bcrypt.compare(password, DUMMY_HASH);
+    require('../security-watch').failure(req);
     await audit(req, 'auth.login_failed', 'user', null, { username, reason: 'unknown_user' });
     throw new HttpError(401, GENERIC_FAIL);
   }
@@ -95,7 +105,7 @@ router.post('/login', loginLimiter, asyncH(async (req, res) => {
     throw new HttpError(401, lockedMessage(user.locked_until), { locked: true });
   }
   if (!ok) {
-    const locked = await recordFailure(user);
+    const locked = await recordFailure(user, req);
     await audit(req, locked ? 'auth.locked' : 'auth.login_failed', 'user', user.id, { username });
     if (locked) throw new HttpError(401, lockedMessage(new Date(Date.now() + settings.get().lockMinutes * 60000)), { locked: true });   // this wrong password was the one that locked it
     throw new HttpError(401, GENERIC_FAIL);
@@ -187,6 +197,7 @@ router.post('/2fa', loginLimiter, asyncH(async (req, res) => {
       await recordFailure(user);
     }
     await save(req);
+    require('../security-watch').failure(req);
     await audit(req, 'auth.2fa_failed', 'user', user.id, { username: user.username });
     throw new HttpError(401, 'Invalid authentication code');
   }

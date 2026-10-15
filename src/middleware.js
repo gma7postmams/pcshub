@@ -7,6 +7,7 @@ const { APP_ORIGINS, COOKIE_NAME, cookieSecure } = require('./config');
 const CLIENT_DIST = path.join(__dirname, '..', 'client', 'dist');
 const INDEX_HTML = path.join(CLIENT_DIST, 'index.html');
 
+const watch = () => require('./security-watch');   // loaded on first use (it needs the database)
 const asyncH = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 // Must repeat the attributes the cookie was set with, or browsers ignore the request to drop a __Host- cookie.
@@ -51,7 +52,7 @@ function isApi(req) {
 
 function requireAuth(req, res, next) {
   if (req.user) return next();
-  if (isApi(req)) return res.status(401).json({ error: 'Not authenticated' });
+  if (isApi(req)) { watch().event(req, 'security.unauthenticated'); return res.status(401).json({ error: 'Not authenticated' }); }
   return res.redirect('/login');
 }
 
@@ -63,6 +64,7 @@ function requirePageAccess(pagePath) {
   return (req, res, next) => {
     if (!req.user) return requireAuth(req, res, next);
     if (canPage(req.user, pagePath)) return next();
+    watch().event(req, 'security.denied', { need: `page ${pagePath}` });
     if (isApi(req)) return res.status(403).json({ error: `${who(req.user)} cannot access ${pagePath}` });
     // Same app shell with a 403 status; the React app renders the 'Access locked' screen
     res.set('Cache-Control', 'no-store');
@@ -75,6 +77,7 @@ function requireAnyPage(paths) {
   return (req, res, next) => {
     if (!req.user) return requireAuth(req, res, next);
     if (paths.some((p) => canPage(req.user, p))) return next();
+    watch().event(req, 'security.denied', { need: `page ${paths.join(' or ')}` });
     return res.status(403).json({ error: `${who(req.user)} cannot access ${paths[0]}` });
   };
 }
@@ -83,6 +86,7 @@ function requireAction(action) {
   return (req, res, next) => {
     if (!req.user) return requireAuth(req, res, next);
     if (can(req.user, action)) return next();
+    watch().event(req, 'security.denied', { need: action });
     return res.status(403).json({ error: `Your role (${req.user.role}) or group does not permit: ${action}` });
   };
 }
@@ -91,6 +95,7 @@ function requireSection(key) {
   return (req, res, next) => {
     if (!req.user) return requireAuth(req, res, next);
     if (canSection(req.user, key)) return next();
+    watch().event(req, 'security.denied', { need: `section ${key}` });
     return res.status(403).json({ error: `${who(req.user)} cannot access section ${key}` });
   };
 }
@@ -128,8 +133,8 @@ function fromThisSite(req) {
 
 function csrfGuard(req, res, next) {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
-  if (req.get('X-Requested-With') !== 'PromoHub') return res.status(403).json({ error: 'Missing request header' });
-  if (!fromThisSite(req)) return res.status(403).json({ error: 'Cross-site request blocked' });
+  if (req.get('X-Requested-With') !== 'PromoHub') { watch().event(req, 'security.csrf_blocked', { reason: 'missing_header', origin: req.get('Origin') || null }); return res.status(403).json({ error: 'Missing request header' }); }
+  if (!fromThisSite(req)) { watch().event(req, 'security.csrf_blocked', { reason: 'cross_site', origin: req.get('Origin') || null }); return res.status(403).json({ error: 'Cross-site request blocked' }); }
   return next();
 }
 

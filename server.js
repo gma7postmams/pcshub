@@ -122,6 +122,10 @@ const apiLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many requests, slow down.' },
+  handler: (req, res, _next, options) => {
+    require('./src/security-watch').event(req, 'security.rate_limited', { limiter: 'api' });
+    res.status(options.statusCode).json(options.message);
+  },
 });
 // API answers are per-user data: neither the browser nor a proxy in between may keep a copy
 // (the few routes that serve files set their own Cache-Control afterwards).

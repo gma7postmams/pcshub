@@ -213,3 +213,10 @@ npm test
 ### App name
 
 The name set in Administration → Branding is used everywhere, including the places the browser reads before the app loads: the tab title, the installed-app (PWA) name and home-screen label (`/manifest.webmanifest` is generated from it; the label is the name cut to about 12 characters at a word boundary), and the offline page. An already-installed PWA picks up a new name the next time the browser refreshes its manifest (reinstall to force it).
+
+## Security watch
+
+Blocked requests (permission refused, not signed in, cross-site, rate limited) are written to the Audit Log as `security.*` lines, once a minute per source and route.
+Ten signs from one IP within five minutes, a hit on the login rate limit, or an account locked by wrong passwords raises a **Security alert**: an Audit Log line,
+a bell/phone notification and an email (when SMTP is set up) to every active Admin, at most one per source every 15 minutes. One IP can lock at most two accounts per
+15 minutes, so a stranger cannot lock everybody out. Live self-test against a throw-away copy: `python3 scripts/security-selftest2.py` (see the header of the file).

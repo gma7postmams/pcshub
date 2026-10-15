@@ -14,6 +14,7 @@ const KINDS = [
   { key: 'ingest_approval', label: 'Approval on my ingest requests', desc: 'An ingest request you created or requested is approved, or its approval is withdrawn.', relevant: (u, k) => k.has('ingest') },
   { key: 'ingest_ready_cm', label: 'Ingest ready for CM', desc: 'An ingest request was approved and is waiting for the CM Status.', relevant: (u) => can(u, 'ingest.cm_complete') },
   { key: 'ingest_cm', label: 'CM decision on my ingest requests', desc: 'The CM Status of your ingest request is set (Compliant, Non-compliant) or cleared back to Pending.', relevant: (u, k) => k.has('ingest') },
+  { key: 'security_alert', label: 'Security alerts', desc: 'Repeated blocked requests, a login brute-force run, or an account locked by wrong passwords.', relevant: (u) => isAdminRole(u) },
 ];
 const KEYS = new Set(KINDS.map((k) => k.key));
 

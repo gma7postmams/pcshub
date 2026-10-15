@@ -12,6 +12,11 @@ const ACTION_LABELS = {
   'auth.password_forgot': 'Password Reset Code Requested',
   'auth.password_reset_self': 'Password Reset (Forgot Password)',
   'auth.login_blocked_locked': 'Login Blocked (Locked Account)',
+  'security.denied': 'Blocked (No Permission)',
+  'security.unauthenticated': 'Blocked (Not Signed In)',
+  'security.csrf_blocked': 'Blocked (Cross-Site Request)',
+  'security.rate_limited': 'Blocked (Rate Limit)',
+  'security.alert': 'Security Alert',
   'auth.login_blocked_maintenance': 'Login Blocked (Maintenance Mode)',
   'admin.group_export': 'Exported Groups',
   'admin.group_import': 'Imported Groups',
@@ -598,6 +603,17 @@ function formatDetails(row) {
     case 'workload.plug_edit':
     case 'workload.plug_delete':
       return `${{ 'workload.plug_add': 'Added', 'workload.plug_edit': 'Edited', 'workload.plug_delete': 'Deleted' }[row.action]} plug ${d.plug_id || ''}${d.plug_date ? ` (${String(d.plug_date).slice(0, 10)})` : ''}`;
+
+    case 'security.denied':
+      return `Refused ${d.method || ''} ${d.route || ''} — needs ${d.need || 'a permission this user lacks'}`;
+    case 'security.unauthenticated':
+      return `Refused ${d.route || ''} — not signed in`;
+    case 'security.csrf_blocked':
+      return `Refused ${d.route || ''} — ${d.reason === 'cross_site' ? `sent from another site (${d.origin || 'unknown origin'})` : 'missing the app request header'}`;
+    case 'security.rate_limited':
+      return `Too many ${d.limiter === 'login' ? 'login' : 'API'} requests from this address — blocked (${d.route || ''})`;
+    case 'security.alert':
+      return d.title || 'Security alert';
 
     case 'auth.locked':
       return 'Account locked due to multiple failed login attempts';
