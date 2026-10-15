@@ -749,7 +749,7 @@ export default function Workload() {
 
   // Table mode: Set / Remove Priority on the selected rows (the ⋮ menu); one batch save, undoable
   const toggleTablePriority = async () => {
-    const list = pickedRowsList.slice(0, 200);
+    const list = prioRows.slice(0, 200);
     if (!list.length) return;
     const to = !pickedAllPrio;
     const mk = (flag) => list.map((r) => ({ id: r.id, ...toPayload(r), is_priority: flag }));
@@ -1331,7 +1331,12 @@ export default function Workload() {
   const isAdminUser = !!(s.user && ['Admin', 'System Admin'].includes(s.user.role));
   const pageRows = data && data.rows ? data.rows : [];
   const pickedRowsList = pageRows.filter((r) => (allMatching || picked.has(r.id)) && !isLocked(r.work_date, meta.locks));
-  const pickedAllPrio = pickedRowsList.length > 0 && pickedRowsList.every((r) => r.is_priority);
+  // Table mode Set / Remove Priority: the ticked rows, else the row(s) of a selected Breakdate / Time cell
+  const bdColIdx = meta && meta.views && meta.views[viewKey] ? meta.views[viewKey].filter((k) => k !== 'breakdate_vedit').indexOf('breakdate_vgfx') : -1;
+  const cellPrioRows = !picked.size && !allMatching && cellSel && bdColIdx >= 0 && Math.min(cellSel.c0, cellSel.c1) <= bdColIdx && Math.max(cellSel.c0, cellSel.c1) >= bdColIdx
+    ? pageRows.slice(Math.min(cellSel.r0, cellSel.r1), Math.max(cellSel.r0, cellSel.r1) + 1).filter((r) => !isLocked(r.work_date, meta && meta.locks)) : [];
+  const prioRows = pickedRowsList.length ? pickedRowsList : cellPrioRows;
+  const pickedAllPrio = prioRows.length > 0 && prioRows.every((r) => r.is_priority);
   const lockedForPick = (r) => canWrite && isLocked(r.work_date, meta.locks);   // a row in a locked period can't be deleted, so it can't be selected (a Viewer only copies, so for them nothing is locked)
   const pickable = pageRows.filter((r) => !lockedForPick(r));
   const pickedCount = allMatching ? total : picked.size;
@@ -1662,9 +1667,9 @@ export default function Workload() {
   };
   tblMouse.current.down = (e) => {   // a click anywhere outside the table (and its bar / dialogs) drops the selection
     const t = e.target;
-    if (cellSel && t && t.closest && !t.closest('#tbl, .modal-backdrop, .xl-menu, .tpop')) setCellSel(null);
+    if (cellSel && t && t.closest && !t.closest('#tbl, .modal-backdrop, .xl-menu, .tpop, [data-keep-sel]')) setCellSel(null);
     if (!(picked.size || allMatching)) return;
-    if (t && t.closest && !t.closest('#tbl, #delete-selected-btn, .modal-backdrop, .xl-menu, .tpop')) clearPicks();
+    if (t && t.closest && !t.closest('#tbl, #delete-selected-btn, .modal-backdrop, .xl-menu, .tpop, [data-keep-sel]')) clearPicks();
   };
   const saveGrid = async () => {
     const idx = [];
@@ -2019,6 +2024,10 @@ export default function Workload() {
               {canWrite ? <button type="button" className="btn ibtn primary" id="new-btn" aria-label="New Workload" title="New Workload" onClick={() => setForm({ rec: null })}><PlusIcon /></button> : null}
               {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import from Excel" title="Import from Excel" disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}><UploadIcon /></button> : null}
               <ExportButton onExport={exportXlsx}><DownloadIcon /></ExportButton>
+              {canWrite && !isGrid && prioRows.length ? (
+                <button type="button" className="btn ibtn" id="priority-table-btn" data-keep-sel onClick={toggleTablePriority}
+                  aria-label={pickedAllPrio ? 'Remove Priority' : 'Set Priority'} title={pickedAllPrio ? 'Remove Priority' : 'Set Priority'}><FlagIcon /></button>
+              ) : null}
               {canWrite && !isGrid && pickedCount ? (
                 <button type="button" className="btn ibtn danger" id="delete-selected-btn" onClick={() => deleteSelected()}
                   aria-label="Delete selected rows" title={`Delete Selected (${pickedCount})`}><TrashIcon /></button>
@@ -2041,7 +2050,7 @@ export default function Workload() {
                 s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
                 canWrite && isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
-                canWrite && !isGrid && pickedRowsList.length > 0 && { id: 'priority-btn', label: pickedAllPrio ? 'Remove Priority' : 'Set Priority', icon: <FlagIcon />, onClick: toggleTablePriority },
+                canWrite && !isGrid && prioRows.length > 0 && { id: 'priority-btn', label: pickedAllPrio ? 'Remove Priority' : 'Set Priority', icon: <FlagIcon />, onClick: toggleTablePriority },
               ]} />
             </div>
           </div>
@@ -2077,6 +2086,9 @@ export default function Workload() {
             {canWrite && isGrid && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? <button type="button" className="btn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}>Delete {selRows.filter((r) => !xlLocked(r)).length > 1 ? `${selRows.filter((r) => !xlLocked(r)).length} Rows` : 'Row'}</button> : null}
             {s.canPage('/admin') ? <button type="button" className="btn" id="lock-dates-btn" onClick={() => setManagingLocks(true)}><LockIcon /> Lock Dates</button> : null}
             {canWrite && isAdminUser ? <button type="button" className="btn danger" id="delete-all-btn" onClick={() => setDeletingAll(true)} title="Delete every row that matches the filters you have on now (Admin)"><TrashIcon /> Delete All</button> : null}
+            {canWrite && !isGrid && prioRows.length ? (
+              <button type="button" className="btn" id="priority-table-btn" data-keep-sel onClick={toggleTablePriority} title="Highlights the Breakdate / Time of the selected row(s)"><FlagIcon /> {pickedAllPrio ? 'Remove Priority' : 'Set Priority'}</button>
+            ) : null}
             {canWrite && !isGrid && pickedCount ? (
               <button type="button" className="btn danger" id="delete-selected-btn" onClick={() => deleteSelected()} title="Delete the rows ticked in the table">
                 Delete Selected ({pickedCount})
