@@ -121,6 +121,7 @@ const ACTION_LABELS = {
   'admin.clear_data': 'Cleared Data',
   'admin.node_sync': 'Backup Server: Sync Started',
   'admin.node_promote': 'Backup Server: Promoted to Main',
+  'admin.node_standalone': 'Backup Server: Made Standalone',
   'admin.node_demote': 'Server Made a Backup Server',
   'admin.user_bulk': 'Changed Several Users',
   'admin.user_signout': 'Signed User Out',

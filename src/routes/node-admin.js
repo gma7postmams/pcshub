@@ -1,4 +1,4 @@
-// Administration → Backup Server (System Admin): status, Sync now, Promote to main, Demote to backup.
+// Administration → Backup Server (System Admin): status, Sync now, Promote to main, Stop being a backup server (standalone), Demote to backup.
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { asyncH, HttpError } = require('../middleware');
@@ -30,7 +30,7 @@ async function status() {
     nextSyncAt: backup && due && node.mainUrl() && node.tokenOk() ? due.toISOString() : null,
     mainReachable: backup ? await mainReachable() : null,
     lastPull: !backup ? s.lastPull || null : null,
-    promotedAt: s.promotedAt || null, demotedAt: s.demotedAt || null,
+    promotedAt: s.promotedAt || null, standaloneAt: s.standaloneAt || null, demotedAt: s.demotedAt || null,
   };
 }
 
@@ -57,6 +57,19 @@ router.post('/promote', limiter, asyncH(async (req, res) => {
   const last = node.get().lastSync;
   node.save({ role: 'main', promotedAt: new Date().toISOString(), lastAttempt: null });
   await audit(req, 'admin.node_promote', 'node', null, { mainReachable: reach.ok, forced: req.body.force === true, dataAsOf: last && last.at || null });
+  res.json(await status());
+}));
+
+// Leave the main / backup pair for good: no failover, no check that the main server is down. This server stops copying and becomes an ordinary main
+// server on its own data (as of the last copy). Nothing on the other server is touched.
+router.post('/standalone', limiter, asyncH(async (req, res) => {
+  if (!node.isBackup()) throw new HttpError(409, 'This server is not a backup server');
+  if (req.body.confirm !== 'STANDALONE') throw new HttpError(400, 'Type STANDALONE to confirm');
+  if (sync.isRunning()) throw new HttpError(409, 'A copy is running right now. Wait for it to finish (it replaces all data here), then try again.');
+  await stepUp.verify(req, { action: 'admin.node_standalone', entity: 'node', id: null }, req.body);
+  const last = node.get().lastSync;
+  node.save({ role: 'main', standaloneAt: new Date().toISOString(), lastAttempt: null });   // the saved role wins over NODE_ROLE in .env
+  await audit(req, 'admin.node_standalone', 'node', null, { mainUrl: node.mainUrl() || null, dataAsOf: last && last.at || null });
   res.json(await status());
 }));
 

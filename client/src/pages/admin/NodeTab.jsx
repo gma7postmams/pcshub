@@ -13,7 +13,7 @@ export default function NodeTab() {
   const toast = useToast();
   const session = useSession();
   const [d, setD] = useState(null);
-  const [dlg, setDlg] = useState(null);   // 'promote' | 'demote'
+  const [dlg, setDlg] = useState(null);   // 'promote' | 'standalone' | 'demote'
   const [force, setForce] = useState(false);
   const [busy, setBusy] = useState(false);
   const timer = useRef(null);
@@ -37,7 +37,7 @@ export default function NodeTab() {
     try {
       const r = await post(`/api/admin/node/${kind}`, { password, code, confirm, force });
       setDlg(null); setForce(false); setD(r);
-      toast(kind === 'promote' ? 'This server is now the main server' : 'This server is now a backup server');
+      toast(kind === 'promote' ? 'This server is now the main server' : kind === 'standalone' ? 'This server is now standalone: it no longer copies another server' : 'This server is now a backup server');
       if (session && session.reload) session.reload();
     } catch (e) {
       if (e.data && e.data.mainReachable) setForce(true);   // ask again with the extra tick-box
@@ -66,6 +66,7 @@ export default function NodeTab() {
             <div className="row mt-12">
               <button type="button" className="btn" id="node-sync" disabled={busy || Boolean(d.running) || !d.mainUrl || !d.tokenSet} onClick={syncNow}>Sync now</button>
               <button type="button" className="btn danger" id="node-promote" disabled={Boolean(d.running)} onClick={() => setDlg('promote')}>Promote to main…</button>
+              <button type="button" className="btn" id="node-standalone" disabled={Boolean(d.running)} onClick={() => setDlg('standalone')}>Stop being a backup server…</button>
             </div>
             <div className="alert warn mt-12">
               <strong>When the main server is down:</strong> click <em>Promote to main</em>, then point users here (DNS, or the address in the reverse proxy). Changes made on the main server after
@@ -77,6 +78,7 @@ export default function NodeTab() {
             <div className="kv-row"><span className="kv-label">Backup server link</span><span className="kv-value">{d.tokenSet ? <span className="chip c-green">NODE_SYNC_TOKEN set</span> : <span className="chip c-amber">NODE_SYNC_TOKEN not set: a backup server cannot copy this one</span>}</span></div>
             <div className="kv-row"><span className="kv-label">Backup server last asked</span><span className="kv-value">{d.lastPull ? `${when(d.lastPull.at)}${d.lastPull.ip ? ` from ${d.lastPull.ip}` : ''}` : <span className="dim">never</span>}</span></div>
             {d.promotedAt ? <div className="kv-row"><span className="kv-label">Promoted from backup</span><span className="kv-value">{when(d.promotedAt)}</span></div> : null}
+            {d.standaloneAt ? <div className="kv-row"><span className="kv-label">Stopped being a backup server</span><span className="kv-value">{when(d.standaloneAt)}</span></div> : null}
             <p className="muted">The backup server asks this one for a fresh backup (database and uploaded files) every few hours. Those backups are marked “Backup server sync” in Backup and Restore and are not counted with your own.</p>
             <div className="row mt-12">
               <button type="button" className="btn danger" id="node-demote" onClick={() => setDlg('demote')}>Make this a backup server…</button>
@@ -96,6 +98,13 @@ export default function NodeTab() {
             <label className="alert warn row"><input type="checkbox" checked readOnly /> <span>The main server still answers. Promote anyway (two main servers can exist until the other one is stopped).</span></label>
           ) : null}
         </ReauthDialog>
+      ) : null}
+      {dlg === 'standalone' ? (
+        <ReauthDialog
+          title="Stop being a backup server" okText="Make standalone" danger typed="STANDALONE" onClose={() => setDlg(null)}
+          intro={`This server stops copying ${d.mainUrl || 'the other server'} and becomes an ordinary main server on its own, with the data as of ${d.lastSync ? when(d.lastSync.at) : 'its last copy (none yet: it may be empty)'}. People can then change data here. The two servers will drift apart: nothing is copied between them any more, and the other server is not touched.`}
+          onSubmit={act('standalone')}
+        />
       ) : null}
       {dlg === 'demote' ? (
         <ReauthDialog

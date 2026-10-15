@@ -85,6 +85,8 @@ How it works: the backup server is read-only. Every few hours it asks the main s
 
 Not copied: `.env`, the backups folder and the Retention archives. The main server marks the backups it makes for the backup server "Backup server sync": they do not count against Backup Keep or the Backup limit, and only the newest is kept.
 
+**To separate the two servers for good:** on the backup server open Administration → Backup Server → **Stop being a backup server…** (your password, type STANDALONE). It stops copying, becomes an ordinary main server on the data it has, and needs no check that the other server is down and no `.env` change (the saved role wins over `NODE_ROLE`; you can remove `NODE_ROLE`, `NODE_MAIN_URL` and `NODE_SYNC_TOKEN` from `.env` afterwards). The other server is not touched; from then on the two diverge.
+
 **When the main server is down:**
 1. Check it is really down (Backup Server tab → *Main server: Not answering*).
 2. On the backup server: Administration → Backup Server → **Promote to main…** (your password, type PROMOTE). It refuses while the main server still answers, unless you tick the extra box.
