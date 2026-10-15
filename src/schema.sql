@@ -620,3 +620,4 @@ CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions (us
 
 -- Which activities notify a person (bell / phone): { kind: { bell: false, push: false } }; a kind that is missing is on
 ALTER TABLE users ADD COLUMN IF NOT EXISTS notif_prefs JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS view_prefs JSONB NOT NULL DEFAULT '{}'::jsonb;   -- each table's sort + filters, remembered per person

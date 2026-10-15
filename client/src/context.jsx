@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { get, put } from './lib/api.js';
 import { cachedMode, isPreview, setMode, setPalette, setUserTheme } from './lib/theme.js';
+import { setAccountViews } from './lib/viewstate.js';
 import { applyFavicon } from './lib/favicon.js';
 
 // The server writes the current Branding name into <meta name="app-name"> (src/app-shell.js), so even the fallback shows the right name.
@@ -49,6 +50,7 @@ export function SessionProvider({ children, fallback }) {
     const m = await get('/api/auth/me');
     setMode(m.user.appearance || 'system');
     setUserTheme(m.user.theme);
+    setAccountViews(m.view_prefs);
     setMe(m);
     return m;
   }, []);

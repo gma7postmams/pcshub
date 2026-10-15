@@ -223,9 +223,11 @@ router.post('/logout', asyncH(async (req, res) => {
   });
 }));
 
-router.get('/me', requireAuth, (req, res) => {
+router.get('/me', requireAuth, asyncH(async (req, res) => {
   const u = req.user;
+  const vp = await db.query('SELECT view_prefs FROM users WHERE id=$1', [u.id]).then((r) => (r.rows[0] && r.rows[0].view_prefs) || {}).catch(() => ({}));
   res.json({
+    view_prefs: vp,
     user: {
       id: u.id, username: u.username, full_name: u.full_name, email: u.email,
       role: u.role, group: u.group_name || null, totp_enabled: u.totp_enabled, twofa_method: u.twofa_method, email_2fa_available: require('../security-settings').get().allowEmail2fa && mailer.configured(), must_change_password: u.must_change_password,
@@ -244,6 +246,6 @@ router.get('/me', requireAuth, (req, res) => {
     // signs in, so the page can keep a per-sign-in preference (the Dashboard's period menu) and forget it at sign-out.
     session_key: crypto.createHash('sha256').update(String(req.sessionID || '')).digest('hex').slice(0, 20),
   });
-});
+}));
 
 module.exports = router;

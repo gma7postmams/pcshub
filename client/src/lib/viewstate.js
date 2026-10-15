@@ -1,11 +1,32 @@
 // Filters, search, dates and sort stay put when the page is refreshed. Kept in sessionStorage (per browser tab, gone when the tab / app is
 // closed), so a shared computer never shows the last person's filters; where storage is blocked the page simply starts fresh.
+import { put } from './api.js';
 const KEY = (page) => `pulse:view:${page}`;
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+// Sort + filters are also kept on the person's account (set from /api/auth/me), so a new tab, a restart or another device opens the way they left it.
+let account = {};
+let lastSent = {};
+export const setAccountViews = (v) => { account = v && typeof v === 'object' ? v : {}; lastSent = {}; for (const k of Object.keys(account)) lastSent[k] = JSON.stringify(account[k]); };
+const ACCT_SKIP = new Set(['from', 'to', 'q']);
+const acctPart = (value) => {
+  const out = {};
+  if (value && value.sort) out.sort = { k: value.sort.k || '', dir: value.sort.dir === 'desc' ? 'desc' : 'asc' };
+  if (value && value.filt) { out.filt = {}; for (const [k, v] of Object.entries(value.filt)) if (!ACCT_SKIP.has(k) && typeof v === 'string') out.filt[k] = v; }
+  return out;
+};
+const timers = {};
+function pushAccount(page, value) {
+  const part = acctPart(value);
+  const sig = JSON.stringify(part);
+  if (sig === lastSent[page]) return;
+  lastSent[page] = sig; account = { ...account, [page]: part };
+  clearTimeout(timers[page]);
+  timers[page] = setTimeout(() => { put('/api/profile/view-prefs', { page, value: part }).catch(() => { /* best effort */ }); }, 800);
+}
 export function loadView(page, fallback) {
   try {
     const raw = sessionStorage.getItem(KEY(page));
-    if (!raw) return fallback;
+    if (!raw) return account[page] ? { ...fallback, ...account[page] } : fallback;
     const v = JSON.parse(raw);
     if (!v || typeof v !== 'object') return fallback;
     // Saved on an earlier day (an installed app or a tab left open overnight): the date filters, the day being looked at and the page
@@ -19,6 +40,7 @@ export function loadView(page, fallback) {
 }
 export function saveView(page, value) {
   try { sessionStorage.setItem(KEY(page), JSON.stringify({ ...value, day: today() })); } catch (e) { /* storage unavailable */ }
+  pushAccount(page, value);
 }
 
 // ---- a dialog that is open (Add / Edit form) and what has been typed in it: reopened after a refresh, dropped when it is closed or saved ----

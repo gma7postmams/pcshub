@@ -945,7 +945,7 @@ export default function Ingest() {
   const renderRow = (r0, i, rnText) => { const r = { ...r0, __i: i }; return (
 <tr key={r.id} data-id={r.id} data-pinned={rnText ? '1' : undefined} className={`clickable${picked.has(r.id) ? ' picked' : ''}`} onMouseDown={cellDown} onContextMenu={(e) => rowMenu(e, r)}
                           onClick={() => { if (suppress.current) { suppress.current = false; return; } openDetail(r.id); }}>
-                          {!narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} onClick={(e) => e.stopPropagation()} title="Click to select the row (Shift-click a range, Ctrl-click to add, drag down)">{rnText || r.row_pos || i + 1}</td> : null}
+                          {!narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} onClick={(e) => e.stopPropagation()} title="Click to select the row (Shift-click a range, Ctrl-click to add, drag down)">{rnText || (sort.k ? offset + i + 1 : r.row_pos || i + 1)}</td> : null}
                           {narrow && canDelete ? <td className="chk" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={picked.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${r.program}`} /></td> : null}
                           {cell(r, 'program', <strong>{r.program}</strong>)}
                           {cell(r, 'platform', <PlatformCell value={r.platform} />)}

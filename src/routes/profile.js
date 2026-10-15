@@ -19,6 +19,33 @@ const stepUp = require('../reauth');
 
 const router = express.Router();
 
+// ---- Each table's sort + filters, remembered per person (loaded with /api/auth/me) ----
+const VIEW_PAGES = new Set(['ingest', 'plugs', 'workload']);
+const cleanView = (v) => {
+  const out = {};
+  if (v && typeof v === 'object' && v.sort && typeof v.sort === 'object') {
+    const k = String(v.sort.k || '').slice(0, 40);
+    out.sort = { k: /^[a-z_]*$/i.test(k) ? k : '', dir: v.sort.dir === 'desc' ? 'desc' : 'asc' };
+  }
+  if (v && typeof v === 'object' && v.filt && typeof v.filt === 'object') {
+    const f = {};
+    for (const [key, val] of Object.entries(v.filt).slice(0, 30)) {
+      if (['from', 'to', 'q'].includes(key) || !/^[a-z_]{1,40}$/i.test(key)) continue;   // dates and search start fresh each day
+      if (typeof val === 'string' && val.length <= 200) f[key] = val;
+    }
+    out.filt = f;
+  }
+  return out;
+};
+router.put('/view-prefs', asyncH(async (req, res) => {
+  const page = String(req.body.page || '');
+  if (!VIEW_PAGES.has(page)) throw new HttpError(400, 'Invalid page');
+  await db.query(
+    `UPDATE users SET view_prefs = jsonb_set(COALESCE(view_prefs, '{}'::jsonb), ARRAY[$2::text], $3::jsonb, true) WHERE id=$1`,
+    [req.user.id, page, JSON.stringify(cleanView(req.body.value))]);
+  res.json({ ok: true });
+}));
+
 // ---- Which activities notify me (bell / phone) ----
 router.get('/notif-prefs', asyncH(async (req, res) => {
   const { relevantKinds } = require('../notify-kinds');
