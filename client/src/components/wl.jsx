@@ -383,13 +383,13 @@ export function useSpareRows(boxSelector, active, resetKey) {
 }
 /** The spare blank rows. `cols` = one entry per data column (a key, or null for a column nobody can type in); `onOpen(key, i)` is called when a cell of spare row `i` is clicked: the page then turns that row into a real new row IN PLACE.
     `at` + `node`: the spare row at index `at` is shown as `node` (the row being typed into) instead of a blank one. */
-export function SpareRows({ count, start, pos0, cols, lead, trail, onOpen, onSelect, onMenu, sel, peerOf, at, node }) {
+export function SpareRows({ count, start, pos0, label0, cols, lead, trail, onOpen, onSelect, onMenu, sel, peerOf, at, node }) {
   // a click only SELECTS a blank cell (like a real one); typing / Enter / F2 / double-click opens its editor; right-click gives the menu.
   // `pos0`: the row number of the first blank row (rows then have fixed numbers, and the callbacks / `sel` / `at` use that number instead of 0, 1, 2 …)
   const slotOf = (i) => (pos0 !== undefined ? pos0 + i : i);
   return Array.from({ length: count }, (_, i) => (at === slotOf(i) && node ? node : (
     <tr key={`spare-${slotOf(i)}`} className="spare-row" data-pos={pos0 !== undefined ? slotOf(i) : undefined}>
-      {lead === 'rn' ? <td className="rn">{pos0 !== undefined ? slotOf(i) : start + i + 1}</td> : lead === 'chk' ? <td className="chk" /> : null}
+      {lead === 'rn' ? <td className="rn">{label0 !== undefined ? label0 + i : pos0 !== undefined ? slotOf(i) : start + i + 1}</td> : lead === 'chk' ? <td className="chk" /> : null}
       {cols.map((k, ci) => (k ? (
         <td key={ci} className={`spare editable${sel && sel.slot === slotOf(i) && sel.k === k ? ' sel' : ''}${peerOf && peerOf(slotOf(i), k) ? ' peer-on' : ''}`}
           {...(peerOf && peerOf(slotOf(i), k) ? { 'data-peer': peerOf(slotOf(i), k).name, style: peerStyle(peerOf(slotOf(i), k)) } : {})}

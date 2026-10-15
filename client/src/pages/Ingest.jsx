@@ -316,7 +316,7 @@ export default function Ingest() {
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
     if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); } else if (narrow) p.set('newest', '1');   // phone: newest entries on top
     if (!quiet) { setPicked(new Set()); setAllMatching(false); }
-    try { const res = await get(`/api/ingest?${p}`); setData({ ...res, _sort: sort.k || '' }); } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
+    try { const res = await get(`/api/ingest?${p}`); setData({ ...res, _seq: !!(sort.k || filt.from || filt.to) }); } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
   }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset, size, sort.k, sort.dir, narrow]); // eslint-disable-line react-hooks/exhaustive-deps
   const load = useCallback(() => fetchPage(false), [fetchPage]);
 
@@ -791,12 +791,16 @@ export default function Ingest() {
   const spareN = useSpareRows('.wl-card .wl-fit', spareOn, `${offset}|${full}`);
   // Every record has a fixed row number (like a sheet row). With no filter and no sort the table shows those numbers with blank rows in the gaps; with a filter or a sort
   // it lists just the matching records (in row order unless sorted) and the blank rows start after the last number in use.
-  const listSort = data && data._sort !== undefined ? data._sort : sort.k;   // the sort the list on screen was read with (the new one only shows once its rows arrive)
-  const gapsOn = canWrite && !narrow && !!data && !!data.rows && !listSort;   // blank rows for the row numbers nobody uses (not when sorted: the order is then not the row order)
+  // A picked date (or a sorted list) numbers its rows 1, 2, 3… with no blank rows; with all dates the rows keep their fixed numbers. `_seq` is what the list on screen was read with
+  // (a new filter / sort only shows once its rows arrive).
+  const seqNums = data && data._seq !== undefined ? data._seq : !!(sort.k || filt.from || filt.to);
+  const gapsOn = canWrite && !narrow && !!data && !!data.rows && !seqNums;   // blank rows for the row numbers nobody uses (not when sorted: the order is then not the row order)
   const lastPos = rows.length ? (rows[rows.length - 1].row_pos || 0) : 0;
   const maxPos = data && data.maxPos ? data.maxPos : 0;
   const usedSet = new Set(data && data.usedPos ? data.usedPos : rows.map((x) => x.row_pos));   // numbers in use, including by records the filter hides
   const trailStart = maxPos + 1;
+  const tailLabel0 = offset + rows.length + 1;   // numbered lists: the blank rows at the end carry on from the last row shown
+  const slotLabel = (slot) => (seqNums ? tailLabel0 + (slot - trailStart) : slot);
   const freeRuns = (from, to) => { const runs = []; let start = null; for (let p = from; p <= to && p - from < 2000; p++) { if (!usedSet.has(p)) { if (start === null) start = p; } else if (start !== null) { runs.push([start, p - start]); start = null; } } if (start !== null) runs.push([start, Math.min(to, from + 1999) - start + 1]); return runs; };
   const allOn = rows.length > 0 && rows.every((r) => picked.has(r.id));
   const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -946,7 +950,7 @@ export default function Ingest() {
   const renderRow = (r0, i, rnText) => { const r = { ...r0, __i: i }; return (
 <tr key={r.id} data-id={r.id} data-pinned={rnText ? '1' : undefined} className={`clickable${picked.has(r.id) ? ' picked' : ''}`} onMouseDown={cellDown} onContextMenu={(e) => rowMenu(e, r)}
                           onClick={() => { if (suppress.current) { suppress.current = false; return; } openDetail(r.id); }}>
-                          {!narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} onClick={(e) => e.stopPropagation()} title="Click to select the row (Shift-click a range, Ctrl-click to add, drag down)">{rnText || (listSort ? offset + i + 1 : r.row_pos || i + 1)}</td> : null}
+                          {!narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} onClick={(e) => e.stopPropagation()} title="Click to select the row (Shift-click a range, Ctrl-click to add, drag down)">{rnText || (seqNums ? offset + i + 1 : r.row_pos || i + 1)}</td> : null}
                           {narrow && canDelete ? <td className="chk" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={picked.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${r.program}`} /></td> : null}
                           {cell(r, 'program', <strong>{r.program}</strong>)}
                           {cell(r, 'platform', <PlatformCell value={r.platform} />)}
@@ -964,7 +968,7 @@ export default function Ingest() {
   const spareNode = () => {   // the row being typed into (or just saved, until the list has it), shown in place of its blank row
     if (draft && draft.at === 'bottom') { const d = { ...draft, id: 'draft' }; return (
       <tr key="spare-draft" className="draft-row spare-draft" data-draft="1">
-        <td className="rn">{d.slot}</td>
+        <td className="rn">{slotLabel(d.slot)}</td>
         {cell(d, 'program', <strong>{d.program}</strong>)}
         {cell(d, 'platform', <PlatformCell value={d.platform} />)}
         {cell(d, 'billable_party', d.billable_party)}
@@ -978,7 +982,7 @@ export default function Ingest() {
         <td />
       </tr>
     ); }
-    if (pinned) { const pr = rows.find((x) => x.id === pinned.id) || pinned.row; const pi = rows.findIndex((x) => x.id === pinned.id); return renderRow(pr, pi >= 0 ? pi : undefined, pinned.slot); }
+    if (pinned) { const pr = rows.find((x) => x.id === pinned.id) || pinned.row; const pi = rows.findIndex((x) => x.id === pinned.id); return renderRow(pr, pi >= 0 ? pi : undefined, seqNums ? (pi >= 0 ? offset + pi + 1 : slotLabel(pinned.slot)) : pinned.slot); }
     return null;
   };
   const renderBodyRows = () => {   // the records and, between them, the blank rows of the numbers nobody has used
@@ -986,7 +990,7 @@ export default function Ingest() {
       onMenu: (e) => setCtx({ x: e.clientX, y: e.clientY }), at: draft && draft.at === 'bottom' ? draft.slot : pinned ? pinned.slot : -1, node: spareNode() };
     const out = []; let prev = gapsOn && offset === 0 ? 0 : null;
     let shown = false;   // the row being typed into / just saved is drawn once, in the first block that holds its number
-    const block = (key, p0, n) => { const here = !shown && spareProps.at >= p0 && spareProps.at < p0 + n; if (here) shown = true; return <SpareRows key={`${key}-${p0}`} count={n} pos0={p0} {...spareProps} at={here ? spareProps.at : -1} />; };
+    const block = (key, p0, n) => { const here = !shown && spareProps.at >= p0 && spareProps.at < p0 + n; if (here) shown = true; return <SpareRows key={`${key}-${p0}`} count={n} pos0={p0} label0={seqNums && key === 'spare-tail' ? tailLabel0 : undefined} {...spareProps} at={here ? spareProps.at : -1} />; };
     const done = new Set();   // a blank row is drawn once, however the records happen to be ordered
     const gaps = (from, to, key) => { if (to >= from) freeRuns(from, to).forEach(([p0, n]) => { if (done.has(p0)) return; done.add(p0); out.push(block(key, p0, n)); }); };
     data.rows.forEach((r0, i) => {
