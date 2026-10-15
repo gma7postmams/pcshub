@@ -207,6 +207,7 @@ export function useFitBox(dep) {
     const fit = () => {
       const el = document.querySelector('.wl-fit');
       if (!el) return;
+      const keepTop = el.scrollTop, keepLeft = el.scrollLeft;   // un-capping the box below squashes its scroll position to 0: put it back afterwards
       el.style.maxHeight = 'none';
       const top = el.getBoundingClientRect().top + window.scrollY;
       let below = 0;
@@ -216,6 +217,8 @@ export function useFitBox(dep) {
       el.style.maxHeight = `${Math.max(240, Math.round(window.innerHeight - top - below - pad - 2))}px`;
       const over = document.documentElement.scrollHeight - window.innerHeight;   // margins under the table that the sum above missed
       if (over > 0 && el.scrollHeight > el.clientHeight) el.style.maxHeight = `${Math.max(240, el.clientHeight - over)}px`;
+      if (keepTop) el.scrollTop = keepTop;
+      if (keepLeft) el.scrollLeft = keepLeft;
     };
     fit();
     window.addEventListener('resize', fit);
