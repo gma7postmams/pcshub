@@ -1364,3 +1364,5 @@ table.t tr.spare-row td.spare.sel { outline: 2px solid var(--accent); outline-of
 /* cards (phone): a selected / focused / priority cell gets room inside its outline instead of hugging the label and text (Workload, Plug List, Ingest) */
 table.t.wl.cards td[data-sel], table.t.wl.cards td:focus, table.t.wl.cards td.editable:focus, table.t.wl.cards td:focus-visible, table.t.wl.cards td.prio { padding: 6px 8px; margin: -6px -8px; border-radius: 8px; }
 table.t.wl.cards td:focus:not(:focus-visible) { outline: none; }
+
+.peer-text { white-space: pre-wrap; overflow-wrap: anywhere; }   /* what somebody else is typing in a cell, shown live */

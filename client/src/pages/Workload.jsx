@@ -1936,7 +1936,9 @@ export default function Workload() {
     const el = cellInner(r, k);
     const p = peers[`${r.id}:${k}`];
     if (!p) return el;
-    return cloneElement(el, { className: [el.props.className, 'peer-on'].filter(Boolean).join(' '), 'data-peer': p.name, 'data-peer-uid': p.first ? p.uid : undefined, style: { ...(el.props.style || {}), ...peerStyle(p) } });
+    const props = { className: [el.props.className, 'peer-on'].filter(Boolean).join(' '), 'data-peer': p.name, 'data-peer-uid': p.first ? p.uid : undefined, style: { ...(el.props.style || {}), ...peerStyle(p) } };
+    if (p.kind === 'edit' && p.text != null && !/\bediting\b/.test(el.props.className || '')) return cloneElement(el, props, <span className="peer-text">{p.text}</span>);   // somebody is typing in this cell: show it as they type
+    return cloneElement(el, props);
   };
 
   // The merged Breakdate/Time column/cell: one or two pills (VGFX purple, VEDIT orange) depending on which

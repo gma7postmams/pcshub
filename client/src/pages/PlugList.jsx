@@ -5,7 +5,7 @@ import { isBlockText, pasteFallback } from '../lib/pasteFallback.js';
 import { loadView, saveView, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
 import { CalendarIcon, DownloadIcon, ExitFullscreenIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
-import { useLive } from '../lib/live.js';
+import { peerStyle, rangeCells, useCellPresence, useLive } from '../lib/live.js';
 import { ExportButton, FilterSelect, FiltersMenu, pickerHeld, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow, useSpareRows, SpareRows } from '../components/wl.jsx';
 import { useSession } from '../context.jsx';
 import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
@@ -519,7 +519,16 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
 
   // ---- a block of cells: drag across cells (or Shift+click) to pick it; Ctrl+C copies, Delete clears, Ctrl+V pastes from its top-left cell ----
   const cellAt = (el) => { const td = el && el.closest ? el.closest('.plug-list td[data-c]') : null; return td ? { r: Number(td.dataset.r), c: Number(td.dataset.c) } : null; };
+  const curCell = useRef(null);   // the cell I have open or selected (announced to the others by useCellPresence)
+  const peers = useCellPresence('plugs', curCell);   // cells other people have open or selected
   const normCells = () => (cellSel ? { r0: Math.min(cellSel.r0, cellSel.r1), r1: Math.max(cellSel.r0, cellSel.r1), c0: Math.min(cellSel.c0, cellSel.c1), c1: Math.max(cellSel.c0, cellSel.c1) } : null);
+  { const n = !cellEd && cellSel ? normCells() : null;
+    const cells = n ? rangeCells(rows, EDIT_COLS, n.r0, n.r1, n.c0, n.c1) : [];
+    const bd = drafts.find((d) => d.at === 'bottom');
+    curCell.current = cellEd && !isDraft(cellEd.id) ? { cells: [`${cellEd.id}:${cellEd.k}|tblr`], kind: 'edit' }
+      : cellEd && bd && cellEd.id === bd.id ? { cells: [`spare:${bd.slot}:${cellEd.k}|tblr`], kind: 'edit' }   // typed into a blank spare row: others see that cell
+      : !cellEd && spareSel && !cells.length ? { cells: [`spare:${spareSel.slot}:${spareSel.k}|tblr`], kind: 'select' }
+      : cells.length ? { cells, kind: 'select' } : null; }
   const cellDown = (e) => {
     if (e.button !== 0) return;
     const t = e.target;
@@ -730,16 +739,19 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   // the cells of one row; a click edits just that cell (read-only people see plain text)
   const editCell = (r, k, content, extra = {}) => {
     const td = { 'data-k': k, ...extra };
+    const peer = peers[isDraft(r.id) && r.at === 'bottom' ? `spare:${r.slot}:${k}` : `${r.id}:${k}`];   // somebody else has this cell open or selected
+    if (peer) { td.className = [extra.className, 'peer-on'].filter(Boolean).join(' '); td['data-peer'] = peer.name; td['data-peer-uid'] = peer.first ? peer.uid : undefined; td.style = peerStyle(peer); }
+    if (peer && peer.kind === 'edit' && peer.text != null && !(cellEd && cellEd.id === r.id && cellEd.k === k)) content = <span className="peer-text">{peer.text}</span>;   // and is typing in it: show it as they type
     if (r.__i !== undefined) {
       const ci = EDIT_COLS.indexOf(k); const n = normCells();
       td['data-r'] = r.__i; td['data-c'] = ci;
       if (n && r.__i >= n.r0 && r.__i <= n.r1 && ci >= n.c0 && ci <= n.c1) td['data-sel'] = '1';
     }
     if (canWrite && cellEd && cellEd.id === r.id && cellEd.k === k) {
-      return <td key={k} {...td} className={`editing ${extra.className || ''}`.trim()} onClick={(e) => e.stopPropagation()}><PlugCellEditor memo={`${r.id}:${k}`} startText={cellEd.start} k={k} initial={r[k]} onSave={(v, move) => saveCell(r, k, v, move)} onCancel={() => { setCellEd(null); if (!isDraft(r.id)) selectCell(r, k); }} onUndo={(sh) => { setCellEd(null); if (sh) redo(); else undo(); }} /></td>;
+      return <td key={k} {...td} className={`editing ${td.className || extra.className || ''}`.trim()} onClick={(e) => e.stopPropagation()}><PlugCellEditor memo={`${r.id}:${k}`} startText={cellEd.start} k={k} initial={r[k]} onSave={(v, move) => saveCell(r, k, v, move)} onCancel={() => { setCellEd(null); if (!isDraft(r.id)) selectCell(r, k); }} onUndo={(sh) => { setCellEd(null); if (sh) redo(); else undo(); }} /></td>;
     }
     if (!canWrite) return <td key={k} {...td}>{content}</td>;
-    return <td key={k} {...td} className={`editable ${extra.className || ''}`.trim()} title="Click to select, double-click or press Enter to edit" tabIndex={0}
+    return <td key={k} {...td} className={`editable ${td.className || extra.className || ''}`.trim()} title="Click to select, double-click or press Enter to edit" tabIndex={0}
       onClick={(e) => {   // select only; Shift / Ctrl+click and drags are the block selection's (see cellDown)
         e.stopPropagation();
         if (isDraft(r.id) || tapEdit()) { setCellEd({ id: r.id, k }); return; }
@@ -777,7 +789,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
           </div>
         ) : null}
         <span className="grow" />
-        <div className="wl-presence"><PresenceAvatars path="/plug-list" /></div>
+        <div className="wl-presence"><PresenceAvatars path="/plug-list" peers={peers} describe={(key) => { const [id, k] = key.split(':'); const r = rows.find((x) => String(x.id) === id); return `${k}${r ? ` · ${r.plug_id}` : ''}`; }} /></div>
         <div className="wl-iconbar">
           {canWrite ? <input ref={fileRef} type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files[0])} /> : null}
           {canWrite ? <button type="button" className="btn ibtn primary" id="add-plug-btn" aria-label="Add Plug" title="Add Plug" onClick={() => setAdding(true)}><PlusIcon /></button> : null}
@@ -847,7 +859,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
                       ) : null}
                     </tr>
                   )) : !draft ? <tr><td colSpan={canWrite ? 8 : 6} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr> : null}
-                  {spareOn ? <SpareRows count={spareN} start={offset + rows.length} cols={EDIT_COLS.concat([null, null])} lead="rn" trail onOpen={openSpare} onSelect={selectSpare} sel={spareSel} onMenu={(e) => setCtx({ x: e.clientX, y: e.clientY })}
+                  {spareOn ? <SpareRows count={spareN} start={offset + rows.length} cols={EDIT_COLS.concat([null, null])} lead="rn" trail onOpen={openSpare} onSelect={selectSpare} sel={spareSel} peerOf={(i, k) => peers[`spare:${i}:${k}`]} onMenu={(e) => setCtx({ x: e.clientX, y: e.clientY })}
                     at={drafts.find((d) => d.at === 'bottom') ? drafts.find((d) => d.at === 'bottom').slot : -1}
                     node={drafts.find((d) => d.at === 'bottom') ? (
                       <tr key="spare-draft" className="draft-row spare-draft" data-draft="1">

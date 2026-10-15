@@ -95,6 +95,25 @@ export function onLive(fn) {
  * My cell is announced when it changes (checked every 0.4 s) and refreshed every 10 s; it is withdrawn when I leave it.
  * Returns { "<row id>:<column>": { name, uid, kind, hue } } for everybody else's cells; each fades by itself after 25 s without a refresh.
  */
+// What is typed in the cell editor that has the focus right now (text boxes, number / date boxes, drop-downs), or null when there is none. The editors of all
+// three trackers are plain boxes inside a td.editing / .cell-editor, so one listener on the page covers every table and tab.
+let typing = null;
+const EDITOR = '.editing, .cell-editor, .cell-editor-inline';
+function readBox(el) {
+  if (!el || !el.matches || !el.matches('input, textarea, select') || !el.closest || !el.closest(EDITOR)) return;
+  if (el.type === 'checkbox' || el.type === 'radio' || el.type === 'file') return;
+  typing = { el, text: el.tagName === 'SELECT' ? (el.value === '' ? '' : ((el.options[el.selectedIndex] || {}).text || '')) : String(el.value || '') };
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('focusin', (e) => readBox(e.target), true);
+  document.addEventListener('input', (e) => readBox(e.target), true);
+  document.addEventListener('change', (e) => readBox(e.target), true);
+}
+function typedText() {
+  if (!typing || !typing.el.isConnected || !typing.el.closest(EDITOR)) return null;
+  if (typing.el.tagName !== 'SELECT') typing.text = String(typing.el.value || '');
+  return typing.text;
+}
 export function useCellPresence(topic, curRef) {
   const [peers, setPeers] = useState({});
   useEffect(() => {
@@ -103,7 +122,7 @@ export function useCellPresence(topic, curRef) {
       setPeers((cur) => {
         const n = { ...cur };
         Object.keys(n).forEach((k) => { if (n[k].by === m.by) delete n[k]; });   // a person has one cell at a time
-        if (m.on) (m.cells || [m.key]).forEach((c, i) => { const [key, edges = 'tblr'] = String(c).split('|'); n[key] = { name: m.name, uid: m.uid, kind: m.kind, hue: colorFor(m.uid ?? m.name), by: m.by, at: Date.now(), edges, first: i === 0 }; });
+        if (m.on) (m.cells || [m.key]).forEach((c, i) => { const [key, edges = 'tblr'] = String(c).split('|'); n[key] = { name: m.name, uid: m.uid, kind: m.kind, text: m.text == null ? null : String(m.text), hue: colorFor(m.uid ?? m.name), by: m.by, at: Date.now(), edges, first: i === 0 }; });
         return n;
       });
     });
@@ -116,10 +135,11 @@ export function useCellPresence(topic, curRef) {
   }, [topic]);
   useEffect(() => {
     let last = null; let lastSent = 0;
-    const send = (c, on) => { post('/api/live/focus', { topic, cells: c.cells, kind: c.kind, on }, { quiet: true }).catch(() => {}); };
-    const sig = (c) => (c ? `${c.kind}|${c.cells.length}|${c.cells[0]}|${c.cells[c.cells.length - 1]}` : '');
+    const send = (c, on) => { post('/api/live/focus', { topic, cells: c.cells, kind: c.kind, text: c.text, on }, { quiet: true }).catch(() => {}); };
+    const sig = (c) => (c ? `${c.kind}|${c.cells.length}|${c.cells[0]}|${c.cells[c.cells.length - 1]}|${c.text == null ? '' : `t${c.text}`}` : '');
     const tick = () => {
-      const c = curRef.current || null;
+      const c0 = curRef.current || null;
+      const c = c0 && c0.kind === 'edit' ? { ...c0, text: typedText() } : c0;   // an open editor also shares what is typed in it, as it is typed
       const same = c && last && sig(c) === sig(last);
       if (same) { if (Date.now() - lastSent > 10000) { send(c, true); lastSent = Date.now(); } return; }
       if (last && !c) send(last, false);

@@ -51,8 +51,9 @@ router.post('/focus', (req, res) => {
   const cells = (Array.isArray(b.cells) ? b.cells : [b.key]).slice(0, 800).map((c) => String(c || '').slice(0, 80)).filter(Boolean);
   if (!cells.length) return res.status(400).json({ error: 'Missing cell' });
   const key = cells[0];
+  const text = b.on !== false && b.kind !== 'select' && typeof b.text === 'string' ? b.text.slice(0, 1000) : null;   // what the editor has typed so far (never stored; only passed on to the others looking at the page)
   const name = String(req.user.full_name || req.user.username || 'Someone').slice(0, 60);
-  bus.emit('cell', { topic, key, cells, on: b.on !== false, kind: b.kind === 'select' ? 'select' : 'edit', uid: req.user.id, name, by: String(req.get('x-tab') || '').slice(0, 40) || null });
+  bus.emit('cell', { topic, key, cells, on: b.on !== false, kind: b.kind === 'select' ? 'select' : 'edit', text, uid: req.user.id, name, by: String(req.get('x-tab') || '').slice(0, 40) || null });
   res.json({ ok: true });
 });
 
@@ -70,7 +71,7 @@ router.get('/stream', (req, res) => {
   const send = (m) => { if (!closed) res.write(`data: ${JSON.stringify(m)}\n\n`); };
   const onChange = (m) => { if (canPage(req.user, TOPIC_PAGE[m.t])) send(m); };
   bus.on('change', onChange);
-  const onCell = (m) => { if (canPage(req.user, TOPIC_PAGE[m.topic])) send({ t: 'cell', topic: m.topic, key: m.key, cells: m.cells, on: m.on, kind: m.kind, uid: m.uid, name: m.name, by: m.by }); };
+  const onCell = (m) => { if (canPage(req.user, TOPIC_PAGE[m.topic])) send({ t: 'cell', topic: m.topic, key: m.key, cells: m.cells, on: m.on, kind: m.kind, text: m.text, uid: m.uid, name: m.name, by: m.by }); };
   bus.on('cell', onCell);
   const onNotif = (m) => { if (req.user && m.ids.includes(req.user.id)) send({ t: 'notif' }); };
   bus.on('notif', onNotif);

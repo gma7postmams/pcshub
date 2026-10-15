@@ -507,6 +507,7 @@ export default function Ingest() {
     const p = peers[r.id === 'draft' && draft && draft.slot !== undefined ? `spare:${draft.slot}:${k}` : `${r.id}:${k}`];
     const props = { 'data-k': k, 'data-label': LBL[k], ...props0 };
     if (p) { props.className = [props.className, 'peer-on'].filter(Boolean).join(' '); props['data-peer'] = p.name; props['data-peer-uid'] = p.first ? p.uid : undefined; props.style = { ...(props.style || {}), ...peerStyle(p) }; }
+    if (p && p.kind === 'edit' && p.text != null && !(editing && editing.id === r.id && editing.k === k)) children = <span className="peer-text">{p.text}</span>;   // somebody is typing in this cell: show it as they type
     const ci = COLS.indexOf(k);
     if (r.__i !== undefined && ci >= 0) {
       props['data-r'] = r.__i; props['data-c'] = ci;
