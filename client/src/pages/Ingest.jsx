@@ -8,7 +8,7 @@ import { ago, downloadFile, fmtDate, fmtDateTime, isoDate as todayISO } from '..
 import { useSession } from '../context.jsx';
 import { PlusIcon, SearchIcon, DownloadIcon, UploadIcon, TrashIcon, FullscreenIcon, ExitFullscreenIcon } from '../components/Icons.jsx';
 import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
-import { Chip, DateChip, DateRange, ExportButton, FilterSelect, FiltersMenu, Pager, PlatformCell, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
+import { Chip, DateChip, DateRange, ExportButton, FilterSelect, FiltersMenu, Pager, PlatformCell, SortTh, SpareRows, ToolMenu, useFitBox, useNarrow, useSpareRows } from '../components/wl.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive, useCellPresence, rangeCells, peerStyle } from '../lib/live.js';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
@@ -453,7 +453,7 @@ export default function Ingest() {
 
   // go to the next cell you may edit (Enter / Tab in a cell editor)
   const moveEdit = (r, k, { dr, dc }) => {
-    const list = [...(draft ? [{ ...draft, id: 'draft' }] : []), ...rows];
+    const list = [...(draft && draft.at !== 'bottom' ? [{ ...draft, id: 'draft' }] : []), ...rows, ...(draft && draft.at === 'bottom' ? [{ ...draft, id: 'draft' }] : [])];
     let ri = list.findIndex((x) => x.id === r.id);
     let ci = COLS.indexOf(k);
     if (ri < 0 || ci < 0) return;
@@ -466,7 +466,13 @@ export default function Ingest() {
   };
   // Save ONE cell (PATCH writes only that column, so other people's edits to the row are kept)
   const saveCell = async (r, k, value, initial, move) => {
-    if (r.id === 'draft') { setDraft((d) => (d ? { ...d, [k]: value } : d)); closeCell(r, k); if (move) moveEdit(r, k, move); return; }
+    if (r.id === 'draft') {
+      const merged = draft ? { ...draft, [k]: value } : null;
+      setDraft((d) => (d ? { ...d, [k]: value } : d)); closeCell(r, k);
+      if (merged && merged.at === 'bottom' && String(merged.program).trim() && String(merged.platform).trim()) { saveDraft(merged); return; }   // a row started in a spare row saves itself once it has a Program and a Platform
+      if (move) moveEdit(r, k, move);
+      return;
+    }
     if (String(value ?? '') === String(initial ?? '')) {
       closeCell(r, k);
       if (k === 'cm_status' && value === 'NON-COMPLIANT') setReasonFor(r);   // picking NON-COMPLIANT again = update its reason
@@ -557,10 +563,16 @@ export default function Ingest() {
     }
     return { added: ids.length, failed, firstErr };
   };
-  const saveDraft = async () => {
-    if (!draft) return;
-    if (!String(draft.program).trim() || !String(draft.platform).trim()) { toast('Program and Platform are required', 'err'); return; }
-    const out = await createRecs([draft], 'add row');
+  const openSpare = (k) => {   // a spare row was clicked: it becomes a new (unsaved) row at the bottom, opened on the clicked cell
+    if (draft) { setEditing({ id: 'draft', k }); return; }
+    setDraft({ id: 'draft', at: 'bottom', program: '', platform: '', billable_party: '', episode_break_date_text: '', source: '', materials_count: '', destination_folder: '' });
+    setEditing({ id: 'draft', k });
+  };
+  const saveDraft = async (given) => {
+    const dr = given && given.program !== undefined ? given : draft;
+    if (!dr) return;
+    if (!String(dr.program).trim() || !String(dr.platform).trim()) { toast('Program and Platform are required', 'err'); return; }
+    const out = await createRecs([dr], 'add row');
     if (!out.added) { toast(out.firstErr || 'Could not add the row', 'err'); return; }
     setDraft(null); setEditing(null);
     toast('Ingest request added');
@@ -723,6 +735,9 @@ export default function Ingest() {
   const total = data ? data.total : 0;
 
   useFitBox(`${rows.length}|${!!data}|${picked.size ? 1 : 0}|${full}|${!!draft}`);
+  // Google-Sheets style: spare blank rows under the last row (last page); more appear as you scroll down; clicking one makes it a new row
+  const spareOn = canWrite && !narrow && !!data && !!data.rows && offset + data.rows.length >= (data.total || 0);
+  const spareN = useSpareRows('.wl-card .wl-fit', spareOn, `${offset}|${full}`);
   const allOn = rows.length > 0 && rows.every((r) => picked.has(r.id));
   const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const removePicked = async () => {
@@ -894,7 +909,7 @@ export default function Ingest() {
         <div className={`table-wrap${narrow ? "" : " wl-fit"}`} id="tbl">
           {!data ? <Empty>Loading…</Empty>
             : data.error ? <Empty>{data.error}</Empty>
-              : !data.rows.length && !draft ? <Empty>No ingest records match these filters.</Empty>
+              : !data.rows.length && !draft && !spareOn ? <Empty>No ingest records match these filters.</Empty>
                 : (
                   <table className={`t wl ing${narrow ? ' cards' : ''}`}>
                     <thead><tr>
@@ -913,7 +928,7 @@ export default function Ingest() {
                       <SortTh k="updated" sort={sort} onSort={setSort}>Updated</SortTh>
                     </tr></thead>
                     <tbody>
-                      {draft ? (() => { const d = { ...draft, id: 'draft' }; return (
+                      {draft && draft.at !== 'bottom' ? (() => { const d = { ...draft, id: 'draft' }; return (
                         <tr key="draft" className="draft-row" data-draft="1">
                           {!narrow ? <td className="rn" title="New row — not saved yet">＋</td> : null}
                           {cell(d, 'program', <strong>{d.program}</strong>)}
@@ -927,7 +942,7 @@ export default function Ingest() {
                           <td />
                           <td />
                           <td className="nowrap" onClick={(e) => e.stopPropagation()}>
-                            <button type="button" className="btn primary" style={{ padding: '4px 10px' }} id="draft-save" onClick={saveDraft}>Save</button>{' '}
+                            <button type="button" className="btn primary" style={{ padding: '4px 10px' }} id="draft-save" onClick={() => saveDraft()}>Save</button>{' '}
                             <button type="button" className="btn" style={{ padding: '4px 10px' }} id="draft-discard" onClick={() => { setDraft(null); setEditing(null); }}>Discard</button>
                           </td>
                         </tr>
@@ -950,6 +965,26 @@ export default function Ingest() {
                           <td data-k="updated" data-label="Updated" className="dim nowrap">{ago(r.updated_at)}</td>
                         </tr>
                       ); })}
+                      {draft && draft.at === 'bottom' ? (() => { const d = { ...draft, id: 'draft' }; return (
+                        <tr key="draft-bottom" className="draft-row" data-draft="1">
+                          {!narrow ? <td className="rn" title="New row — not saved yet">＋</td> : null}
+                          {cell(d, 'program', <strong>{d.program}</strong>)}
+                          {cell(d, 'platform', <PlatformCell value={d.platform} />)}
+                          {cell(d, 'billable_party', d.billable_party)}
+                          {cell(d, 'episode_break_date_text', d.episode_break_date_text ? <DateChip>{dayText(d.episode_break_date_text)}</DateChip> : '', { className: 'nowrap' })}
+                          {cell(d, 'source', d.source, { className: 'cell-clip' })}
+                          {cell(d, 'materials_count', d.materials_count, { className: 'num' })}
+                          <td />
+                          {cell(d, 'destination_folder', d.destination_folder, { className: 'cell-clip mono' })}
+                          <td />
+                          <td />
+                          <td className="nowrap" onClick={(e) => e.stopPropagation()}>
+                            <button type="button" className="btn primary" style={{ padding: '4px 10px' }} onClick={() => saveDraft()}>Save</button>{' '}
+                            <button type="button" className="btn" style={{ padding: '4px 10px' }} onClick={() => { setDraft(null); setEditing(null); }}>Discard</button>
+                          </td>
+                        </tr>
+                      ); })() : null}
+                      {spareOn ? <SpareRows count={spareN} start={offset + data.rows.length + (draft && draft.at === 'bottom' ? 1 : 0)} cols={['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', null, canApprove ? 'destination_folder' : null, null, null, null]} lead="rn" onOpen={openSpare} /> : null}
                     </tbody>
                   </table>
                 )}

@@ -6,7 +6,7 @@ import { loadView, saveView, loadDialog, syncDialog, loadEdit, syncEdit, loadCel
 import { CalendarIcon, DownloadIcon, ExitFullscreenIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive } from '../lib/live.js';
-import { ExportButton, FilterSelect, FiltersMenu, pickerHeld, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow } from '../components/wl.jsx';
+import { ExportButton, FilterSelect, FiltersMenu, pickerHeld, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow, useSpareRows, SpareRows } from '../components/wl.jsx';
 import { useSession } from '../context.jsx';
 import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
@@ -302,6 +302,9 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const rowsRef = useRef(rows); rowsRef.current = rows;
   const clearPicksRef = useRef(() => {}); clearPicksRef.current = () => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; };
   useFitBox(`table|${narrow}|${rows.length}|${days === null}|${!!data}|${size}|${full}`);
+  // Google-Sheets style: spare blank rows under the last row (only on the last page); more appear as you scroll down; clicking one makes it a new row
+  const spareOn = canWrite && !narrow && !!data && offset + rows.length >= data.total;
+  const spareN = useSpareRows('.plug-list .wl-fit', spareOn, `${period}|${anchor}|${offset}|${size}`);
   const chosen = rows.filter((r) => picked.has(r.id));
   const pickedCount = chosen.length;
   const allOn = !!rows.length && rows.every((r) => picked.has(r.id));
@@ -435,7 +438,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     return true;
   };
   const moveEdit = (r, k, dr, dc) => {
-    const list = [...drafts, ...rows];
+    const list = [...drafts.filter((d) => d.at !== 'bottom'), ...rows, ...drafts.filter((d) => d.at === 'bottom')];
     let ri = list.findIndex((x) => x.id === r.id);
     let ci = EDIT_COLS.indexOf(k);
     if (ri < 0 || ci < 0) return;
@@ -446,7 +449,14 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const saveCell = async (r, k, raw, move) => {
     const value = k === 'plug_date' ? normDate(raw) : String(raw ?? '').replace(/\s*\n\s*/g, ' ').trim();
     const close = () => { setCellEd((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur)); if (!isDraft(r.id)) selectCell(r, k); };
-    if (isDraft(r.id)) { setDrafts((ds) => ds.map((d) => (d.id === r.id ? { ...d, [k]: value } : d))); close(); if (move) moveEdit(r, k, move.dr, move.dc); return; }
+    if (isDraft(r.id)) {
+      const merged = { ...(drafts.find((d) => d.id === r.id) || r), [k]: value };
+      setDrafts((ds) => ds.map((d) => (d.id === r.id ? merged : d)));
+      close();
+      if (merged.at === 'bottom' && String(merged.plug_id).trim()) { saveDrafts([merged]); return; }   // a row started in a spare row saves as soon as it has a Plug ID
+      if (move) moveEdit(r, k, move.dr, move.dc);
+      return;
+    }
     if (value === String(r[k] ?? '')) { close(); if (move) moveEdit(r, k, move.dr, move.dc); return; }
     if (k === 'plug_id' && !value) { toast('Plug ID is required', 'err'); close(); return; }
     const before = recOf(r);
@@ -468,6 +478,13 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     setDrafts((ds) => [...made, ...ds]);
     setCellEd({ id: made[0].id, k: 'plug_id' });
     requestAnimationFrame(() => { const box = document.querySelector('.plug-list .wl-fit'); if (box) box.scrollTop = 0; });
+  };
+  const openSpare = (k) => {   // a spare row was clicked: it becomes a new (unsaved) row at the bottom, opened on the clicked cell
+    const have = drafts.find((d) => d.at === 'bottom');
+    if (have) { setCellEd({ id: have.id, k }); return; }
+    const d = { id: `draft-${Date.now()}-${draftSeq.current++}`, at: 'bottom', plug_date: defaultDate(), plug_id: '', prog_name: '', psd: '' };
+    setDrafts((ds) => [...ds, d]);
+    setCellEd({ id: d.id, k });
   };
   const discardDraft = (d) => { setDrafts((ds) => ds.filter((x) => x.id !== d.id)); setCellEd((cur) => (cur && cur.id === d.id ? null : cur)); };
   // Save one new row, or (list = all of them) every new row that has something in it; rows left completely blank are dropped
@@ -780,14 +797,14 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {drafts.map((d, di) => (
+                  {drafts.filter((d) => d.at !== 'bottom').map((d, di) => (
                     <tr key={d.id} className="draft-row" data-draft="1">
                       {!narrow ? <td className="rn" title="New row — not saved yet">＋</td> : <td className="chk" />}
                       {dataCells(d)}
                       
                       <td className="plug-actions nowrap" onClick={(e) => e.stopPropagation()}>
                         <button type="button" className="btn primary" style={{ padding: '4px 10px' }} id={di === 0 ? 'draft-save' : undefined} onClick={() => saveDrafts([d])}>Save</button>{' '}
-                        {drafts.length > 1 && di === 0 ? <><button type="button" className="btn primary" style={{ padding: '4px 10px' }} id="draft-save-all" onClick={() => saveDrafts(drafts)}>Save all ({drafts.length})</button>{' '}</> : null}
+                        {drafts.filter((d) => d.at !== 'bottom').length > 1 && di === 0 ? <><button type="button" className="btn primary" style={{ padding: '4px 10px' }} id="draft-save-all" onClick={() => saveDrafts(drafts.filter((d) => d.at !== 'bottom'))}>Save all ({drafts.filter((d) => d.at !== 'bottom').length})</button>{' '}</> : null}
                         <button type="button" className="btn" style={{ padding: '4px 10px' }} id={di === 0 ? 'draft-discard' : undefined} onClick={() => discardDraft(d)}>Discard</button>
                       </td>
                     </tr>
@@ -805,6 +822,18 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
                       ) : null}
                     </tr>
                   )) : !draft ? <tr><td colSpan={canWrite ? 8 : 6} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr> : null}
+                  {drafts.filter((d) => d.at === 'bottom').map((d, di) => (
+                    <tr key={d.id} className="draft-row" data-draft="1">
+                      {!narrow ? <td className="rn" title="New row — not saved yet">＋</td> : <td className="chk" />}
+                      {dataCells(d)}
+                      
+                      <td className="plug-actions nowrap" onClick={(e) => e.stopPropagation()}>
+                        <button type="button" className="btn primary" style={{ padding: '4px 10px' }}  onClick={() => saveDrafts([d])}>Save</button>{' '}
+                                                <button type="button" className="btn" style={{ padding: '4px 10px' }}  onClick={() => discardDraft(d)}>Discard</button>
+                      </td>
+                    </tr>
+                  ))}
+                  {spareOn ? <SpareRows count={spareN} start={offset + rows.length + drafts.filter((d) => d.at === 'bottom').length} cols={EDIT_COLS.concat([null, null])} lead="rn" trail onOpen={openSpare} /> : null}
                 </tbody>
               </table>
             </div>

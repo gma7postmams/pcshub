@@ -354,3 +354,36 @@ export function useNarrow(px = 900) {
   }, [px]);
   return narrow;
 }
+
+// ---- Google-Sheets style spare rows: blank rows sit under the last row of the table and more appear as you scroll down ----
+/** How many spare blank rows to show. Starts at 12, and 20 more are added each time the table box (`boxSelector`) is scrolled to its bottom. `resetKey` puts it back to 12. */
+export function useSpareRows(boxSelector, active, resetKey) {
+  const [count, setCount] = useState(12);
+  useEffect(() => { setCount(12); }, [resetKey]);
+  useEffect(() => {   // like Sheets, the blank rows always fill the box: while the table does not yet reach its bottom edge, add more
+    if (!active) return;
+    const el = document.querySelector(boxSelector);
+    if (el && el.scrollHeight <= el.clientHeight + 2 && count < 400) setCount((c) => Math.min(c + 10, 400));
+  });
+  useEffect(() => {
+    if (!active) return undefined;
+    const on = (e) => {
+      const el = e.target;
+      if (!el || !el.matches || !el.matches(boxSelector)) return;
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 160) setCount((c) => Math.min(c + 20, 400));
+    };
+    document.addEventListener('scroll', on, true);
+    return () => document.removeEventListener('scroll', on, true);
+  }, [boxSelector, active]);
+  return count;
+}
+/** The spare blank rows. `cols` = one entry per data column (a key, or null for a column nobody can type in); `onOpen(key)` is called when a cell is clicked: the page then turns it into a real new row. */
+export function SpareRows({ count, start, cols, lead, trail, onOpen }) {
+  return Array.from({ length: count }, (_, i) => (
+    <tr key={`spare-${i}`} className="spare-row">
+      {lead === 'rn' ? <td className="rn">{start + i + 1}</td> : lead === 'chk' ? <td className="chk" /> : null}
+      {cols.map((k, ci) => <td key={ci} className={k ? 'spare editable' : 'spare'} onMouseDown={k ? (e) => { e.preventDefault(); onOpen(k); } : undefined} />)}
+      {trail ? <td className="actions-cell" /> : null}
+    </tr>
+  ));
+}

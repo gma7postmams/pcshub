@@ -7,7 +7,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FlagIcon, FullscreenIcon, LockIcon, PlusIcon, SaveIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, ExportButton, FilterSelect, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
+import { DateChip, DateRange, ExportButton, FilterSelect, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useSpareRows } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive, useCellPresence, rangeCells, peerStyle } from '../lib/live.js';
@@ -714,7 +714,7 @@ export default function Workload() {
   };
   // After Enter / Tab in a cell editor: select the next cell — below / above (Enter, Shift+Enter) or beside it (Tab, Shift+Tab, wrapping to the next row)
   const moveEdit = (r, k, dr, dc) => {
-    const rows = [...(draft ? [draft] : []), ...(data && data.rows ? data.rows : [])];
+    const rows = [...(draft && draft.at !== 'bottom' ? [draft] : []), ...(data && data.rows ? data.rows : []), ...(draft && draft.at === 'bottom' ? [draft] : [])];
     let ri = rows.findIndex((x) => x.id === r.id);
     let ci = tableCols.findIndex((c) => c === k || (c === 'breakdate_vgfx' && k === 'breakdate_vedit'));
     if (ri < 0 || ci < 0) return;
@@ -728,9 +728,11 @@ export default function Workload() {
     }
   };
   const saveCell = async (r, k, value, move) => {
-    if (r.id === 'draft') {   // the new row only changes on screen until its Save button is pressed
+    if (r.id === 'draft') {   // the new row only changes on screen until its Save button is pressed (a row started in a spare row saves itself once it has a Plug ID, Work Date and Units)
+      const merged = draft ? setCellValue(draft, k, value, false) : null;
       setDraft((d) => (d ? setCellValue(d, k, value, false) : d));
       setEditing((cur) => (cur && cur.id === 'draft' && cur.k === k ? null : cur));
+      if (merged && merged.at === 'bottom' && String(merged.plug_id || '').trim() && merged.work_date && merged.units_concerned) { saveDraft(merged); return; }
       if (move) moveEdit(r, k, move.dr, move.dc);
       return;
     }
@@ -771,11 +773,20 @@ export default function Workload() {
     setEditing({ id: 'draft', k: 'plug_id' });
     requestAnimationFrame(() => { const box = document.getElementById('tbl'); if (box) box.scrollTop = 0; });
   };
-  const saveDraft = async () => {
-    if (!draft) return;
+  const openSpare = (k) => {   // a spare row was clicked: it becomes a new (unsaved) row at the bottom, opened on the clicked cell
+    if (draft) { setEditing({ id: 'draft', k: editKeyFor(draft, k) || 'plug_id' }); return; }
+    const last = data && data.rows && data.rows.length ? data.rows[data.rows.length - 1] : null;
+    const units = filt.units || meta.tabDefaultUnits[tab] || '';
+    const d = { id: 'draft', at: 'bottom', work_date: (last && last.work_date) || filt.from || isoDate(), units_concerned: units };
+    setDraft(d);
+    setEditing({ id: 'draft', k: editKeyFor(d, k) || 'plug_id' });
+  };
+  const saveDraft = async (given) => {
+    const dr = given && given.id === 'draft' ? given : draft;
+    if (!dr) return;
     try {
-      const ids = (await post('/api/workload/batch', { rows: [toPayload(draft)] })).createdIds || [];
-      const row = toPayload(draft);
+      const ids = (await post('/api/workload/batch', { rows: [toPayload(dr)] })).createdIds || [];
+      const row = toPayload(dr);
       let cid = ids;
       pushTbl({ label: 'add row', undo: async () => { await post('/api/workload/bulk-delete', { ids: cid }); }, redo: async () => { cid = (await post('/api/workload/batch', { rows: [row] })).createdIds || []; } });
       setDraft(null);
@@ -1702,6 +1713,9 @@ export default function Workload() {
   // The table (Table and Excel mode) scrolls inside its own box that ends near the bottom of the window — a tall table used to put its sideways scroll
   // bar below the last row, out of sight until you scrolled the whole page down. Measured again when the window, the mode, the tab or a filter changes.
   const hasMeta = !!meta;
+  // Google-Sheets style: spare blank rows under the last row (last page, table view); more appear as you scroll down; clicking one makes it a new row
+  const spareOn = canWrite && !cards && tab !== 'PREP' && !!data && !!data.rows && offset + data.rows.length >= (data.total || 0);
+  const spareN = useSpareRows('#tbl', spareOn, `${tab}|${offset}|${size}|${filt.from}|${filt.to}`);
   useLayoutEffect(() => {
     const fit = () => {
       const el = document.querySelector('.wl-fit');
@@ -1904,7 +1918,7 @@ export default function Workload() {
       className: ['editable', td.props.className].filter(Boolean).join(' '), title: 'Click to select, double-click or press Enter to edit', tabIndex: 0,
       onClick: (e) => {   // select only; Shift / Ctrl+click and drags are the block selection's (see cellDown)
         e.stopPropagation();
-        if (tapEdit()) { open(); return; }
+        if (r.id === 'draft' || tapEdit()) { open(); return; }
         if (e.shiftKey || e.ctrlKey || e.metaKey) return;
         const rr = Number(e.currentTarget.dataset.r); const cc = Number(e.currentTarget.dataset.c);
         if (Number.isFinite(rr) && Number.isFinite(cc)) setCellSel({ r0: rr, c0: cc, r1: rr, c1: cc });
@@ -1934,7 +1948,7 @@ export default function Workload() {
       <td key="breakdate_vgfx" data-k="breakdate_vgfx" className={[r.is_priority ? 'prio' : '', canWrite && !locked ? 'editable' : ''].filter(Boolean).join(' ') || undefined} title={locked ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}
         onClick={canWrite && !locked ? (e) => {   // the whole cell is a click target (not just the pills): it selects, so keyboard shortcuts and paste work
           if (e.target.closest && e.target.closest('.cell-editor-inline')) return;
-          if (tapEdit()) { const ek = editKeyFor(r, 'breakdate_vgfx'); if (ek) setEditing({ id: r.id, k: ek }); return; }
+          if (r.id === 'draft' || tapEdit()) { const ek = editKeyFor(r, 'breakdate_vgfx'); if (ek) setEditing({ id: r.id, k: ek }); return; }
           if (e.shiftKey || e.ctrlKey || e.metaKey) return;
           const rr = Number(e.currentTarget.dataset.r); const cc = Number(e.currentTarget.dataset.c);
           if (Number.isFinite(rr) && Number.isFinite(cc)) setCellSel({ r0: rr, c0: cc, r1: rr, c1: cc });
@@ -1956,7 +1970,7 @@ export default function Workload() {
                 key={k} className={clickable ? 'wl-pill-edit' : ''} tabIndex={clickable ? 0 : undefined} title={clickable ? 'Click to select, double-click or press Enter to edit' : undefined}
                 onClick={clickable ? (e) => {
                   e.stopPropagation();
-                  if (tapEdit()) { setEditing({ id: r.id, k }); return; }
+                  if (r.id === 'draft' || tapEdit()) { setEditing({ id: r.id, k }); return; }
                   if (e.shiftKey || e.ctrlKey || e.metaKey) return;
                   const td = e.currentTarget.closest('td'); const rr = td ? Number(td.dataset.r) : NaN; const cc = td ? Number(td.dataset.c) : NaN;
                   if (Number.isFinite(rr) && Number.isFinite(cc)) setCellSel({ r0: rr, c0: cc, r1: rr, c1: cc });
@@ -2193,18 +2207,18 @@ export default function Workload() {
             }}>
               {!data ? <Empty>Loading…</Empty>
                 : data.error ? <Empty>{data.error}</Empty>
-                  : !data.rows.length && !draft ? <Empty>No workload items match these filters.</Empty>
+                  : !data.rows.length && !draft && !spareOn ? <Empty>No workload items match these filters.</Empty>
                     : (
                       <table className={`t wl v-${viewKey.toLowerCase()}${cards ? ' cards' : ''}`}>
                         <thead><tr>{!cards ? <th className="rn" title={pageAllPicked ? 'Click to unselect all' : 'Select all rows on this page (Ctrl+A)'} onClick={() => (pageAllPicked ? clearPicks() : selectPage())} /> : null}{canWrite && cards ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
-                          {draft ? (
+                          {draft && draft.at !== 'bottom' ? (
                             <tr key="draft" className="draft-row" data-draft="1">
                               {!cards ? <td className="rn" title="New row — not saved yet">＋</td> : null}
                               {cards ? <td className="chk" /> : null}
                               {tableCols.map((k) => (k === 'breakdate_vgfx' ? breakdateCell(draft) : cell(draft, k)))}
                               <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
-                                <button type="button" className="btn primary" style={{ padding: "4px 10px" }} id="draft-save" onClick={saveDraft}>Save</button>{' '}
+                                <button type="button" className="btn primary" style={{ padding: "4px 10px" }} id="draft-save" onClick={() => saveDraft()}>Save</button>{' '}
                                 <button type="button" className="btn" style={{ padding: "4px 10px" }} id="draft-discard" onClick={() => { setDraft(null); setEditing(null); }}>Discard</button>
                               </td>
                             </tr>
@@ -2245,6 +2259,18 @@ export default function Workload() {
                               <td colSpan={tableCols.length + 4}><strong>For Follow-up</strong> <span className="dim">({prepNextWait.n}): continues on page {prepNextWait.page}. Click to go there.</span></td>
                             </tr>
                           ) : null}
+                                                  {draft && draft.at === 'bottom' ? (
+                            <tr key="draft" className="draft-row" data-draft="1">
+                              {!cards ? <td className="rn" title="New row — not saved yet">＋</td> : null}
+                              {cards ? <td className="chk" /> : null}
+                              {tableCols.map((k) => (k === 'breakdate_vgfx' ? breakdateCell(draft) : cell(draft, k)))}
+                              <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
+                                <button type="button" className="btn primary" style={{ padding: "4px 10px" }} onClick={() => saveDraft()}>Save</button>{' '}
+                                <button type="button" className="btn" style={{ padding: "4px 10px" }} onClick={() => { setDraft(null); setEditing(null); }}>Discard</button>
+                              </td>
+                            </tr>
+                          ) : null}
+                          {spareOn ? <SpareRows count={spareN} start={offset + (data.rows ? data.rows.length : 0) + (draft && draft.at === 'bottom' ? 1 : 0)} cols={tableCols} lead="rn" trail onOpen={openSpare} /> : null}
                         </tbody>
                       </table>
                     )}

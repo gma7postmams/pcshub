@@ -1352,3 +1352,8 @@ table.t td[data-sel]:focus, table.t td.editable:focus { outline: 2px solid var(-
 table.t td.editing input:placeholder-shown, table.t td.editing textarea:placeholder-shown,
 .cell-editor input:placeholder-shown, .cell-editor textarea:placeholder-shown { text-align: center; }
 .admin-pane .restore-intro { margin: 18px 12px 14px; }
+/* spare blank rows under a table (they turn into a new row when clicked) */
+table.t tr.spare-row td { height: 38px; color: var(--text-3); cursor: cell; }
+table.t tr.spare-row td.rn { text-align: center; font-size: 11.5px; cursor: default; }
+table.t tr.spare-row:hover td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+table.t tr.spare-row td.actions-cell { cursor: default; }
