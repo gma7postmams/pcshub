@@ -1284,7 +1284,8 @@ body { padding-bottom: env(safe-area-inset-bottom, 0px); }
 .avatar.has-img { padding: 2px; }
 .dsh-avatar.has-img { padding: 3px; }
 .dsh-act-av.has-img { padding: 2px; }
-.pa.has-img { padding: 2.5px; }
+.pa.has-img { padding: 0; }   /* the picture fills the whole circle (same size as an initials avatar); its colour ring is the picture's own border */
+.pa.has-img .av-img { box-sizing: border-box; border: 2.5px solid var(--ring, transparent); }
 .prof-pic { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .prof-pic .pp-av { flex: none; width: 88px; height: 88px; border-radius: 50%; display: grid; place-items: center; font-size: 28px; font-weight: 700; color: #fff; padding: 4px; }
 

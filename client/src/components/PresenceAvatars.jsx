@@ -61,7 +61,7 @@ export default function PresenceAvatars({ path, peers, describe }) {
   return (
     <div className="presence" role="list" aria-label="People on this page right now">
       {shown.map((u) => (
-        <span key={u.id} role="listitem" className={`pa${u.av ? ' has-img' : ''}${u.you ? ' you' : ''}${peers && !u.you && where(u) ? ' clickable' : ''}`} style={{ background: colorFor(u.id) }} data-tip={`${nameOf(u)}${peers && !u.you && where(u) ? ` · ${where(u)[1].kind === 'select' ? 'selected' : 'editing'} a cell — click to jump` : ''}`} aria-label={nameOf(u)}
+        <span key={u.id} role="listitem" className={`pa${u.av ? ' has-img' : ''}${u.you ? ' you' : ''}${peers && !u.you && where(u) ? ' clickable' : ''}`} style={{ background: colorFor(u.id), '--ring': colorFor(u.id) }} data-tip={`${nameOf(u)}${peers && !u.you && where(u) ? ` · ${where(u)[1].kind === 'select' ? 'selected' : 'editing'} a cell — click to jump` : ''}`} aria-label={nameOf(u)}
           onClick={peers && !u.you ? () => locate(u) : undefined}>
           {u.av ? <img className="av-img" src={avatarUrl(u.id, u.av)} alt="" draggable="false" /> : initials(u.name).slice(0, 2)}
         </span>
