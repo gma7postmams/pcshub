@@ -773,11 +773,11 @@ export default function Workload() {
     setEditing({ id: 'draft', k: 'plug_id' });
     requestAnimationFrame(() => { const box = document.getElementById('tbl'); if (box) box.scrollTop = 0; });
   };
-  const openSpare = (k) => {   // a spare row was clicked: it becomes a new (unsaved) row at the bottom, opened on the clicked cell
+  const openSpare = (k, slot) => {   // a spare row was clicked: it becomes a new (unsaved) row at the bottom, opened on the clicked cell
     if (draft) { setEditing({ id: 'draft', k: editKeyFor(draft, k) || 'plug_id' }); return; }
     const last = data && data.rows && data.rows.length ? data.rows[data.rows.length - 1] : null;
     const units = filt.units || meta.tabDefaultUnits[tab] || '';
-    const d = { id: 'draft', at: 'bottom', work_date: (last && last.work_date) || filt.from || isoDate(), units_concerned: units };
+    const d = { id: 'draft', at: 'bottom', slot: slot || 0, work_date: (last && last.work_date) || filt.from || isoDate(), units_concerned: units };
     setDraft(d);
     setEditing({ id: 'draft', k: editKeyFor(d, k) || 'plug_id' });
   };
@@ -1714,7 +1714,10 @@ export default function Workload() {
   // bar below the last row, out of sight until you scrolled the whole page down. Measured again when the window, the mode, the tab or a filter changes.
   const hasMeta = !!meta;
   // Google-Sheets style: spare blank rows under the last row (last page, table view); more appear as you scroll down; clicking one makes it a new row
-  const spareOn = canWrite && !cards && tab !== 'PREP' && !!data && !!data.rows && offset + data.rows.length >= (data.total || 0);
+  const spareOn = canWrite && !cards && !!data && !!data.rows && offset + data.rows.length >= (data.total || 0);
+  useEffect(() => {   // a spare row opened but left empty goes back to being a blank spare row
+    if (!editing && draft && draft.at === 'bottom' && Object.keys(draft).every((k) => ['id', 'at', 'slot', 'work_date', 'units_concerned'].includes(k) || !String(draft[k] == null ? '' : draft[k]).trim())) setDraft(null);
+  }, [editing, draft]);
   const spareN = useSpareRows('#tbl', spareOn, `${tab}|${offset}|${size}|${filt.from}|${filt.to}`);
   useLayoutEffect(() => {
     const fit = () => {
@@ -2259,18 +2262,15 @@ export default function Workload() {
                               <td colSpan={tableCols.length + 4}><strong>For Follow-up</strong> <span className="dim">({prepNextWait.n}): continues on page {prepNextWait.page}. Click to go there.</span></td>
                             </tr>
                           ) : null}
-                                                  {draft && draft.at === 'bottom' ? (
-                            <tr key="draft" className="draft-row" data-draft="1">
-                              {!cards ? <td className="rn" title="New row — not saved yet">＋</td> : null}
-                              {cards ? <td className="chk" /> : null}
-                              {tableCols.map((k) => (k === 'breakdate_vgfx' ? breakdateCell(draft) : cell(draft, k)))}
-                              <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
-                                <button type="button" className="btn primary" style={{ padding: "4px 10px" }} onClick={() => saveDraft()}>Save</button>{' '}
-                                <button type="button" className="btn" style={{ padding: "4px 10px" }} onClick={() => { setDraft(null); setEditing(null); }}>Discard</button>
-                              </td>
-                            </tr>
-                          ) : null}
-                          {spareOn ? <SpareRows count={spareN} start={offset + (data.rows ? data.rows.length : 0) + (draft && draft.at === 'bottom' ? 1 : 0)} cols={tableCols} lead="rn" trail onOpen={openSpare} /> : null}
+                          {spareOn ? <SpareRows count={spareN} start={offset + (data.rows ? data.rows.length : 0)} cols={tableCols} lead="rn" trail onOpen={openSpare}
+                            at={draft && draft.at === 'bottom' ? draft.slot : -1}
+                            node={draft && draft.at === 'bottom' ? (
+                              <tr key="spare-draft" className="draft-row spare-draft" data-draft="1">
+                                <td className="rn">{offset + (data.rows ? data.rows.length : 0) + draft.slot + 1}</td>
+                                {tableCols.map((k) => (k === 'breakdate_vgfx' ? breakdateCell(draft) : cell(draft, k)))}
+                                <td className="actions-cell" />
+                              </tr>
+                            ) : null} /> : null}
                         </tbody>
                       </table>
                     )}

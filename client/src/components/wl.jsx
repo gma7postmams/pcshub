@@ -377,13 +377,14 @@ export function useSpareRows(boxSelector, active, resetKey) {
   }, [boxSelector, active]);
   return count;
 }
-/** The spare blank rows. `cols` = one entry per data column (a key, or null for a column nobody can type in); `onOpen(key)` is called when a cell is clicked: the page then turns it into a real new row. */
-export function SpareRows({ count, start, cols, lead, trail, onOpen }) {
-  return Array.from({ length: count }, (_, i) => (
+/** The spare blank rows. `cols` = one entry per data column (a key, or null for a column nobody can type in); `onOpen(key, i)` is called when a cell of spare row `i` is clicked: the page then turns that row into a real new row IN PLACE.
+    `at` + `node`: the spare row at index `at` is shown as `node` (the row being typed into) instead of a blank one. */
+export function SpareRows({ count, start, cols, lead, trail, onOpen, at, node }) {
+  return Array.from({ length: count }, (_, i) => (at === i && node ? node : (
     <tr key={`spare-${i}`} className="spare-row">
       {lead === 'rn' ? <td className="rn">{start + i + 1}</td> : lead === 'chk' ? <td className="chk" /> : null}
-      {cols.map((k, ci) => <td key={ci} className={k ? 'spare editable' : 'spare'} onMouseDown={k ? (e) => { e.preventDefault(); onOpen(k); } : undefined} />)}
+      {cols.map((k, ci) => <td key={ci} className={k ? 'spare editable' : 'spare'} onMouseDown={k ? (e) => { e.preventDefault(); onOpen(k, i); } : undefined} />)}
       {trail ? <td className="actions-cell" /> : null}
     </tr>
-  ));
+  )));
 }

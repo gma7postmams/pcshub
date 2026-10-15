@@ -189,6 +189,9 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const [cellEd, setCellEd] = useState(() => loadEdit('plugs').cell || null);        // { id, k } while one cell is open for editing (comes back after a refresh)
   const prevEd = useRef(cellEd ? `${cellEd.id}:${cellEd.k}` : null);
   useEffect(() => { prevEd.current = syncEdit('plugs', cellEd, drafts.length ? drafts : null, prevEd.current); }, [cellEd, drafts]);
+  useEffect(() => {   // a spare row opened but left empty (Esc / clicked away) goes back to being a blank spare row
+    if (!cellEd) setDrafts((ds) => (ds.some((d) => d.at === 'bottom' && !String(d.plug_id).trim() && !String(d.prog_name).trim() && !String(d.psd).trim()) ? ds.filter((d) => d.at !== 'bottom' || String(d.plug_id).trim() || String(d.prog_name).trim() || String(d.psd).trim()) : ds));
+  }, [cellEd]);
   const [ctx, setCtx] = useState(null);              // right-click menu position
   useEffect(() => { if (cellEd && !isDraft(cellEd.id) && data && data.rows && !data.rows.some((r) => r.id === cellEd.id)) setCellEd(null); }, [data]);   // eslint-disable-line react-hooks/exhaustive-deps
   const hist = useRef({ past: [], future: [] });
@@ -479,10 +482,10 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     setCellEd({ id: made[0].id, k: 'plug_id' });
     requestAnimationFrame(() => { const box = document.querySelector('.plug-list .wl-fit'); if (box) box.scrollTop = 0; });
   };
-  const openSpare = (k) => {   // a spare row was clicked: it becomes a new (unsaved) row at the bottom, opened on the clicked cell
+  const openSpare = (k, slot) => {   // a spare row was clicked: it becomes a new (unsaved) row at the bottom, opened on the clicked cell
     const have = drafts.find((d) => d.at === 'bottom');
     if (have) { setCellEd({ id: have.id, k }); return; }
-    const d = { id: `draft-${Date.now()}-${draftSeq.current++}`, at: 'bottom', plug_date: defaultDate(), plug_id: '', prog_name: '', psd: '' };
+    const d = { id: `draft-${Date.now()}-${draftSeq.current++}`, at: 'bottom', slot: slot || 0, plug_date: defaultDate(), plug_id: '', prog_name: '', psd: '' };
     setDrafts((ds) => [...ds, d]);
     setCellEd({ id: d.id, k });
   };
@@ -822,18 +825,15 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
                       ) : null}
                     </tr>
                   )) : !draft ? <tr><td colSpan={canWrite ? 8 : 6} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr> : null}
-                  {drafts.filter((d) => d.at === 'bottom').map((d, di) => (
-                    <tr key={d.id} className="draft-row" data-draft="1">
-                      {!narrow ? <td className="rn" title="New row — not saved yet">＋</td> : <td className="chk" />}
-                      {dataCells(d)}
-                      
-                      <td className="plug-actions nowrap" onClick={(e) => e.stopPropagation()}>
-                        <button type="button" className="btn primary" style={{ padding: '4px 10px' }}  onClick={() => saveDrafts([d])}>Save</button>{' '}
-                                                <button type="button" className="btn" style={{ padding: '4px 10px' }}  onClick={() => discardDraft(d)}>Discard</button>
-                      </td>
-                    </tr>
-                  ))}
-                  {spareOn ? <SpareRows count={spareN} start={offset + rows.length + drafts.filter((d) => d.at === 'bottom').length} cols={EDIT_COLS.concat([null, null])} lead="rn" trail onOpen={openSpare} /> : null}
+                  {spareOn ? <SpareRows count={spareN} start={offset + rows.length} cols={EDIT_COLS.concat([null, null])} lead="rn" trail onOpen={openSpare}
+                    at={drafts.find((d) => d.at === 'bottom') ? drafts.find((d) => d.at === 'bottom').slot : -1}
+                    node={drafts.find((d) => d.at === 'bottom') ? (
+                      <tr key="spare-draft" className="draft-row spare-draft" data-draft="1">
+                        <td className="rn">{offset + rows.length + drafts.find((d) => d.at === 'bottom').slot + 1}</td>
+                        {dataCells(drafts.find((d) => d.at === 'bottom'))}
+                        <td className="plug-actions" />
+                      </tr>
+                    ) : null} /> : null}
                 </tbody>
               </table>
             </div>

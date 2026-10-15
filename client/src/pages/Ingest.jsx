@@ -563,9 +563,9 @@ export default function Ingest() {
     }
     return { added: ids.length, failed, firstErr };
   };
-  const openSpare = (k) => {   // a spare row was clicked: it becomes a new (unsaved) row at the bottom, opened on the clicked cell
+  const openSpare = (k, slot) => {   // a spare row was clicked: it becomes a new (unsaved) row at the bottom, opened on the clicked cell
     if (draft) { setEditing({ id: 'draft', k }); return; }
-    setDraft({ id: 'draft', at: 'bottom', program: '', platform: '', billable_party: '', episode_break_date_text: '', source: '', materials_count: '', destination_folder: '' });
+    setDraft({ id: 'draft', at: 'bottom', slot: slot || 0, program: '', platform: '', billable_party: '', episode_break_date_text: '', source: '', materials_count: '', destination_folder: '' });
     setEditing({ id: 'draft', k });
   };
   const saveDraft = async (given) => {
@@ -737,6 +737,9 @@ export default function Ingest() {
   useFitBox(`${rows.length}|${!!data}|${picked.size ? 1 : 0}|${full}|${!!draft}`);
   // Google-Sheets style: spare blank rows under the last row (last page); more appear as you scroll down; clicking one makes it a new row
   const spareOn = canWrite && !narrow && !!data && !!data.rows && offset + data.rows.length >= (data.total || 0);
+  useEffect(() => {   // a spare row opened but left empty goes back to being a blank spare row
+    if (!editing && draft && draft.at === 'bottom' && Object.keys(draft).every((k) => ['id', 'at', 'slot'].includes(k) || !String(draft[k] == null ? '' : draft[k]).trim())) setDraft(null);
+  }, [editing, draft]);
   const spareN = useSpareRows('.wl-card .wl-fit', spareOn, `${offset}|${full}`);
   const allOn = rows.length > 0 && rows.every((r) => picked.has(r.id));
   const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -965,26 +968,24 @@ export default function Ingest() {
                           <td data-k="updated" data-label="Updated" className="dim nowrap">{ago(r.updated_at)}</td>
                         </tr>
                       ); })}
-                      {draft && draft.at === 'bottom' ? (() => { const d = { ...draft, id: 'draft' }; return (
-                        <tr key="draft-bottom" className="draft-row" data-draft="1">
-                          {!narrow ? <td className="rn" title="New row — not saved yet">＋</td> : null}
-                          {cell(d, 'program', <strong>{d.program}</strong>)}
-                          {cell(d, 'platform', <PlatformCell value={d.platform} />)}
-                          {cell(d, 'billable_party', d.billable_party)}
-                          {cell(d, 'episode_break_date_text', d.episode_break_date_text ? <DateChip>{dayText(d.episode_break_date_text)}</DateChip> : '', { className: 'nowrap' })}
-                          {cell(d, 'source', d.source, { className: 'cell-clip' })}
-                          {cell(d, 'materials_count', d.materials_count, { className: 'num' })}
-                          <td />
-                          {cell(d, 'destination_folder', d.destination_folder, { className: 'cell-clip mono' })}
-                          <td />
-                          <td />
-                          <td className="nowrap" onClick={(e) => e.stopPropagation()}>
-                            <button type="button" className="btn primary" style={{ padding: '4px 10px' }} onClick={() => saveDraft()}>Save</button>{' '}
-                            <button type="button" className="btn" style={{ padding: '4px 10px' }} onClick={() => { setDraft(null); setEditing(null); }}>Discard</button>
-                          </td>
-                        </tr>
-                      ); })() : null}
-                      {spareOn ? <SpareRows count={spareN} start={offset + data.rows.length + (draft && draft.at === 'bottom' ? 1 : 0)} cols={['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', null, canApprove ? 'destination_folder' : null, null, null, null]} lead="rn" onOpen={openSpare} /> : null}
+                      {spareOn ? <SpareRows count={spareN} start={offset + data.rows.length} cols={['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', null, canApprove ? 'destination_folder' : null, null, null, null]} lead="rn" onOpen={openSpare}
+                        at={draft && draft.at === 'bottom' ? draft.slot : -1}
+                        node={draft && draft.at === 'bottom' ? (() => { const d = { ...draft, id: 'draft' }; return (
+                          <tr key="spare-draft" className="draft-row spare-draft" data-draft="1">
+                            <td className="rn">{offset + data.rows.length + d.slot + 1}</td>
+                            {cell(d, 'program', <strong>{d.program}</strong>)}
+                            {cell(d, 'platform', <PlatformCell value={d.platform} />)}
+                            {cell(d, 'billable_party', d.billable_party)}
+                            {cell(d, 'episode_break_date_text', d.episode_break_date_text ? <DateChip>{dayText(d.episode_break_date_text)}</DateChip> : '', { className: 'nowrap' })}
+                            {cell(d, 'source', d.source, { className: 'cell-clip' })}
+                            {cell(d, 'materials_count', d.materials_count, { className: 'num' })}
+                            <td />
+                            {cell(d, 'destination_folder', d.destination_folder, { className: 'cell-clip mono' })}
+                            <td />
+                            <td />
+                            <td />
+                          </tr>
+                        ); })() : null} /> : null}
                     </tbody>
                   </table>
                 )}
