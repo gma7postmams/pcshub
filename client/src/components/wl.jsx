@@ -394,7 +394,7 @@ export function SpareRows({ count, start, cols, lead, trail, onOpen, onSelect, o
           onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); onSelect(k, i); } }}
           onDoubleClick={() => onOpen(k, i)}
           onContextMenu={(e) => { e.preventDefault(); onSelect(k, i); if (onMenu) onMenu(e, k, i); }}>
-          {peerOf && peerOf(i, k) && peerOf(i, k).kind === 'edit' && peerOf(i, k).text != null ? <span className="peer-text">{peerOf(i, k).text}</span> : null}
+          {peerOf && peerOf(i, k) && peerOf(i, k).text != null ? <span className="peer-text">{peerOf(i, k).text}</span> : null}
         </td>
       ) : <td key={ci} className="spare" />))}
       {trail ? <td className="actions-cell" /> : null}

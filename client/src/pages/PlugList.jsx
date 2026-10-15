@@ -524,11 +524,16 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const normCells = () => (cellSel ? { r0: Math.min(cellSel.r0, cellSel.r1), r1: Math.max(cellSel.r0, cellSel.r1), c0: Math.min(cellSel.c0, cellSel.c1), c1: Math.max(cellSel.c0, cellSel.c1) } : null);
   { const n = !cellEd && cellSel ? normCells() : null;
     const cells = n ? rangeCells(rows, EDIT_COLS, n.r0, n.r1, n.c0, n.c1) : [];
-    const bd = drafts.find((d) => d.at === 'bottom');
-    curCell.current = cellEd && !isDraft(cellEd.id) ? { cells: [`${cellEd.id}:${cellEd.k}|tblr`], kind: 'edit' }
-      : cellEd && bd && cellEd.id === bd.id ? { cells: [`spare:${bd.slot}:${cellEd.k}|tblr`], kind: 'edit' }   // typed into a blank spare row: others see that cell
-      : !cellEd && spareSel && !cells.length ? { cells: [`spare:${spareSel.slot}:${spareSel.k}|tblr`], kind: 'select' }
-      : cells.length ? { cells, kind: 'select' } : null; }
+    const bd = drafts.find((d) => d.at === 'bottom');   // a new row being filled in a blank spare row: everybody sees the whole row as typed, even before it can be saved
+    const filled = bd ? ['plug_date', 'plug_id', 'prog_name', 'psd'].filter((f) => f !== 'plug_date' && String(bd[f] == null ? '' : bd[f]).trim()) : [];
+    const dKeys = filled.map((f) => `spare:${bd.slot}:${f}`);
+    const dTexts = Object.fromEntries(filled.map((f) => [`spare:${bd.slot}:${f}`, String(bd[f])]));
+    const lead = cellEd && bd && cellEd.id === bd.id ? `spare:${bd.slot}:${cellEd.k}` : !cellEd && spareSel && !cells.length ? `spare:${spareSel.slot}:${spareSel.k}` : null;
+    const base = cellEd && !isDraft(cellEd.id) ? { cells: [`${cellEd.id}:${cellEd.k}|tblr`], kind: 'edit' }
+      : lead ? { cells: [`${lead}|tblr`], kind: cellEd ? 'edit' : 'select' }
+      : cells.length ? { cells, kind: 'select' } : null;
+    const extra = dKeys.filter((x) => !(base && base.cells.some((c) => c.split('|')[0] === x))).map((x) => `${x}|tblr`);   // the unsaved new row stays visible to the others while I am elsewhere
+    curCell.current = base || extra.length ? { cells: [...(base ? base.cells : []), ...extra], kind: base ? base.kind : 'select', texts: dKeys.length ? dTexts : undefined } : null; }
   const cellDown = (e) => {
     if (e.button !== 0) return;
     const t = e.target;
@@ -741,7 +746,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     const td = { 'data-k': k, ...extra };
     const peer = peers[isDraft(r.id) && r.at === 'bottom' ? `spare:${r.slot}:${k}` : `${r.id}:${k}`];   // somebody else has this cell open or selected
     if (peer) { td.className = [extra.className, 'peer-on'].filter(Boolean).join(' '); td['data-peer'] = peer.name; td['data-peer-uid'] = peer.first ? peer.uid : undefined; td.style = peerStyle(peer); }
-    if (peer && peer.kind === 'edit' && peer.text != null && !(cellEd && cellEd.id === r.id && cellEd.k === k)) content = <span className="peer-text">{peer.text}</span>;   // and is typing in it: show it as they type
+    if (peer && peer.text != null && !(cellEd && cellEd.id === r.id && cellEd.k === k)) content = <span className="peer-text">{peer.text}</span>;   // and is typing in it: show it as they type
     if (r.__i !== undefined) {
       const ci = EDIT_COLS.indexOf(k); const n = normCells();
       td['data-r'] = r.__i; td['data-c'] = ci;

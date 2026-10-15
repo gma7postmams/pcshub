@@ -122,7 +122,7 @@ export function useCellPresence(topic, curRef) {
       setPeers((cur) => {
         const n = { ...cur };
         Object.keys(n).forEach((k) => { if (n[k].by === m.by) delete n[k]; });   // a person has one cell at a time
-        if (m.on) (m.cells || [m.key]).forEach((c, i) => { const [key, edges = 'tblr'] = String(c).split('|'); n[key] = { name: m.name, uid: m.uid, kind: m.kind, text: m.text == null ? null : String(m.text), hue: colorFor(m.uid ?? m.name), by: m.by, at: Date.now(), edges, first: i === 0 }; });
+        if (m.on) (m.cells || [m.key]).forEach((c, i) => { const [key, edges = 'tblr'] = String(c).split('|'); n[key] = { name: m.name, uid: m.uid, kind: m.kind, text: (i === 0 && m.text != null ? String(m.text) : (m.texts && m.texts[key] != null ? String(m.texts[key]) : null)), hue: colorFor(m.uid ?? m.name), by: m.by, at: Date.now(), edges, first: i === 0 }; });
         return n;
       });
     });
@@ -135,8 +135,8 @@ export function useCellPresence(topic, curRef) {
   }, [topic]);
   useEffect(() => {
     let last = null; let lastSent = 0;
-    const send = (c, on) => { post('/api/live/focus', { topic, cells: c.cells, kind: c.kind, text: c.text, on }, { quiet: true }).catch(() => {}); };
-    const sig = (c) => (c ? `${c.kind}|${c.cells.length}|${c.cells[0]}|${c.cells[c.cells.length - 1]}|${c.text == null ? '' : `t${c.text}`}` : '');
+    const send = (c, on) => { post('/api/live/focus', { topic, cells: c.cells, kind: c.kind, text: c.text, texts: c.texts, on }, { quiet: true }).catch(() => {}); };
+    const sig = (c) => (c ? `${c.kind}|${c.cells.length}|${c.cells[0]}|${c.cells[c.cells.length - 1]}|${c.text == null ? '' : `t${c.text}`}|${c.texts ? JSON.stringify(c.texts) : ''}` : '');
     const tick = () => {
       const c0 = curRef.current || null;
       const c = c0 && c0.kind === 'edit' ? { ...c0, text: typedText() } : c0;   // an open editor also shares what is typed in it, as it is typed

@@ -499,15 +499,21 @@ export default function Ingest() {
   const normCells = () => (cellSel ? { r0: Math.min(cellSel.r0, cellSel.r1), r1: Math.max(cellSel.r0, cellSel.r1), c0: Math.min(cellSel.c0, cellSel.c1), c1: Math.max(cellSel.c0, cellSel.c1) } : null);
   { const n = !editing && cellSel ? normCells() : null;
     const cells = n ? rangeCells(rows, COLS, n.r0, n.r1, n.c0, n.c1) : [];
-    curCell.current = editing && editing.id !== 'draft' ? { cells: [`${editing.id}:${editing.k}|tblr`], kind: 'edit' }
-      : editing && draft && draft.at === 'bottom' ? { cells: [`spare:${draft.slot}:${editing.k}|tblr`], kind: 'edit' }   // a new row typed into a blank spare row: others see that blank cell lit up
-      : !editing && spareSel && !cells.length ? { cells: [`spare:${spareSel.slot}:${spareSel.k}|tblr`], kind: 'select' }
-      : cells.length ? { cells, kind: 'select' } : null; }
+    const bd = draft && draft.at === 'bottom' ? draft : null;   // a new row being filled in a blank spare row: everybody sees the whole row as typed, even before it can be saved
+    const filled = bd ? ['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', 'destination_folder'].filter((f) => String(bd[f] == null ? '' : bd[f]).trim()) : [];
+    const dKeys = filled.map((f) => `spare:${bd.slot}:${f}`);
+    const dTexts = Object.fromEntries(filled.map((f) => [`spare:${bd.slot}:${f}`, String(bd[f])]));
+    const lead = editing && bd && editing.id === 'draft' ? `spare:${bd.slot}:${editing.k}` : !editing && spareSel && !cells.length ? `spare:${spareSel.slot}:${spareSel.k}` : null;
+    const base = editing && editing.id !== 'draft' ? { cells: [`${editing.id}:${editing.k}|tblr`], kind: 'edit' }
+      : lead ? { cells: [`${lead}|tblr`], kind: editing ? 'edit' : 'select' }
+      : cells.length ? { cells, kind: 'select' } : null;
+    const extra = dKeys.filter((x) => !(base && base.cells.some((c) => c.split('|')[0] === x))).map((x) => `${x}|tblr`);   // the unsaved new row stays visible to the others while I am elsewhere
+    curCell.current = base || extra.length ? { cells: [...(base ? base.cells : []), ...extra], kind: base ? base.kind : 'select', texts: dKeys.length ? dTexts : undefined } : null; }
   const cell = (r, k, children, props0 = {}) => {
     const p = peers[r.id === 'draft' && draft && draft.slot !== undefined ? `spare:${draft.slot}:${k}` : `${r.id}:${k}`];
     const props = { 'data-k': k, 'data-label': LBL[k], ...props0 };
     if (p) { props.className = [props.className, 'peer-on'].filter(Boolean).join(' '); props['data-peer'] = p.name; props['data-peer-uid'] = p.first ? p.uid : undefined; props.style = { ...(props.style || {}), ...peerStyle(p) }; }
-    if (p && p.kind === 'edit' && p.text != null && !(editing && editing.id === r.id && editing.k === k)) children = <span className="peer-text">{p.text}</span>;   // somebody is typing in this cell: show it as they type
+    if (p && p.text != null && !(editing && editing.id === r.id && editing.k === k)) children = <span className="peer-text">{p.text}</span>;   // somebody is typing in this cell: show it as they type
     const ci = COLS.indexOf(k);
     if (r.__i !== undefined && ci >= 0) {
       props['data-r'] = r.__i; props['data-c'] = ci;

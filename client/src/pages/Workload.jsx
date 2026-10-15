@@ -1937,7 +1937,7 @@ export default function Workload() {
     const p = peers[`${r.id}:${k}`];
     if (!p) return el;
     const props = { className: [el.props.className, 'peer-on'].filter(Boolean).join(' '), 'data-peer': p.name, 'data-peer-uid': p.first ? p.uid : undefined, style: { ...(el.props.style || {}), ...peerStyle(p) } };
-    if (p.kind === 'edit' && p.text != null && !/\bediting\b/.test(el.props.className || '')) return cloneElement(el, props, <span className="peer-text">{p.text}</span>);   // somebody is typing in this cell: show it as they type
+    if (p.text != null && !/\bediting\b/.test(el.props.className || '')) return cloneElement(el, props, <span className="peer-text">{p.text}</span>);   // somebody is typing in this cell: show it as they type
     return cloneElement(el, props);
   };
 
