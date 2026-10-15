@@ -479,7 +479,7 @@ export default function Ingest() {
     if (r.id === 'draft') {
       const merged = draft ? { ...draft, [k]: value } : null;
       setDraft((d) => (d ? { ...d, [k]: value } : d)); closeCell(r, k);
-      if (merged && merged.at === 'bottom' && ['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', 'destination_folder'].some((f) => String(merged[f] == null ? '' : merged[f]).trim())) { saveDraft(merged, true); return; }   // a row started in a spare row saves as soon as any cell has something in it
+      if (merged && merged.at === 'bottom' && ['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', 'destination_folder'].some((f) => String(merged[f] == null ? '' : merged[f]).trim())) { saveDraft(merged, true, move, k); return; }   // a row started in a spare row saves as soon as any cell has something in it
       if (move) moveEdit(r, k, move);
       return;
     }
@@ -599,14 +599,27 @@ export default function Ingest() {
     setDraft({ id: 'draft', at: 'bottom', slot: slot || 0, program: '', platform: '', billable_party: '', episode_break_date_text: '', source: '', materials_count: '', destination_folder: '' });
     setEditing({ id: 'draft', k, start });
   };
-  const saveDraft = async (given, partial = false) => {
+  const pendingSel = useRef(null);   // the cell to select once a row saved from a spare row is in the list
+  useEffect(() => {
+    const ps = pendingSel.current; if (!ps) return;
+    const ri = rows.findIndex((x) => x.id === ps.id); const ci = COLS.indexOf(ps.k);
+    if (ri >= 0 && ci >= 0) { pendingSel.current = null; setCellSel({ r0: ri, c0: ci, r1: ri, c1: ci }); }
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+  const saveDraft = async (given, partial = false, move = null, fromK = null) => {
     const dr = given && given.program !== undefined ? given : draft;
     if (!dr) return;
     if (!partial && (!String(dr.program).trim() || !String(dr.platform).trim())) { toast('Program and Platform are required', 'err'); return; }
     const out = await createRecs([dr], 'add row', partial);
     if (!out.added) { toast(out.firstErr || 'Could not add the row', 'err'); return; }
     setDraft(null); setEditing(null);
-    if (partial && dr.at === 'bottom' && out.ids && out.ids[0]) setPinned({ id: out.ids[0], slot: dr.slot, row: { ...dr, id: out.ids[0], at: undefined, updated_at: new Date().toISOString() } });   // it stays where I was typing
+    if (partial && dr.at === 'bottom' && out.ids && out.ids[0]) {
+      const nid = out.ids[0]; const snap = { ...dr, id: nid, at: undefined, updated_at: new Date().toISOString() };
+      setPinned({ id: nid, slot: dr.slot, row: snap });   // it stays where I was typing
+      setSpareSel(null);
+      let nextK = null;
+      if (move && move.dc && fromK) { let ci = COLS.indexOf(fromK); for (let n = 0; n < COLS.length; n++) { ci += move.dc; if (ci < 0 || ci >= COLS.length) break; const kk = COLS[ci]; if (WRITE.has(kk) && CELLS[kk] && !CELLS[kk].cm && (kk !== 'destination_folder' || canApprove)) { nextK = kk; break; } } }
+      if (nextK) setEditing({ id: nid, k: nextK }); else if (fromK) pendingSel.current = { id: nid, k: fromK };   // Tab goes on to the next cell of the same row
+    }
     toast('Ingest request added');
     load();
   };

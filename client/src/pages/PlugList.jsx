@@ -456,7 +456,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       const merged = { ...(drafts.find((d) => d.id === r.id) || r), [k]: value };
       setDrafts((ds) => ds.map((d) => (d.id === r.id ? merged : d)));
       close();
-      if (merged.at === 'bottom' && (String(merged.plug_id).trim() || String(merged.prog_name).trim() || String(merged.psd).trim())) { saveDrafts([merged], true); return; }   // a row started in a spare row saves as soon as any cell has something in it
+      if (merged.at === 'bottom' && (String(merged.plug_id).trim() || String(merged.prog_name).trim() || String(merged.psd).trim())) { saveDrafts([merged], true, move, k); return; }   // a row started in a spare row saves as soon as any cell has something in it
       if (move) moveEdit(r, k, move.dr, move.dc);
       return;
     }
@@ -511,17 +511,28 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   };
   const discardDraft = (d) => { setDrafts((ds) => ds.filter((x) => x.id !== d.id)); setCellEd((cur) => (cur && cur.id === d.id ? null : cur)); };
   // Save one new row, or (list = all of them) every new row that has something in it; rows left completely blank are dropped
-  const saveDrafts = async (list, partial = false) => {
+  const pendingSel = useRef(null);   // the cell to select once a row saved from a spare row is in the list
+  useEffect(() => {
+    const ps = pendingSel.current; if (!ps) return;
+    const ri = rows.findIndex((x) => x.id === ps.id); const ci = EDIT_COLS.indexOf(ps.k);
+    if (ri >= 0 && ci >= 0) { pendingSel.current = null; setCellSel({ r0: ri, c0: ci, r1: ri, c1: ci }); }
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+  const saveDrafts = async (list, partial = false, move = null, fromK = null) => {
     const used = list.filter((d) => String(d.plug_id).trim() || String(d.prog_name).trim() || String(d.psd).trim());
     if (!used.length) { toast('Plug ID is required', 'err'); return; }
     if (!partial && used.some((d) => !String(d.plug_id).trim())) { toast('Plug ID is required on every new row', 'err'); return; }
     const recs = used.map((d) => (partial ? { ...recOf(d), partial: true } : recOf(d)));   // partial: a row started in a spare row may still be missing its Plug ID
     try {
       let ids = (await batch(recs)).addedIds || [];
-      if (partial && used.length === 1 && used[0].at === 'bottom' && ids[0]) setPinned({ id: ids[0], slot: used[0].slot, row: { ...used[0], id: ids[0], at: undefined, requested_by: '' } });   // it stays where I was typing
+      if (partial && used.length === 1 && used[0].at === 'bottom' && ids[0]) {
+        setPinned({ id: ids[0], slot: used[0].slot, row: { ...used[0], id: ids[0], at: undefined, requested_by: '' } });   // it stays where I was typing
+        setSpareSel(null);
+        const nk = move && move.dc && fromK ? EDIT_COLS[EDIT_COLS.indexOf(fromK) + move.dc] : null;
+        if (nk) setCellEd({ id: ids[0], k: nk }); else if (fromK) pendingSel.current = { id: ids[0], k: fromK };   // Tab goes on to the next cell of the same row
+      }
       pushH({ label: 'add row', undo: async () => { await post('/api/plugs/delete-selected', { ids }); }, redo: async () => { ids = (await batch(recs)).addedIds || []; } });
       const gone = new Set(list.map((d) => d.id));
-      setDrafts((ds) => ds.filter((d) => !gone.has(d.id))); setCellEd(null);
+      setDrafts((ds) => ds.filter((d) => !gone.has(d.id))); setCellEd((cur) => (cur && gone.has(cur.id) ? null : cur));
       toast(used.length === 1 ? 'Plug added' : `${used.length} plugs added`);
       reload();
     } catch (e) { toast(e.message, 'err'); }
