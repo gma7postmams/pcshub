@@ -314,10 +314,10 @@ export default function Ingest() {
   const fetchPage = useCallback(async (quiet) => {
     const p = new URLSearchParams({ limit: size, offset });
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
-    if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
+    if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); } else if (narrow) p.set('newest', '1');   // phone: newest entries on top
     if (!quiet) { setPicked(new Set()); setAllMatching(false); }
     try { setData(await get(`/api/ingest?${p}`)); } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
-  }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset, size, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset, size, sort.k, sort.dir, narrow]); // eslint-disable-line react-hooks/exhaustive-deps
   const load = useCallback(() => fetchPage(false), [fetchPage]);
 
   useEffect(() => { load(); }, [load]);
