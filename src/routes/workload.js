@@ -39,7 +39,7 @@ const NOT_SET = '(Not set)';   // Units filter value for rows copied from the PS
 const TAB_LABEL = Object.assign(Object.create(null), { ALL: 'All', VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio', PREP: 'Ongoing' });
 
 // Field kinds: date | select | text | audio_guide | date_or_text (a picked date OR typed text). `multiline` = textarea. `hint` = placeholder from the red notes.
-const OPEN = 'Type or paste anything';
+const OPEN = 'Type or paste anything…';
 const FROM_PSD = 'Filled from the PSD Daily Plug List';
 const FIELDS = {
   work_date:      { label: 'Work Date', kind: 'date', required: true },

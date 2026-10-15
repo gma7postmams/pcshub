@@ -81,8 +81,8 @@ function CellMenu({ x, y, children, ...rest }) {
   return <div ref={ref} className="xl-menu" style={{ left: x, top: y }} {...rest}>{children}</div>;
 }
 // One cell being edited: Enter saves and moves down (Shift+Enter up), Tab / Shift+Tab move sideways, Esc cancels, clicking away saves.
-function PlugCellEditor({ k, initial, onSave, onCancel, onUndo, memo }) {
-  const [val, setValRaw] = useState(() => (memo ? loadCellText('plugs', memo, initial ?? '') : initial ?? ''));
+function PlugCellEditor({ k, initial, onSave, onCancel, onUndo, memo, startText }) {
+  const [val, setValRaw] = useState(() => (startText !== undefined ? startText : memo ? loadCellText('plugs', memo, initial ?? '') : initial ?? ''));   // startText: the key pressed on a selected cell, which replaces what was there
   const setVal = (v) => { setValRaw(v); if (memo) saveCellText('plugs', memo, v); };
   const ref = useRef(null);
   const done = useRef(false);
@@ -415,6 +415,20 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   };
 
   // click a cell to edit just that cell (Plug ID, date, program, PSD, account by)
+  // Google-Sheets style: a click only SELECTS a cell; typing, Enter, F2 or a double-click opens its editor
+  const selectCell = (r, k) => {
+    const ri = rows.findIndex((x) => x.id === r.id); const ci = EDIT_COLS.indexOf(k);
+    if (ri >= 0 && ci >= 0) setCellSel({ r0: ri, c0: ci, r1: ri, c1: ci });
+  };
+  const tapEdit = () => narrow || (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches);   // a phone / tablet has no double-click or keyboard focus: a tap opens the editor as before
+  const openSelected = (start) => {
+    const n = normCells();
+    if (!n || n.r0 !== n.r1 || n.c0 !== n.c1) return false;
+    const row = rows[n.r0]; const k = EDIT_COLS[n.c0];
+    if (!row || !k) return false;
+    setCellEd({ id: row.id, k, start: start !== undefined && k !== 'plug_date' ? start : undefined });
+    return true;
+  };
   const moveEdit = (r, k, dr, dc) => {
     const list = [...(draft ? [draft] : []), ...rows];
     let ri = list.findIndex((x) => x.id === r.id);
@@ -422,11 +436,11 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     if (ri < 0 || ci < 0) return;
     if (dc) { ci += dc; if (ci >= EDIT_COLS.length) { ci = 0; ri += 1; } else if (ci < 0) { ci = EDIT_COLS.length - 1; ri -= 1; } } else ri += dr;
     if (ri < 0 || ri >= list.length) return;
-    setCellEd({ id: list[ri].id, k: EDIT_COLS[ci] });
+    if (list[ri].id === 'draft') setCellEd({ id: 'draft', k: EDIT_COLS[ci] }); else selectCell(list[ri], EDIT_COLS[ci]);   // the unsaved new row keeps opening editors
   };
   const saveCell = async (r, k, raw, move) => {
     const value = k === 'plug_date' ? normDate(raw) : String(raw ?? '').replace(/\s*\n\s*/g, ' ').trim();
-    const close = () => setCellEd((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur));
+    const close = () => { setCellEd((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur)); if (r.id !== 'draft') selectCell(r, k); };
     if (r.id === 'draft') { setDraft((d) => (d ? { ...d, [k]: value } : d)); close(); if (move) moveEdit(r, k, move.dr, move.dc); return; }
     if (value === String(r[k] ?? '')) { close(); if (move) moveEdit(r, k, move.dr, move.dc); return; }
     if (k === 'plug_id' && !value) { toast('Plug ID is required', 'err'); close(); return; }
@@ -567,6 +581,24 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       if ((e.ctrlKey || e.metaKey) && key === 'x') { e.preventDefault(); copyCells().then((ok) => { if (ok) clearCells(); }); return; }
       if (!e.ctrlKey && !e.metaKey && (key === 'delete' || key === 'backspace')) { e.preventDefault(); clearCells(); return; }
       if (!e.ctrlKey && !e.metaKey && key === 'escape') { setCellSel(null); return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && !e.shiftKey && (key === 'enter' || key === 'f2')) { if (openSelected()) e.preventDefault(); return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && e.key.length === 1) { if (openSelected(e.key)) e.preventDefault(); return; }   // just start typing: the cell opens with what was typed replacing its content
+      if (!e.ctrlKey && !e.metaKey && key === 'tab' && cellSel.r0 === cellSel.r1 && cellSel.c0 === cellSel.c1) {   // Tab / Shift+Tab: the next / previous cell
+        e.preventDefault();
+        const nC = EDIT_COLS.length; let c = cellSel.c1 + (e.shiftKey ? -1 : 1); let r = cellSel.r1;
+        if (c >= nC) { c = 0; r += 1; } else if (c < 0) { c = nC - 1; r -= 1; }
+        if (r >= 0 && r < rows.length) setCellSel({ r0: r, c0: c, r1: r, c1: c });
+        return;
+      }
+      if (!e.ctrlKey && !e.metaKey && ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {   // Shift+arrows grow / shrink the block from the cell it started on; plain arrows move to a single cell
+        e.preventDefault();
+        const nR = rows.length; const nC = EDIT_COLS.length;
+        const dr = key === 'arrowdown' ? 1 : key === 'arrowup' ? -1 : 0; const dc = key === 'arrowright' ? 1 : key === 'arrowleft' ? -1 : 0;
+        const r1 = Math.max(0, Math.min(nR - 1, cellSel.r1 + dr)); const c1 = Math.max(0, Math.min(nC - 1, cellSel.c1 + dc));
+        setCellSel(e.shiftKey ? { ...cellSel, r1, c1 } : { r0: r1, c0: c1, r1, c1 });
+        requestAnimationFrame(() => { const td = document.querySelector(`td[data-r="${r1}"][data-c="${c1}"]`); if (td && td.scrollIntoView) td.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
+        return;
+      }
     }
     if (e.ctrlKey || e.metaKey) {
       if (key === 'a') { e.preventDefault(); if (isAdminUser && allOn && total > rows.length) setAllMatching(true); else setPicked(new Set(rows.map((r) => r.id))); }   // Admin, again: every matching plug on every page
@@ -651,12 +683,17 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       if (n && r.__i >= n.r0 && r.__i <= n.r1 && ci >= n.c0 && ci <= n.c1) td['data-sel'] = '1';
     }
     if (canWrite && cellEd && cellEd.id === r.id && cellEd.k === k) {
-      return <td key={k} {...td} className={`editing ${extra.className || ''}`.trim()} onClick={(e) => e.stopPropagation()}><PlugCellEditor memo={`${r.id}:${k}`} k={k} initial={r[k]} onSave={(v, move) => saveCell(r, k, v, move)} onCancel={() => setCellEd(null)} onUndo={(sh) => { setCellEd(null); if (sh) redo(); else undo(); }} /></td>;
+      return <td key={k} {...td} className={`editing ${extra.className || ''}`.trim()} onClick={(e) => e.stopPropagation()}><PlugCellEditor memo={`${r.id}:${k}`} startText={cellEd.start} k={k} initial={r[k]} onSave={(v, move) => saveCell(r, k, v, move)} onCancel={() => { setCellEd(null); if (r.id !== 'draft') selectCell(r, k); }} onUndo={(sh) => { setCellEd(null); if (sh) redo(); else undo(); }} /></td>;
     }
     if (!canWrite) return <td key={k} {...td}>{content}</td>;
-    return <td key={k} {...td} className={`editable ${extra.className || ''}`.trim()} title="Click to edit" tabIndex={0}
-      onClick={(e) => { e.stopPropagation(); setCellEd({ id: r.id, k }); }}
-      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); setCellEd({ id: r.id, k }); } }}>{content}</td>;
+    return <td key={k} {...td} className={`editable ${extra.className || ''}`.trim()} title="Click to select, double-click or press Enter to edit" tabIndex={0}
+      onClick={(e) => {   // select only; Shift / Ctrl+click and drags are the block selection's (see cellDown)
+        e.stopPropagation();
+        if (r.id === 'draft' || tapEdit()) { setCellEd({ id: r.id, k }); return; }
+        if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+        if (r.__i !== undefined) setCellSel({ r0: r.__i, c0: EDIT_COLS.indexOf(k), r1: r.__i, c1: EDIT_COLS.indexOf(k) });
+      }}
+      onDoubleClick={(e) => { e.stopPropagation(); setCellEd({ id: r.id, k }); }}>{content}</td>;
   };
   const dataCells = (r0, idx) => { const r = idx === undefined ? r0 : { ...r0, __i: idx }; return [
     editCell(r, 'plug_date', r.plug_date ? dateLabel(r.plug_date) : '', { 'data-label': 'Date', className: 'nowrap' }),
