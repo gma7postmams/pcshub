@@ -316,7 +316,7 @@ export default function Ingest() {
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
     if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); } else if (narrow) p.set('newest', '1');   // phone: newest entries on top
     if (!quiet) { setPicked(new Set()); setAllMatching(false); }
-    try { setData(await get(`/api/ingest?${p}`)); } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
+    try { const res = await get(`/api/ingest?${p}`); setData({ ...res, _sort: sort.k || '' }); } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
   }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset, size, sort.k, sort.dir, narrow]); // eslint-disable-line react-hooks/exhaustive-deps
   const load = useCallback(() => fetchPage(false), [fetchPage]);
 
@@ -791,7 +791,8 @@ export default function Ingest() {
   const spareN = useSpareRows('.wl-card .wl-fit', spareOn, `${offset}|${full}`);
   // Every record has a fixed row number (like a sheet row). With no filter and no sort the table shows those numbers with blank rows in the gaps; with a filter or a sort
   // it lists just the matching records (in row order unless sorted) and the blank rows start after the last number in use.
-  const gapsOn = canWrite && !narrow && !!data && !!data.rows && !sort.k;   // blank rows for the row numbers nobody uses (not when sorted: the order is then not the row order)
+  const listSort = data && data._sort !== undefined ? data._sort : sort.k;   // the sort the list on screen was read with (the new one only shows once its rows arrive)
+  const gapsOn = canWrite && !narrow && !!data && !!data.rows && !listSort;   // blank rows for the row numbers nobody uses (not when sorted: the order is then not the row order)
   const lastPos = rows.length ? (rows[rows.length - 1].row_pos || 0) : 0;
   const maxPos = data && data.maxPos ? data.maxPos : 0;
   const usedSet = new Set(data && data.usedPos ? data.usedPos : rows.map((x) => x.row_pos));   // numbers in use, including by records the filter hides
@@ -945,7 +946,7 @@ export default function Ingest() {
   const renderRow = (r0, i, rnText) => { const r = { ...r0, __i: i }; return (
 <tr key={r.id} data-id={r.id} data-pinned={rnText ? '1' : undefined} className={`clickable${picked.has(r.id) ? ' picked' : ''}`} onMouseDown={cellDown} onContextMenu={(e) => rowMenu(e, r)}
                           onClick={() => { if (suppress.current) { suppress.current = false; return; } openDetail(r.id); }}>
-                          {!narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} onClick={(e) => e.stopPropagation()} title="Click to select the row (Shift-click a range, Ctrl-click to add, drag down)">{rnText || (sort.k ? offset + i + 1 : r.row_pos || i + 1)}</td> : null}
+                          {!narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} onClick={(e) => e.stopPropagation()} title="Click to select the row (Shift-click a range, Ctrl-click to add, drag down)">{rnText || (listSort ? offset + i + 1 : r.row_pos || i + 1)}</td> : null}
                           {narrow && canDelete ? <td className="chk" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={picked.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${r.program}`} /></td> : null}
                           {cell(r, 'program', <strong>{r.program}</strong>)}
                           {cell(r, 'platform', <PlatformCell value={r.platform} />)}
