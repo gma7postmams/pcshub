@@ -195,6 +195,13 @@ CREATE TABLE IF NOT EXISTS ingest_records (
 );
 CREATE INDEX IF NOT EXISTS ingest_status_idx ON ingest_records (status);
 CREATE INDEX IF NOT EXISTS ingest_created_idx ON ingest_records (created_at DESC);
+-- ROW NUMBER: where the record sits in the Ingest table, like a spreadsheet row. It is fixed (a delete leaves a blank row, nothing renumbers); a record
+-- typed into a blank row keeps that row's number. Records from before this existed are numbered in the order they were entered.
+ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS row_pos INT;
+UPDATE ingest_records r SET row_pos = (SELECT COALESCE(MAX(x.row_pos), 0) FROM ingest_records x) + n.rn
+  FROM (SELECT id, row_number() OVER (ORDER BY created_at, id) AS rn FROM ingest_records WHERE row_pos IS NULL) n
+ WHERE r.id = n.id AND r.row_pos IS NULL;
+CREATE INDEX IF NOT EXISTS ingest_row_pos_idx ON ingest_records (row_pos);
 
 CREATE TABLE IF NOT EXISTS approval_requests (
   id                SERIAL PRIMARY KEY,

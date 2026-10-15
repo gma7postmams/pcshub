@@ -109,8 +109,8 @@ const SORTS = {
 };
 function orderBy(q) {
   const col = Object.prototype.hasOwnProperty.call(SORTS, q.sort) ? SORTS[q.sort] : null;
-  if (!col) return 'i.created_at ASC, i.id ASC';   // like a sheet: the order things were entered, so a new row lands at the bottom, where the blank rows are
-  return `${col} ${q.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, i.created_at ASC, i.id ASC`;
+  if (!col) return 'i.row_pos ASC NULLS LAST, i.id ASC';   // like a sheet: every record keeps the row it was typed into
+  return `${col} ${q.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, i.row_pos ASC NULLS LAST, i.id ASC`;
 }
 
 // ---- audit helpers ----
@@ -176,7 +176,14 @@ router.get('/', asyncH(async (req, res) => {
   const { rows } = await db.query(
     `${SELECT} ${whereSql} ORDER BY ${orderBy(req.query)} LIMIT ${limit} OFFSET ${offset}`, params
   );
-  res.json({ total: countQ.rows[0].n, rows });
+  // for the table's blank rows: the highest row number in use, and (when more records follow this page) the row number of the next one
+  const maxQ = await db.query('SELECT COALESCE(MAX(row_pos), 0)::int AS m FROM ingest_records');
+  let nextPos = null;
+  if (rows.length === limit) {
+    const nx = await db.query(`SELECT i.row_pos FROM ingest_records i LEFT JOIN users ru ON ru.id=i.requested_by_user_id ${whereSql} ORDER BY ${orderBy(req.query)} LIMIT 1 OFFSET ${offset + limit}`, params);
+    nextPos = nx.rows.length ? nx.rows[0].row_pos : null;
+  }
+  res.json({ total: countQ.rows[0].n, rows, maxPos: maxQ.rows[0].m, nextPos });
 }));
 
 // Excel export of what the list shows: same filters, search and sort. Logged in the audit trail.
@@ -365,8 +372,8 @@ router.post('/import', requireAction('ingest.write'), upload.single('file'), one
         if (have.has(key)) { existing++; continue; }   // compared with what was already there, not with earlier rows of this file
         const { rows } = await c.query(
           `INSERT INTO ingest_records (program, billable_party, platform, episode_date, episode_break_date_text, materials_count, source, destination_folder,
-             approved_by, requested_by_user_id, requested_by_psd, remarks, created_by, updated_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13) RETURNING id`,
+             approved_by, requested_by_user_id, requested_by_psd, remarks, created_by, updated_by, row_pos)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13, (SELECT COALESCE(MAX(row_pos), 0) + 1 FROM ingest_records)) RETURNING id`,
           [r.program, r.billable_party, r.platform, r.episode_date, r.episode_break_date_text, r.materials_count, r.source, r.destination_folder,
             r.approved_by, r.requested_by_user_id, r.requested_by_psd, r.remarks, req.user.id]
         );
@@ -410,14 +417,19 @@ async function notifyNewIngest(c, actor, id, r) {
 router.post('/', requireAction('ingest.write'), asyncH(async (req, res) => {
   const created = await db.tx(async (c) => {
     const r = await parseBody(c, req.body, req.user);
+    // the row it was typed into (a blank row of the table keeps its number); if that number is taken or none was given, the next free one at the bottom
+    await c.query('LOCK TABLE ingest_records IN SHARE ROW EXCLUSIVE MODE');
+    const want = Number.isInteger(req.body && req.body.row_pos) && req.body.row_pos >= 1 && req.body.row_pos <= 1000000 ? req.body.row_pos : null;
+    const taken = want ? (await c.query('SELECT 1 FROM ingest_records WHERE row_pos = $1', [want])).rowCount > 0 : true;
+    const pos = want && !taken ? want : (await c.query('SELECT COALESCE(MAX(row_pos), 0) + 1 AS p FROM ingest_records')).rows[0].p;
     const { rows } = await c.query(
       `INSERT INTO ingest_records (program, billable_party, platform, episode_date, episode_break_date_text,
          materials_count, source, destination_folder, approved_by, requested_by_user_id, requested_by_psd, remarks,
-         created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13) RETURNING id`,
+         created_by, updated_by, row_pos)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13, $14) RETURNING id`,
       [r.program, r.billable_party, r.platform, r.episode_date, r.episode_break_date_text,
         r.materials_count, r.source, r.destination_folder, r.approved_by, r.requested_by_user_id,
-        r.requested_by_psd, r.remarks, req.user.id]
+        r.requested_by_psd, r.remarks, req.user.id, pos]
     );
     await audit(req, 'ingest.create', 'ingest_record', rows[0].id, r, c);
     if (filled(r.program) && filled(r.platform)) await notifyNewIngest(c, req.user, rows[0].id, r);   // a half-filled row is announced once it has a Program and a Platform

@@ -425,6 +425,7 @@ export default function Ingest() {
     document.addEventListener('mousedown', down, true); document.addEventListener('keydown', esc);
     return () => { document.removeEventListener('mousedown', down, true); document.removeEventListener('keydown', esc); };
   }, [pinned]);
+  useEffect(() => { if (pinned && rows.some((x) => x.id === pinned.id)) setPinned(null); }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setPinned(null); }, [offset, size, filt.from, filt.to, filt.status, filt.program, filt.platform, filt.approval, q, sort.k, sort.dir]);
   const [spareSel, setSpareSel] = useState(null);   // the blank cell picked in a spare row { slot, k }
   const [cellSel, setCellSel] = useState(null);      // a block of cells picked by dragging { r0, c0, r1, c1 }
@@ -567,6 +568,7 @@ export default function Ingest() {
     program: o.program || '', platform: o.platform || '', billable_party: o.billable_party || '', episode_break_date_text: o.episode_break_date_text || '',
     source: o.source || '', materials_count: o.materials_count === '' || o.materials_count == null ? null : Number(o.materials_count),
     destination_folder: canApprove ? (o.destination_folder || '') : '', remarks: '',
+    row_pos: o.at === 'bottom' && o.slot ? o.slot : undefined,   // a row typed into a blank row keeps that row's number
   });
   const createRecs = async (list, label, partial = false) => {   // new records from { program, platform, … } objects; one undo step removes them again
     let ids = [];
@@ -596,7 +598,7 @@ export default function Ingest() {
       setEditing({ id: 'draft', k, start });
       return;
     }
-    setDraft({ id: 'draft', at: 'bottom', slot: slot || 0, program: '', platform: '', billable_party: '', episode_break_date_text: '', source: '', materials_count: '', destination_folder: '' });
+    setDraft({ id: 'draft', at: 'bottom', slot: slot || trailStart, program: '', platform: '', billable_party: '', episode_break_date_text: '', source: '', materials_count: '', destination_folder: '' });
     setEditing({ id: 'draft', k, start });
   };
   const pendingSel = useRef(null);   // the cell to select once a row saved from a spare row is in the list
@@ -787,6 +789,14 @@ export default function Ingest() {
     if (!editing && draft && draft.at === 'bottom' && Object.keys(draft).every((k) => ['id', 'at', 'slot'].includes(k) || !String(draft[k] == null ? '' : draft[k]).trim())) setDraft(null);
   }, [editing, draft]);
   const spareN = useSpareRows('.wl-card .wl-fit', spareOn, `${offset}|${full}`);
+  // Every record has a fixed row number (like a sheet row). With no filter and no sort the table shows those numbers with blank rows in the gaps; with a filter or a sort
+  // it lists just the matching records (in row order unless sorted) and the blank rows start after the last number in use.
+  const noFilt = !filt.status && !filt.program && !filt.platform && !filt.from && !filt.to && !filt.approval && !filt.q && !q;
+  const gridMode = noFilt && !sort.k;
+  const gapsOn = canWrite && !narrow && !!data && !!data.rows && gridMode;
+  const lastPos = rows.length ? (rows[rows.length - 1].row_pos || 0) : 0;
+  const maxPos = data && data.maxPos ? data.maxPos : 0;
+  const trailStart = gridMode ? lastPos + 1 : maxPos + 1;
   const allOn = rows.length > 0 && rows.every((r) => picked.has(r.id));
   const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const removePicked = async () => {
@@ -820,7 +830,16 @@ export default function Ingest() {
     const key = e.key.toLowerCase();
     if (spareSel && !picked.size && !cellSel) {   // a blank cell in a spare row is selected
       const live = SPARE_COLS.map((c, i) => (c ? i : -1)).filter((i) => i >= 0);
-      const ci = SPARE_COLS.indexOf(spareSel.k); const move = (slot, c) => { if (slot < 0 || slot >= spareN || c < 0 || c >= live.length) return; setSpareSel({ slot, k: SPARE_COLS[live[c]] }); requestAnimationFrame(() => { const el = document.querySelectorAll('tr.spare-row, tr.spare-draft')[0]; const row = document.querySelectorAll('.wl-card tbody tr')[rows.length + slot]; if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' }); }); };
+      const ci = SPARE_COLS.indexOf(spareSel.k); const move = (slot, c) => {
+        if (slot < 1 || c < 0 || c >= live.length) return;
+        const kk = SPARE_COLS[live[c]];
+        const rec = rows.find((x) => x.row_pos === slot);
+        if (rec) { setSpareSel(null); selectCell(rec, kk); return; }   // a saved record sits on that row number
+        const end = spareOn ? trailStart + spareN - 1 : (data && data.nextPos ? data.nextPos - 1 : lastPos);
+        if (slot > end || (!gridMode && slot < trailStart)) return;
+        setSpareSel({ slot, k: kk });
+        requestAnimationFrame(() => { const row = document.querySelector(`.wl-card tr[data-pos="${slot}"]`); if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' }); });
+      };
       const li = live.indexOf(ci);
       if (!e.ctrlKey && !e.metaKey && ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) { e.preventDefault(); move(spareSel.slot + (key === 'arrowdown' ? 1 : key === 'arrowup' ? -1 : 0), li + (key === 'arrowright' ? 1 : key === 'arrowleft' ? -1 : 0)); return; }
       if (!e.ctrlKey && !e.metaKey && key === 'tab') { e.preventDefault(); const n = li + (e.shiftKey ? -1 : 1); if (n >= live.length) move(spareSel.slot + 1, 0); else if (n < 0) move(spareSel.slot - 1, live.length - 1); else move(spareSel.slot, n); return; }
@@ -926,7 +945,7 @@ export default function Ingest() {
   const renderRow = (r0, i, rnText) => { const r = { ...r0, __i: i }; return (
 <tr key={r.id} data-id={r.id} data-pinned={rnText ? '1' : undefined} className={`clickable${picked.has(r.id) ? ' picked' : ''}`} onMouseDown={cellDown} onContextMenu={(e) => rowMenu(e, r)}
                           onClick={() => { if (suppress.current) { suppress.current = false; return; } openDetail(r.id); }}>
-                          {!narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} onClick={(e) => e.stopPropagation()} title="Click to select the row (Shift-click a range, Ctrl-click to add, drag down)">{rnText || i + 1}</td> : null}
+                          {!narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} onClick={(e) => e.stopPropagation()} title="Click to select the row (Shift-click a range, Ctrl-click to add, drag down)">{rnText || r.row_pos || i + 1}</td> : null}
                           {narrow && canDelete ? <td className="chk" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={picked.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${r.program}`} /></td> : null}
                           {cell(r, 'program', <strong>{r.program}</strong>)}
                           {cell(r, 'platform', <PlatformCell value={r.platform} />)}
@@ -941,6 +960,40 @@ export default function Ingest() {
                           <td data-k="updated" data-label="Updated" className="dim nowrap">{ago(r.updated_at)}</td>
                         </tr>
   ); };
+  const spareNode = () => {   // the row being typed into (or just saved, until the list has it), shown in place of its blank row
+    if (draft && draft.at === 'bottom') { const d = { ...draft, id: 'draft' }; return (
+      <tr key="spare-draft" className="draft-row spare-draft" data-draft="1">
+        <td className="rn">{d.slot}</td>
+        {cell(d, 'program', <strong>{d.program}</strong>)}
+        {cell(d, 'platform', <PlatformCell value={d.platform} />)}
+        {cell(d, 'billable_party', d.billable_party)}
+        {cell(d, 'episode_break_date_text', d.episode_break_date_text ? <DateChip>{dayText(d.episode_break_date_text)}</DateChip> : '', { className: 'nowrap' })}
+        {cell(d, 'source', d.source, { className: 'cell-clip' })}
+        {cell(d, 'materials_count', d.materials_count, { className: 'num' })}
+        <td />
+        {cell(d, 'destination_folder', d.destination_folder, { className: 'cell-clip mono' })}
+        <td />
+        <td />
+        <td />
+      </tr>
+    ); }
+    if (pinned) { const pr = rows.find((x) => x.id === pinned.id) || pinned.row; const pi = rows.findIndex((x) => x.id === pinned.id); return renderRow(pr, pi >= 0 ? pi : undefined, pinned.slot); }
+    return null;
+  };
+  const renderBodyRows = () => {   // the records and, between them, the blank rows of the numbers nobody has used
+    const spareProps = { cols: SPARE_COLS, lead: 'rn', onOpen: openSpare, onSelect: selectSpare, sel: spareSel, peerOf: (pos, k) => peers[`spare:${pos}:${k}`],
+      onMenu: (e) => setCtx({ x: e.clientX, y: e.clientY }), at: draft && draft.at === 'bottom' ? draft.slot : pinned ? pinned.slot : -1, node: spareNode() };
+    const out = []; let prev = gapsOn && offset === 0 ? 0 : null;
+    data.rows.forEach((r0, i) => {
+      const pos = r0.row_pos || 0;
+      if (gapsOn && prev !== null && pos - prev - 1 > 0) out.push(<SpareRows key={`gap-${prev}`} count={Math.min(pos - prev - 1, 2000)} pos0={prev + 1} {...spareProps} />);
+      out.push(renderRow(r0, i));
+      prev = pos;
+    });
+    if (gapsOn && !spareOn && prev !== null && data.nextPos && data.nextPos - prev - 1 > 0) out.push(<SpareRows key="gap-tail" count={Math.min(data.nextPos - prev - 1, 2000)} pos0={prev + 1} {...spareProps} />);
+    if (spareOn) out.push(<SpareRows key="spare-tail" count={spareN} pos0={trailStart} {...spareProps} />);
+    return out;
+  };
   return (
     <main className="container wide wl-page">
       <h1 className="sr-only">Ingest</h1>
@@ -1025,25 +1078,7 @@ export default function Ingest() {
                           </td>
                         </tr>
                       ); })() : null}
-                      {data.rows.map((r0, i) => (pinned && pinned.id === r0.id ? null : renderRow(r0, i)))}
-                      {spareOn ? <SpareRows count={spareN} start={offset + data.rows.length} cols={SPARE_COLS} lead="rn" onOpen={openSpare} onSelect={selectSpare} sel={spareSel} peerOf={(i, k) => peers[`spare:${i}:${k}`]} onMenu={(e) => setCtx({ x: e.clientX, y: e.clientY })}
-                        at={draft && draft.at === 'bottom' ? draft.slot : pinned ? pinned.slot : -1}
-                        node={pinned && !(draft && draft.at === 'bottom') ? (() => { const pr = rows.find((x) => x.id === pinned.id) || pinned.row; const pi = rows.findIndex((x) => x.id === pinned.id); return renderRow(pr, pi >= 0 ? pi : undefined, offset + rows.length + pinned.slot + 1); })() : draft && draft.at === 'bottom' ? (() => { const d = { ...draft, id: 'draft' }; return (
-                          <tr key="spare-draft" className="draft-row spare-draft" data-draft="1">
-                            <td className="rn">{offset + data.rows.length + d.slot + 1}</td>
-                            {cell(d, 'program', <strong>{d.program}</strong>)}
-                            {cell(d, 'platform', <PlatformCell value={d.platform} />)}
-                            {cell(d, 'billable_party', d.billable_party)}
-                            {cell(d, 'episode_break_date_text', d.episode_break_date_text ? <DateChip>{dayText(d.episode_break_date_text)}</DateChip> : '', { className: 'nowrap' })}
-                            {cell(d, 'source', d.source, { className: 'cell-clip' })}
-                            {cell(d, 'materials_count', d.materials_count, { className: 'num' })}
-                            <td />
-                            {cell(d, 'destination_folder', d.destination_folder, { className: 'cell-clip mono' })}
-                            <td />
-                            <td />
-                            <td />
-                          </tr>
-                        ); })() : null} /> : null}
+                      {renderBodyRows()}
                     </tbody>
                   </table>
                 )}
