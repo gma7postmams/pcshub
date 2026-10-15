@@ -1918,7 +1918,7 @@ export default function Workload() {
     if (teams.includes('VEDIT')) parts.push({ k: 'breakdate_vedit', hue: 'orange', tag: 'VEDIT' });
     const locked = canWrite && rowLocked(r);
     return (
-      <td key="breakdate_vgfx" data-k="breakdate_vgfx" className={r.is_priority ? 'prio' : undefined} title={locked ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}
+      <td key="breakdate_vgfx" data-k="breakdate_vgfx" className={[r.is_priority ? 'prio' : '', canWrite && !locked ? 'editable' : ''].filter(Boolean).join(' ') || undefined} title={locked ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}
         onClick={canWrite && !locked ? (e) => {   // the whole cell is a click target (not just the pills): it selects, so keyboard shortcuts and paste work
           if (e.target.closest && e.target.closest('.cell-editor-inline')) return;
           if (tapEdit()) { const ek = editKeyFor(r, 'breakdate_vgfx'); if (ek) setEditing({ id: r.id, k: ek }); return; }
