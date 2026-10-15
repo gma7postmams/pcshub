@@ -482,6 +482,15 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     setCellEd({ id: made[0].id, k: 'plug_id' });
     requestAnimationFrame(() => { const box = document.querySelector('.plug-list .wl-fit'); if (box) box.scrollTop = 0; });
   };
+  const [pinned, setPinned] = useState(null);   // a row just saved from a spare row stays in that spot (no jump) until I move on { id, slot, row }
+  useEffect(() => {   // moving on from the row (a click anywhere else, or Esc) lets it settle into its sorted place
+    if (!pinned) return undefined;
+    const down = (e) => { if (!(e.target && e.target.closest && e.target.closest('tr[data-pinned]'))) setPinned(null); };
+    const esc = (e) => { if (e.key === 'Escape' && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target || {}).tagName || '')) setPinned(null); };
+    document.addEventListener('mousedown', down, true); document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', down, true); document.removeEventListener('keydown', esc); };
+  }, [pinned]);
+  useEffect(() => { setPinned(null); }, [offset, size, query, period, anchor, range && range.from, filt.in_workload, filt.psd, filt.account_by]);
   const [spareSel, setSpareSel] = useState(null);   // the blank cell picked in a spare row { slot, k }
   const selectSpare = (k, slot) => { setSpareSel({ slot, k }); setCellSel(null); clearPicks(); setCellEd(null); };
   const draftHasText = (d) => !!d && ['plug_id', 'prog_name', 'psd'].some((x) => String(d[x] == null ? '' : d[x]).trim());
@@ -509,6 +518,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     const recs = used.map((d) => (partial ? { ...recOf(d), partial: true } : recOf(d)));   // partial: a row started in a spare row may still be missing its Plug ID
     try {
       let ids = (await batch(recs)).addedIds || [];
+      if (partial && used.length === 1 && used[0].at === 'bottom' && ids[0]) setPinned({ id: ids[0], slot: used[0].slot, row: { ...used[0], id: ids[0], at: undefined, requested_by: '' } });   // it stays where I was typing
       pushH({ label: 'add row', undo: async () => { await post('/api/plugs/delete-selected', { ids }); }, redo: async () => { ids = (await batch(recs)).addedIds || []; } });
       const gone = new Set(list.map((d) => d.id));
       setDrafts((ds) => ds.filter((d) => !gone.has(d.id))); setCellEd(null);
@@ -774,6 +784,19 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     <td key="in_workload" data-label="In Workload" className="plug-inwl">{isDraft(r.id) ? null : r.in_workload ? <span className="chip c-green">In workload</span> : <span className="dim">—</span>}</td>,
   ]; };
 
+  const renderRow = (r, i, rnText) => (
+                    <tr key={r.id} data-id={r.id} data-pinned={rnText ? '1' : undefined} className={`${r.in_workload ? 'done' : ''}${picked.has(r.id) ? ' picked' : ''}`.trim()}
+                      onMouseDown={canWrite ? cellDown : undefined} onContextMenu={canWrite ? (e) => rowMenu(e, r) : undefined}>
+                      {canWrite && !narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} title="Click to select the row (Shift-click a range, Ctrl-click to add; Ctrl+C copies, Ctrl+V pastes)">{rnText || offset + i + 1}</td> : null}
+                      {canWrite && narrow ? <td className="chk"><input type="checkbox" checked={picked.has(r.id)} onChange={() => { setPicked((cur) => { const n = new Set(cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; }); lastPick.current = r.id; }} aria-label={`Select ${r.plug_id}`} /></td> : null}
+                      {dataCells(r, i)}
+                      {canWrite ? (
+                        <td className="plug-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowMenu onEdit={() => setEditing(r)} onDelete={() => removePlug(r)} />
+                        </td>
+                      ) : null}
+                    </tr>
+  );
   return (
     <div className={`plug-list${full ? ' full' : ''}`}>
       <div className="plug-bar">
@@ -851,22 +874,10 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
                       </td>
                     </tr>
                   ))}
-                  {rows.length ? rows.map((r, i) => (
-                    <tr key={r.id} data-id={r.id} className={`${r.in_workload ? 'done' : ''}${picked.has(r.id) ? ' picked' : ''}`.trim()}
-                      onMouseDown={canWrite ? cellDown : undefined} onContextMenu={canWrite ? (e) => rowMenu(e, r) : undefined}>
-                      {canWrite && !narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} title="Click to select the row (Shift-click a range, Ctrl-click to add; Ctrl+C copies, Ctrl+V pastes)">{offset + i + 1}</td> : null}
-                      {canWrite && narrow ? <td className="chk"><input type="checkbox" checked={picked.has(r.id)} onChange={() => { setPicked((cur) => { const n = new Set(cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; }); lastPick.current = r.id; }} aria-label={`Select ${r.plug_id}`} /></td> : null}
-                      {dataCells(r, i)}
-                      {canWrite ? (
-                        <td className="plug-actions" onClick={(e) => e.stopPropagation()}>
-                          <RowMenu onEdit={() => setEditing(r)} onDelete={() => removePlug(r)} />
-                        </td>
-                      ) : null}
-                    </tr>
-                  )) : !draft ? <tr><td colSpan={canWrite ? 8 : 6} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr> : null}
+                  {rows.length ? rows.map((r, i) => (pinned && pinned.id === r.id ? null : renderRow(r, i))) : !draft ? <tr><td colSpan={canWrite ? 8 : 6} className="empty">{query ? 'No plugs match that search.' : period === 'day' ? 'No plugs on this day.' : 'No plugs in this period.'}</td></tr> : null}
                   {spareOn ? <SpareRows count={spareN} start={offset + rows.length} cols={EDIT_COLS.concat([null, null])} lead="rn" trail onOpen={openSpare} onSelect={selectSpare} sel={spareSel} peerOf={(i, k) => peers[`spare:${i}:${k}`]} onMenu={(e) => setCtx({ x: e.clientX, y: e.clientY })}
-                    at={drafts.find((d) => d.at === 'bottom') ? drafts.find((d) => d.at === 'bottom').slot : -1}
-                    node={drafts.find((d) => d.at === 'bottom') ? (
+                    at={drafts.find((d) => d.at === 'bottom') ? drafts.find((d) => d.at === 'bottom').slot : pinned ? pinned.slot : -1}
+                    node={pinned && !drafts.find((d) => d.at === 'bottom') ? (() => { const pr = rows.find((x) => x.id === pinned.id) || pinned.row; const pi = rows.findIndex((x) => x.id === pinned.id); return renderRow(pr, pi >= 0 ? pi : undefined, offset + rows.length + pinned.slot + 1); })() : drafts.find((d) => d.at === 'bottom') ? (
                       <tr key="spare-draft" className="draft-row spare-draft" data-draft="1">
                         <td className="rn">{offset + rows.length + drafts.find((d) => d.at === 'bottom').slot + 1}</td>
                         {dataCells(drafts.find((d) => d.at === 'bottom'))}

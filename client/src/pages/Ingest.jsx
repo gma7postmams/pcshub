@@ -417,6 +417,15 @@ export default function Ingest() {
   // other people's changes appear by themselves (not while a cell, form, detail or dialog is open here, so nothing is overwritten under your hands)
   useLive(['ingest'], () => fetchPage(true), () => !!(editing || form || detail || reasonFor || draft || document.querySelector('.modal-backdrop')));
   const [ctx, setCtx] = useState(null);              // right-click menu position
+  const [pinned, setPinned] = useState(null);   // a row just saved from a spare row stays in that spot (no jump) until I move on { id, slot, row }
+  useEffect(() => {   // moving on from the row (a click anywhere else, or Esc) lets it settle into its sorted place
+    if (!pinned) return undefined;
+    const down = (e) => { if (!(e.target && e.target.closest && e.target.closest('tr[data-pinned]'))) setPinned(null); };
+    const esc = (e) => { if (e.key === 'Escape' && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target || {}).tagName || '')) setPinned(null); };
+    document.addEventListener('mousedown', down, true); document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', down, true); document.removeEventListener('keydown', esc); };
+  }, [pinned]);
+  useEffect(() => { setPinned(null); }, [offset, size, filt.from, filt.to, filt.status, filt.program, filt.platform, filt.approval, q, sort.k, sort.dir]);
   const [spareSel, setSpareSel] = useState(null);   // the blank cell picked in a spare row { slot, k }
   const [cellSel, setCellSel] = useState(null);      // a block of cells picked by dragging { r0, c0, r1, c1 }
   const hist = useRef({ past: [], future: [] });
@@ -572,7 +581,7 @@ export default function Ingest() {
         redo: async () => { const again = []; for (const o of list) { try { again.push((await post('/api/ingest', partial ? { ...bodyOf(o), partial: true } : bodyOf(o))).id); } catch (e) { /* skipped */ } } ids = again; },
       });
     }
-    return { added: ids.length, failed, firstErr };
+    return { added: ids.length, failed, firstErr, ids };
   };
   const SPARE_COLS = ['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', null, canApprove ? 'destination_folder' : null, null, null, null];
   const selectSpare = (k, slot) => { setSpareSel({ slot, k }); setCellSel(null); clearPicks(); setEditing(null); };
@@ -597,6 +606,7 @@ export default function Ingest() {
     const out = await createRecs([dr], 'add row', partial);
     if (!out.added) { toast(out.firstErr || 'Could not add the row', 'err'); return; }
     setDraft(null); setEditing(null);
+    if (partial && dr.at === 'bottom' && out.ids && out.ids[0]) setPinned({ id: out.ids[0], slot: dr.slot, row: { ...dr, id: out.ids[0], at: undefined, updated_at: new Date().toISOString() } });   // it stays where I was typing
     toast('Ingest request added');
     load();
   };
@@ -900,6 +910,24 @@ export default function Ingest() {
     return () => { window.removeEventListener('keydown', key); window.removeEventListener('paste', paste); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); window.removeEventListener('mousedown', down); };
   }, []);
 
+  const renderRow = (r0, i, rnText) => { const r = { ...r0, __i: i }; return (
+<tr key={r.id} data-id={r.id} data-pinned={rnText ? '1' : undefined} className={`clickable${picked.has(r.id) ? ' picked' : ''}`} onMouseDown={cellDown} onContextMenu={(e) => rowMenu(e, r)}
+                          onClick={() => { if (suppress.current) { suppress.current = false; return; } openDetail(r.id); }}>
+                          {!narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} onClick={(e) => e.stopPropagation()} title="Click to select the row (Shift-click a range, Ctrl-click to add, drag down)">{rnText || i + 1}</td> : null}
+                          {narrow && canDelete ? <td className="chk" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={picked.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${r.program}`} /></td> : null}
+                          {cell(r, 'program', <strong>{r.program}</strong>)}
+                          {cell(r, 'platform', <PlatformCell value={r.platform} />)}
+                          {cell(r, 'billable_party', r.billable_party)}
+                          {cell(r, 'episode_break_date_text', <DateChip>{dayText(r.episode_break_date_text || r.episode_date)}</DateChip>, { className: 'nowrap' })}
+                          {cell(r, 'source', r.source, { className: 'cell-clip', title: r.source || '' })}
+                          {cell(r, 'materials_count', r.materials_count != null ? r.materials_count : '', { className: 'num' })}
+                          {cell(r, 'requested_by', r.requested_by_psd || r.requested_by_name || '', { title: 'Filled in automatically from the person who created the request' })}
+                          {cell(r, 'destination_folder', r.destination_folder, { className: 'cell-clip mono', title: r.destination_folder || '' })}
+                          {cell(r, 'approved_by', <ApprovedBy r={r} canApprove={canApprove} />)}
+                          {cell(r, 'cm_status', <CmStatus r={r} />)}
+                          <td data-k="updated" data-label="Updated" className="dim nowrap">{ago(r.updated_at)}</td>
+                        </tr>
+  ); };
   return (
     <main className="container wide wl-page">
       <h1 className="sr-only">Ingest</h1>
@@ -984,27 +1012,10 @@ export default function Ingest() {
                           </td>
                         </tr>
                       ); })() : null}
-                      {data.rows.map((r0, i) => { const r = { ...r0, __i: i }; return (
-                        <tr key={r.id} data-id={r.id} className={`clickable${picked.has(r.id) ? ' picked' : ''}`} onMouseDown={cellDown} onContextMenu={(e) => rowMenu(e, r)}
-                          onClick={() => { if (suppress.current) { suppress.current = false; return; } openDetail(r.id); }}>
-                          {!narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} onClick={(e) => e.stopPropagation()} title="Click to select the row (Shift-click a range, Ctrl-click to add, drag down)">{i + 1}</td> : null}
-                          {narrow && canDelete ? <td className="chk" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={picked.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${r.program}`} /></td> : null}
-                          {cell(r, 'program', <strong>{r.program}</strong>)}
-                          {cell(r, 'platform', <PlatformCell value={r.platform} />)}
-                          {cell(r, 'billable_party', r.billable_party)}
-                          {cell(r, 'episode_break_date_text', <DateChip>{dayText(r.episode_break_date_text || r.episode_date)}</DateChip>, { className: 'nowrap' })}
-                          {cell(r, 'source', r.source, { className: 'cell-clip', title: r.source || '' })}
-                          {cell(r, 'materials_count', r.materials_count != null ? r.materials_count : '', { className: 'num' })}
-                          {cell(r, 'requested_by', r.requested_by_psd || r.requested_by_name || '', { title: 'Filled in automatically from the person who created the request' })}
-                          {cell(r, 'destination_folder', r.destination_folder, { className: 'cell-clip mono', title: r.destination_folder || '' })}
-                          {cell(r, 'approved_by', <ApprovedBy r={r} canApprove={canApprove} />)}
-                          {cell(r, 'cm_status', <CmStatus r={r} />)}
-                          <td data-k="updated" data-label="Updated" className="dim nowrap">{ago(r.updated_at)}</td>
-                        </tr>
-                      ); })}
+                      {data.rows.map((r0, i) => (pinned && pinned.id === r0.id ? null : renderRow(r0, i)))}
                       {spareOn ? <SpareRows count={spareN} start={offset + data.rows.length} cols={SPARE_COLS} lead="rn" onOpen={openSpare} onSelect={selectSpare} sel={spareSel} peerOf={(i, k) => peers[`spare:${i}:${k}`]} onMenu={(e) => setCtx({ x: e.clientX, y: e.clientY })}
-                        at={draft && draft.at === 'bottom' ? draft.slot : -1}
-                        node={draft && draft.at === 'bottom' ? (() => { const d = { ...draft, id: 'draft' }; return (
+                        at={draft && draft.at === 'bottom' ? draft.slot : pinned ? pinned.slot : -1}
+                        node={pinned && !(draft && draft.at === 'bottom') ? (() => { const pr = rows.find((x) => x.id === pinned.id) || pinned.row; const pi = rows.findIndex((x) => x.id === pinned.id); return renderRow(pr, pi >= 0 ? pi : undefined, offset + rows.length + pinned.slot + 1); })() : draft && draft.at === 'bottom' ? (() => { const d = { ...draft, id: 'draft' }; return (
                           <tr key="spare-draft" className="draft-row spare-draft" data-draft="1">
                             <td className="rn">{offset + data.rows.length + d.slot + 1}</td>
                             {cell(d, 'program', <strong>{d.program}</strong>)}
