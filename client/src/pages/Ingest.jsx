@@ -470,7 +470,7 @@ export default function Ingest() {
     if (r.id === 'draft') {
       const merged = draft ? { ...draft, [k]: value } : null;
       setDraft((d) => (d ? { ...d, [k]: value } : d)); closeCell(r, k);
-      if (merged && merged.at === 'bottom' && String(merged.program).trim() && String(merged.platform).trim()) { saveDraft(merged); return; }   // a row started in a spare row saves itself once it has a Program and a Platform
+      if (merged && merged.at === 'bottom' && ['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', 'destination_folder'].some((f) => String(merged[f] == null ? '' : merged[f]).trim())) { saveDraft(merged, true); return; }   // a row started in a spare row saves as soon as any cell has something in it
       if (move) moveEdit(r, k, move);
       return;
     }
@@ -559,17 +559,17 @@ export default function Ingest() {
     source: o.source || '', materials_count: o.materials_count === '' || o.materials_count == null ? null : Number(o.materials_count),
     destination_folder: canApprove ? (o.destination_folder || '') : '', remarks: '',
   });
-  const createRecs = async (list, label) => {   // new records from { program, platform, … } objects; one undo step removes them again
+  const createRecs = async (list, label, partial = false) => {   // new records from { program, platform, … } objects; one undo step removes them again
     let ids = [];
     let failed = 0; let firstErr = '';
     for (const o of list) {
-      try { const out = await post('/api/ingest', bodyOf(o)); ids.push(out.id); } catch (e) { failed++; if (!firstErr) firstErr = e.message; }
+      try { const out = await post('/api/ingest', partial ? { ...bodyOf(o), partial: true } : bodyOf(o)); ids.push(out.id); } catch (e) { failed++; if (!firstErr) firstErr = e.message; }
     }
     if (ids.length) {
       pushH({
         label,
         undo: async () => { if (ids.length) await post('/api/ingest/delete', { ids }); },
-        redo: async () => { const again = []; for (const o of list) { try { again.push((await post('/api/ingest', bodyOf(o))).id); } catch (e) { /* skipped */ } } ids = again; },
+        redo: async () => { const again = []; for (const o of list) { try { again.push((await post('/api/ingest', partial ? { ...bodyOf(o), partial: true } : bodyOf(o))).id); } catch (e) { /* skipped */ } } ids = again; },
       });
     }
     return { added: ids.length, failed, firstErr };
@@ -590,11 +590,11 @@ export default function Ingest() {
     setDraft({ id: 'draft', at: 'bottom', slot: slot || 0, program: '', platform: '', billable_party: '', episode_break_date_text: '', source: '', materials_count: '', destination_folder: '' });
     setEditing({ id: 'draft', k, start });
   };
-  const saveDraft = async (given) => {
+  const saveDraft = async (given, partial = false) => {
     const dr = given && given.program !== undefined ? given : draft;
     if (!dr) return;
-    if (!String(dr.program).trim() || !String(dr.platform).trim()) { toast('Program and Platform are required', 'err'); return; }
-    const out = await createRecs([dr], 'add row');
+    if (!partial && (!String(dr.program).trim() || !String(dr.platform).trim())) { toast('Program and Platform are required', 'err'); return; }
+    const out = await createRecs([dr], 'add row', partial);
     if (!out.added) { toast(out.firstErr || 'Could not add the row', 'err'); return; }
     setDraft(null); setEditing(null);
     toast('Ingest request added');

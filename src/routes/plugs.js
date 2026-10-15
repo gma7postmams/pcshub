@@ -413,9 +413,10 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
   };
 
   // ---- add / edit / delete a single plug by hand ----
-  const plugBody = (body) => ({
+  // `blankOk`: a row started in a blank spare row may exist with no Plug ID yet (the Plug ID is filled in next)
+  const plugBody = (body, blankOk = false) => ({
     plug_date: v.date(body.plug_date, { field: 'Date', required: true }),
-    plug_id: (v.str(body.plug_id, { field: 'Plug ID', max: 200, required: true }) || '').replace(/\s+/g, ' ').trim(),
+    plug_id: (v.str(body.plug_id, { field: 'Plug ID', max: 200, required: !blankOk }) || '').replace(/\s+/g, ' ').trim(),
     prog_name: v.str(body.prog_name, { field: 'PROG. NAME / PROJ. TITLE', max: 300 }) || '',
     psd: v.str(body.psd, { field: 'PSD', max: 200 }) || '',
     // Account By is no longer shown or edited in the app; when a request leaves it out, an edit keeps what is stored (null = keep)
@@ -425,7 +426,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
 
 
   router.post('/', requireAction('plugs.write'), asyncH(async (req, res) => {
-    const b = plugBody(req.body || {});
+    const b = plugBody(req.body || {}, (req.body || {}).partial === true);
     let row;
     try {
       ({ rows: [row] } = await db.query(
@@ -435,6 +436,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
       ));
     } catch (e) { dupe(e); }
     await audit(req, 'workload.plug_add', 'workload_plug', row.id, { plug_date: b.plug_date, plug_id: b.plug_id });
+    if (!b.plug_id) return res.status(201).json({ id: row.id, workloadRowsFilled: 0, copied: null });   // no Plug ID yet: nothing to copy to the Workload or announce until it has one
     const filled = await backfillWorkload(db, { from: b.plug_date, to: b.plug_date, userId: req.user.id });
     const copied = await autoCopy(req, 'p.id = $1', [row.id]);
     await notifyAdded(req, 1, `${b.plug_id} (${b.plug_date})`);
@@ -449,12 +451,13 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     if (list.length > MAX_BATCH) throw new HttpError(400, `Save at most ${MAX_BATCH} rows at a time`);
     const out = await db.tx(async (c) => {
       const addedIds = [];
+      const readyIds = [];   // the new ones that already have a Plug ID (a row still without one is not copied to the Workload or announced yet)
       const days = new Set();
       let updated = 0;
       for (let i = list.length - 1; i >= 0; i--) {   // backwards: each new plug goes to the top of its day, so a block keeps its order
         const row = list[i] || {};
         try {
-          const b = plugBody(row);
+          const b = plugBody(row, row.partial === true);
           days.add(b.plug_date);
           if (row.id) {
             const id = v.id(row.id);
@@ -471,6 +474,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
               [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by || '', req.user.id, whoIs(req)]);
             await audit(req, 'workload.plug_add', 'workload_plug', ins.rows[0].id, { plug_date: b.plug_date, plug_id: b.plug_id }, c);
             addedIds.push(ins.rows[0].id);
+            if (b.plug_id) readyIds.push(ins.rows[0].id);
           }
         } catch (e) {
           if (e && e.code === '23505') throw new HttpError(409, `Row ${i + 1}: that plug (same Plug ID, program and PSD) is already on this day's list`);
@@ -478,17 +482,18 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
           throw e;
         }
       }
-      return { added: addedIds.length, updated, addedIds, days: [...days].sort() };
+      return { added: addedIds.length, updated, addedIds, readyIds, days: [...days].sort() };
     });
     const filled = await backfillWorkload(db, { from: out.days[0], to: out.days[out.days.length - 1], userId: req.user.id });
-    const copied = out.addedIds.length ? await autoCopy(req, 'p.id = ANY($1::bigint[])', [out.addedIds]) : null;
-    await notifyAdded(req, out.added, `${out.added} plug${out.added === 1 ? '' : 's'} (${out.days[0]}${out.days.length > 1 ? ` to ${out.days[out.days.length - 1]}` : ''})`);
+    const copied = out.readyIds.length ? await autoCopy(req, 'p.id = ANY($1::bigint[])', [out.readyIds]) : null;
+    if (out.readyIds.length) await notifyAdded(req, out.readyIds.length, `${out.readyIds.length} plug${out.readyIds.length === 1 ? '' : 's'} (${out.days[0]}${out.days.length > 1 ? ` to ${out.days[out.days.length - 1]}` : ''})`);
     res.json({ ok: true, added: out.added, updated: out.updated, addedIds: out.addedIds, workloadRowsFilled: filled, copied });
   }));
 
   router.put('/:id(\\d+)', requireAction('plugs.write'), asyncH(async (req, res) => {
-    const b = plugBody(req.body || {});
-    const cur = await db.query('SELECT prog_name FROM workload_plugs WHERE id=$1', [req.params.id]);
+    const cur = await db.query('SELECT plug_id FROM workload_plugs WHERE id=$1', [req.params.id]);
+    const wasBlank = cur.rows.length > 0 && !String(cur.rows[0].plug_id || '').trim();   // still being filled in: its Plug ID may stay empty while the other cells are typed
+    const b = plugBody(req.body || {}, wasBlank);
     try {
       const r = await db.query(
         `UPDATE workload_plugs SET plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=COALESCE($6, account_by), updated_at=now() WHERE id=$1`,
@@ -497,8 +502,10 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
       if (!r.rowCount) throw new HttpError(404, 'Plug not found');
     } catch (e) { dupe(e); }
     await audit(req, 'workload.plug_edit', 'workload_plug', req.params.id, { plug_date: b.plug_date, plug_id: b.plug_id });
-    const filled = await backfillWorkload(db, { from: b.plug_date, to: b.plug_date, userId: req.user.id });
-    res.json({ ok: true, workloadRowsFilled: filled });
+    const filled = b.plug_id ? await backfillWorkload(db, { from: b.plug_date, to: b.plug_date, userId: req.user.id }) : 0;
+    let copied = null;
+    if (wasBlank && b.plug_id) { copied = await autoCopy(req, 'p.id = $1', [req.params.id]); await notifyAdded(req, 1, `${b.plug_id} (${b.plug_date})`); }   // it just got its Plug ID: now it is a real plug
+    res.json({ ok: true, workloadRowsFilled: filled, copied });
   }));
 
   router.delete('/:id(\\d+)', requireAction('plugs.write'), asyncH(async (req, res) => {

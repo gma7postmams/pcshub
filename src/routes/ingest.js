@@ -74,10 +74,12 @@ async function parseBody(client, body, user, current = null) {
       episode_break_date_text = legacyDate;
     }
   }
+  // A row started in a blank spare row may be saved with just one cell filled in (body.partial); a row that is still missing its Program or Platform stays editable the same way
+  const relax = (f) => (current ? !String(current[f] || '').trim() : body.partial === true);
   const rec = {
-    program: v.str(body.program, { field: 'Program', max: 200, required: true }),
+    program: v.str(body.program, { field: 'Program', max: 200, required: !relax('program') }) || '',
     billable_party: v.str(body.billable_party, { field: 'Billable Party', max: 200 }),
-    platform: v.str(body.platform, { field: 'Platform', max: 100, required: true }),
+    platform: v.str(body.platform, { field: 'Platform', max: 100, required: !relax('platform') }) || '',
     episode_date,
     episode_break_date_text,
     materials_count: v.int(body.materials_count, { field: 'Materials count', min: 0 }),
@@ -94,7 +96,7 @@ async function parseBody(client, body, user, current = null) {
     requested_by_psd: current && (current.requested_by_user_id || current.requested_by_psd) ? current.requested_by_psd : user.full_name,
     remarks: v.str(body.remarks, { field: 'Remarks', max: 4000 }),
   };
-  await assertDropdown(client, 'platform', rec.platform, 'Platform');
+  if (rec.platform) await assertDropdown(client, 'platform', rec.platform, 'Platform');
   return rec;
 }
 
@@ -150,7 +152,10 @@ function ingestFilter(q) {
     if (toD) { params.push(toD); lc.push(`split_part(d, '/', 1)::date <= $${params.length}`); bare.push(`i.episode_date <= $${params.length}`); }
     where.push(`(CASE WHEN i.episode_break_date_text ~ '^\\d{4}-\\d{2}-\\d{2}(/\\d{4}-\\d{2}-\\d{2})?(,\\d{4}-\\d{2}-\\d{2}(/\\d{4}-\\d{2}-\\d{2})?)+$'
                       THEN EXISTS (SELECT 1 FROM unnest(string_to_array(i.episode_break_date_text, ',')) d WHERE ${lc.join(' AND ')})
-                      ELSE (${bare.join(' AND ')}) END)`);
+                      ELSE (${bare.join(' AND ')}) END
+                OR (i.episode_date IS NULL AND COALESCE(i.episode_break_date_text, '') = ''   -- no Episode / Breakdate yet (a row still being filled in): shown on the days it was added, so it does not vanish
+                    ${fromD ? `AND (i.created_at AT TIME ZONE 'Asia/Manila')::date >= $${params.length - (toD ? 1 : 0)}` : ''}
+                    ${toD ? `AND (i.created_at AT TIME ZONE 'Asia/Manila')::date <= $${params.length}` : ''}))`);
   }
   if (req.query.q) {
     params.push(v.like(req.query.q, 100));
@@ -392,6 +397,15 @@ router.get('/:id', asyncH(async (req, res) => {
   res.json(rows[0]);
 }));
 
+/** Tell the approvers a new request exists (sent when it first has both a Program and a Platform). */
+async function notifyNewIngest(c, actor, id, r) {
+  await notifyCapable('ingest.approve', {
+      title: `New ingest: ${r.program}`,
+      body: `${actor.full_name} added a new ingest request (${r.platform}). ${filled(r.destination_folder) ? 'It is waiting for your approval.' : 'Destination Folder and Approved By are waiting.'}`,
+      link: `/ingest?id=${id}`, kind: 'ingest_new',
+    }, { excludeUserId: actor.id }, c);
+}
+
 // Create — Requested By is always the signed-in user
 router.post('/', requireAction('ingest.write'), asyncH(async (req, res) => {
   const created = await db.tx(async (c) => {
@@ -406,11 +420,7 @@ router.post('/', requireAction('ingest.write'), asyncH(async (req, res) => {
         r.requested_by_psd, r.remarks, req.user.id]
     );
     await audit(req, 'ingest.create', 'ingest_record', rows[0].id, r, c);
-    await notifyCapable('ingest.approve', {
-      title: `New ingest: ${r.program}`,
-      body: `${req.user.full_name} added a new ingest request (${r.platform}). ${filled(r.destination_folder) ? 'It is waiting for your approval.' : 'Destination Folder and Approved By are waiting.'}`,
-      link: `/ingest?id=${rows[0].id}`, kind: 'ingest_new',
-    }, { excludeUserId: req.user.id }, c);
+    if (filled(r.program) && filled(r.platform)) await notifyNewIngest(c, req.user, rows[0].id, r);   // a half-filled row is announced once it has a Program and a Platform
     return rows[0];
   });
   res.status(201).json({ ok: true, id: created.id });
@@ -462,6 +472,7 @@ router.put('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
     const changes = changesOf(cur.rows[0], r);
     if (Object.keys(changes).length) await audit(req, 'ingest.update', 'ingest_record', id, { program: r.program, changes }, c);
     if (!filled(cur.rows[0].destination_folder) && filled(r.destination_folder) && !isApproved(cur.rows[0]) && !filled(r.approved_by)) await notifyReady(c, req.user, id, r);
+    if ((!filled(cur.rows[0].program) || !filled(cur.rows[0].platform)) && filled(r.program) && filled(r.platform)) await notifyNewIngest(c, req.user, id, r);   // the half-filled row is now a complete request
   });
   } catch (e) {
     if (blocked) await auditBlocked(req, 'ingest.edit_blocked', id, { ...blocked, reason: e.message });
@@ -514,6 +525,10 @@ router.patch('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
     const only = {}; if (changes[field]) only[field] = changes[field];
     if (Object.keys(only).length) await audit(req, 'ingest.update', 'ingest_record', id, { program: cur.rows[0].program, changes: only, via: 'table cell' }, c);
     if (field === 'destination_folder' && !filled(cur.rows[0].destination_folder) && filled(value) && !isApproved(cur.rows[0])) await notifyReady(c, req.user, id, cur.rows[0]);
+    if ((field === 'program' || field === 'platform') && (!filled(cur.rows[0].program) || !filled(cur.rows[0].platform))) {   // the half-filled row is now a complete request
+      const after = { ...cur.rows[0], [field]: value };
+      if (filled(after.program) && filled(after.platform)) await notifyNewIngest(c, req.user, id, after);
+    }
     const out = await c.query(`${SELECT} WHERE i.id=$1`, [id]);
     return out.rows[0];
   });

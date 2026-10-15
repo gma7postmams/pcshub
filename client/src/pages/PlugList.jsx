@@ -456,7 +456,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       const merged = { ...(drafts.find((d) => d.id === r.id) || r), [k]: value };
       setDrafts((ds) => ds.map((d) => (d.id === r.id ? merged : d)));
       close();
-      if (merged.at === 'bottom' && String(merged.plug_id).trim()) { saveDrafts([merged]); return; }   // a row started in a spare row saves as soon as it has a Plug ID
+      if (merged.at === 'bottom' && (String(merged.plug_id).trim() || String(merged.prog_name).trim() || String(merged.psd).trim())) { saveDrafts([merged], true); return; }   // a row started in a spare row saves as soon as any cell has something in it
       if (move) moveEdit(r, k, move.dr, move.dc);
       return;
     }
@@ -502,11 +502,11 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   };
   const discardDraft = (d) => { setDrafts((ds) => ds.filter((x) => x.id !== d.id)); setCellEd((cur) => (cur && cur.id === d.id ? null : cur)); };
   // Save one new row, or (list = all of them) every new row that has something in it; rows left completely blank are dropped
-  const saveDrafts = async (list) => {
+  const saveDrafts = async (list, partial = false) => {
     const used = list.filter((d) => String(d.plug_id).trim() || String(d.prog_name).trim() || String(d.psd).trim());
     if (!used.length) { toast('Plug ID is required', 'err'); return; }
-    if (used.some((d) => !String(d.plug_id).trim())) { toast('Plug ID is required on every new row', 'err'); return; }
-    const recs = used.map(recOf);
+    if (!partial && used.some((d) => !String(d.plug_id).trim())) { toast('Plug ID is required on every new row', 'err'); return; }
+    const recs = used.map((d) => (partial ? { ...recOf(d), partial: true } : recOf(d)));   // partial: a row started in a spare row may still be missing its Plug ID
     try {
       let ids = (await batch(recs)).addedIds || [];
       pushH({ label: 'add row', undo: async () => { await post('/api/plugs/delete-selected', { ids }); }, redo: async () => { ids = (await batch(recs)).addedIds || []; } });
