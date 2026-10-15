@@ -2021,7 +2021,6 @@ export default function Workload() {
             <div className="wl-iconbar">
               {canWrite ? <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
               {canWrite && isGrid ? <button type="button" className="btn ibtn" id="add-row" aria-label="Add row" title="Add row" onClick={addRow}><PlusIcon /></button> : null}
-              {canWrite ? <button type="button" className="btn ibtn primary" id="new-btn" aria-label="New Workload" title="New Workload" onClick={() => setForm({ rec: null })}><PlusIcon /></button> : null}
               {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import from Excel" title="Import from Excel" disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}><UploadIcon /></button> : null}
               <ExportButton onExport={exportXlsx}><DownloadIcon /></ExportButton>
               {canWrite && !isGrid && pickedCount ? (
@@ -2086,9 +2085,6 @@ export default function Workload() {
               <button type="button" className="btn danger" id="delete-selected-btn" onClick={() => deleteSelected()} title="Delete the rows ticked in the table">
                 Delete Selected ({pickedCount})
               </button>
-            ) : null}
-            {canWrite && !isGrid ? (
-              <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({ rec: null })}><PlusIcon /> New Workload</button>
             ) : null}
             {canWrite && isGrid ? (
               <button type="button" className="btn primary" id="save-grid" disabled={saving || !dirtyCount} onClick={saveGrid}>
@@ -2546,9 +2542,9 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
     && !(k === 'breakdate_vgfx' && !teams.includes('VGFX'))
     && !(k === 'breakdate_vedit' && !teams.includes('VEDIT')));
   // Any row that involves Audio also gets the Audio-only columns (Length, Others)
-  const shown = f.units_concerned
-    ? [...base, ...(teams.includes('AUDIO') ? meta.audioExtra.filter((k) => !base.includes(k)) : [])]
-    : [];
+  // (with no Units Concerned yet — e.g. a plug copied from the PSD Daily Plug List — the usual fields still show, so Edit opens the full card straight away;
+  // the Breakdate / Time fields appear once a team is chosen)
+  const shown = [...base, ...(teams.includes('AUDIO') ? meta.audioExtra.filter((k) => !base.includes(k)) : [])];
   const bothVgfxVedit = teams.includes('VGFX') && teams.includes('VEDIT');
   // Only one of the two teams involved: drop the "(VGFX)"/"(VEDIT)" suffix since there's no ambiguity to resolve
   const fieldLabel = (k, def) => (!bothVgfxVedit && (k === 'breakdate_vgfx' || k === 'breakdate_vedit') ? 'Breakdate / Time' : k === 'others' && !audioOnly ? 'Remarks (Audio)' : def.label);
@@ -2574,7 +2570,7 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
 
   return (
     <Modal
-      title={rec ? `${canWrite ? 'Edit' : 'View'} Workload #${rec.id}` : duplicateFrom ? 'Duplicate Workload' : 'New Workload'}
+      title={rec ? `${canWrite ? 'Edit' : 'View'} Workload` : duplicateFrom ? 'Duplicate Workload' : 'New Workload'}
       onClose={onClose}
       footer={(
         <>
@@ -2596,7 +2592,8 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
             {' '}Priority <span className="dim">— highlights this item's Breakdate / Time</span>
           </span>
         </label>
-        {!f.units_concerned ? <div className="full dim">Choose Units Concerned to see the fields.</div> : shown.map((k) => {
+        {!f.units_concerned ? <div className="full dim">Choose Units Concerned to add the Breakdate / Time fields.</div> : null}
+        {shown.map((k) => {
           const def = meta.fields[k];
           if (k === 'plug_id') {
             // no free-text box: the Plug ID is chosen from the PSD Daily Plug List of the Work Date

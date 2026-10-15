@@ -180,12 +180,17 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   const [editing, setEditing] = useState(() => { const d = loadDialog('plugs'); return d && d.rec && d.rec.editing ? d.rec.editing : null; });      // the plug being edited
   useEffect(() => { syncDialog('plugs', editing ? { editing } : adding ? { adding: true } : null); }, [adding, editing]);
   const okToLeave = async () => true;   // Excel mode (and its unsaved-grid prompt) is gone: the list is the Table only
-  const [draft, setDraft] = useState(() => loadEdit('plugs').draft || null);          // the empty row Add Row put at the top, not saved yet (kept across a refresh)
+  // the empty rows Add Row put at the top, not saved yet (kept across a refresh; an older single remembered row is still understood)
+  const [drafts, setDrafts] = useState(() => { const d = loadEdit('plugs').draft; return Array.isArray(d) ? d : d ? [d] : []; });
+  const draft = drafts.length ? drafts[0] : null;
+  const isDraft = (id) => typeof id === 'string' && id.startsWith('draft');
+  const draftSeq = useRef(0);
+  const [askRows, setAskRows] = useState(null);       // the "How many rows?" box (a number string) while open
   const [cellEd, setCellEd] = useState(() => loadEdit('plugs').cell || null);        // { id, k } while one cell is open for editing (comes back after a refresh)
   const prevEd = useRef(cellEd ? `${cellEd.id}:${cellEd.k}` : null);
-  useEffect(() => { prevEd.current = syncEdit('plugs', cellEd, draft, prevEd.current); }, [cellEd, draft]);
+  useEffect(() => { prevEd.current = syncEdit('plugs', cellEd, drafts.length ? drafts : null, prevEd.current); }, [cellEd, drafts]);
   const [ctx, setCtx] = useState(null);              // right-click menu position
-  useEffect(() => { if (cellEd && cellEd.id !== 'draft' && data && data.rows && !data.rows.some((r) => r.id === cellEd.id)) setCellEd(null); }, [data]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (cellEd && !isDraft(cellEd.id) && data && data.rows && !data.rows.some((r) => r.id === cellEd.id)) setCellEd(null); }, [data]);   // eslint-disable-line react-hooks/exhaustive-deps
   const hist = useRef({ past: [], future: [] });
   const internalClip = useRef(null);
   const lastPick = useRef(null);
@@ -430,18 +435,18 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     return true;
   };
   const moveEdit = (r, k, dr, dc) => {
-    const list = [...(draft ? [draft] : []), ...rows];
+    const list = [...drafts, ...rows];
     let ri = list.findIndex((x) => x.id === r.id);
     let ci = EDIT_COLS.indexOf(k);
     if (ri < 0 || ci < 0) return;
     if (dc) { ci += dc; if (ci >= EDIT_COLS.length) { ci = 0; ri += 1; } else if (ci < 0) { ci = EDIT_COLS.length - 1; ri -= 1; } } else ri += dr;
     if (ri < 0 || ri >= list.length) return;
-    if (list[ri].id === 'draft') setCellEd({ id: 'draft', k: EDIT_COLS[ci] }); else selectCell(list[ri], EDIT_COLS[ci]);   // the unsaved new row keeps opening editors
+    if (isDraft(list[ri].id)) setCellEd({ id: list[ri].id, k: EDIT_COLS[ci] }); else selectCell(list[ri], EDIT_COLS[ci]);   // the unsaved new row keeps opening editors
   };
   const saveCell = async (r, k, raw, move) => {
     const value = k === 'plug_date' ? normDate(raw) : String(raw ?? '').replace(/\s*\n\s*/g, ' ').trim();
-    const close = () => { setCellEd((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur)); if (r.id !== 'draft') selectCell(r, k); };
-    if (r.id === 'draft') { setDraft((d) => (d ? { ...d, [k]: value } : d)); close(); if (move) moveEdit(r, k, move.dr, move.dc); return; }
+    const close = () => { setCellEd((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur)); if (!isDraft(r.id)) selectCell(r, k); };
+    if (isDraft(r.id)) { setDrafts((ds) => ds.map((d) => (d.id === r.id ? { ...d, [k]: value } : d))); close(); if (move) moveEdit(r, k, move.dr, move.dc); return; }
     if (value === String(r[k] ?? '')) { close(); if (move) moveEdit(r, k, move.dr, move.dc); return; }
     if (k === 'plug_id' && !value) { toast('Plug ID is required', 'err'); close(); return; }
     const before = recOf(r);
@@ -455,22 +460,28 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       if (move) moveEdit(r, k, move.dr, move.dc);
     } catch (e) { toast(e.message, 'err'); close(); }
   };
-  const addDraft = () => {
-    if (!canWrite) return;
-    if (draft) { setCellEd({ id: 'draft', k: 'plug_id' }); return; }
-    setDraft({ id: 'draft', plug_date: defaultDate(), plug_id: '', prog_name: '', psd: '' });
-    setCellEd({ id: 'draft', k: 'plug_id' });
+  const addDraft = () => { if (canWrite) setAskRows('1'); };   // Add Row first asks how many rows
+  const addDrafts = (n) => {
+    const count = Math.max(1, Math.min(50, Math.floor(Number(n)) || 1));
+    const made = Array.from({ length: count }, () => ({ id: `draft-${Date.now()}-${draftSeq.current++}`, plug_date: defaultDate(), plug_id: '', prog_name: '', psd: '' }));
+    setAskRows(null);
+    setDrafts((ds) => [...made, ...ds]);
+    setCellEd({ id: made[0].id, k: 'plug_id' });
     requestAnimationFrame(() => { const box = document.querySelector('.plug-list .wl-fit'); if (box) box.scrollTop = 0; });
   };
-  const saveDraft = async () => {
-    if (!draft) return;
-    if (!String(draft.plug_id).trim()) { toast('Plug ID is required', 'err'); return; }
-    const rec = recOf(draft);
+  const discardDraft = (d) => { setDrafts((ds) => ds.filter((x) => x.id !== d.id)); setCellEd((cur) => (cur && cur.id === d.id ? null : cur)); };
+  // Save one new row, or (list = all of them) every new row that has something in it; rows left completely blank are dropped
+  const saveDrafts = async (list) => {
+    const used = list.filter((d) => String(d.plug_id).trim() || String(d.prog_name).trim() || String(d.psd).trim());
+    if (!used.length) { toast('Plug ID is required', 'err'); return; }
+    if (used.some((d) => !String(d.plug_id).trim())) { toast('Plug ID is required on every new row', 'err'); return; }
+    const recs = used.map(recOf);
     try {
-      let ids = (await batch([rec])).addedIds || [];
-      pushH({ label: 'add row', undo: async () => { await post('/api/plugs/delete-selected', { ids }); }, redo: async () => { ids = (await batch([rec])).addedIds || []; } });
-      setDraft(null); setCellEd(null);
-      toast('Plug added');
+      let ids = (await batch(recs)).addedIds || [];
+      pushH({ label: 'add row', undo: async () => { await post('/api/plugs/delete-selected', { ids }); }, redo: async () => { ids = (await batch(recs)).addedIds || []; } });
+      const gone = new Set(list.map((d) => d.id));
+      setDrafts((ds) => ds.filter((d) => !gone.has(d.id))); setCellEd(null);
+      toast(used.length === 1 ? 'Plug added' : `${used.length} plugs added`);
       reload();
     } catch (e) { toast(e.message, 'err'); }
   };
@@ -627,7 +638,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   pasteRef.current = (e) => {
     const text0 = e.clipboardData && e.clipboardData.getData('text/plain');
     // several cells copied from a spreadsheet while one cell is open: they are pasted from that cell down and across, like in Excel
-    if (canWrite && cellEd && cellEd.id !== 'draft' && text0 && isBlockText(text0)) {
+    if (canWrite && cellEd && !isDraft(cellEd.id) && text0 && isBlockText(text0)) {
       const r0 = rows.findIndex((x) => x.id === cellEd.id); const c0 = EDIT_COLS.indexOf(cellEd.k);
       if (r0 >= 0 && c0 >= 0) { e.preventDefault(); setCellEd(null); pasteCells(text0, { r0, c0, r1: r0, c1: c0 }); return; }
     }
@@ -683,13 +694,13 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       if (n && r.__i >= n.r0 && r.__i <= n.r1 && ci >= n.c0 && ci <= n.c1) td['data-sel'] = '1';
     }
     if (canWrite && cellEd && cellEd.id === r.id && cellEd.k === k) {
-      return <td key={k} {...td} className={`editing ${extra.className || ''}`.trim()} onClick={(e) => e.stopPropagation()}><PlugCellEditor memo={`${r.id}:${k}`} startText={cellEd.start} k={k} initial={r[k]} onSave={(v, move) => saveCell(r, k, v, move)} onCancel={() => { setCellEd(null); if (r.id !== 'draft') selectCell(r, k); }} onUndo={(sh) => { setCellEd(null); if (sh) redo(); else undo(); }} /></td>;
+      return <td key={k} {...td} className={`editing ${extra.className || ''}`.trim()} onClick={(e) => e.stopPropagation()}><PlugCellEditor memo={`${r.id}:${k}`} startText={cellEd.start} k={k} initial={r[k]} onSave={(v, move) => saveCell(r, k, v, move)} onCancel={() => { setCellEd(null); if (!isDraft(r.id)) selectCell(r, k); }} onUndo={(sh) => { setCellEd(null); if (sh) redo(); else undo(); }} /></td>;
     }
     if (!canWrite) return <td key={k} {...td}>{content}</td>;
     return <td key={k} {...td} className={`editable ${extra.className || ''}`.trim()} title="Click to select, double-click or press Enter to edit" tabIndex={0}
       onClick={(e) => {   // select only; Shift / Ctrl+click and drags are the block selection's (see cellDown)
         e.stopPropagation();
-        if (r.id === 'draft' || tapEdit()) { setCellEd({ id: r.id, k }); return; }
+        if (isDraft(r.id) || tapEdit()) { setCellEd({ id: r.id, k }); return; }
         if (e.shiftKey || e.ctrlKey || e.metaKey) return;
         if (r.__i !== undefined) setCellSel({ r0: r.__i, c0: EDIT_COLS.indexOf(k), r1: r.__i, c1: EDIT_COLS.indexOf(k) });
       }}
@@ -701,7 +712,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     editCell(r, 'prog_name', r.prog_name, { 'data-label': 'PROG. NAME / PROJ. TITLE' }),
     editCell(r, 'psd', r.psd, { 'data-label': 'PSD' }),
     <td key="requested_by" data-label="Requested By">{r.requested_by}</td>,
-    <td key="in_workload" data-label="In Workload" className="plug-inwl">{r.id === 'draft' ? null : r.in_workload ? <span className="chip c-green">In workload</span> : <span className="dim">—</span>}</td>,
+    <td key="in_workload" data-label="In Workload" className="plug-inwl">{isDraft(r.id) ? null : r.in_workload ? <span className="chip c-green">In workload</span> : <span className="dim">—</span>}</td>,
   ]; };
 
   return (
@@ -769,17 +780,18 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {draft ? (
-                    <tr key="draft" className="draft-row" data-draft="1">
+                  {drafts.map((d, di) => (
+                    <tr key={d.id} className="draft-row" data-draft="1">
                       {!narrow ? <td className="rn" title="New row — not saved yet">＋</td> : <td className="chk" />}
-                      {dataCells(draft)}
+                      {dataCells(d)}
                       
                       <td className="plug-actions nowrap" onClick={(e) => e.stopPropagation()}>
-                        <button type="button" className="btn primary" style={{ padding: '4px 10px' }} id="draft-save" onClick={saveDraft}>Save</button>{' '}
-                        <button type="button" className="btn" style={{ padding: '4px 10px' }} id="draft-discard" onClick={() => { setDraft(null); setCellEd(null); }}>Discard</button>
+                        <button type="button" className="btn primary" style={{ padding: '4px 10px' }} id={di === 0 ? 'draft-save' : undefined} onClick={() => saveDrafts([d])}>Save</button>{' '}
+                        {drafts.length > 1 && di === 0 ? <><button type="button" className="btn primary" style={{ padding: '4px 10px' }} id="draft-save-all" onClick={() => saveDrafts(drafts)}>Save all ({drafts.length})</button>{' '}</> : null}
+                        <button type="button" className="btn" style={{ padding: '4px 10px' }} id={di === 0 ? 'draft-discard' : undefined} onClick={() => discardDraft(d)}>Discard</button>
                       </td>
                     </tr>
-                  ) : null}
+                  ))}
                   {rows.length ? rows.map((r, i) => (
                     <tr key={r.id} data-id={r.id} className={`${r.in_workload ? 'done' : ''}${picked.has(r.id) ? ' picked' : ''}`.trim()}
                       onMouseDown={canWrite ? cellDown : undefined} onContextMenu={canWrite ? (e) => rowMenu(e, r) : undefined}>
@@ -796,6 +808,15 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
                 </tbody>
               </table>
             </div>
+            {askRows !== null ? (
+              <Modal title="Add rows" size="sm" onClose={() => setAskRows(null)}
+                footer={<><button type="button" className="btn" onClick={() => setAskRows(null)}>Cancel</button><button type="button" className="btn primary" id="add-rows-go" onClick={() => addDrafts(askRows)}>Add</button></>}>
+                <label className="f"><span>How many rows?</span>
+                  <input id="add-rows-n" type="number" min="1" max="50" step="1" autoFocus value={askRows} onChange={(e) => setAskRows(e.target.value)}
+                    onFocus={(e) => e.target.select()} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addDrafts(askRows); } }} /></label>
+                <p className="dim">1 to 50 empty rows are added at the top. Fill them in, then Save each one or Save all.</p>
+              </Modal>
+            ) : null}
             {ctx ? (
               <CellMenu x={ctx.x} y={ctx.y} onContextMenu={(e) => e.preventDefault()}>
                 <button type="button" disabled={!hist.current.past.length} onClick={() => { setCtx(null); undo(); }}>Undo<span>Ctrl+Z</span></button>
