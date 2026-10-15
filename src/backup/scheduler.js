@@ -6,6 +6,8 @@ const db = require('../db');
 const cfg = require('./config');
 const svc = require('./service');
 const { audit } = require('../audit');
+const node = require('../node');
+const NOT_SYNC = `COALESCE(note,'') <> '${node.SYNC_NOTE}'`;   // backups made for the backup server are not part of the schedule's count
 
 const KEYS = ['backup_schedule', 'backup_time', 'backup_weekday', 'backup_keep'];
 const STALE_DAYS = 2;
@@ -51,10 +53,10 @@ async function status() {
   const s = await getSchedule();
   const [last, fail, count] = await Promise.all([
     db.query(`SELECT id, COALESCE(finished_at, created_at) AS at, size_bytes, created_by_name FROM backup_jobs
-               WHERE kind='create' AND status='succeeded' AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`),
+               WHERE kind='create' AND status='succeeded' AND deleted_at IS NULL AND ${NOT_SYNC} ORDER BY created_at DESC LIMIT 1`),
     db.query(`SELECT COALESCE(finished_at, created_at) AS at, error FROM backup_jobs
                WHERE kind='create' AND status='failed' ORDER BY created_at DESC LIMIT 1`),
-    db.query(`SELECT count(*)::int AS n FROM backup_jobs WHERE kind='create' AND status='succeeded' AND deleted_at IS NULL`),
+    db.query(`SELECT count(*)::int AS n FROM backup_jobs WHERE kind='create' AND status='succeeded' AND deleted_at IS NULL AND ${NOT_SYNC}`),
   ]);
   const l = last.rows[0] || null;
   const ageMs = l ? Date.now() - new Date(l.at).getTime() : null;
@@ -69,7 +71,7 @@ async function status() {
 
 async function applyRetention(keep) {
   const { rows } = await db.query(
-    `SELECT id FROM backup_jobs WHERE kind='create' AND status='succeeded' AND deleted_at IS NULL
+    `SELECT id FROM backup_jobs WHERE kind='create' AND status='succeeded' AND deleted_at IS NULL AND ${NOT_SYNC}
       ORDER BY created_at DESC OFFSET $1`, [keep]
   );
   for (const r of rows) {
@@ -83,7 +85,7 @@ async function applyRetention(keep) {
 
 let busy = false;
 async function tick() {
-  if (busy) return;
+  if (busy || node.isBackup()) return;   // a backup server only copies the main one
   busy = true;
   try {
     const s = await getSchedule();
@@ -117,7 +119,7 @@ async function tick() {
 let timer = null;
 function start() {
   if (timer || process.env.NODE_ENV === 'test') return;
-  timer = setInterval(() => { tick(); require('../retention').autoTick().catch((e) => console.error('[retention]', e.message)); }, 60 * 1000);
+  timer = setInterval(() => { tick(); if (!node.isBackup()) require('../retention').autoTick().catch((e) => console.error('[retention]', e.message)); }, 60 * 1000);
   timer.unref();
 }
 

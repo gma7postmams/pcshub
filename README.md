@@ -70,6 +70,28 @@ Closes the site to everyone except a System Admin, for upgrades and similar work
 
 Any one of the three being on is enough, so if it stays on after you turn it off in the app, check the flag file and `.env`. People already signed in are not signed out: they see the maintenance page until it ends, then carry on.
 
+## Backup server (main + standby on the same LAN)
+
+A second copy of the app that keeps itself up to date and takes over when the main server is gone. **Manual failover, up to `NODE_SYNC_HOURS` (default 4) of recent changes can be missing.**
+
+How it works: the backup server is read-only. Every few hours it asks the main server for a fresh backup (the same archive as Administration → Backup and Restore: database, Branding and Knowledge files), downloads it, checks its checksum and restores it over itself. People can sign in on it with their normal accounts to read, nothing can be changed. When the main server is lost, a System Admin presses **Promote to main** (Administration → Backup Server) and users are pointed to it.
+
+**Set up** (once):
+1. Install the app on the second server like the first one: the same version (pull both together), the same PostgreSQL major version, `pg_dump` / `pg_restore` present, and `BACKUP_DATABASE_URL` set the same way as on the main server.
+2. Copy `TOTP_ENC_KEY` (and `BACKUP_SIGNING_KEY` if you use it) from the main server's `.env`: 2FA secrets are encrypted with it, so the copied data is unreadable without the same key.
+3. Make a shared secret (`openssl rand -hex 32`) and put it as `NODE_SYNC_TOKEN` in **both** `.env` files.
+4. On the backup server also set `NODE_ROLE=backup`, `NODE_MAIN_URL=https://<the main server's address>` (the address the reverse proxy answers on; a self-signed certificate needs `NODE_EXTRA_CA_CERTS`) and, if you want, `NODE_SYNC_HOURS=4` (1 to 24).
+5. Restart both. Within a minute the backup server makes its first copy; Administration → Backup Server shows when the data is from, when the next copy is, and whether the main server answers.
+
+Not copied: `.env`, the backups folder and the Retention archives. The main server marks the backups it makes for the backup server "Backup server sync": they do not count against Backup Keep or the Backup limit, and only the newest is kept.
+
+**When the main server is down:**
+1. Check it is really down (Backup Server tab → *Main server: Not answering*).
+2. On the backup server: Administration → Backup Server → **Promote to main…** (your password, type PROMOTE). It refuses while the main server still answers, unless you tick the extra box.
+3. Point users to the backup server (DNS name or the reverse proxy's address). It is now the main server and keeps that role across restarts (the role is stored in `<BACKUP_DIR>/node-state.json`, not in the database, because the database is replaced on every copy).
+
+**When the old main server comes back:** do NOT start it as a main server, it holds old data. Before starting it set `NODE_ROLE=backup`, `NODE_MAIN_URL` (the new main server) and the same `NODE_SYNC_TOKEN` in its `.env`; if it was once promoted, delete its `node-state.json` or use *Make this a backup server…* on its Backup Server tab. It then copies the new main server and everything it held is replaced. To go back to the original layout later, promote it the same way and make the other one a backup server.
+
 ## Notes
 
 - All settings come from `.env`; `.env.example` lists them with comments. Never commit your real `.env`.

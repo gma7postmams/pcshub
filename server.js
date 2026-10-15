@@ -127,10 +127,12 @@ const apiLimiter = rateLimit({
 // (the few routes that serve files set their own Cache-Control afterwards).
 const noStoreApi = (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); };
 app.use('/api', apiLimiter, csrfGuard, noStoreApi);
+app.use('/api', require('./src/node').readOnlyGuard);   // a backup server is read-only (see src/node.js)
 
 // Public
 app.use('/api/branding', require('./src/routes/branding'));
 app.use('/api/auth', require('./src/routes/auth'));
+app.use('/api/node-sync', require('./src/routes/node-sync'));   // the backup server pulls from here with NODE_SYNC_TOKEN (main server only)
 
 // Everything below needs a signed-in user
 app.use('/api', requireAuth);
@@ -160,6 +162,7 @@ app.use('/api/workload',      requirePageAccess('/workload'),  live.track('workl
 app.use('/api/plugs',         live.track('plugs'), require('./src/routes/plugs')(require('./src/routes/workload').helpers));   // PSD Daily Plug List (page + API of its own)
 app.use('/api/knowledge',     requirePageAccess('/knowledge'), require('./src/routes/knowledge'));
 app.use('/api/admin/backups', requirePageAccess('/admin'),     require('./src/routes/backups'));
+app.use('/api/admin/node',    requirePageAccess('/admin'),     require('./src/routes/node-admin'));
 app.use('/api/admin',         requirePageAccess('/admin'),     require('./src/routes/admin'));
 
 
@@ -229,6 +232,7 @@ boot
     const HOST = process.env.HOST || (PROD ? '127.0.0.1' : '0.0.0.0');
 
     try { require('./src/backup/scheduler').start(); } catch (e) { console.error('[backup] scheduler not started:', e.message); }
+    try { require('./src/node-sync').start(); } catch (e) { console.error('[node-sync] not started:', e.message); }
 
     app.listen(PORT, HOST, () =>
       console.log(

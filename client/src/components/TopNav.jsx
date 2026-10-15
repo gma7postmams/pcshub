@@ -117,6 +117,7 @@ export default function TopNav() {
         ))}
       </nav>
       <div className="nav-right">
+        {s.node && s.node.readOnly ? <span className="maint-pill" id="node-pill" role="status" aria-label="Backup server, read-only" title={`Backup server: read-only. Data copied from the main server${s.node.lastSyncAt ? ` on ${new Date(s.node.lastSyncAt).toLocaleString()}` : ''}. Changes cannot be made here.`}>Backup server: read-only</span> : null}
         {s.maintenance && s.maintenance.on ? <span className="maint-pill" id="maint-pill" role="status" aria-label="Maintenance mode is ON" title={`Maintenance mode is ON: only site administrators can sign in. ${s.maintenance.message || ''}`.trim()}>Maintenance: ON</span> : null}
         <button type="button" className={`iconbtn${ring ? ' ringing' : ''}`} id="notif-btn" aria-label="Notifications" onClick={toggle('notif')}>
           <BellIcon />

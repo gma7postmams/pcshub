@@ -238,6 +238,7 @@ router.get('/me', requireAuth, (req, res) => {
     sections: allowedSections(u),
     actions: allowedActions(u),
     landing: landingPath(u),
+    node: require('../node').publicInfo(),   // { role, readOnly, lastSyncAt }: a backup server shows a read-only badge
     maintenance: maintenanceMode.state(),   // { on, message }: only a System Admin gets this far while it is on — the page shows a banner
     // A fingerprint of THIS sign-in (a one-way hash of the session id — the id itself is never sent to the page). It changes every time someone
     // signs in, so the page can keep a per-sign-in preference (the Dashboard's period menu) and forget it at sign-out.

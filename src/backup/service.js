@@ -119,7 +119,7 @@ async function startCreate(req, { note }) {
   if (!env.pgDump.ok) throw new HttpError(503, `Backups are unavailable: ${env.pgDump.error}`);
   if (!env.storageWritable) throw new HttpError(503, 'Backups are unavailable: the backup directory is not writable');
 
-  const { rows: cnt } = await db.query(`SELECT count(*)::int AS n FROM backup_jobs WHERE kind='create' AND status='succeeded' AND deleted_at IS NULL`);
+  const { rows: cnt } = await db.query(`SELECT count(*)::int AS n FROM backup_jobs WHERE kind='create' AND status='succeeded' AND deleted_at IS NULL AND COALESCE(note,'') <> $1`, [require('../node').SYNC_NOTE]);
   if (cnt[0].n >= cfg.MAX_BACKUPS) throw new HttpError(409, `Backup limit reached (${cfg.MAX_BACKUPS}). Delete an old backup first.`);
 
   const [files, dbBytes] = await Promise.all([collectFiles(), tableBytes()]);
