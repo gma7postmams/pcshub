@@ -387,26 +387,6 @@ table.xl .x-btn:hover { color: var(--red); }
 .auth-card .brand .name { display: block; font-size: 16.5px; max-width: 100%; white-space: normal; }
 .auth-card .tagline { color: var(--text-2); font-size: 13px; font-weight: 400; }
 .auth-card .btn { width: 100%; height: 40px; }
-/* short windows (a laptop at 125-150% scaling): the sign-in card gets less tall (tighter spacing, a smaller logo) so it fits without scrolling; its width, side padding and text sizes stay */
-@media (max-height: 760px) {
-  .auth-wrap { padding: 12px 20px; align-items: safe center; }
-  .auth-card { padding: 20px 30px; }
-  .auth-card .brand { margin-bottom: 12px; gap: 6px; }
-  .auth-card .brand img { height: 84px; }
-  .auth-card .brand .mark { width: 64px; height: 64px; font-size: 28px; border-radius: 17px; }
-  .auth-card .stack > * + * { margin-top: 9px; }
-  .auth-card .btn { height: 36px; }
-}
-@media (max-height: 560px) {
-  .auth-wrap { padding: 8px 20px; }
-  .auth-card { padding: 12px 30px; }
-  .auth-card .brand { margin-bottom: 6px; gap: 3px; }
-  .auth-card .brand img { height: 56px; }
-  .auth-card .brand .mark { width: 46px; height: 46px; font-size: 21px; border-radius: 12px; }
-  .auth-card .stack > * + * { margin-top: 6px; }
-  label.f > span { margin-bottom: 3px; }
-  .auth-card .btn { height: 32px; }
-}
 .otp-input { text-align: center; font-size: 22px; letter-spacing: .4em; font-family: var(--mono); height: 50px; }
 .qr { background: #fff; padding: 10px; border-radius: 10px; display: inline-block; }
 .qr img { display: block; width: 200px; height: 200px; }
