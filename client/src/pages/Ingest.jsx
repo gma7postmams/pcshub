@@ -254,7 +254,7 @@ function ReasonModal({ r, onClose, onSave }) {
     try { await onSave(reason); } catch (e) { toast(e.message, 'err'); setBusy(false); }
   };
   return (
-    <Modal title={`Ingest #${r.no ?? r.id}: NON-COMPLIANT`} onClose={() => { if (!busy) onClose(); }}
+    <Modal title="NON-COMPLIANT" onClose={() => { if (!busy) onClose(); }}
       footer={(<>
         <button type="button" className="btn" disabled={busy} onClick={onClose}>Cancel</button>
         <button type="button" className="btn primary" disabled={busy} onClick={save}>Save</button>
@@ -1176,7 +1176,7 @@ export default function Ingest() {
           onEdit={() => { setForm(detail); setDetail(null); }}
           onDelete={async () => {
             const done = detail.cm_status === 'DONE';
-            if (!(await confirm('Delete ingest record', done ? `Ingest #${detail.no ?? detail.id} is already DONE in CM. Deleting it permanently removes this historical record.` : `Permanently delete ingest #${detail.no ?? detail.id}?`, { okText: 'Delete', danger: true }))) return;
+            if (!(await confirm('Delete ingest record', done ? 'This ingest is already DONE in CM. Deleting it permanently removes this historical record.' : 'Permanently delete this ingest?', { okText: 'Delete', danger: true }))) return;
             try { await del(`/api/ingest/${detail.id}`); toast('Deleted'); setDetail(null); load(); } catch (e) { toast(e.message, 'err'); }
           }}
         />
