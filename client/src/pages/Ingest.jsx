@@ -792,11 +792,11 @@ export default function Ingest() {
   // Every record has a fixed row number (like a sheet row). With no filter and no sort the table shows those numbers with blank rows in the gaps; with a filter or a sort
   // it lists just the matching records (in row order unless sorted) and the blank rows start after the last number in use.
   // Numbering: a sorted list is numbered 1, 2, 3… (no blank rows). With a date picked the rows (and the blank rows between them) are numbered 1, 2, 3… in the order they are drawn,
-  // and a row typed into a blank row stays on that row. With all dates the rows show their fixed row numbers. `_sort` / `_date` are what the list on screen was read with
+  // and a row typed into a blank row stays on that row. With all dates the rows show their fixed row numbers and no blank rows between them. `_sort` / `_date` are what the list on screen was read with
   // (a new filter / sort only shows once its rows arrive).
   const sortNums = data && data._sort !== undefined ? data._sort : !!sort.k;
   const ordinal = !sortNums && (data && data._date !== undefined ? data._date : !!(filt.from || filt.to));
-  const gapsOn = canWrite && !narrow && !!data && !!data.rows && !sortNums;   // blank rows for the row numbers nobody uses (not when sorted: the order is then not the row order)
+  const gapsOn = canWrite && !narrow && !!data && !!data.rows && !sortNums && ordinal;   // blank rows between records only with a date picked; all dates lists just the records (rows close up, each with its real row number)   // blank rows for the row numbers nobody uses (not when sorted: the order is then not the row order)
   const lastPos = rows.length ? (rows[rows.length - 1].row_pos || 0) : 0;
   const maxPos = data && data.maxPos ? data.maxPos : 0;
   const usedSet = new Set(data && data.usedPos ? data.usedPos : rows.map((x) => x.row_pos));   // numbers in use, including by records the filter hides
