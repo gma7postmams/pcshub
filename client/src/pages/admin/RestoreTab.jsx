@@ -47,8 +47,8 @@ function UploadCard({ busy, uploadPct, onAnalyze }) {
           onDrop={(e) => { e.preventDefault(); setOver(false); pick(e.dataTransfer.files[0]); }}
           onClick={() => !busy && input.current.click()}
         >
-          <input ref={input} type="file" accept=".zip,application/zip" hidden onChange={(e) => { pick(e.target.files[0]); e.target.value = ''; }} />
-          {file ? <><strong>{file.name}</strong><span className="dim">{fmtBytes(file.size)}</span></> : <span className="dim">Drop a backup .zip here, or click to browse</span>}
+          <input ref={input} type="file" accept=".zip,.enc,application/zip" hidden onChange={(e) => { pick(e.target.files[0]); e.target.value = ''; }} />
+          {file ? <><strong>{file.name}</strong><span className="dim">{fmtBytes(file.size)}</span></> : <span className="dim">Drop a backup (.zip or .zip.enc) here, or click to browse</span>}
         </div>
         {busy && uploadPct != null && uploadPct < 1 ? <progress className="mt-12" max="1" value={uploadPct} style={{ width: '100%' }} /> : null}
         <div className="row mt-12">

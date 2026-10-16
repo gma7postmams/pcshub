@@ -18,8 +18,8 @@ const MAX_DAYS = 3650;
 // `where` uses $1 = cutoff timestamp.
 const MODULES = {
   audit: {
-    label: 'Audit Log', table: 'audit_logs', basis: 'Entry date',
-    where: 'created_at < $1', oldest: 'created_at',
+    label: 'Audit Log', table: 'audit_logs', basis: 'Entry date. Sign-ins, security blocks and admin actions from the protected period are kept',
+    get where() { return `created_at < $1 AND ${require('./audit').deletableSql()}`; }, oldest: 'created_at',
   },
   ingest: {
     label: 'Ingest', table: 'ingest_records', basis: 'Episode date (or created date), and not edited since; only Approved or Rejected records',

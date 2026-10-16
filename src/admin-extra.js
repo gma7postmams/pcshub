@@ -44,7 +44,10 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
       }
       if (action === 'role') await c.query('UPDATE users SET role=$2, updated_at=now() WHERE id = ANY($1::int[])', [target, role]);
       if (action === 'group') await c.query('UPDATE users SET group_id=$2, updated_at=now() WHERE id = ANY($1::int[])', [target, groupId]);
-      if (action === 'reset-2fa') await c.query('UPDATE users SET totp_secret=NULL, totp_enabled=FALSE, totp_last_step=NULL, updated_at=now() WHERE id = ANY($1::int[])', [target]);
+      if (action === 'reset-2fa') {
+        await c.query('UPDATE users SET totp_secret=NULL, totp_enabled=FALSE, totp_last_step=NULL, updated_at=now() WHERE id = ANY($1::int[])', [target]);
+        await c.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = ANY($1::int[])`, [target]);
+      }
       if (action === 'sign-out') await c.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = ANY($1::int[])`, [target]);
       if (action === 'unlock') await c.query('UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id = ANY($1::int[])', [target]);
       await audit(req, 'admin.user_bulk', 'user', null, {
@@ -140,7 +143,9 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
   // Everyone except the person pressing the button must choose a new password at their next sign-in.
   router.post('/security/force-password-change', asyncH(async (req, res) => {
     const r = await db.query('UPDATE users SET must_change_password=TRUE, updated_at=now() WHERE is_active AND id <> $1', [req.user.id]);
-    await audit(req, 'admin.force_password_change', 'user', null, { users: r.rowCount });
+    // After a suspected leak a stolen session must not be the one that picks the new password: everyone else signs in again first
+    const s = await db.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int <> $1`, [req.user.id]);
+    await audit(req, 'admin.force_password_change', 'user', null, { users: r.rowCount, sessionsEnded: s.rowCount });
     res.json({ ok: true, users: r.rowCount });
   }));
 

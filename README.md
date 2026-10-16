@@ -221,3 +221,18 @@ Blocked requests (permission refused, not signed in, cross-site, rate limited) a
 Ten signs from one IP within five minutes, a hit on the login rate limit, or an account locked by wrong passwords raises a **Security alert**: an Audit Log line,
 a bell/phone notification and an email (when SMTP is set up) to every active Admin and to the Security alert email set in Administration → Security (default: ADMIN_EMAIL), at most one per source every 15 minutes. One IP can lock at most two accounts per
 15 minutes, so a stranger cannot lock everybody out. Live self-test against a throw-away copy: `python3 scripts/security-selftest2.py` (see the header of the file).
+
+### Backups encrypted at rest
+
+With `BACKUP_ENC_KEY` set, every new backup is encrypted (AES-256-GCM) and named `….zip.enc`; verify, restore, upload and the backup server
+read it back transparently, and a wrong key or a changed byte is refused. Older plain `.zip` backups still restore. Keep a copy of the key off
+the server: without it no encrypted backup can be restored. The backup server needs the same key.
+
+### Protected audit trail
+
+Sign-in (`auth.*`), security (`security.*`) and admin (`admin.*`) lines are kept for `AUDIT_PROTECT_DAYS` (default 365) even when Clear Data
+or the retention clean-up removes the Audit Log, and each one is also written to the server log as an `[audit] {json}` line
+(`journalctl -u pcshub | grep '\[audit\]'`), which cannot be deleted from inside the app.
+
+Resetting or turning off a user's 2FA, and "Make everyone change their password", now also sign the affected users out.
+Live self-test for these: `scripts/security-selftest3.py` (header of the file says how to run it).

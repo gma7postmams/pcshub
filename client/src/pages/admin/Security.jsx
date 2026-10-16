@@ -79,7 +79,7 @@ function Rules({ policy, limits, email, onSaved }) {
     try { const r = await post('/api/admin/security/test-email', {}); toast(`Test email sent to ${r.to}`); } catch (e) { toast(e.message, 'err'); }
   };
   const force = async () => {
-    if (!(await confirm('Everyone changes their password', 'Every other active user must choose a new password at their next sign-in. Use this after tightening the password rules, or after a suspected leak.', { okText: 'Require change', danger: true }))) return;
+    if (!(await confirm('Everyone changes their password', 'Every other active user is signed out now and must choose a new password when they sign in again. Use this after tightening the password rules, or after a suspected leak.', { okText: 'Require change', danger: true }))) return;
     try { const r = await post('/api/admin/security/force-password-change', {}); toast(`${r.users} ${r.users === 1 ? 'user' : 'users'} must change their password`); } catch (e) { toast(e.message, 'err'); }
   };
   return (

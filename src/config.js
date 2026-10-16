@@ -52,6 +52,7 @@ function startupChecks() {
   // Required in every mode: there is no built-in fallback, so a forgotten setting can never leave sessions signed with a known key.
   if (APP_ORIGIN_PROBLEMS.length) problems.push(`APP_ORIGIN is not a web address: ${APP_ORIGIN_PROBLEMS.join(', ')}. Use the form https://hub.example.com`);
   if (weakSecret(process.env.SESSION_SECRET)) problems.push('SESSION_SECRET must be 32+ random characters, not a placeholder. Generate one with: openssl rand -hex 48');
+  if (PROD && !process.env.BACKUP_ENC_KEY) warn.push('BACKUP_ENC_KEY not set: backups are stored unencrypted (they hold password hashes and 2FA secrets). Set it with: openssl rand -hex 32, and keep a copy off this server');
   if (PROD && !process.env.BACKUP_SIGNING_KEY) warn.push('BACKUP_SIGNING_KEY not set: backups are created unsigned, so a tampered archive cannot be told apart from a real one. Set it with: openssl rand -hex 32');
   if (PROD && /change[-_ ]?me/i.test(process.env.ADMIN_PASSWORD || '')) warn.push('ADMIN_PASSWORD is still the placeholder from .env.example. Change it (and remove it from .env once the first Admin has signed in).');
   if (PROD && !cookieSecure) warn.push('COOKIE_SECURE=false in production: sessions travel without the Secure flag. Only acceptable on an isolated LAN.');

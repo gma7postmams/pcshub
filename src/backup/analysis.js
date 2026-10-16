@@ -59,10 +59,12 @@ const activeAdmins = async (runner) => (await runner.query(`SELECT count(*)::int
 
 /** Called after the upload is on disk. Throws 409 when another backup operation holds the lock. */
 async function start(req, file, originalName) {
-  const head = Buffer.alloc(4);
+  const head = Buffer.alloc(8);
   const fd = await fsp.open(file.path, 'r');
-  try { await fd.read(head, 0, 4, 0); } finally { await fd.close(); }
-  if (!head.equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))) throw new HttpError(400, 'The uploaded file is not a ZIP archive');
+  try { await fd.read(head, 0, 8, 0); } finally { await fd.close(); }
+  const zip = head.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+  const enc = head.equals(Buffer.from('PCHBENC1'));   // an encrypted backup (BACKUP_ENC_KEY); scanZip decrypts it
+  if (!zip && !enc) throw new HttpError(400, 'The uploaded file is not a backup (.zip or .zip.enc)');
 
   const release = await svc.acquire();
   while (analyses.size >= MAX_HELD) discard(analyses.values().next().value);

@@ -18,7 +18,7 @@ const AREAS = {
   workload: { label: 'Workload', basis: 'Work date (or created date)', table: 'workload_items', date: 'COALESCE(work_date, created_at::date)', live: 'workload' },
   plugs: { label: 'PSD Daily Plug List', basis: 'Plug date', table: 'workload_plugs', date: 'plug_date', live: 'plugs' },
   knowledge: { label: 'Knowledge Base', basis: 'Date added; includes the Trash. The document files are deleted from the server too (only the list of items is archived)', table: 'knowledge_docs', date: 'created_at::date', files: 'stored_name' },
-  audit: { label: 'Audit Log', basis: 'Entry date', table: 'audit_logs', date: 'created_at::date' },
+  audit: { label: 'Audit Log', basis: 'Entry date. Sign-ins, security blocks and admin actions from the protected period are kept', table: 'audit_logs', date: 'created_at::date', get extra() { return require('./audit').deletableSql(); } },
   notifications: { label: 'Notifications', basis: 'Sent date', table: 'notifications', date: 'created_at::date' },
   users: {
     label: 'User access (accounts)', basis: 'Account created date. System Admins and you are never removed', table: 'users', date: 'created_at::date', self: true,

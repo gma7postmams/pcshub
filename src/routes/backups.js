@@ -111,7 +111,7 @@ const uploadZip = multer({
     filename: (req, file, cb) => cb(null, `${crypto.randomBytes(12).toString('hex')}.zip`),
   }),
   limits: { fileSize: cfg.MAX_ARCHIVE_BYTES, files: 1 },
-  fileFilter: (req, file, cb) => (path.extname(file.originalname).toLowerCase() === '.zip' ? cb(null, true) : cb(new HttpError(400, 'Choose a .zip backup file'))),
+  fileFilter: (req, file, cb) => (/\.zip(\.enc)?$/i.test(file.originalname) ? cb(null, true) : cb(new HttpError(400, 'Choose a backup file (.zip or .zip.enc)'))),
 });
 const receive = (req, res, next) => {
   if (svc.isBusy()) return next(new HttpError(409, 'Another backup operation is already running'));

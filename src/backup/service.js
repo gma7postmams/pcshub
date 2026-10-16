@@ -10,7 +10,7 @@ const { SCHEMA_VERSION, APP_VERSION } = require('../version');
 const cfg = require('./config');
 const pg = require('./pg');
 const manifest = require('./manifest');
-const { sha256File, walk, writeZip, scanZip } = require('./archive');
+const { sha256File, walk, writeZip, scanZip, encryptFile, encryptionOn } = require('./archive');
 
 const TMP_DIR = path.join(cfg.BACKUP_DIR, '.tmp');
 const COLS = `id, kind, status, progress, filename, size_bytes, sha256, schema_version, app_version, pg_version, signed, note,
@@ -198,7 +198,7 @@ async function runCreate(job, req, release) {
       nodeVersion: process.version,
       databaseName: pg.databaseName(),
       hostname: os.hostname(),
-      encrypted: false,
+      encrypted: encryptionOn(),
       components: { database: true, branding: true, knowledge: true },
       dumpSha256: dumpSha,
       files: fileList.map(({ path: p, size, sha256 }) => ({ path: p, size, sha256 })),
@@ -229,6 +229,13 @@ async function runCreate(job, req, release) {
       [{ abs: dumpPath, name: 'database.dump', store: true }, ...fileList.map((f) => ({ abs: f.abs, name: f.path }))],
       { 'metadata.json': metaStr, 'summary.json': sumStr, 'checksums.sha256': checksums }
     );
+    // Encrypted at rest when BACKUP_ENC_KEY is set; the verification below reads it back through the decryption
+    const encrypted = encryptionOn();
+    if (encrypted) {
+      const plainZip = `${tmpZip}.plain`;
+      await fsp.rename(tmpZip, plainZip);
+      try { await encryptFile(plainZip, tmpZip); } finally { await fsp.unlink(plainZip).catch(() => {}); }
+    }
 
     const zipStat = await fsp.stat(tmpZip);
     if (zipStat.size > cfg.MAX_ARCHIVE_BYTES) throw new Error('Backup exceeds the maximum allowed archive size');
@@ -238,7 +245,7 @@ async function runCreate(job, req, release) {
     const verify = await verifyFile(tmpZip, { id: job.id, sha256: zipSha });
     if (verify.status !== 'ok') throw new Error('Archive failed post-creation verification');
 
-    const filename = `pcshub-backup-${stamp(createdAt)}-${job.id.slice(0, 8)}.zip`;
+    const filename = `pcshub-backup-${stamp(createdAt)}-${job.id.slice(0, 8)}.zip${encrypted ? '.enc' : ''}`;
     const rel = `${createdAt.getUTCFullYear()}/${String(createdAt.getUTCMonth() + 1).padStart(2, '0')}/${filename}`;
     finalAbs = path.join(cfg.BACKUP_DIR, ...rel.split('/'));
     await fsp.mkdir(path.dirname(finalAbs), { recursive: true, mode: 0o700 });
@@ -255,7 +262,7 @@ async function runCreate(job, req, release) {
     await audit(req, 'admin.backup_create', 'backup', job.id, {
       outcome: 'success', backupId: job.id, filename, sizeBytes: zipStat.size, sha256: zipSha,
       schemaVersion: SCHEMA_VERSION, appVersion: APP_VERSION, components: Object.keys(meta.components),
-      counts, files: summaryFiles, signed: Boolean(meta.signature), encrypted: false, durationMs: Date.now() - t0,
+      counts, files: summaryFiles, signed: Boolean(meta.signature), encrypted, durationMs: Date.now() - t0,
     });
     return rows[0];
   } catch (e) {

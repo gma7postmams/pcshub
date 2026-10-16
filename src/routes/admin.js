@@ -500,7 +500,9 @@ router.post('/users/:id/2fa', asyncH(async (req, res) => {
       : 'UPDATE users SET twofa_required=FALSE, totp_secret=NULL, totp_enabled=FALSE, totp_last_step=NULL, updated_at=now() WHERE id=$1 RETURNING username',
     enabled ? [id, method] : [id]
   );
-  await audit(req, enabled ? 'admin.user_2fa_enable' : 'admin.user_2fa_disable', 'user', id, { username: r.rows[0].username, method: enabled ? method : undefined, reenrol: reenrol || undefined });
+  // 2FA taken away or reset: sessions opened with the old second factor end (it may be why it was reset: a lost phone)
+  const signedOut = (!enabled || reenrol) ? (await db.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = $1`, [id])).rowCount : 0;
+  await audit(req, enabled ? 'admin.user_2fa_enable' : 'admin.user_2fa_disable', 'user', id, { username: r.rows[0].username, method: enabled ? method : undefined, reenrol: reenrol || undefined, sessionsEnded: signedOut || undefined });
   res.json({ ok: true });
 }));
 
@@ -511,7 +513,8 @@ router.post('/users/:id/reset-2fa', asyncH(async (req, res) => {
     `UPDATE users SET totp_secret=NULL, totp_enabled=FALSE, totp_last_step=NULL, updated_at=now() WHERE id=$1 RETURNING username`, [id]
   );
   if (!r.rowCount) throw new HttpError(404, 'User not found');
-  await audit(req, 'admin.user_reset_2fa', 'user', id, { username: r.rows[0].username });
+  const ended = (await db.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = $1`, [id])).rowCount;   // a lost phone: its sessions go too
+  await audit(req, 'admin.user_reset_2fa', 'user', id, { username: r.rows[0].username, sessionsEnded: ended });
   res.json({ ok: true });
 }));
 

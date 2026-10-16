@@ -15,6 +15,9 @@ module.exports = {
   PG_DUMP_BIN: process.env.PG_DUMP_BIN || 'pg_dump',
   PG_RESTORE_BIN: process.env.PG_RESTORE_BIN || 'pg_restore',
   SIGNING_KEY: process.env.BACKUP_SIGNING_KEY || '',
+  // Backups are encrypted at rest (AES-256-GCM) when this is set. Keep a copy somewhere safe: without it no encrypted backup can be read.
+  // The backup server needs the same value.
+  ENC_KEY: process.env.BACKUP_ENC_KEY || '',
 
   TIMEOUT_MS: int(process.env.BACKUP_TIMEOUT_MIN, 30) * 60 * 1000,
   MAX_BACKUPS: int(process.env.BACKUP_MAX_COUNT, 30),
