@@ -1309,7 +1309,7 @@ function DeleteAllIngest({ total, scope, filters, admin, onClose, onDone }) {
 function IngestDetail({ r, canWrite, canDelete, canApprove, approveReady, canUnapprove, onClose, onEdit, onDelete, onApprove, onUnapprove }) {
   return (
     <Modal
-      title={`Ingest #${r.no ?? r.id}`}
+      title={canWrite ? 'Edit Ingest' : 'Ingest'}
       onClose={onClose}
       footer={(
         <>
