@@ -3,7 +3,7 @@ import { del, get, post, put } from '../lib/api.js';
 import { downloadFile, fmtDate, isoDate } from '../lib/util.js';
 import { isBlockText, pasteFallback } from '../lib/pasteFallback.js';
 import { loadView, saveView, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
-import { CalendarIcon, DownloadIcon, ExitFullscreenIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
+import { CalendarIcon, CopyIcon, DownloadIcon, ExitFullscreenIcon, FullscreenIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { peerStyle, rangeCells, useCellPresence, useLive } from '../lib/live.js';
 import { ExportButton, FilterSelect, FiltersMenu, pickerHeld, Pager, RowMenu, SortTh, ToolMenu, useFitBox, useNarrow, useSpareRows, SpareRows } from '../components/wl.jsx';
@@ -913,7 +913,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
           {canWrite ? (
             <ToolMenu items={[
               narrow && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
-              { id: 'copy-wl-menu', label: 'Copy to Workload', keep: true, disabled: !copyable.length, onClick: copyToWorkload },
+              { id: 'copy-wl-menu', label: 'Copy to Workload', icon: <CopyIcon />, keep: true, disabled: !copyable.length, onClick: copyToWorkload },
               isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
             ]} />
           ) : null}
