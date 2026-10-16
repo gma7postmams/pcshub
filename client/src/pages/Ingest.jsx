@@ -792,17 +792,19 @@ export default function Ingest() {
   // Every record has a fixed row number (like a sheet row). With no filter and no sort the table shows those numbers with blank rows in the gaps; with a filter or a sort
   // it lists just the matching records (in row order unless sorted) and the blank rows start after the last number in use.
   // Numbering: a sorted list is numbered 1, 2, 3… (no blank rows). With a date picked the rows (and the blank rows between them) are numbered 1, 2, 3… in the order they are drawn,
-  // and a row typed into a blank row stays on that row. With all dates the rows show their fixed row numbers and no blank rows between them. `_sort` / `_date` are what the list on screen was read with
+  // and a row typed into a blank row stays on that row. With all dates the rows are listed in the order they were added (the newest at the bottom), numbered 1, 2, 3… with no blank rows. `_sort` / `_date` are what the list on screen was read with
   // (a new filter / sort only shows once its rows arrive).
   const sortNums = data && data._sort !== undefined ? data._sort : !!sort.k;
-  const ordinal = !sortNums && (data && data._date !== undefined ? data._date : !!(filt.from || filt.to));
-  const gapsOn = canWrite && !narrow && !!data && !!data.rows && !sortNums && ordinal;   // blank rows between records only with a date picked; all dates lists just the records (rows close up, each with its real row number)   // blank rows for the row numbers nobody uses (not when sorted: the order is then not the row order)
+  const dateOn = data && data._date !== undefined ? data._date : !!(filt.from || filt.to);
+  const ordinal = !sortNums && dateOn;
+  const flatNums = sortNums || !dateOn;   // a sorted list, and all dates (in the order the rows were added, newest at the bottom): numbered 1, 2, 3… with no blank rows
+  const gapsOn = canWrite && !narrow && !!data && !!data.rows && ordinal;   // blank rows between records only with a date picked; all dates lists just the records (rows close up, each with its real row number)   // blank rows for the row numbers nobody uses (not when sorted: the order is then not the row order)
   const lastPos = rows.length ? (rows[rows.length - 1].row_pos || 0) : 0;
   const maxPos = data && data.maxPos ? data.maxPos : 0;
   const usedSet = new Set(data && data.usedPos ? data.usedPos : rows.map((x) => x.row_pos));   // numbers in use, including by records the filter hides
   const trailStart = maxPos + 1;
   const tailLabel0 = offset + rows.length + 1;   // numbered lists: the blank rows at the end carry on from the last row shown
-  const slotLabel = (slot) => (sortNums ? tailLabel0 + (slot - trailStart) : slot);
+  const slotLabel = (slot) => (flatNums ? tailLabel0 + (slot - trailStart) : slot);
   const freeRuns = (from, to) => { const runs = []; let start = null; for (let p = from; p <= to && p - from < 2000; p++) { if (!usedSet.has(p)) { if (start === null) start = p; } else if (start !== null) { runs.push([start, p - start]); start = null; } } if (start !== null) runs.push([start, Math.min(to, from + 1999) - start + 1]); return runs; };
   const allOn = rows.length > 0 && rows.every((r) => picked.has(r.id));
   const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -952,7 +954,7 @@ export default function Ingest() {
   const renderRow = (r0, i, rnText, label) => { const r = { ...r0, __i: i }; return (
 <tr key={r.id} data-id={r.id} data-pinned={rnText ? '1' : undefined} className={`clickable${picked.has(r.id) ? ' picked' : ''}`} onMouseDown={cellDown} onContextMenu={(e) => rowMenu(e, r)}
                           onClick={() => { if (suppress.current) { suppress.current = false; return; } openDetail(r.id); }}>
-                          {!narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} onClick={(e) => e.stopPropagation()} title="Click to select the row (Shift-click a range, Ctrl-click to add, drag down)">{rnText || label || (sortNums ? offset + i + 1 : r.row_pos || i + 1)}</td> : null}
+                          {!narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} onClick={(e) => e.stopPropagation()} title="Click to select the row (Shift-click a range, Ctrl-click to add, drag down)">{rnText || label || (flatNums ? offset + i + 1 : r.row_pos || i + 1)}</td> : null}
                           {narrow && canDelete ? <td className="chk" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={picked.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${r.program}`} /></td> : null}
                           {cell(r, 'program', <strong>{r.program}</strong>)}
                           {cell(r, 'platform', <PlatformCell value={r.platform} />)}
@@ -984,7 +986,7 @@ export default function Ingest() {
         <td />
       </tr>
     ); }
-    if (pinned) { const pr = rows.find((x) => x.id === pinned.id) || pinned.row; const pi = rows.findIndex((x) => x.id === pinned.id); return renderRow(pr, pi >= 0 ? pi : undefined, label !== undefined ? label : sortNums ? (pi >= 0 ? offset + pi + 1 : slotLabel(pinned.slot)) : pinned.slot); }
+    if (pinned) { const pr = rows.find((x) => x.id === pinned.id) || pinned.row; const pi = rows.findIndex((x) => x.id === pinned.id); return renderRow(pr, pi >= 0 ? pi : undefined, label !== undefined ? label : flatNums ? (pi >= 0 ? offset + pi + 1 : slotLabel(pinned.slot)) : pinned.slot); }
     return null;
   };
   const renderBodyRows = () => {   // the records and, between them, the blank rows of the numbers nobody has used
@@ -995,7 +997,7 @@ export default function Ingest() {
     let c = offset;   // with a date picked: the number of the last row drawn (records and blank rows count alike)
     const block = (key, p0, n) => {
       const here = !shown && spareProps.at >= p0 && spareProps.at < p0 + n; if (here) shown = true;
-      const l0 = ordinal ? c + 1 : sortNums && key === 'spare-tail' ? tailLabel0 : undefined;
+      const l0 = ordinal ? c + 1 : flatNums && key === 'spare-tail' ? tailLabel0 : undefined;
       if (ordinal) c += n;
       return <SpareRows key={`${key}-${p0}`} count={n} pos0={p0} label0={l0} {...spareProps} at={here ? spareProps.at : -1} node={here ? spareNode(l0 !== undefined ? l0 + (spareProps.at - p0) : undefined) : null} />;
     };
