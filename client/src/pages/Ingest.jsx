@@ -311,12 +311,16 @@ export default function Ingest() {
   }, []);
 
   // quiet = a re-read because somebody else changed the list: keep the person's picked rows and the table as it is if the read fails
+  // Only today's list (no other filter, no search, no sort) keeps rows where they were typed (blank rows, fixed spots); every other view lists the rows in the order they were added, numbered 1, 2, 3…
+  const keepNow = () => !sort.k && !!filt.from && filt.from === filt.to && filt.from === todayISO() && !filt.status && !filt.program && !filt.platform && !filt.approval && !q;
   const fetchPage = useCallback(async (quiet) => {
     const p = new URLSearchParams({ limit: size, offset });
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
     if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); } else if (narrow) p.set('newest', '1');   // phone: newest entries on top
     if (!quiet) { setPicked(new Set()); setAllMatching(false); }
-    try { const res = await get(`/api/ingest?${p}`); setData({ ...res, _sort: !!sort.k, _date: !!(filt.from || filt.to) }); } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
+    const keep = keepNow();
+    if (keep) p.set('keep', '1');   // today's list only: every row keeps the row it was typed into
+    try { const res = await get(`/api/ingest?${p}`); setData({ ...res, _sort: !!sort.k, _keep: keep }); } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
   }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset, size, sort.k, sort.dir, narrow]); // eslint-disable-line react-hooks/exhaustive-deps
   const load = useCallback(() => fetchPage(false), [fetchPage]);
 
@@ -795,9 +799,9 @@ export default function Ingest() {
   // and a row typed into a blank row stays on that row. With all dates the rows are listed in the order they were added (the newest at the bottom), numbered 1, 2, 3… with no blank rows. `_sort` / `_date` are what the list on screen was read with
   // (a new filter / sort only shows once its rows arrive).
   const sortNums = data && data._sort !== undefined ? data._sort : !!sort.k;
-  const dateOn = data && data._date !== undefined ? data._date : !!(filt.from || filt.to);
-  const ordinal = !sortNums && dateOn;
-  const flatNums = sortNums || !dateOn;   // a sorted list, and all dates (in the order the rows were added, newest at the bottom): numbered 1, 2, 3… with no blank rows
+  const keepView = data && data._keep !== undefined ? data._keep : keepNow();
+  const ordinal = !sortNums && keepView;
+  const flatNums = sortNums || !keepView;   // a sorted list, and all dates (in the order the rows were added, newest at the bottom): numbered 1, 2, 3… with no blank rows
   const gapsOn = canWrite && !narrow && !!data && !!data.rows && ordinal;   // blank rows between records only with a date picked; all dates lists just the records (rows close up, each with its real row number)   // blank rows for the row numbers nobody uses (not when sorted: the order is then not the row order)
   const lastPos = rows.length ? (rows[rows.length - 1].row_pos || 0) : 0;
   const maxPos = data && data.maxPos ? data.maxPos : 0;
