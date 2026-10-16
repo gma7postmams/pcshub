@@ -359,6 +359,21 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     } catch (e) { toast(e.message, 'err'); }
   };
   const removeChosen = () => deleteChosen('Delete');
+  // Copy to Workload: the chosen plugs that are not in the Workload page yet (e.g. their Workload row was deleted) get a row again; plugs already there are left alone
+  const copyable = chosen.filter((r) => !isDraft(r.id) && !r.in_workload);
+  const copyToWorkload = async () => {
+    setCtx(null);
+    if (!pickedCount) { toast('Select the plugs to copy first'); return; }
+    if (!copyable.length) { toast('The selected plugs are already in Workload'); return; }
+    try {
+      const out = await post('/api/plugs/copy', { ids: copyable.map((r) => r.id) });
+      const bits = [`${out.created} copied to Workload`];
+      if (out.already) bits.push(`${out.already} already there`);
+      if (out.locked) bits.push(`${out.locked} skipped (locked period)`);
+      toast(bits.join(', '), out.errors && out.errors.length ? 'err' : undefined);
+      reload();
+    } catch (e) { toast(e.message, 'err'); }
+  };
 
   // copy / cut / paste (tab-separated, so it also goes to and from a real Excel sheet)
   const copyChosen = async () => {
@@ -898,6 +913,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
           {canWrite ? (
             <ToolMenu items={[
               narrow && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
+              { id: 'copy-wl-menu', label: 'Copy to Workload', keep: true, disabled: !copyable.length, onClick: copyToWorkload },
               isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
             ]} />
           ) : null}
@@ -964,6 +980,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
                 <button type="button" disabled={!picked.size} onClick={() => menuPaste('above')}>Paste as new row above</button>
                 <button type="button" disabled={!picked.size} onClick={() => menuPaste('below')}>Paste as new row below</button>
                 <hr />
+                <button type="button" disabled={!copyable.length} onClick={copyToWorkload}>Copy to Workload</button>
                 <button type="button" disabled={!pickedCount} onClick={() => { setCtx(null); deleteChosen(); }}>Delete {pickedCount > 1 ? `${pickedCount} rows` : 'row'}<span>Del</span></button>
               </CellMenu>
             ) : null}
