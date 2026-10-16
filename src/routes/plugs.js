@@ -634,7 +634,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     } catch (e) { console.error('[plugs] automatic copy failed', e.message); return null; }
   };
 
-  router.post('/copy', requireAction('workload.write'), asyncH(async (req, res) => {
+  router.post('/copy', requireAction('plugs.write'), asyncH(async (req, res) => {
     const t0 = Date.now();
     const body = req.body || {};
     // Units Concerned is NOT known from the plug list: rows are made with it blank (they show under All until someone sets it).
