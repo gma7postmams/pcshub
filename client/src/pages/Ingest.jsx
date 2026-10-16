@@ -316,7 +316,7 @@ export default function Ingest() {
   const fetchPage = useCallback(async (quiet) => {
     const p = new URLSearchParams({ limit: size, offset });
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
-    if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); } else if (narrow) p.set('newest', '1');   // phone: newest entries on top
+    if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); } else if (narrow && (filt.from || filt.to)) p.set('newest', '1');   // phone: newest entries on top, except with all dates (like the desktop: newest at the bottom)
     if (!quiet) { setPicked(new Set()); setAllMatching(false); }
     const keep = keepNow();
     if (keep) p.set('keep', '1');   // today's list only: every row keeps the row it was typed into
