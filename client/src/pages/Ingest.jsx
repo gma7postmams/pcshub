@@ -323,6 +323,20 @@ export default function Ingest() {
     try { const res = await get(`/api/ingest?${p}`); setData({ ...res, _sort: !!sort.k, _keep: keep }); } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
   }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset, size, sort.k, sort.dir, narrow]); // eslint-disable-line react-hooks/exhaustive-deps
   const load = useCallback(() => fetchPage(false), [fetchPage]);
+  // after a save the screen follows the entry: it scrolls to the saved record and flashes it, so it is not lost in a long list (the phone especially)
+  const follow = useRef(null);
+  useEffect(() => {
+    const id = follow.current;
+    if (!id || !data || !data.rows) return;
+    follow.current = null;
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`.wl-card tr[data-id="${id}"]`);
+      if (!el) return;
+      if (el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el.classList.add('saved-flash');
+      setTimeout(() => el.classList.remove('saved-flash'), 2400);
+    });
+  }, [data]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1129,7 +1143,7 @@ export default function Ingest() {
       </div>
 
       {form && lookups ? (
-        <IngestForm rec={form.id ? form : null} lookups={lookups} onClose={() => setForm(null)} onSaved={() => { setForm(null); load(); }} />
+        <IngestForm rec={form.id ? form : null} lookups={lookups} onClose={() => setForm(null)} onSaved={(sid) => { setForm(null); follow.current = sid || null; load(); }} />
       ) : null}
 
       {reasonFor ? (
@@ -1226,13 +1240,13 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
       else id = (await post('/api/ingest', payload)).id;
       if (cmChanged) await post(`/api/ingest/${id}/cm-decision`, { decision: f.cm_status || 'Pending', reason: f.cm_status === 'NON-COMPLIANT' ? f.cm_reason : '' });
       toast('Saved');
-      onSaved();
+      onSaved(id);
     } catch (e) { toast(e.message, 'err'); setBusy(false); }
   };
 
   return (
     <Modal
-      title={rec ? `Edit Ingest #${rec.no ?? rec.id}` : 'New Ingest'}
+      title={rec ? 'Edit Ingest' : 'New Ingest'}
       onClose={requestClose}
       footer={(
         <>

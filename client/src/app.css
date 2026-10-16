@@ -1366,3 +1366,7 @@ table.t.wl.cards td[data-sel], table.t.wl.cards td:focus, table.t.wl.cards td.ed
 table.t.wl.cards td:focus:not(:focus-visible) { outline: none; }
 
 .peer-text { white-space: pre-wrap; overflow-wrap: anywhere; }   /* what somebody else is typing in a cell, shown live */
+
+/* the row that was just saved (the screen scrolls to it) */
+tr.saved-flash td, tr.saved-flash { animation: saved-flash 2.4s ease-out; }
+@keyframes saved-flash { 0%, 35% { background: color-mix(in srgb, var(--brand, #4f8cff) 22%, transparent); } 100% { background: transparent; } }
