@@ -242,7 +242,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       if (range.to) p.set('to', range.to);
       if (query) p.set('q', query);
       Object.entries(filt).forEach(([k, val]) => { if (val) p.set(k, val); });
-      if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); } else if (narrow || period !== 'day') p.set('newest', '1');   // phone, and every view that spans more than one day (the date column tells the days apart): the newest entries on top
+      if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); } else if (narrow || period !== 'day') { p.set('newest', '1'); if (narrow) p.set('order', 'desc'); }   // phone, and every view that spans more than one day: grouped by date, the newest entry of a date on top
       setData({ ...(await get(`/api/plugs?${p}`)), _sort: !!sort.k });
     } catch (e) { if (!quiet) { setData({ rows: [], total: 0 }); toast(e.message, 'err'); } }
   }, [anchor, range.from, range.to, query, filt, limit, offset, period, sort.k, sort.dir, narrow]); // eslint-disable-line react-hooks/exhaustive-deps
