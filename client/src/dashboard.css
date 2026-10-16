@@ -255,7 +255,7 @@ button.dsh-stat:hover { transform: translateY(-2px); box-shadow: 0 10px 22px col
    Hero, the two KPI blocks keep their natural height. Active users / Recent Activity and the chart row share what is left;
    Recent Activity shows as many whole rows as fit (extra rows wrap into a hidden second column), Active users scrolls inside its card. */
 @media (min-width: 1100px) {
-  .container.wide.dsh { height: calc(100vh - var(--nav-h)); height: calc(100dvh - var(--nav-h)); min-height: 520px; }
+  .container.wide.dsh { height: calc(100vh - var(--nav-h)); height: calc(100dvh - var(--nav-h)); min-height: 700px; }   /* below ~760 px of window height the page scrolls instead of squeezing the cards into each other */
   .dsh > * { flex: none; }
   .dsh-row2 { flex: 1 1 0; min-height: 76px; max-height: 250px; align-items: stretch; }
   .dsh-row3 { flex: 1.25 1 0; min-height: 104px; max-height: 380px; }
