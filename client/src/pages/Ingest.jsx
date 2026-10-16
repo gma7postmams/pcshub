@@ -287,7 +287,6 @@ export default function Ingest() {
     if (params.get('status') || params.get('approval')) { base.from = ''; base.to = ''; }   // a Dashboard link to the pending items shows them on every date
     return base;
   });
-  const goLast = useRef(false);
   const [offset, setOffset] = useState(() => loadView('ingest', {}).offset || 0);   // the page you were on is kept across a refresh
   const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('ing:rows3')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
   const changeSize = (e) => { const n = Number(e.target.value); try { localStorage.setItem('ing:rows3', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
@@ -317,14 +316,7 @@ export default function Ingest() {
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
     if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); } else if (narrow) p.set('newest', '1');   // phone: newest entries on top
     if (!quiet) { setPicked(new Set()); setAllMatching(false); }
-    try {
-      const res = await get(`/api/ingest?${p}`); setData({ ...res, _sort: !!sort.k, _date: !!(filt.from || filt.to) });
-      if (goLast.current) {   // just switched to all dates: open on the last page, where the newest entries (yours) are, not on the oldest rows
-        goLast.current = false;
-        const lo = Math.max(0, Math.floor(((res.total || 1) - 1) / size) * size);
-        if (lo !== offset && !narrow && !sort.k) setOffset(lo);
-      }
-    } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
+    try { const res = await get(`/api/ingest?${p}`); setData({ ...res, _sort: !!sort.k, _date: !!(filt.from || filt.to) }); } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
   }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset, size, sort.k, sort.dir, narrow]); // eslint-disable-line react-hooks/exhaustive-deps
   const load = useCallback(() => fetchPage(false), [fetchPage]);
 
@@ -1035,7 +1027,7 @@ export default function Ingest() {
             <FilterSelect label="Status" value={filt.status} onChange={setF('status')}><Options list={STATUS_FILTER} blank="All" /></FilterSelect>
             <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All" /></FilterSelect>
           </FiltersMenu>
-          <DateRange title="Episode / Breakdate range" from={filt.from} to={filt.to} onChange={({ from, to }) => { setFilt((f) => ({ ...f, from, to })); setOffset(0); goLast.current = !from && !to; }} />
+          <DateRange title="Episode / Breakdate range" from={filt.from} to={filt.to} onChange={({ from, to }) => { setFilt((f) => ({ ...f, from, to })); setOffset(0); }} />
           {filt.approval ? (   // opened from the Dashboard's Pending Approval card: only requests nobody has approved yet; the chip clears it
             <button type="button" className="btn sm" title="Show every request again" onClick={() => { setFilt((f) => ({ ...f, approval: '' })); setOffset(0); }}>Awaiting approval ✕</button>
           ) : null}
