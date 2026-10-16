@@ -918,7 +918,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
                   : <>All <strong>{rows.length}</strong> on this page are selected. <button type="button" className="linklike" id="select-all-matching" onClick={() => setAllMatching(true)}>Select all {total} in this view</button></>}
               </div>
             ) : null}
-            <div className={`table-wrap${narrow ? '' : ' wl-fit'}`} onClickCapture={(e) => { if (suppress.current) { suppress.current = false; e.stopPropagation(); e.preventDefault(); return; } if (canWrite && picked.size && !(e.target.closest && e.target.closest('.rn, .chk, .plug-actions'))) clearPicks(); }}>
+            <div className={`table-wrap${narrow ? '' : ' wl-fit'}`} onClickCapture={(e) => { if (suppress.current) { suppress.current = false; e.stopPropagation(); e.preventDefault(); return; } if (canWrite && picked.size && !(e.target.closest && e.target.closest('.rn, .chk, .plug-actions')) && e.target.closest && e.target.closest('td, th')) clearPicks(); }}>   {/* a click that lands on the table itself (not in a cell) is the end of a drag over the row numbers: keep the selection */}
               <table className={`t wl plug-t${narrow ? ' cards' : ''}`}>
                 <thead>
                   <tr>
