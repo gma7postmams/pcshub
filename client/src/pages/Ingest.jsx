@@ -312,7 +312,7 @@ export default function Ingest() {
 
   // quiet = a re-read because somebody else changed the list: keep the person's picked rows and the table as it is if the read fails
   // Only today's list (no other filter, no search, no sort) keeps rows where they were typed (blank rows, fixed spots); every other view lists the rows in the order they were added, numbered 1, 2, 3…
-  const keepNow = () => !sort.k && !!filt.from && filt.from === filt.to && filt.from === todayISO() && !filt.status && !filt.program && !filt.platform && !filt.approval && !q;
+  const keepNow = () => !narrow && !sort.k && !!filt.from && filt.from === filt.to && filt.from === todayISO() && !filt.status && !filt.program && !filt.platform && !filt.approval && !q;
   const fetchPage = useCallback(async (quiet) => {
     const p = new URLSearchParams({ limit: size, offset });
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });

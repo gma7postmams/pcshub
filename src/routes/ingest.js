@@ -109,7 +109,7 @@ const SORTS = {
 };
 function orderBy(q) {
   const col = Object.prototype.hasOwnProperty.call(SORTS, q.sort) ? SORTS[q.sort] : null;
-  if (!col && q.newest === '1') return 'i.row_pos DESC NULLS LAST, i.id DESC';   // the phone list: the newest entry first
+  if (!col && q.newest === '1') return 'i.id DESC';   // the phone list: the newest entry first
   if (!col && q.keep !== '1') return 'i.id ASC';   // every view except today's: the order the rows were added, the newest at the bottom
   if (!col) return 'i.row_pos ASC NULLS LAST, i.id ASC';   // like a sheet: every record keeps the row it was typed into
   return `${col} ${q.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, i.row_pos ASC NULLS LAST, i.id ASC`;
