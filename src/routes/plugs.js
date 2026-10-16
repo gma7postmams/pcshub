@@ -416,7 +416,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
         title: `${count} new plug${count === 1 ? '' : 's'} added`,
         body: `${req.user.full_name} added ${what} to the PSD Daily Plug List.`,
         link: '/plug-list', kind: 'plugs_added',
-      }, { excludeUserId: req.user.id });
+      }, { excludeUserId: req.user.id, linkIf: { key: 'workload', link: '/workload' } });   // new plugs are copied into Workload: whoever can open it lands there
     } catch (e) { console.error('[plugs] notification failed:', e.message); }
   };
 

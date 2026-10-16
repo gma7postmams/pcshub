@@ -40,7 +40,7 @@ async function notifyCapable(action, payload, { excludeUserId } = {}, client) {
 }
 
 /** Notify every active user who may open the page `pageKey` (e.g. 'plugs'), whatever their role. */
-async function notifyPageUsers(pageKey, payload, { excludeUserId } = {}, client) {
+async function notifyPageUsers(pageKey, payload, { excludeUserId, linkIf } = {}, client) {
   const runner = client || db;
   const { rows } = await runner.query(
     `SELECT u.id, u.role,
@@ -49,7 +49,12 @@ async function notifyPageUsers(pageKey, payload, { excludeUserId } = {}, client)
       WHERE u.is_active AND ($1::int IS NULL OR u.id <> $1)`,
     [excludeUserId || null]
   );
-  await notifyUsers(rows.filter((u) => effectiveKeys({ role: u.role, perms: u.perms }).has(pageKey)).map((u) => u.id), payload, client);
+  const who = rows.filter((u) => effectiveKeys({ role: u.role, perms: u.perms }).has(pageKey));
+  // `linkIf` { key, link }: people who can also open that page are taken there instead (e.g. new plugs are copied into Workload, so Workload is where they look)
+  const alt = linkIf ? who.filter((u) => effectiveKeys({ role: u.role, perms: u.perms }).has(linkIf.key)) : [];
+  const altIds = new Set(alt.map((u) => u.id));
+  await notifyUsers(who.filter((u) => !altIds.has(u.id)).map((u) => u.id), payload, client);
+  if (alt.length) await notifyUsers(alt.map((u) => u.id), { ...payload, link: linkIf.link }, client);
 }
 
 module.exports = { notifyPageUsers, notifyUsers, notifyCapable };
