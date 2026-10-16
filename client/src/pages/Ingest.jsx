@@ -312,6 +312,8 @@ export default function Ingest() {
 
   // quiet = a re-read because somebody else changed the list: keep the person's picked rows and the table as it is if the read fails
   // Only today's list (no other filter, no search, no sort) keeps rows where they were typed (blank rows, fixed spots); every other view lists the rows in the order they were added, numbered 1, 2, 3…
+  const follow = useRef(null);   // the id of the record just saved: the screen follows it
+  const jumped = useRef(0);
   const keepNow = () => !narrow && !sort.k && !!filt.from && filt.from === filt.to && filt.from === todayISO() && !filt.status && !filt.program && !filt.platform && !filt.approval && !q;
   const fetchPage = useCallback(async (quiet) => {
     const p = new URLSearchParams({ limit: size, offset });
@@ -320,23 +322,32 @@ export default function Ingest() {
     if (!quiet) { setPicked(new Set()); setAllMatching(false); }
     const keep = keepNow();
     if (keep) p.set('keep', '1');   // today's list only: every row keeps the row it was typed into
-    try { const res = await get(`/api/ingest?${p}`); setData({ ...res, _sort: !!sort.k, _keep: keep }); } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
+    if (follow.current) p.set('locate', String(follow.current));   // just saved: ask where the record is in this list
+    try {
+      const res = await get(`/api/ingest?${p}`);
+      // the saved record is on another page (a new entry goes to the last page of All dates): go to that page; the next read shows it
+      if (follow.current && res.at != null && !quiet) {
+        const sz = Number(size) || 25;
+        if ((res.at < offset || res.at >= offset + sz) && jumped.current < 2) { jumped.current += 1; setOffset(Math.floor(res.at / sz) * sz); return; }
+      }
+      setData({ ...res, _sort: !!sort.k, _keep: keep });
+    } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
   }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset, size, sort.k, sort.dir, narrow]); // eslint-disable-line react-hooks/exhaustive-deps
   const load = useCallback(() => fetchPage(false), [fetchPage]);
   // after a save the screen follows the entry: it scrolls to the saved record and flashes it, so it is not lost in a long list (the phone especially)
-  const follow = useRef(null);
   useEffect(() => {
     const id = follow.current;
     if (!id || !data || !data.rows) return;
-    follow.current = null;
     requestAnimationFrame(() => {
       const el = document.querySelector(`.wl-card tr[data-id="${id}"]`);
-      if (!el) return;
+      if (!el) { if (data.at == null || jumped.current >= 2) follow.current = null; return; }   // not here yet: a read of its page is on the way
+      follow.current = null;
       if (el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
       el.classList.add('saved-flash');
       setTimeout(() => el.classList.remove('saved-flash'), 2400);
     });
   }, [data]);
+  useEffect(() => { const t = setInterval(() => { if (follow.current && Date.now() - (follow.since || 0) > 8000) follow.current = null; }, 4000); return () => clearInterval(t); }, []);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1143,7 +1154,7 @@ export default function Ingest() {
       </div>
 
       {form && lookups ? (
-        <IngestForm rec={form.id ? form : null} lookups={lookups} onClose={() => setForm(null)} onSaved={(sid) => { setForm(null); follow.current = sid || null; load(); }} />
+        <IngestForm rec={form.id ? form : null} lookups={lookups} onClose={() => setForm(null)} onSaved={(sid) => { setForm(null); follow.current = sid || null; follow.since = Date.now(); jumped.current = 0; load(); }} />
       ) : null}
 
       {reasonFor ? (

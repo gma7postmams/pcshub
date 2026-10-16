@@ -186,7 +186,17 @@ router.get('/', asyncH(async (req, res) => {
     const nx = await db.query(`SELECT i.row_pos FROM ingest_records i LEFT JOIN users ru ON ru.id=i.requested_by_user_id ${whereSql} ORDER BY ${orderBy(req.query)} LIMIT 1 OFFSET ${offset + limit}`, params);
     nextPos = nx.rows.length ? nx.rows[0].row_pos : null;
   }
-  res.json({ total: countQ.rows[0].n, rows, maxPos: maxQ.rows[0].m, nextPos, usedPos: usedQ.rows.map((x) => x.row_pos) });
+  // ?locate=<id>: where that record sits in this list (0 = first), so the screen can go to the page it is on after a save
+  let at = null;
+  const loc = Number(req.query.locate);
+  if (Number.isInteger(loc) && loc > 0) {
+    const lq = await db.query(
+      `SELECT pos FROM (SELECT i.id, (row_number() OVER (ORDER BY ${orderBy(req.query)}) - 1)::int AS pos FROM ingest_records i LEFT JOIN users ru ON ru.id=i.requested_by_user_id ${whereSql}) t WHERE t.id = $${params.length + 1}`,
+      [...params, loc]
+    );
+    at = lq.rows.length ? lq.rows[0].pos : null;
+  }
+  res.json({ total: countQ.rows[0].n, rows, maxPos: maxQ.rows[0].m, nextPos, usedPos: usedQ.rows.map((x) => x.row_pos), at });
 }));
 
 // Excel export of what the list shows: same filters, search and sort. Logged in the audit trail.
