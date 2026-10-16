@@ -266,7 +266,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
            AND upper(p.plug_id) IN (SELECT upper(btrim(x)) FROM unnest(string_to_array(w.plug_id, E'\\n')) AS x)) AS in_workload`
       : '';
     const { limit, offset } = v.paging(req.query, { def: 3000, max: 5000 });
-    let order = req.query.newest === '1' ? 'p.plug_date DESC, p.row_pos DESC NULLS LAST, p.id DESC'   // the phone list: the newest entry first
+    let order = req.query.newest === '1' ? 'p.id DESC'   // the phone list: the newest entry first
       : req.query.order === 'desc' ? 'p.plug_date DESC, p.row_pos NULLS LAST, p.seq, p.id' : 'p.plug_date, p.row_pos NULLS LAST, p.seq, p.id';   // rows stay on the row they were entered in   // newest day first, or oldest first; list order within a day
     // a clicked column header (?sort=&dir=) sorts the whole result, text case-insensitively, empty values last
     const SORTS = { plug_date: 'p.plug_date', plug_id: 'lower(p.plug_id)', prog_name: 'lower(p.prog_name)', psd: 'lower(p.psd)', account_by: 'lower(p.account_by)', requested_by: 'lower(p.requested_by)' };
