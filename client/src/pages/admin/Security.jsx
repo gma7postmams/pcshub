@@ -61,7 +61,7 @@ function Rules({ policy, limits, email, onSaved }) {
   const [f, setF] = useState(policy);
   const [busy, setBusy] = useState(false);
   useEffect(() => setF(policy), [policy]);
-  const dirty = Object.keys(limits).some((k) => Number(f[k]) !== policy[k]) || f.requireAdmin2fa !== policy.requireAdmin2fa || Boolean(f.allowEmail2fa) !== Boolean(policy.allowEmail2fa);
+  const dirty = Object.keys(limits).some((k) => Number(f[k]) !== policy[k]) || f.requireAdmin2fa !== policy.requireAdmin2fa || Boolean(f.allowEmail2fa) !== Boolean(policy.allowEmail2fa) || (f.alertEmail || '') !== (policy.alertEmail || '');
   const bad = Object.entries(limits).find(([k, l]) => !(Number(f[k]) >= l.min && Number(f[k]) <= l.max));
   const save = async () => {
     const weaker = f.minPasswordLength < policy.minPasswordLength || f.lockAfterFailures > policy.lockAfterFailures
@@ -70,7 +70,7 @@ function Rules({ policy, limits, email, onSaved }) {
     setBusy(true);
     try {
       await put('/api/admin/security/settings', {
-        ...Object.fromEntries(Object.keys(limits).map((k) => [k, Number(f[k])])), requireAdmin2fa: Boolean(f.requireAdmin2fa), allowEmail2fa: Boolean(f.allowEmail2fa),
+        ...Object.fromEntries(Object.keys(limits).map((k) => [k, Number(f[k])])), requireAdmin2fa: Boolean(f.requireAdmin2fa), allowEmail2fa: Boolean(f.allowEmail2fa), alertEmail: f.alertEmail || '',
       });
       toast('Security rules saved'); onSaved();
     } catch (e) { toast(e.message, 'err'); } finally { setBusy(false); }
@@ -97,6 +97,9 @@ function Rules({ policy, limits, email, onSaved }) {
           {' '}Require 2FA for every Admin <span className="dim">— Admins without it must set it up at their next use</span></label>
         <label className="check check-row mt-12"><input type="checkbox" checked={Boolean(f.allowEmail2fa)} disabled={!email.configured && !f.allowEmail2fa} onChange={(e) => setF({ ...f, allowEmail2fa: e.target.checked })} />
           {' '}Allow email codes for 2FA <span className="dim">— for accounts shared by a group, where an authenticator app is not practical. Pick the method per user in Access → Users.</span></label>
+        <label className="f mt-12"><span>Security alert email <span className="dim">(up to 5, comma-separated)</span></span>
+          <input type="text" value={f.alertEmail || ''} placeholder="security@example.com" onChange={(e) => setF({ ...f, alertEmail: e.target.value })} />
+          <span className="dim mt-6">Brute-force runs, repeated blocked requests and locked accounts are emailed here, as well as to every Admin&apos;s own address and bell.{email.configured ? '' : ' Email sending is not set up yet, so for now only the bell is used.'}</span></label>
         <div className="kv-row mt-12"><span className="kv-label">Email sending</span><span className="kv-value">
           {email.configured ? <>Set up on the server{email.from ? ` (from ${email.from})` : ''}. <button type="button" className="linklike" onClick={testMail}>Send a test to my address</button></> : 'Not set up. Add the SMTP_ lines to the server\u2019s .env (see .env.example) and restart.'}
         </span></div>

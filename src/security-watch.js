@@ -38,9 +38,11 @@ async function tellAdmins(title, body) {
     await require('./notify').notifyUsers(rows.map((r) => r.id), { title, body, link: '/admin', kind: 'security_alert' });
     const mailer = require('./mailer');
     if (mailer.configured()) {
-      const to = [...new Set(rows.map((r) => (r.email || '').trim()).filter(Boolean))];
-      if (to.length) await mailer.send({ to: to.join(','), subject: `[Security] ${title}`, text: `${body}\n\nSee Administration → Audit Log for the details.` });
+      // every Admin's own address, plus the security alert address(es) from Administration → Security (default: ADMIN_EMAIL)
+      const to = [...new Set([...rows.map((r) => (r.email || '').trim().toLowerCase()), ...require('./security-settings').alertEmails()].filter(Boolean))];
+      if (to.length) await mailer.send({ to: to.join(','), subject: `[Security alert] ${title}`, text: `${body}\n\nSee Administration → Audit Log for the details.` });
     }
+    else console.warn('[security-watch] alert not emailed: SMTP is not set up');
   } catch (e) { console.error('[security-watch] could not notify the admins:', e.message); }
 }
 

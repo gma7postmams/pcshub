@@ -105,6 +105,11 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
     }
     next.requireAdmin2fa = b.requireAdmin2fa === true;
     next.allowEmail2fa = b.allowEmail2fa === true;
+    next.alertEmail = settings.cleanEmails(typeof b.alertEmail === 'string' ? b.alertEmail : prev.alertEmail);
+    const alertList = next.alertEmail ? next.alertEmail.split(', ') : [];
+    const badMail = alertList.find((e) => !require('validator').isEmail(e) || e.length > 254);
+    if (badMail) throw new HttpError(400, `"${badMail}" is not a valid email address`);
+    if (alertList.length > 5) throw new HttpError(400, 'Give at most 5 security alert addresses');
     if (next.allowEmail2fa && !require('./mailer').configured()) throw new HttpError(400, 'Email is not set up on the server (SMTP settings in .env), so email codes cannot be switched on');
     // Turning it on while you have no 2FA yourself would lock you out of this very page.
     if (next.requireAdmin2fa && !prev.requireAdmin2fa && !req.user.totp_enabled) {

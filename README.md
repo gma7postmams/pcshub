@@ -220,5 +220,5 @@ The name set in Administration → Branding is used everywhere, including the pl
 
 Blocked requests (permission refused, not signed in, cross-site, rate limited) are written to the Audit Log as `security.*` lines, once a minute per source and route.
 Ten signs from one IP within five minutes, a hit on the login rate limit, or an account locked by wrong passwords raises a **Security alert**: an Audit Log line,
-a bell/phone notification and an email (when SMTP is set up) to every active Admin, at most one per source every 15 minutes. One IP can lock at most two accounts per
+a bell/phone notification and an email (when SMTP is set up) to every active Admin and to the Security alert email set in Administration → Security (default: ADMIN_EMAIL), at most one per source every 15 minutes. One IP can lock at most two accounts per
 15 minutes, so a stranger cannot lock everybody out. Live self-test against a throw-away copy: `python3 scripts/security-selftest2.py` (see the header of the file).

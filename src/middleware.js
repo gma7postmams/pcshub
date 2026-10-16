@@ -52,7 +52,10 @@ function isApi(req) {
 
 function requireAuth(req, res, next) {
   if (req.user) return next();
-  if (isApi(req)) { watch().event(req, 'security.unauthenticated'); return res.status(401).json({ error: 'Not authenticated' }); }
+  if (isApi(req)) {
+    if (req.originalUrl.split('?')[0] !== '/api/auth/me') watch().event(req, 'security.unauthenticated');   // /me is how every signed-out page load starts
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
   return res.redirect('/login');
 }
 
