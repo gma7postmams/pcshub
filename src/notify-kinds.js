@@ -1,7 +1,7 @@
 // The kinds of activity a person can be notified about, and who could ever get each one. People choose, per kind, whether it appears
 // in the app's bell and whether it is pushed to their phone (users.notif_prefs: { kind: { bell: false, push: false } }; missing = on).
 const { can, effectiveKeys } = require('./permissions');
-const isAdminRole = (u) => u.role === 'Admin' || u.role === 'System Admin';
+const isSystemAdmin = (u) => u.role === 'System Admin';   // security alerts go to System Admins only, not to plain Admins
 
 const KINDS = [
   { key: 'plugs_added', label: 'New plugs added', desc: 'Someone adds plugs to the PSD Daily Plug List.', relevant: (u, k) => k.has('plugs') },
@@ -14,7 +14,7 @@ const KINDS = [
   { key: 'ingest_approval', label: 'Approval on my ingest requests', desc: 'An ingest request you created or requested is approved, or its approval is withdrawn.', relevant: (u, k) => k.has('ingest') },
   { key: 'ingest_ready_cm', label: 'Ingest ready for CM', desc: 'An ingest request was approved and is waiting for the CM Status.', relevant: (u) => can(u, 'ingest.cm_complete') },
   { key: 'ingest_cm', label: 'CM decision on my ingest requests', desc: 'The CM Status of your ingest request is set (Compliant, Non-compliant) or cleared back to Pending.', relevant: (u, k) => k.has('ingest') },
-  { key: 'security_alert', label: 'Security alerts', desc: 'Repeated blocked requests, a login brute-force run, or an account locked by wrong passwords.', relevant: (u) => isAdminRole(u) },
+  { key: 'security_alert', label: 'Security alerts', desc: 'Repeated blocked requests, a login brute-force run, or an address shut out of an account by wrong passwords.', relevant: (u) => isSystemAdmin(u) },
 ];
 const KEYS = new Set(KINDS.map((k) => k.key));
 

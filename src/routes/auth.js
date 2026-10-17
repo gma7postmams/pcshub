@@ -16,6 +16,7 @@ const { twofaRequired } = require('../config');
 const router = express.Router();
 
 const settings = require('../security-settings');   // lock after N wrong passwords, for M minutes: set in Admin > Security
+const guard = require('../login-guard');            // ...per account AND per IP, so a stranger cannot lock the real user out
 // Dummy hash so timing is similar when the username does not exist
 const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', 12);
 // One message for every failure so responses never reveal whether a username exists, is locked or disabled
@@ -23,7 +24,7 @@ const GENERIC_FAIL = 'Incorrect username or password.';
 // Said when the account exists and is locked (a different answer from a wrong password, so people know to wait or ask an Admin to unlock it)
 const lockedMessage = (until) => {
   const mins = Math.max(1, Math.ceil((new Date(until) - Date.now()) / 60000));
-  return `This account is locked after too many wrong passwords. Try again in ${mins} ${mins === 1 ? 'minute' : 'minutes'}, or ask an Administrator to unlock it.`;
+  return `Too many wrong passwords for this account from this address. Try again in ${mins} ${mins === 1 ? 'minute' : 'minutes'}, or ask an Administrator to unlock it.`;
 };
 
 const loginLimiter = rateLimit({
@@ -45,20 +46,16 @@ function save(req) {
   return new Promise((resolve, reject) => req.session.save((e) => (e ? reject(e) : resolve())));
 }
 
+// A wrong password. Counted per account AND per IP: reaching the limit shuts this address out of this account only. The account is NOT
+// locked for everybody, so nobody can keep a known user out just by typing wrong passwords. users.failed_attempts is a running count for display.
 async function recordFailure(user, req) {
   const watch = require('../security-watch');
   watch.failure(req);
-  const wanted = user.failed_attempts + 1 >= settings.get().lockAfterFailures;
-  // One IP may lock only a few accounts per window: past that its wrong passwords are refused but no longer lock anyone else out
-  const lock = wanted && watch.lockBudgetLeft(req);
-  const attempts = wanted && !lock ? settings.get().lockAfterFailures - 1 : user.failed_attempts + 1;
-  await db.query(
-    `UPDATE users SET failed_attempts=$2, locked_until=CASE WHEN $3 THEN now() + ($4 || ' minutes')::interval ELSE locked_until END
-     WHERE id=$1`,
-    [user.id, lock ? 0 : attempts, lock, String(settings.get().lockMinutes)]
-  );
-  if (lock) watch.locked(req, user.username);
-  return lock;
+  const r = guard.fail(user.username, req.ip);
+  await db.query('UPDATE users SET failed_attempts = failed_attempts + 1 WHERE id=$1', [user.id]);
+  if (r.locked) watch.ipLocked(req, user.username, r.minutes);
+  if (r.distributed) watch.distributed(user.username, r.distributed.ips, r.distributed.failures);
+  return r;
 }
 
 async function completeLogin(req, user) {
@@ -66,6 +63,7 @@ async function completeLogin(req, user) {
   req.session.userId = user.id;
   req.session.createdAt = Date.now();   // start of the absolute session lifetime (SESSION_MAX_HOURS)
   await db.query('UPDATE users SET failed_attempts=0, locked_until=NULL, last_login_at=now() WHERE id=$1', [user.id]);
+  guard.clear(user.username, req.ip);
   req.user = { id: user.id, username: user.username };
   await audit(req, 'auth.login', 'user', user.id);
   await save(req);
@@ -92,22 +90,33 @@ router.post('/login', loginLimiter, asyncH(async (req, res) => {
 
   const { rows } = await db.query('SELECT * FROM users WHERE lower(username)=lower($1)', [username]);
   const user = rows[0];
+  // Is THIS address shut out of this account? Asked the same way for a name that does not exist, so the answer reveals nothing about accounts.
+  const blocked = guard.blockedUntil(username, req.ip);
 
   if (!user) {
     await bcrypt.compare(password, DUMMY_HASH);
+    if (blocked) { await audit(req, 'auth.login_blocked_locked', 'user', null, { username }); throw new HttpError(401, lockedMessage(blocked), { locked: true }); }
     require('../security-watch').failure(req);
+    const r = guard.fail(username, req.ip);
     await audit(req, 'auth.login_failed', 'user', null, { username, reason: 'unknown_user' });
+    if (r.locked) throw new HttpError(401, lockedMessage(r.until), { locked: true });
     throw new HttpError(401, GENERIC_FAIL);
   }
   const ok = await bcrypt.compare(password, user.password_hash); // always run: same timing for locked accounts
+  // An Admin-set / older whole-account lock still applies to everybody
   if (user.locked_until && new Date(user.locked_until) > new Date()) {
     await audit(req, 'auth.login_blocked_locked', 'user', user.id, { username });
     throw new HttpError(401, lockedMessage(user.locked_until), { locked: true });
   }
+  // This address guessed too often: refused even with the right password, until the lock time is over
+  if (blocked) {
+    await audit(req, 'auth.login_blocked_locked', 'user', user.id, { username });
+    throw new HttpError(401, lockedMessage(blocked), { locked: true });
+  }
   if (!ok) {
-    const locked = await recordFailure(user, req);
-    await audit(req, locked ? 'auth.locked' : 'auth.login_failed', 'user', user.id, { username });
-    if (locked) throw new HttpError(401, lockedMessage(new Date(Date.now() + settings.get().lockMinutes * 60000)), { locked: true });   // this wrong password was the one that locked it
+    const r = await recordFailure(user, req);
+    await audit(req, r.locked ? 'auth.locked' : 'auth.login_failed', 'user', user.id, { username, ...(r.locked ? { scope: 'ip' } : {}) });
+    if (r.locked) throw new HttpError(401, lockedMessage(r.until), { locked: true });   // this wrong password was the one that shut this address out
     throw new HttpError(401, GENERIC_FAIL);
   }
   if (!user.is_active) {
@@ -168,6 +177,7 @@ router.post('/forgot/verify', loginLimiter, asyncH(async (req, res) => {
   const hash = await bcrypt.hash(pw, 12);
   await db.query('UPDATE users SET password_hash=$2, must_change_password=FALSE, failed_attempts=0, locked_until=NULL, updated_at=now() WHERE id=$1', [user.id, hash]);
   await db.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = $1`, [user.id]);
+  guard.clearUser(user.username);
   delete req.session.pwReset;
   await save(req);
   req.user = { id: user.id, username: user.username };
@@ -194,7 +204,7 @@ router.post('/2fa', loginLimiter, asyncH(async (req, res) => {
     p.tries += 1;
     if (p.tries >= 5) {
       delete req.session.pending2fa;
-      await recordFailure(user);
+      await recordFailure(user, req);
     }
     await save(req);
     require('../security-watch').failure(req);

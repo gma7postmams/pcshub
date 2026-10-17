@@ -49,7 +49,7 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
         await c.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = ANY($1::int[])`, [target]);
       }
       if (action === 'sign-out') await c.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = ANY($1::int[])`, [target]);
-      if (action === 'unlock') await c.query('UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id = ANY($1::int[])', [target]);
+      if (action === 'unlock') { await c.query('UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id = ANY($1::int[])', [target]); rows.forEach((u) => require('./login-guard').clearUser(u.username)); }
       await audit(req, 'admin.user_bulk', 'user', null, {
         action, role, group_id: groupId, count: rows.length, users: rows.map((u) => u.username),
       }, c);
