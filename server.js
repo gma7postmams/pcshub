@@ -55,6 +55,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Blocked addresses (Administration > IP Access) get 403 before anything else runs: no session, no database work.
+app.use(require('./src/ip-rules').middleware);
+
 // During a restore everything except the status endpoint answers 503. Registered before sessions: it must not touch the database.
 const maintenance = require('./src/backup/maintenance');
 app.use(maintenance.middleware);
@@ -121,6 +124,7 @@ const apiLimiter = rateLimit({
   limit: API_RATE_LIMIT,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  skip: (req) => require('./src/ip-rules').isAllowed(req.ip),   // trusted addresses (IP Access > Allowed)
   message: { error: 'Too many requests, slow down.' },
   handler: (req, res, _next, options) => {
     require('./src/security-watch').event(req, 'security.rate_limited', { limiter: 'api' });
@@ -165,6 +169,7 @@ app.use('/api/ingest',        requirePageAccess('/ingest'),    live.track('inges
 app.use('/api/workload',      requirePageAccess('/workload'),  live.track('workload'), require('./src/routes/workload'));
 app.use('/api/plugs',         live.track('plugs'), require('./src/routes/plugs')(require('./src/routes/workload').helpers));   // PSD Daily Plug List (page + API of its own)
 app.use('/api/knowledge',     requirePageAccess('/knowledge'), require('./src/routes/knowledge'));
+app.use('/api/admin/ip-rules', requirePageAccess('/admin'),    require('./src/routes/ip-rules'));
 app.use('/api/admin/backups', requirePageAccess('/admin'),     require('./src/routes/backups'));
 app.use('/api/admin/node',    requirePageAccess('/admin'),     require('./src/routes/node-admin'));
 app.use('/api/admin',         requirePageAccess('/admin'),     require('./src/routes/admin'));
@@ -216,6 +221,7 @@ const boot = process.env.MIGRATE_ON_START === 'false'
 boot
   .then(() => require('./src/roles').loadRoles(db))
   .then(() => require('./src/security-settings').load())
+  .then(() => require('./src/ip-rules').load(db))
   .then(() => require('./src/maintenance-mode').loadUi(db))
   .then(() => require('./src/backup/service').recoverStale())
   .then(() => require('./src/backup/analysis').startupCleanup())

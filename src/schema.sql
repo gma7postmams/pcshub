@@ -627,3 +627,18 @@ CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions (us
 -- Which activities notify a person (bell / phone): { kind: { bell: false, push: false } }; a kind that is missing is on
 ALTER TABLE users ADD COLUMN IF NOT EXISTS notif_prefs JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS view_prefs JSONB NOT NULL DEFAULT '{}'::jsonb;   -- each table's sort + filters, remembered per person
+
+-- IP access rules (Administration > IP Access). kind 'block': that address / range cannot reach the app at all.
+-- kind 'allow': that address / range is never shut out by wrong passwords or rate limits, and an allow rule wins over a block rule.
+-- cidr is one address ("203.0.113.7") or a range ("203.0.113.0/24", "2001:db8::/32"). expires_at NULL = until removed.
+CREATE TABLE IF NOT EXISTS ip_rules (
+  id               SERIAL PRIMARY KEY,
+  kind             TEXT NOT NULL CHECK (kind IN ('block', 'allow')),
+  cidr             TEXT NOT NULL,
+  note             TEXT,
+  expires_at       TIMESTAMPTZ,
+  created_by       INT REFERENCES users(id) ON DELETE SET NULL,
+  created_by_name  TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (kind, cidr)
+);

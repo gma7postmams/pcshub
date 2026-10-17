@@ -17,6 +17,12 @@ const ACTION_LABELS = {
   'security.csrf_blocked': 'Blocked (Cross-Site Request)',
   'security.rate_limited': 'Blocked (Rate Limit)',
   'security.alert': 'Security Alert',
+  'security.ip_blocked': 'Blocked (IP Block List)',
+  'admin.ip_rule_add': 'IP Rule Added',
+  'admin.ip_rule_remove': 'IP Rule Removed',
+  'admin.ip_rule_import': 'IP Rules Imported',
+  'admin.ip_rule_export': 'IP Rules Exported',
+  'admin.ip_auto_unblock': 'Address Let Back In',
   'auth.login_blocked_maintenance': 'Login Blocked (Maintenance Mode)',
   'admin.group_export': 'Exported Groups',
   'admin.group_import': 'Imported Groups',
@@ -614,6 +620,18 @@ function formatDetails(row) {
       return `Too many ${d.limiter === 'login' ? 'login' : 'API'} requests from this address — blocked (${d.route || ''})`;
     case 'security.alert':
       return d.title || 'Security alert';
+    case 'security.ip_blocked':
+      return `Refused ${d.method || ''} ${d.route || ''} — this address is on the block list${d.rule ? ` (${d.rule})` : ''}`;
+    case 'admin.ip_rule_add':
+      return `${d.updated ? 'Updated' : 'Added'} ${d.ip} on the ${d.list === 'allow' ? 'allow' : 'block'} list${d.note ? ` — ${d.note}` : ''}${d.expires ? `, until ${String(d.expires).slice(0, 16).replace('T', ' ')}` : ''}`;
+    case 'admin.ip_rule_remove':
+      return d.ip ? `Removed ${d.ip} from the ${d.list === 'allow' ? 'allow' : 'block'} list` : `Removed ${d.count ?? 0} IP rule(s)`;
+    case 'admin.ip_rule_import':
+      return `Imported IP rules: ${d.added ?? 0} new, ${d.updated ?? 0} updated, ${d.invalid ?? 0} skipped (${d.block ?? 0} block, ${d.allow ?? 0} allow)`;
+    case 'admin.ip_rule_export':
+      return `Exported ${d.count ?? 0} IP rule(s) as ${String(d.format || '').toUpperCase()}`;
+    case 'admin.ip_auto_unblock':
+      return `Let ${d.ip || 'an address'} back in to ${d.username || 'an account'}`;
 
     case 'auth.locked':
       return 'Account locked due to multiple failed login attempts';

@@ -8,6 +8,7 @@
 // Guessing spread over many addresses is not answered with a lock (that would give the attacker the lock-out back): the System Admins
 // are alerted instead (security-watch distributed()). Counters live in memory (single Node process) and are lost on restart.
 const settings = require('./security-settings');
+const ipRules = require('./ip-rules');   // an address on the allow list is never shut out
 
 const MAX_KEYS = 5000;
 const DISTRIBUTED_FACTOR = 3;   // this many times the limit...
@@ -30,6 +31,7 @@ function prune(now) {
 
 /** Until when (ms since epoch) is this address shut out of this account? 0 = not. */
 function blockedUntil(user, ip, now = Date.now()) {
+  if (ipRules.isAllowed(ip)) return 0;
   const p = pairs.get(key(user, ip));
   return p && p.until > now ? p.until : 0;
 }
@@ -38,6 +40,7 @@ function blockedUntil(user, ip, now = Date.now()) {
 function fail(user, ip, now = Date.now()) {
   prune(now);
   const { lockAfterFailures, lockMinutes } = settings.get();
+  if (ipRules.isAllowed(ip)) return { locked: false, until: 0, minutes: lockMinutes, distributed: null };   // allow-listed: counted nowhere, never shut out
   const k = key(user, ip);
   let p = pairs.get(k);
   if (!p || (p.until <= now && now - p.first > windowMs())) p = { n: 0, first: now, until: 0 };
@@ -65,6 +68,20 @@ function clearUser(user) {
   users.delete(norm(user));
 }
 
+/** Addresses shut out right now, for Administration > IP Access: [{ user, ip, until }] */
+function list(now = Date.now()) {
+  const out = [];
+  for (const [k, p] of pairs) {
+    if (p.until <= now) continue;
+    const i = k.lastIndexOf('|');
+    out.push({ user: k.slice(0, i), ip: k.slice(i + 1), until: p.until });
+  }
+  return out.sort((a, b) => b.until - a.until);
+}
+
+/** An Admin lets one address back in to one account. */
+function unblock(user, ip) { return pairs.delete(key(user, ip)); }
+
 function reset() { pairs.clear(); users.clear(); }
 
-module.exports = { blockedUntil, fail, clear, clearUser, reset, DISTRIBUTED_FACTOR, DISTRIBUTED_IPS };
+module.exports = { blockedUntil, fail, clear, clearUser, list, unblock, reset, DISTRIBUTED_FACTOR, DISTRIBUTED_IPS };
