@@ -56,6 +56,7 @@ function raise(key, ip, title, body, details) {
 function count(req, weight, routeKey) {
   const now = Date.now();
   const ip = req.ip || 'unknown';
+  if (require('./ip-rules').isAllowed(ip)) return;   // a trusted address (IP Access > Allowed) never counts towards an alert
   let s = sources.get(ip);
   if (!s) { s = { hits: [], routes: new Map() }; sources.set(ip, s); }
   s.hits = s.hits.filter((t) => now - t < BURST_MS);

@@ -32,6 +32,7 @@ const loginLimiter = rateLimit({
   limit: parseInt(process.env.LOGIN_RATE_LIMIT, 10) || 20, // attempts per IP per 15 min
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  skip: (req) => require('../ip-rules').isAllowed(req.ip),   // trusted addresses (IP Access > Allowed)
   message: { error: 'Too many login attempts. Try again later.' },
   handler: (req, res, _next, options) => {
     require('../security-watch').event(req, 'security.rate_limited', { limiter: 'login', route: `${req.method} ${req.baseUrl}${req.path}` });
