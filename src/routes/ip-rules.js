@@ -6,6 +6,7 @@ const { asyncH, HttpError } = require('../middleware');
 const { audit } = require('../audit');
 const ipRules = require('../ip-rules');
 const guard = require('../login-guard');
+const geoip = require('../geoip');
 
 const router = express.Router();
 router.use((req, res, next) => (req.user && req.user.role === 'System Admin' ? next() : res.status(403).json({ error: 'System Admin role required' })));
@@ -17,10 +18,12 @@ const who = (req) => req.user.full_name || req.user.username;
 
 router.get('/', asyncH(async (req, res) => {
   const { rows } = await db.query('SELECT * FROM ip_rules ORDER BY created_at DESC, id DESC');
+  const auto = guard.list().map((a) => ({ user: a.user, ip: a.ip, until: new Date(a.until).toISOString() }));
+  const me = { ip: ipRules.unmap(req.ip), direct: ipRules.unmap((req.socket && req.socket.remoteAddress) || ''), trustProxy: process.env.TRUST_PROXY || null };
+  // Where each address is (this whole route is System Admin only). A range is placed by its first address.
+  const geo = geoip.mapFor(req, [me.ip, me.direct, ...auto.map((a) => a.ip), ...rows.map((r) => r.cidr.split('/')[0])]);
   res.json({
-    rules: rows.map(ipRules.shape),
-    auto: guard.list().map((a) => ({ user: a.user, ip: a.ip, until: new Date(a.until).toISOString() })),
-    me: { ip: ipRules.unmap(req.ip), direct: ipRules.unmap((req.socket && req.socket.remoteAddress) || ''), trustProxy: process.env.TRUST_PROXY || null },
+    rules: rows.map(ipRules.shape), auto, me, geo: geo || {}, geoip: geoip.status(),
     max: ipRules.MAX_RULES, disabled: String(process.env.IP_RULES_DISABLE || '').toLowerCase() === 'true',
   });
 }));

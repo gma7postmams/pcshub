@@ -36,3 +36,6 @@ uploads/
 
 # Backups
 backups/
+
+# Location databases (npm run geoip:update)
+/data/

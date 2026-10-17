@@ -10,7 +10,8 @@
     "migrate": "node src/migrate.js",
     "test": "node --test test/*.test.js",
     "build": "npm --prefix client ci && npm --prefix client run build",
-    "dev:client": "npm --prefix client run dev"
+    "dev:client": "npm --prefix client run dev",
+    "geoip:update": "node scripts/update-geoip.js"
   },
   "engines": {
     "node": ">=20"
@@ -25,6 +26,7 @@
     "express-rate-limit": "^7.5.0",
     "express-session": "^1.18.1",
     "helmet": "^8.0.0",
+    "maxmind": "^5.0.7",
     "multer": "^2.0.2",
     "nodemailer": "^10.1.0",
     "otplib": "^12.0.1",

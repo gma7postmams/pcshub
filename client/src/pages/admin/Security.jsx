@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { get, post, put } from '../../lib/api.js';
 import { fmtDateTime } from '../../lib/util.js';
 import { Empty, useConfirm, useToast } from '../../components/ui.jsx';
+import { Geo, GeoNote } from '../../components/Geo.jsx';
 
 const EVENT = {
   'auth.login_failed': 'Failed sign-in', 'auth.locked': 'Account locked', 'auth.password_reset_self': 'Password reset by the user (Forgot password)', 'auth.login_blocked_locked': 'Sign-in blocked (locked)', 'auth.2fa_failed': 'Wrong 2FA code',
@@ -37,10 +38,11 @@ export default function Security({ go }) {
           <table className="t wl">
             <thead><tr><th>Time</th><th>Who</th><th>Event</th><th>IP</th></tr></thead>
             <tbody>{d.events.length ? d.events.map((e) => (
-              <tr key={e.id}><td className="nowrap dim">{fmtDateTime(e.created_at)}</td><td className="mono">{e.username || '—'}</td><td>{EVENT[e.action] || e.action}{e.action.startsWith('admin.') && e.target ? <> — <strong className="mono">{e.target}</strong></> : null}</td><td className="mono dim">{e.ip || ''}</td></tr>
+              <tr key={e.id}><td className="nowrap dim">{fmtDateTime(e.created_at)}</td><td className="mono">{e.username || '—'}</td><td>{EVENT[e.action] || e.action}{e.action.startsWith('admin.') && e.target ? <> — <strong className="mono">{e.target}</strong></> : null}</td><td className="dim"><span className="mono">{e.ip || ''}</span>{d.geo && e.ip ? <Geo g={d.geo[e.ip]} /> : null}</td></tr>
             )) : <tr><td colSpan={4} className="empty">Nothing to report.</td></tr>}</tbody>
           </table>
         </div>
+        {d.geo ? <div className="card-pad"><GeoNote status={d.geoip} /></div> : null}
       </div>
     </>
   );
