@@ -61,7 +61,7 @@ export default function IpAccess() {
             <strong>Block</strong>: the address cannot open the app at all. <strong>Allow</strong>: the address is never shut out by wrong passwords or rate limits and is not counted towards security alerts, so use it only for addresses you trust (your office, a monitoring service). An allow entry wins over a block entry.
           </div>
           <div className="kv-row mb-12"><span className="kv-label">Your address</span><span className="kv-value">
-            <span className="mono">{d.me.ip || 'unknown'}</span>{d.geo[d.me.ip] ? <Geo g={d.geo[d.me.ip]} block /> : null}
+            <span className="mono">{d.me.ip || 'unknown'}</span>{d.geo[d.me.ip] ? <Geo g={d.geo[d.me.ip]} /> : null}
             {d.me.direct && d.me.direct !== d.me.ip ? <span className="dim"> (the connection reaches the app from <span className="mono">{d.me.direct}</span>)</span> : null}
             {isPrivate(d.me.ip) ? <div className="alert warn mt-6">The app sees your address as <span className="mono">{d.me.ip}</span>, which looks like a gateway or proxy, not your real address. Until that is fixed (TRUST_PROXY, and <span className="mono">set_real_ip_from</span> in nginx), a block would hit everybody behind it.</div> : null}
           </span></div>

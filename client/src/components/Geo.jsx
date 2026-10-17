@@ -1,10 +1,12 @@
 // Where an address is: "Quezon City, Philippines" with the network (provider and AS number) under it. Only a System Admin is ever sent
 // this (the server leaves it out for everybody else), so wherever it is missing nothing is drawn.
-export function Geo({ g, block }) {
+export function Geo({ g }) {
   if (!g) return null;
-  if (g.private) return <span className="dim geo" style={block ? { display: 'block' } : undefined}>Private network</span>;
+  // always on its own line under the address, like a located one (an inline label ran into the IP: "10.0.0.10Private network")
+  const own = { display: 'block', fontSize: '0.85em', lineHeight: 1.3 };
+  if (g.private) return <span className="dim geo" style={own}>Private network</span>;
   const where = [g.city, g.country].filter(Boolean).join(', ');
-  if (!where && !g.network) return <span className="dim geo" style={block ? { display: 'block' } : undefined}>Location unknown</span>;
+  if (!where && !g.network) return <span className="dim geo" style={own}>Location unknown</span>;
   return (
     <span className="geo" style={{ display: 'block', fontSize: '0.85em', lineHeight: 1.3 }} title={[g.region, g.country, g.network].filter(Boolean).join(' · ')}>
       {where ? <span>{where}</span> : null}
