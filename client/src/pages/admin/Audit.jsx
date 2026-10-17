@@ -805,9 +805,6 @@ export default function Audit() {
 
                       <td className="nowrap">
                         {formatEntity(r)}
-                        {r.entity_id ? (
-                          <> <button type="button" className="linklike mono" title="Show everything about this record" onClick={() => { if (!isActivityHistory) { setF((x) => ({ ...x, record: r.entity_id })); setOffset(0); } }}>#{r.entity_id}</button></>
-                        ) : null}
                         {link && !isActivityHistory ? <> <a className="linklike" href={link}>Open</a></> : null}
                       </td>
 
