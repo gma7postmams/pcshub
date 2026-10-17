@@ -76,13 +76,15 @@ const unitsFor = (team) => Object.entries(UNIT_TEAMS).filter(([, teams]) => team
 
 // Who is working in the app right now, and who was earlier in the last 24 hours. Used by the full dashboard and, on its own, by the
 // light GET /api/dashboard/users the page polls every few seconds so people's locations stay current.
+// A person only sees the people in their own group (and themselves); a System Admin sees everybody.
 async function activeUsers(u) {
   const { rows } = await db.query(
     `SELECT p.user_id AS id, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name, u.role, u.avatar_v AS av, p.page, p.last_active_at,
             (p.left_at IS NULL AND p.last_active_at >= now() - ($1 || ' minutes')::interval) AS active
        FROM user_presence p JOIN users u ON u.id = p.user_id
       WHERE u.is_active AND p.last_active_at >= now() - interval '24 hours'
-      ORDER BY p.last_active_at DESC LIMIT 60`, [String(ACTIVE_MINUTES)]
+        AND ($2::boolean OR u.id = $3 OR (u.group_id IS NOT NULL AND u.group_id = $4))
+      ORDER BY p.last_active_at DESC LIMIT 60`, [String(ACTIVE_MINUTES), u.role === 'System Admin', u.id, u.group_id || null]
   );
   const row = (r) => ({ id: r.id, name: r.name, role: r.role, av: r.av ? Number(r.av) : null, page: r.page && PAGE_BY_PATH[r.page] ? PAGE_BY_PATH[r.page].label : null, path: r.page && PAGE_BY_PATH[r.page] ? r.page : null, lastActiveAt: r.last_active_at, you: r.id === u.id });
   return { windowMinutes: ACTIVE_MINUTES, active: rows.filter((r) => r.active).map(row), earlier: rows.filter((r) => !r.active).slice(0, 12).map(row) };
