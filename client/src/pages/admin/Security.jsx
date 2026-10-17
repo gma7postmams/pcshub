@@ -99,7 +99,7 @@ function Rules({ policy, limits, email, onSaved }) {
           {' '}Allow email codes for 2FA <span className="dim">— for accounts shared by a group, where an authenticator app is not practical. Pick the method per user in Access → Users.</span></label>
         <label className="f mt-12"><span>Security alert email <span className="dim">(up to 5, comma-separated)</span></span>
           <input type="text" value={f.alertEmail || ''} placeholder="security@example.com" onChange={(e) => setF({ ...f, alertEmail: e.target.value })} />
-          <span className="dim mt-6">Brute-force runs, repeated blocked requests and locked accounts are emailed here, as well as to every Admin&apos;s own address and bell.{email.configured ? '' : ' Email sending is not set up yet, so for now only the bell is used.'}</span></label>
+          <span className="dim mt-6">Brute-force runs, repeated blocked requests and addresses shut out of an account are emailed here, as well as to every System Admin&apos;s own address and bell (plain Admins are not told).{email.configured ? '' : ' Email sending is not set up yet, so for now only the bell is used.'}</span></label>
         <div className="kv-row mt-12"><span className="kv-label">Email sending</span><span className="kv-value">
           {email.configured ? <>Set up on the server{email.from ? ` (from ${email.from})` : ''}. <button type="button" className="linklike" onClick={testMail}>Send a test to my address</button></> : 'Not set up. Add the SMTP_ lines to the server\u2019s .env (see .env.example) and restart.'}
         </span></div>

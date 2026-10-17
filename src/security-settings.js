@@ -14,7 +14,7 @@ const FIELDS = {
 };
 const ADMIN_2FA_KEY = 'sec_admin_2fa';
 const EMAIL_2FA_KEY = 'sec_email_2fa';
-// Where security alerts are emailed, besides every Admin's own address (comma-separated). Until an Admin sets it, ADMIN_EMAIL from .env.
+// Where security alerts are emailed, besides every System Admin's own address (comma-separated). Until an Admin sets it, ADMIN_EMAIL from .env.
 const ALERT_EMAIL_KEY = 'sec_alert_email';
 const cleanEmails = (v) => [...new Set(String(v || '').split(/[,;\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean))].join(', ');
 
