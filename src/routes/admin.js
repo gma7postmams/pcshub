@@ -466,6 +466,7 @@ router.post('/users/:id/reset-password', asyncH(async (req, res) => {
         WHERE id=$1`, [id, hash, force]
     );
     if (!r.rowCount) throw new HttpError(404, 'User not found');
+    require('../login-guard').clearUser(target.username);
     if (sendMail) {   // sent before the change is committed: if the email cannot be sent, the old password stays
       try { await require('../password-mail').sendTemporaryPassword(target, temp, { force }); } catch (e) {
         console.error('[reset-password] email failed:', e.message);
@@ -531,6 +532,7 @@ router.post('/users/:id/unlock', asyncH(async (req, res) => {
     'UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=$1',
     [id]
   );
+  require('../login-guard').clearUser(cur.rows[0].username);   // addresses shut out of this account start fresh too
 
   await audit(req, 'admin.user_unlock', 'user', id, {
     username: cur.rows[0].username

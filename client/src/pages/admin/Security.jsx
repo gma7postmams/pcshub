@@ -48,8 +48,8 @@ export default function Security({ go }) {
 
 const NUM = [
   ['minPasswordLength', 'Minimum password length', 'characters', 'Applies to passwords set from now on.'],
-  ['lockAfterFailures', 'Lock after wrong passwords', 'in a row', 'Then the account is locked.'],
-  ['lockMinutes', 'Lock lasts', 'minutes', 'An Admin can unlock sooner.'],
+  ['lockAfterFailures', 'Lock after wrong passwords', 'in a row', 'Then that address is shut out of the account. The account stays open to everyone else.'],
+  ['lockMinutes', 'Lock lasts', 'minutes', 'An Admin can unlock sooner (Users > Unlock).'],
   ['idleSignOutHours', 'Sign out after being idle', 'hours', 'Counted from the last activity.'],
   ['maxSessionHours', 'Longest session', 'hours', 'Then sign in again, however active.'],
 ];

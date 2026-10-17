@@ -56,7 +56,8 @@ function startupChecks() {
   if (PROD && !process.env.BACKUP_SIGNING_KEY) warn.push('BACKUP_SIGNING_KEY not set: backups are created unsigned, so a tampered archive cannot be told apart from a real one. Set it with: openssl rand -hex 32');
   if (PROD && /change[-_ ]?me/i.test(process.env.ADMIN_PASSWORD || '')) warn.push('ADMIN_PASSWORD is still the placeholder from .env.example. Change it (and remove it from .env once the first Admin has signed in).');
   if (PROD && !cookieSecure) warn.push('COOKIE_SECURE=false in production: sessions travel without the Secure flag. Only acceptable on an isolated LAN.');
-  if (PROD && !process.env.TRUST_PROXY) warn.push('TRUST_PROXY not set. If this runs behind a reverse proxy, every user shares the proxy IP for rate limiting and audit logs. Set TRUST_PROXY=1.');
+  if (PROD && !process.env.TRUST_PROXY) warn.push('TRUST_PROXY not set. If this runs behind a reverse proxy, every user shares the proxy IP: the audit log shows the gateway, and one person\'s wrong passwords shut out everybody behind it. Set TRUST_PROXY=1 (and see set_real_ip_from in deploy/nginx.conf if another gateway is in front of nginx).');
+  if (/^(true|yes|on)$/i.test(process.env.TRUST_PROXY || '')) warn.push('TRUST_PROXY=true trusts any X-Forwarded-For a client sends, so the audit log and the sign-in limits can be faked. Use the number of proxies (1) or their addresses.');
   warn.forEach((w) => console.warn(`[security] ${w}`));
   if (problems.length) {
     problems.forEach((p) => console.error(`[security] ${p}`));

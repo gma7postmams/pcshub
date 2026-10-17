@@ -224,9 +224,15 @@ The name set in Administration → Branding is used everywhere, including the pl
 ## Security watch
 
 Blocked requests (permission refused, not signed in, cross-site, rate limited) are written to the Audit Log as `security.*` lines, once a minute per source and route.
-Ten signs from one IP within five minutes, a hit on the login rate limit, or an account locked by wrong passwords raises a **Security alert**: an Audit Log line,
-a bell/phone notification and an email (when SMTP is set up) to every active Admin and to the Security alert email set in Administration → Security (default: ADMIN_EMAIL), at most one per source every 15 minutes. One IP can lock at most two accounts per
-15 minutes, so a stranger cannot lock everybody out. Live self-test against a throw-away copy: `python3 scripts/security-selftest2.py` (see the header of the file).
+Ten signs from one IP within five minutes, a hit on the login rate limit, or an address shut out of an account by wrong passwords raises a **Security alert**: an Audit Log line,
+a bell/phone notification and an email (when SMTP is set up) to every active **System Admin** (plain Admins are not told) and to the Security alert email set in
+Administration → Security (default: ADMIN_EMAIL), at most one per source every 15 minutes.
+
+**Wrong passwords never lock the account for everybody.** They are counted per account *and* per IP: after the "Lock after" limit (Administration → Security) that **address** is shut out
+of **that account** for the lock time (refused even with the right password), and the real user, from their own address, signs in as usual. Guessing spread over many addresses
+(3× the limit from 4+ addresses) locks nobody out; the System Admins get a Security alert instead. Counters are in memory (reset on restart); Administration → Users → Unlock clears them. For this to work the app
+must see real client addresses: set `TRUST_PROXY=1`, and if another gateway is in front of nginx, set `set_real_ip_from` in `deploy/nginx.conf` (otherwise the audit log shows the gateway and everybody behind it shares one lock).
+Live self-test against a throw-away copy: `python3 scripts/security-selftest2.py` (see the header of the file).
 
 ### Backups encrypted at rest
 
