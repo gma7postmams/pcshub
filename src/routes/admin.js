@@ -878,7 +878,9 @@ router.get('/audit', asyncH(async (req, res) => {
     db.query(`SELECT count(*)::int AS n FROM audit_logs ${whereSql}`, params),
     db.query(`SELECT * FROM audit_logs ${whereSql} ORDER BY created_at DESC, id DESC LIMIT ${limit} OFFSET ${offset}`, params),
   ]);
-  res.json({ total: cnt.rows[0].n, rows: list.rows });
+  const geoip = require('../geoip');
+  const geo = geoip.mapFor(req, list.rows.map((r) => r.ip));   // locations: System Admin only
+  res.json({ total: cnt.rows[0].n, rows: list.rows, ...(geo ? { geo, geoip: geoip.status() } : {}) });
 }));
 
 require('../admin-extra')(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, auditWhere });

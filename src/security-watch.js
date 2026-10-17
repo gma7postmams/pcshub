@@ -50,7 +50,9 @@ function raise(key, ip, title, body, details) {
   alerted.set(key, now);
   console.warn(`[security] ALERT ${title} (${ip || 'unknown ip'})`);
   audit({ ...SYSTEM, ip }, 'security.alert', 'security', null, { title, ...details }).catch(() => {});
-  tellAdmins(title, body);
+  let where = '';
+  try { where = ip ? require('./geoip').place(require('./geoip').lookup(ip)) : ''; } catch (_) { /* no location is fine */ }
+  tellAdmins(title, where ? `${body} Location: ${where}.` : body);   // not in the audit line: only the System Admins who get the alert see it
 }
 
 function count(req, weight, routeKey) {

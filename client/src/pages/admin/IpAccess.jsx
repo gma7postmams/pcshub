@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { get, post, del } from '../../lib/api.js';
 import { fmtDateTime } from '../../lib/util.js';
 import { Empty, useConfirm, useToast } from '../../components/ui.jsx';
+import { Geo, GeoNote } from '../../components/Geo.jsx';
 
 // Administration > IP Access (System Admin). Block list: these addresses cannot reach the app at all. Allow list: these addresses are never
 // shut out by wrong passwords or rate limits (and win over a block). Entries are one address or a range (203.0.113.0/24); add them by hand,
@@ -60,7 +61,7 @@ export default function IpAccess() {
             <strong>Block</strong>: the address cannot open the app at all. <strong>Allow</strong>: the address is never shut out by wrong passwords or rate limits and is not counted towards security alerts, so use it only for addresses you trust (your office, a monitoring service). An allow entry wins over a block entry.
           </div>
           <div className="kv-row mb-12"><span className="kv-label">Your address</span><span className="kv-value">
-            <span className="mono">{d.me.ip || 'unknown'}</span>
+            <span className="mono">{d.me.ip || 'unknown'}</span>{d.geo[d.me.ip] ? <Geo g={d.geo[d.me.ip]} block /> : null}
             {d.me.direct && d.me.direct !== d.me.ip ? <span className="dim"> (the connection reaches the app from <span className="mono">{d.me.direct}</span>)</span> : null}
             {isPrivate(d.me.ip) ? <div className="alert warn mt-6">The app sees your address as <span className="mono">{d.me.ip}</span>, which looks like a gateway or proxy, not your real address. Until that is fixed (TRUST_PROXY, and <span className="mono">set_real_ip_from</span> in nginx), a block would hit everybody behind it.</div> : null}
           </span></div>
@@ -86,19 +87,20 @@ export default function IpAccess() {
           <table className="t wl">
             <thead><tr>
               <th style={{ width: 28 }}><input type="checkbox" aria-label="Select all shown" checked={allPicked} onChange={(e) => setPick(e.target.checked ? new Set(shown.map((r) => r.id)) : new Set())} /></th>
-              <th>Address</th><th>Note</th><th>Added by</th><th>Added</th><th>Expires</th><th />
+              <th>Address</th><th>Location</th><th>Note</th><th>Added by</th><th>Added</th><th>Expires</th><th />
             </tr></thead>
             <tbody>{shown.length ? shown.map((r) => (
               <tr key={r.id} className={r.expired ? 'dim' : ''}>
                 <td><input type="checkbox" aria-label={`Select ${r.cidr}`} checked={pick.has(r.id)} onChange={(e) => { const n = new Set(pick); if (e.target.checked) n.add(r.id); else n.delete(r.id); setPick(n); }} /></td>
                 <td className="mono">{r.cidr}</td>
+                <td><Geo g={d.geo[r.cidr.split('/')[0]]} />{r.cidr.includes('/') && d.geo[r.cidr.split('/')[0]] ? <span className="dim" style={{ fontSize: '0.8em' }}>first address of the range</span> : null}</td>
                 <td>{r.note || <span className="dim">—</span>}</td>
                 <td>{r.created_by || <span className="dim">—</span>}</td>
                 <td className="nowrap dim">{fmtDateTime(r.created_at)}</td>
                 <td className="nowrap">{r.expires_at ? <>{fmtDateTime(r.expires_at)}{r.expired ? <span className="dim"> (expired)</span> : null}</> : <span className="dim">Never</span>}</td>
                 <td className="nowrap"><button type="button" className="btn" onClick={() => remove(r)}>Remove</button></td>
               </tr>
-            )) : <tr><td colSpan={7} className="empty">{q ? 'Nothing matches.' : view === 'block' ? 'No address is blocked.' : 'No address is on the allow list.'}</td></tr>}</tbody>
+            )) : <tr><td colSpan={8} className="empty">{q ? 'Nothing matches.' : view === 'block' ? 'No address is blocked.' : 'No address is on the allow list.'}</td></tr>}</tbody>
           </table>
         </div>
         {rows.length > shown.length ? <div className="card-pad dim">Showing {shown.length} of {rows.length}. <button type="button" className="linklike" onClick={() => setShowAll(true)}>Show all</button> or search to narrow the list.</div> : null}
@@ -109,16 +111,17 @@ export default function IpAccess() {
         <div className="card-pad dim">An address that types too many wrong passwords for one account is shut out of <em>that account only</em> for the lock time (Security tab); the account stays open to everyone else. These are cleared when the service restarts.</div>
         <div className="table-wrap">
           <table className="t wl">
-            <thead><tr><th>Address</th><th>Account</th><th>Shut out until</th><th /></tr></thead>
+            <thead><tr><th>Address</th><th>Location</th><th>Account</th><th>Shut out until</th><th /></tr></thead>
             <tbody>{d.auto.length ? d.auto.map((a) => (
               <tr key={`${a.user}|${a.ip}`}>
-                <td className="mono">{a.ip}</td><td className="mono">{a.user}</td><td className="nowrap">{fmtDateTime(a.until)}</td>
+                <td className="mono">{a.ip}</td><td><Geo g={d.geo[a.ip]} /></td><td className="mono">{a.user}</td><td className="nowrap">{fmtDateTime(a.until)}</td>
                 <td className="nowrap"><button type="button" className="btn" onClick={() => unblock(a)}>Let back in</button>{' '}<button type="button" className="btn danger" onClick={() => blockAuto(a)}>Block completely</button></td>
               </tr>
-            )) : <tr><td colSpan={4} className="empty">No address is shut out right now.</td></tr>}</tbody>
+            )) : <tr><td colSpan={5} className="empty">No address is shut out right now.</td></tr>}</tbody>
           </table>
         </div>
       </div>
+      <GeoNote status={d.geoip} />
     </>
   );
 }

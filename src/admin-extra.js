@@ -84,6 +84,8 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
       db.query(`SELECT count(*)::int AS n FROM audit_logs WHERE action IN ('auth.login_failed','auth.locked') AND created_at > now() - interval '7 days'`),
     ]);
     const sessions = await db.query(`SELECT count(*)::int AS n FROM user_sessions WHERE expire > now()`).catch(() => ({ rows: [{ n: null }] }));
+    const geoip = require('./geoip');
+    const geo = geoip.mapFor(req, events.rows.map((e) => e.ip));
     res.json({
       policy: {
         ...settings.get(), passwordRules: 'Letters and numbers, not a common password, no username or name inside it',
@@ -92,6 +94,7 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
       email: { configured: require('./mailer').configured(), from: process.env.SMTP_FROM || null },
       limits: Object.fromEntries(Object.entries(settings.FIELDS).map(([k, f]) => [k, { min: f.min, max: f.max, def: f.def }])),
       users: users.rows[0], failedLogins7d: failed.rows[0].n, openSessions: sessions.rows[0].n, events: events.rows,
+      ...(geo ? { geo, geoip: geoip.status() } : {}),   // locations: System Admin only
     });
   }));
 
@@ -251,12 +254,16 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
       { header: 'Time', key: 'time', width: 20 }, { header: 'User', key: 'user', width: 18 }, { header: 'Action', key: 'action', width: 28 },
       { header: 'Entity', key: 'entity', width: 18 }, { header: 'Record', key: 'record', width: 10 }, { header: 'Details', key: 'details', width: 90 }, { header: 'IP', key: 'ip', width: 16 },
     ];
+    const geoip = require('./geoip');
+    const geo = geoip.mapFor(req, rows.map((r) => r.ip));   // Country / City / Network columns: System Admin only
+    if (geo) ws.columns = [...ws.columns, { header: 'Country', key: 'country', width: 18 }, { header: 'City', key: 'city', width: 18 }, { header: 'Network', key: 'network', width: 34 }];
     ws.getRow(1).font = { bold: true };
     ws.views = [{ state: 'frozen', ySplit: 1 }];
-    rows.forEach((r) => ws.addRow({
+    rows.forEach((r) => { const g = geo && geo[r.ip]; ws.addRow({
       time: r.created_at, user: r.username || '', action: r.action, entity: r.entity || '', record: r.entity_id || '',
       details: r.details ? JSON.stringify(r.details) : '', ip: r.ip || '',
-    }));
+      ...(geo ? { country: (g && g.country) || '', city: (g && g.city) || '', network: (g && g.network) || '' } : {}),
+    }); });
     ws.getColumn('time').numFmt = 'yyyy-mm-dd hh:mm:ss';
     await audit(req, 'admin.audit_export', 'audit_log', null, { rows: rows.length, truncated: rows.length >= LIMIT });
     res.set({

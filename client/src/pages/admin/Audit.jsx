@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { get } from '../../lib/api.js';
 import { fmtBytes, fmtDateTime } from '../../lib/util.js';
 import { Empty, Pager, usePageSize, useDebounced } from '../../components/ui.jsx';
+import { Geo, GeoNote } from '../../components/Geo.jsx';
 
 
 const ACTION_LABELS = {
@@ -814,7 +815,7 @@ export default function Audit() {
                         {formatDetails(r)}
                       </td>
 
-                      <td className="mono dim">{r.ip || ''}</td>
+                      <td className="dim"><span className="mono">{r.ip || ''}</span>{d.geo && r.ip ? <Geo g={d.geo[r.ip]} /> : null}</td>
                     </tr>
                     {isOpen ? <tr className="audit-more"><td /><td colSpan={6}><Expanded row={r} /></td></tr> : null}
                   </Fragment>
@@ -825,6 +826,7 @@ export default function Audit() {
         )}
       </div>
       <Pager total={total} offset={offset} size={PAGE} onOffset={setOffset} onSize={setPage} />
+      {d && d.geo ? <GeoNote status={d.geoip} /> : null}
     </div>
   );
 }
