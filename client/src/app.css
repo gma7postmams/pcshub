@@ -1373,4 +1373,4 @@ tr.saved-flash td, tr.saved-flash { animation: saved-flash 2.4s ease-out; }
 
 /* the "Locations are…" note under IP Access: a small, tight note */
 .geo-compact { padding: 4px 18px 8px; margin: 0; }
-.geo-compact > div { margin-top: 0; font-size: 0.76em !important; line-height: 1.4; }
+.geo-compact > div { margin-top: 0; }
