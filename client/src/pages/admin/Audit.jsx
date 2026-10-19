@@ -823,7 +823,7 @@ export default function Audit() {
         )}
       </div>
       <Pager total={total} offset={offset} size={PAGE} onOffset={setOffset} onSize={setPage} />
-      {d && d.geo ? <GeoNote status={d.geoip} /> : null}
+      {d && d.geo ? <div className="geo-compact"><GeoNote status={d.geoip} /></div> : null}
     </div>
   );
 }

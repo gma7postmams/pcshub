@@ -42,7 +42,7 @@ export default function Security({ go }) {
             )) : <tr><td colSpan={4} className="empty">Nothing to report.</td></tr>}</tbody>
           </table>
         </div>
-        {d.geo ? <div className="card-pad"><GeoNote status={d.geoip} /></div> : null}
+        {d.geo ? <div className="geo-compact"><GeoNote status={d.geoip} /></div> : null}
       </div>
     </>
   );
