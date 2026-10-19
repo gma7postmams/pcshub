@@ -1370,3 +1370,7 @@ table.t.wl.cards td:focus:not(:focus-visible) { outline: none; }
 /* the row that was just saved (the screen scrolls to it) */
 tr.saved-flash td, tr.saved-flash { animation: saved-flash 2.4s ease-out; }
 @keyframes saved-flash { 0%, 35% { background: color-mix(in srgb, var(--brand, #4f8cff) 22%, transparent); } 100% { background: transparent; } }
+
+/* the "Locations are…" note under IP Access: a small, tight note */
+.geo-compact { padding: 4px 18px 8px; margin: 0; }
+.geo-compact > div { margin-top: 0; font-size: 0.76em !important; line-height: 1.4; }
