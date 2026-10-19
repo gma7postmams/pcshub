@@ -121,7 +121,7 @@ export default function IpAccess() {
           </table>
         </div>
       </div>
-      <GeoNote status={d.geoip} />
+      <div className="card-pad" style={{ margin: 0 }}><GeoNote status={d.geoip} /></div>
     </>
   );
 }
