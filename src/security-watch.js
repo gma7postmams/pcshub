@@ -76,6 +76,7 @@ function count(req, weight, routeKey) {
 /** A request was blocked. action: security.denied | security.unauthenticated | security.csrf_blocked | security.rate_limited */
 function event(req, action, details = {}) {
   try {
+    if (require('./security-check').isProbe(req)) return;   // the self-check attacking its own front door
     const now = Date.now();
     prune(now);
     const route = details.route || `${req.method} ${(req.originalUrl || '').split('?')[0]}`;

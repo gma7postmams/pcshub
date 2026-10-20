@@ -9,6 +9,62 @@ const EVENT = {
   'auth.reauth_failed': 'Wrong password on a sensitive action', 'admin.user_signout': 'Signed out by an Admin', 'admin.user_reset_password': 'Password reset for', 'admin.user_reset_2fa': '2FA reset for',
 };
 
+const LEVEL = {
+  fail: { label: 'Fix now', cls: 's-rejected' },       // red
+  warn: { label: 'Should fix', cls: 's-pending' },      // amber
+  info: { label: 'Note', cls: 's-new' },                // blue
+  ok: { label: 'OK', cls: 's-approved' },               // green
+};
+
+// The security self-check: the server inspects its own settings, files, accounts and backups, and attacks its own front door.
+function SelfCheck() {
+  const toast = useToast();
+  const [r, setR] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [showOk, setShowOk] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    try { setR(await post('/api/admin/security/check', {})); } catch (e) { toast(e.message, 'err'); } finally { setBusy(false); }
+  };
+  const areas = r ? [...new Set(r.checks.map((c) => c.area))] : [];
+  const verdict = !r ? null : r.fail ? 'fail' : r.warn ? 'warn' : 'ok';
+  return (
+    <div className="card mb-12">
+      <div className="card-head"><h2>Security check</h2><button type="button" className="btn primary" disabled={busy} onClick={run}>{busy ? 'Checking…' : r ? 'Run again' : 'Run security check'}</button></div>
+      <div className="card-pad">
+        {!r ? <div className="dim">Looks at this server&apos;s settings, files, accounts and backups, and tries the front door the way an attacker would (without signing in). Nothing is changed. Takes up to half a minute.</div> : (
+          <>
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span className={`pill ${LEVEL[verdict].cls}`}>{verdict === 'fail' ? 'Needs attention' : verdict === 'warn' ? 'Mostly fine' : 'All good'}</span>
+              <span>{r.fail} to fix now · {r.warn} should fix · {r.info} notes · {r.ok} OK</span>
+              <span className="dim">checked {fmtDateTime(r.at)} in {Math.round(r.durationMs / 100) / 10}s</span>
+              <label className="check" style={{ marginLeft: 'auto' }}><input type="checkbox" checked={showOk} onChange={(e) => setShowOk(e.target.checked)} /> {' '}Show what is fine</label>
+            </div>
+            {areas.map((area) => {
+              const items = r.checks.filter((c) => c.area === area && (showOk || c.status !== 'ok'));
+              if (!items.length) return null;
+              return (
+                <div key={area} className="mt-12">
+                  <strong>{area}</strong>
+                  <table className="t wl mt-6"><tbody>
+                    {items.map((c) => (
+                      <tr key={c.id}>
+                        <td className="nowrap" style={{ width: 1, textAlign: 'left', verticalAlign: 'top' }}><span className={`pill ${LEVEL[c.status].cls}`}>{LEVEL[c.status].label}</span></td>
+                        <td style={{ textAlign: 'left' }}><div>{c.title}</div><div className="dim">{c.detail}</div>{c.fix && c.status !== 'ok' ? <div className="mt-6"><strong>To fix:</strong> {c.fix}</div> : null}</td>
+                      </tr>
+                    ))}
+                  </tbody></table>
+                </div>
+              );
+            })}
+            {!showOk && !r.checks.some((c) => c.status !== 'ok') ? <div className="mt-12">Everything checked is fine.</div> : null}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Security({ go }) {
   const [d, setD] = useState(null);
   const load = useCallback(() => get('/api/admin/security').then(setD).catch(() => setD(false)), []);
@@ -31,6 +87,7 @@ export default function Security({ go }) {
           <div className="dim mt-12">To sign someone out of every device, open the person in Users and choose <strong>Sign out everywhere</strong>; to do it for several people, tick them and use the bulk action. Disabling an account also signs it out.</div>
         </div>
       </div>
+      <SelfCheck />
       <Rules policy={p} limits={d.limits} email={d.email} onSaved={load} />
       <div className="card">
         <div className="card-head"><h2>Recent security events</h2><button type="button" className="btn" onClick={load}>Refresh</button></div>

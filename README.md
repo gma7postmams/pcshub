@@ -222,6 +222,12 @@ npm test
 
 The name set in Administration → Branding is used everywhere, including the places the browser reads before the app loads: the tab title, the installed-app (PWA) name and home-screen label (`/manifest.webmanifest` is generated from it; the label is the name cut to about 12 characters at a word boundary), and the offline page. An already-installed PWA picks up a new name the next time the browser refreshes its manifest (reinstall to force it).
 
+## Security self-check
+
+Administration → Security → **Run security check** (System Admin) inspects the running server and reports what to fix, in plain words: server settings (HTTPS cookies, session secret, proxy, `.env` and backup-folder permissions), accounts (admins without 2FA, password rules, stale accounts), monitoring (email, alerts, audit protection), backups (age, encrypted, signed) and a live test of its own front door (headers, sign-in required, source files not served). It also runs `npm audit` for known package problems.
+
+The check is read-only. Its live probes carry a per-process token, so the security watch ignores them: no alerts, no audit noise. Each run is logged as "Ran Security Check". Runs are limited to one every few seconds.
+
 ## Security watch
 
 Blocked requests (permission refused, not signed in, cross-site, rate limited) are written to the Audit Log as `security.*` lines, once a minute per source and route.

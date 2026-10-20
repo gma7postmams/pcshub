@@ -66,6 +66,6 @@ function startupChecks() {
 }
 
 module.exports = {
-  PROD, cookieSecure, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks,
+  PROD, cookieSecure, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks, weakSecret,
   SESSION_IDLE_MS, SESSION_MAX_MS, API_RATE_LIMIT, APP_ORIGINS,
 };

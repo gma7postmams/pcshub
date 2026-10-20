@@ -141,6 +141,7 @@ const ACTION_LABELS = {
   'admin.dropdown_bulk_add': 'Added Dropdown Options',
   'admin.audit_export': 'Exported Audit Log',
   'admin.security_update': 'Changed Security Rules',
+  'admin.security_check': 'Ran Security Check',
   'admin.force_password_change': 'Forced Password Change',
 };
 
@@ -304,6 +305,8 @@ function formatDetails(row) {
     case 'admin.dropdown_bulk_add':
       return `Added ${n(d.added, 'option')} to ${d.category}${d.skipped ? `, ${d.skipped} already existed` : ''}`;
 
+    case 'admin.security_check':
+      return `Security check: ${d.fail ?? 0} to fix now, ${d.warn ?? 0} should fix${d.failed && d.failed.length ? ` (${d.failed.join(', ')})` : ''}`;
     case 'admin.security_update': {
       const L = { minPasswordLength: 'min password', lockAfterFailures: 'lock after', lockMinutes: 'lock minutes', idleSignOutHours: 'idle hours', maxSessionHours: 'max session hours', requireAdmin2fa: 'Admin 2FA' };
       const ch = Object.keys(L).filter((k) => d.from && d.to && d.from[k] !== d.to[k]).map((k) => `${L[k]}: ${d.from[k]} → ${d.to[k]}`);

@@ -131,6 +131,16 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
   }));
 
   // Send a test message to the signed-in Admin's own address, to prove the server's email settings work.
+  // Security self-check: inspects this server and attacks its own front door. Read-only; counts only go to the audit log.
+  let lastCheck = 0;
+  router.post('/security/check', asyncH(async (req, res) => {
+    if (Date.now() - lastCheck < 8000) throw new HttpError(429, 'Wait a few seconds between checks');
+    lastCheck = Date.now();
+    const r = await require('./security-check').run();
+    await audit(req, 'admin.security_check', 'app_settings', null, { fail: r.fail, warn: r.warn, info: r.info, ok: r.ok, failed: r.checks.filter((c) => c.status === 'fail').map((c) => c.id) });
+    res.json(r);
+  }));
+
   router.post('/security/test-email', asyncH(async (req, res) => {
     const mailer = require('./mailer');
     if (!mailer.configured()) throw new HttpError(400, 'Email is not set up on the server (SMTP settings in .env)');
