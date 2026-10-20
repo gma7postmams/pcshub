@@ -7,6 +7,9 @@ import { Empty, Modal, Options, Pager, RoleBadge, usePageSize, useConfirm, useFo
 import { keyLabels } from './labels.js';
 import JsonTools from './JsonTools.jsx';
 
+// Shared by the list and the Manage dialog (UserForm), which is a separate component
+const isLocked = (u) => u.locked_until && new Date(u.locked_until) > new Date();
+
 export default function Users({ model }) {
   const s = useSession();
   const toast = useToast();
@@ -33,7 +36,6 @@ export default function Users({ model }) {
 
   if (!list) return <Empty>Loading…</Empty>;
   const term = q.trim().toLowerCase();
-  const isLocked = (u) => u.locked_until && new Date(u.locked_until) > new Date();
   const shown = list.filter((u) => {
     if (term && ![u.full_name, u.username, u.email, u.role, u.group_name].some((x) => (x || '').toLowerCase().includes(term))) return false;
     if (fRole && u.role !== fRole) return false;
