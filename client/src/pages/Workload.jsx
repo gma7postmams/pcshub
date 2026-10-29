@@ -435,6 +435,21 @@ function CellEditor({ def, initial, lookups, onSave, onCancel, onUndo, copyText,
   );
 }
 
+/** Pull the members of each plug group together on a page: a group sits right under its first member (the rest of the order is kept),
+ *  so the Plug ID cells of its rows can be shown as one merged cell. */
+function groupAdjacent(d) {
+  if (!d || !Array.isArray(d.rows) || !d.rows.some((r) => r.group_key)) return d;
+  const placed = new Set();
+  const out = [];
+  d.rows.forEach((r) => {
+    if (!r.group_key) { out.push(r); return; }
+    if (placed.has(r.group_key)) return;
+    placed.add(r.group_key);
+    d.rows.forEach((x) => { if (x.group_key === r.group_key) out.push(x); });
+  });
+  return { ...d, rows: out };
+}
+
 export default function Workload() {
   const s = useSession();
   const toast = useToast();
@@ -626,7 +641,8 @@ export default function Workload() {
         hist.current = { past: [], future: [], tag: null };
         setGrid({ total: d.total, rows: d.rows.map((r) => ({ ...r, _key: `r${r.id}`, _dirty: false })) });
       } else {
-        setData(await get(`/api/workload?${query({ limit: size, offset })}`));
+        const d = await get(`/api/workload?${query({ limit: size, offset })}`);
+        setData(tab === 'PREP' ? d : groupAdjacent(d));   // members of a plug group sit together, so their Plug ID cells can merge
       }
     } catch (e) {
       if (!quiet) (isGrid ? setGrid : setData)({ error: e.message, rows: [], total: 0 });
@@ -1877,6 +1893,27 @@ export default function Workload() {
   const oneLine = (t) => String(t ?? '').replace(/\s*\n+\s*/g, ' · ');
 
   // Cells wrap (pasted line breaks kept) instead of being cut off; data-label feeds the card layout.
+  // Plug groups shown as one merged Plug ID cell: the rows of a group sit together (see groupAdjacent), the first row draws one tall cell with
+  // the prefixes and the shared ID, the rows under it draw none. Returns null = this row's cell is covered by the one above, undefined = not a
+  // merge (a group with a single row on this page), else the merged <td>. Not used in cards layout, the Prep list or Excel mode.
+  const mergedPlugCell = (rows, idx) => {
+    const r = rows[idx];
+    if (idx > 0 && rows[idx - 1].group_key === r.group_key) return null;
+    let span = 1;
+    while (idx + span < rows.length && rows[idx + span].group_key === r.group_key) span += 1;
+    if (span < 2) return undefined;
+    const parts = rows.slice(idx, idx + span).map((x) => { const f = String(x.plug_id || '').split('\n')[0].trim(); const i = f.indexOf('_'); return { pre: i > 0 ? f.slice(0, i).trim().toUpperCase() : '', base: i > 0 ? f.slice(i + 1).trim() : f }; });
+    const prefixes = [...new Set(parts.map((x) => x.pre).filter(Boolean))];
+    return (
+      <td key="plug_id" data-k="plug_id" data-label={head('plug_id')} rowSpan={span} className="plug-merged" onMouseDown={(e) => e.stopPropagation()}
+        title={`${span} rows share this Plug ID under different prefixes. To change one row's Plug ID, open its ⋯ menu and choose Edit.`}>
+        <div className="plug-prefixes">{prefixes.map((x) => <span key={x} className="chip c-gray sm">{x}_</span>)}</div>
+        <span className="strong">{parts[0].base}</span>
+        {' '}<GroupTag gkey={r.group_key} n={r.group_n} onPick={() => pickGroup(r)} />
+      </td>
+    );
+  };
+
   const cellView = (r, k) => {
     const val = r[k];
     const common = { key: k, 'data-k': k, 'data-label': head(k) };
@@ -2260,7 +2297,7 @@ export default function Workload() {
                                     onChange={() => { setAllMatching(false); setPicked((cur) => { const n = new Set(allMatching ? pickable.map((x) => x.id) : cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; }); lastPick.current = r.id; }} />
                                 </td>
                               ) : null}
-                              {tableCols.map((k, ci) => { const td = k === 'breakdate_vgfx' ? breakdateCell(r) : cell(r, k); const n = normCells(); return cloneElement(td, { 'data-r': idx, 'data-c': ci, 'data-sel': n && idx >= n.r0 && idx <= n.r1 && ci >= n.c0 && ci <= n.c1 ? '1' : undefined }); })}
+                              {tableCols.map((k, ci) => { if (k === 'plug_id' && r.group_key && !cards && !isPrep) { const mg = mergedPlugCell(data.rows, idx); if (mg === null) return null; if (mg) return mg; } const td = k === 'breakdate_vgfx' ? breakdateCell(r) : cell(r, k); const n = normCells(); return cloneElement(td, { 'data-r': idx, 'data-c': ci, 'data-sel': n && idx >= n.r0 && idx <= n.r1 && ci >= n.c0 && ci <= n.c1 ? '1' : undefined }); })}
                               {canWrite ? (
                                 <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
                                   <RowMenu
