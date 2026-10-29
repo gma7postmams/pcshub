@@ -801,6 +801,8 @@ table.t.xl td[data-k="breakdate_vgfx"] .xl-cell { min-width: 250px; }
 .plug-sum { max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; margin-top: 10px; font-size: 13px; }
 .plug-sum > div { display: flex; justify-content: space-between; gap: 16px; padding: 3px 0; }
 .plug-tabmode { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; }
+.plug-tabmode input[type="radio"] { width: 16px; height: 16px; min-width: 16px; padding: 0; margin: 0; flex: none; accent-color: var(--accent); }   /* the global input rule (width 100%, height 37px) would stretch a radio */
+.plug-tabs input[type="checkbox"] { flex: none; margin: 0; }
 .plug-tabtools { display: flex; align-items: center; gap: 14px; margin: 8px 0 4px; font-size: 13px; }
 .plug-tabtools .dim { margin-left: auto; }
 .plug-tabs { max-height: 280px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; font-size: 13px; }
