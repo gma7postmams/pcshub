@@ -7,7 +7,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FlagIcon, FullscreenIcon, LockIcon, PlusIcon, SaveIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, ExportButton, FilterSelect, GroupIcon, GroupTag, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useNarrow, useSpareRows } from '../components/wl.jsx';
+import { DateChip, DateRange, ExportButton, FilterSelect, GroupIcon, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useNarrow, useSpareRows } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive, useCellPresence, rangeCells, peerStyle } from '../lib/live.js';
@@ -675,11 +675,6 @@ export default function Workload() {
   const goOffset = async (o) => { if (o === offset || !(await okToLeave())) return; setOffset(o); };
   const changeSize = async (e) => { const n = Number(e.target.value); if (n === size || !(await okToLeave())) return; try { localStorage.setItem('wl:rows3', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
   const sortBy = async (s2) => { if (!(await okToLeave())) return; setSort(s2); };
-  const pickGroup = async (r) => {   // the tag was clicked: show only this group (every row with the same Plug ID under any prefix, on any day)
-    if (!(await okToLeave())) return;
-    setFilt((f) => ({ ...f, group: r.group_key }));
-    setOffset(0);
-  };
   const clearGroup = () => { setFilt((f) => ({ ...f, group: '' })); setOffset(0); };
   const togglePill = tab !== 'PREP' ? (
     <button type="button" className={`chip wl-together${filt.together !== '0' ? ' on' : ''}`} aria-pressed={filt.together !== '0'}
@@ -1945,7 +1940,6 @@ export default function Workload() {
         return (
           <td {...common} className={r.is_priority && !cols.includes('breakdate_vgfx') ? 'prio' : undefined}>
             <span className="strong">{first}</span>
-            {r.group_key ? <> <GroupTag gkey={r.group_key} n={r.group_n} hue={groupPos.byKey.get(r.group_key)} onPick={() => pickGroup(r)} /></> : null}
             {rest.length ? <span className="dim-inline"> · {rest.join(' · ')}</span> : null}
           </td>
         );
