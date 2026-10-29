@@ -492,8 +492,6 @@ export default function Workload() {
   useEffect(() => { syncDialog('workload', form); }, [form]);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState(() => loadEdit('workload').draft || null);   // Table mode: the empty row Add Row put at the top, not saved yet (kept across a refresh)
-  const baseSkip = useRef(false);   // Enter / Esc already settled the shared-ID editor: the blur that follows its removal must not save again
-  const [baseEdit, setBaseEdit] = useState(null);   // the shared ID of a merged plug group is being edited: { id: first row's id, text }
   const [editing, setEditing] = useState(() => loadEdit('workload').cell || null);   // an open cell editor comes back after a refresh
   const prevEd = useRef(editing ? `${editing.id}:${editing.k}` : null);
   useEffect(() => { prevEd.current = syncEdit('workload', editing, draft, prevEd.current); }, [editing, draft]);
@@ -750,29 +748,6 @@ export default function Workload() {
       if (ek) { if (row.id === 'draft') setEditing({ id: row.id, k: ek }); else selectCell(row, ek); return; }   // the unsaved new row keeps opening editors (it has no row number to select)
     }
   };
-  // Merged plug group: change the ID the rows share. Every row of the group on this page keeps its own prefix (and any extra lines of its Plug ID cell).
-  const saveBase = async (run, groupN, text) => {
-    setBaseEdit(null);
-    const nb = String(text || '').trim();
-    if (!nb) { toast('The Plug ID cannot be empty', 'err'); return; }
-    const lockedRow = run.find((x) => rowLocked(x));
-    if (lockedRow) { toast(`Locked: ${lockNote(lockedRow.work_date, meta.locks)}. An Admin must unlock it first.`, 'err'); return; }
-    const changes = run.map((x) => {
-      const lines = String(x.plug_id || '').split('\n');
-      const i = lines[0].indexOf('_');
-      const pre = i > 0 ? lines[0].slice(0, i).trim() : '';
-      return { x, before: x.plug_id ?? '', after: [pre ? `${pre}_${nb}` : nb, ...lines.slice(1)].join('\n') };
-    }).filter((c) => c.after !== c.before);
-    if (!changes.length) return;
-    const apply = async (list, which) => { for (const c of list) await patch(`/api/workload/${c.x.id}`, { field: 'plug_id', value: c[which] }); };
-    try {
-      await apply(changes, 'after');
-      pushTbl({ label: 'Plug ID change', undo: () => apply(changes, 'before'), redo: () => apply(changes, 'after') });
-      toast(`Plug ID changed on ${changes.length} row${changes.length === 1 ? '' : 's'}${groupN > run.length ? `. ${groupN - run.length} more row${groupN - run.length === 1 ? '' : 's'} with this ID (other page or hidden by a filter) not changed` : ''}`);
-    } catch (e) { toast(e.message, 'err'); }
-    load();
-  };
-
   const saveCell = async (r, k, value, move) => {
     if (r.id === 'draft') {   // the new row only changes on screen until its Save button is pressed (a row started in a spare row saves itself once it has a Plug ID, Work Date and Units)
       const merged = draft ? setCellValue(draft, k, value, false) : null;
@@ -1932,10 +1907,6 @@ export default function Workload() {
       tb.querySelectorAll('tr.grp-hover').forEach((tr) => tr.classList.remove('grp-hover'));
       if (on) for (const tr of tb.rows) { if (tr.dataset.gk === r.group_key) tr.classList.add('grp-hover'); }
     };
-    const rowOf = (e, id) => { const tb = e.currentTarget.closest('tbody'); return tb ? tb.querySelector(`tr[data-id="${id}"]`) : null; };
-    const editable = canWrite && !run.some((x) => rowLocked(x));
-    const beOpen = baseEdit && baseEdit.id === r.id;
-    const openBase = () => { baseSkip.current = false; setBaseEdit({ id: r.id, text: parts[0].base }); };
     return (
       <td key="plug_id" data-k="plug_id" data-label={head('plug_id')} rowSpan={span} className="plug-merged" onMouseDown={(e) => e.stopPropagation()}
         onMouseEnter={(e) => light(e, true)} onMouseLeave={(e) => light(e, false)}>
@@ -1953,33 +1924,15 @@ export default function Workload() {
             const clickable = canWrite && !rowLocked(x);
             const open = () => setEditing({ id: x.id, k: 'plug_id' });
             return (
-              <span key={x.id} className="plug-pfx-item"
-                onMouseEnter={(e) => { const tr = rowOf(e, x.id); if (tr) tr.classList.add('grp-hover-one'); }}
-                onMouseLeave={(e) => { const tr = rowOf(e, x.id); if (tr) tr.classList.remove('grp-hover-one'); }}>
-                <PrefixChip prefix={parts[i].pre || '?'} className={clickable ? 'wl-pill-edit' : ''} tabIndex={clickable ? 0 : undefined}
-                  title={clickable ? `${parts[i].full}: double-click or press Enter to edit this row's Plug ID` : parts[i].full}
-                  onClick={clickable ? (e) => { e.stopPropagation(); if (tapEdit()) open(); } : undefined}
-                  onDoubleClick={clickable ? (e) => { e.stopPropagation(); open(); } : undefined}
-                  onKeyDown={clickable ? (e) => { if (e.key === 'Enter') { e.preventDefault(); open(); } } : undefined} />
-                <span className="plug-pfx-date" title={x.work_date ? `Work Date of ${parts[i].full}` : undefined}>{x.work_date ? fmtDate(String(x.work_date).slice(0, 10)) : ''}</span>
-              </span>
+              <PrefixChip key={x.id} prefix={parts[i].pre || '?'} className={clickable ? 'wl-pill-edit' : ''} tabIndex={clickable ? 0 : undefined}
+                title={clickable ? `${parts[i].full}: double-click or press Enter to edit this Plug ID` : parts[i].full}
+                onClick={clickable ? (e) => { e.stopPropagation(); if (tapEdit()) open(); } : undefined}
+                onDoubleClick={clickable ? (e) => { e.stopPropagation(); open(); } : undefined}
+                onKeyDown={clickable ? (e) => { if (e.key === 'Enter') { e.preventDefault(); open(); } } : undefined} />
             );
           })}
         </div>
-        {beOpen ? (
-          <span className="plug-base-edit" onClick={(e) => e.stopPropagation()}>
-            <input autoFocus value={baseEdit.text} aria-label="Shared Plug ID" onFocus={(e) => e.target.select()}
-              onChange={(e) => setBaseEdit({ id: r.id, text: e.target.value })}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); baseSkip.current = true; saveBase(run, r.group_n, baseEdit.text); } else if (e.key === 'Escape') { e.preventDefault(); baseSkip.current = true; setBaseEdit(null); } }}
-              onBlur={() => { if (baseSkip.current) { baseSkip.current = false; return; } saveBase(run, r.group_n, baseEdit.text); }} />
-          </span>
-        ) : (
-          <span className={`strong${editable ? ' wl-base-edit' : ''}`} tabIndex={editable ? 0 : undefined}
-            title={editable ? `Double-click or press Enter to change this ID on all ${span} rows (each keeps its own prefix)` : undefined}
-            onDoubleClick={editable ? (e) => { e.stopPropagation(); openBase(); } : undefined}
-            onClick={editable ? (e) => { e.stopPropagation(); if (tapEdit()) openBase(); } : undefined}
-            onKeyDown={editable ? (e) => { if (e.key === 'Enter') { e.preventDefault(); openBase(); } } : undefined}>{parts[0].base}</span>
-        )}
+        <span className="strong">{parts[0].base}</span>
       </td>
     );
   };

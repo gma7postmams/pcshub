@@ -1389,7 +1389,7 @@ tr.saved-flash td, tr.saved-flash { animation: saved-flash 2.4s ease-out; }
 
 /* Workload: one merged Plug ID cell for the rows of a plug group */
 .t.wl td.plug-merged { vertical-align: middle; border-bottom: 1px solid var(--border); }
-.plug-merged .plug-prefixes { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-bottom: 6px; }
+.plug-merged .plug-prefixes { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; justify-content: center; }
 
 /* Prefix pills of the merged Plug ID cell */
 .chip.pfx { padding: 2px 10px 2px 8px; gap: 5px; font-size: 11.5px; font-weight: 800; letter-spacing: .07em; color: var(--c); border: 0;
@@ -1403,10 +1403,3 @@ tr.saved-flash td, tr.saved-flash { animation: saved-flash 2.4s ease-out; }
 /* hovering a merged cell lights up every row it covers */
 table.t.wl tbody tr.grp-hover td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 table.t.wl tbody tr.grp-hover td.plug-merged { background: color-mix(in srgb, var(--accent) 20%, transparent); box-shadow: inset 3px 0 0 var(--accent); }
-
-.plug-pfx-item { display: inline-flex; align-items: center; gap: 8px; }
-.plug-pfx-date { font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
-.wl-base-edit { cursor: text; border-radius: 4px; padding: 0 3px; }
-.wl-base-edit:hover, .wl-base-edit:focus { outline: 1px dashed var(--accent); outline-offset: 2px; }
-.plug-base-edit input { width: 100%; min-width: 190px; text-align: center; font-weight: 700; }
-table.t.wl tbody tr.grp-hover-one td:not(.plug-merged) { background: color-mix(in srgb, var(--accent) 26%, transparent); }
