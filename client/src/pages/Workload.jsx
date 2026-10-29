@@ -7,7 +7,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FlagIcon, FullscreenIcon, LockIcon, PlusIcon, SaveIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, ExportButton, FilterSelect, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useNarrow, useSpareRows } from '../components/wl.jsx';
+import { DateChip, DateRange, ExportButton, FilterSelect, GroupTag, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useNarrow, useSpareRows } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive, useCellPresence, rangeCells, peerStyle } from '../lib/live.js';
@@ -464,7 +464,7 @@ export default function Workload() {
   const setMode = () => {};
   const isGrid = false;   // Excel mode = the editable grid; Table mode = rows with the New / Edit form (the layout around both is the same)
   const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('wl:rows3')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
-  const [filt, setFilt] = useState(() => ({ q: '', units: '', platform: '', plug_type: '', from: isoDate(), to: isoDate(), ...(loadViewState('workload', {}).filt || {}) }));   // a fresh tab starts on today   // kept across a refresh
+  const [filt, setFilt] = useState(() => ({ q: '', units: '', platform: '', plug_type: '', group: '', group_date: '', from: isoDate(), to: isoDate(), ...(loadViewState('workload', {}).filt || {}) }));   // a fresh tab starts on today   // kept across a refresh
   const [stats, setStats] = useState(null);   // summary cards + tab badges
   const [offset, setOffset] = useState(() => loadViewState('workload', {}).offset || 0);   // the page you were on is kept across a refresh
   const [sort, setSortState] = useState(() => loadViewState('workload', {}).sort || { k: '', dir: 'asc' });   // clicked column header (Table mode)
@@ -568,7 +568,7 @@ export default function Workload() {
   }, []);
   const q = useDebounced(filt.q, 300);
   // a different tab / filter / search is a different set of rows: drop the selection
-  useEffect(() => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; }, [tab, mode, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q]);
+  useEffect(() => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; }, [tab, mode, filt.units, filt.platform, filt.plug_type, filt.group, filt.group_date, filt.from, filt.to, q]);
   // Table-mode keyboard + mouse (one set of window listeners that always call the latest handlers, assigned further down every render)
   useEffect(() => {
     const key = (e) => { if (keysRef.current) keysRef.current(e); };
@@ -601,11 +601,11 @@ export default function Workload() {
   const query = useCallback((extra = {}) => {
     const p = new URLSearchParams(extra);
     if (tab !== 'ALL') p.set('team', tab);
-    ['units', 'platform', 'plug_type', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
+    ['units', 'platform', 'plug_type', 'group', 'group_date', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
     if (q) p.set('q', q);
     if (sort.k && extra.limit !== undefined) { p.set('sort', sort.k); p.set('dir', sort.dir); }   // only the table's own list and the export follow it; counts ignore it
     return p;
-  }, [tab, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q, sort.k, sort.dir]);
+  }, [tab, filt.units, filt.platform, filt.plug_type, filt.group, filt.group_date, filt.from, filt.to, q, sort.k, sort.dir]);
 
   // Tab badges (the counts next to All / VGFX / VEDIT / Audio) follow every filter except the team tab
   const loadStats = useCallback(async () => {
@@ -674,6 +674,16 @@ export default function Workload() {
   const goOffset = async (o) => { if (o === offset || !(await okToLeave())) return; setOffset(o); };
   const changeSize = async (e) => { const n = Number(e.target.value); if (n === size || !(await okToLeave())) return; try { localStorage.setItem('wl:rows3', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
   const sortBy = async (s2) => { if (!(await okToLeave())) return; setSort(s2); };
+  const pickGroup = async (r) => {   // the tag was clicked: show only this group (that day's rows with the same Plug ID under any prefix)
+    if (!(await okToLeave())) return;
+    setFilt((f) => ({ ...f, group: r.group_key, group_date: String(r.work_date || '').slice(0, 10) }));
+    setOffset(0);
+  };
+  const clearGroup = () => { setFilt((f) => ({ ...f, group: '', group_date: '' })); setOffset(0); };
+  const groupChip = filt.group ? (
+    <button type="button" className="chip c-blue wl-group-on" title="Show every row again" onClick={clearGroup}>Group: {filt.group} ✕</button>
+  ) : null;
+
   const setF = (k) => async (e) => {
     const val = e.target.value;
     if (k !== 'q' && !(await okToLeave())) return;
@@ -1736,7 +1746,7 @@ export default function Workload() {
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
-  }, [hasMeta, mode, tab, cards, winW, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, !!data, !!grid, full]);
+  }, [hasMeta, mode, tab, cards, winW, filt.units, filt.platform, filt.plug_type, filt.group, filt.from, filt.to, !!data, !!grid, full]);
 
   if (!meta) return <main className="container wide"><Empty>Loading…</Empty></main>;
 
@@ -1880,6 +1890,7 @@ export default function Workload() {
         return (
           <td {...common} className={r.is_priority && !cols.includes('breakdate_vgfx') ? 'prio' : undefined}>
             <span className="strong">{first}</span>
+            {r.group_key ? <> <GroupTag gkey={r.group_key} n={r.group_n} onPick={() => pickGroup(r)} /></> : null}
             {rest.length ? <span className="dim-inline"> · {rest.join(' · ')}</span> : null}
           </td>
         );
@@ -2036,6 +2047,7 @@ export default function Workload() {
               <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
             </FiltersMenu>
             <DateRange from={filt.from} to={filt.to} onChange={setRange} />
+            {groupChip}
             <span className="grow" />
             <div className="wl-presence"><PresenceAvatars path="/workload" peers={peers} describe={describePeer} /></div>
             <div className="wl-iconbar">
@@ -2123,6 +2135,7 @@ export default function Workload() {
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
           <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
           <DateRange from={filt.from} to={filt.to} onChange={setRange} />
+          {groupChip}
           <div className="wl-presence"><PresenceAvatars path="/workload" peers={peers} describe={describePeer} /></div>
         </div>
 
@@ -2309,9 +2322,9 @@ export default function Workload() {
       {deletingAll ? (
         <DeleteAllModal
           total={total}
-          scope={[tab === 'ALL' ? 'All tab' : `${meta.tabs.find((t) => t.key === tab).label} tab`, filt.units && `Units: ${filt.units}`, filt.platform && `Platform: ${filt.platform}`, filt.plug_type && `Plug Type: ${filt.plug_type}`,
+          scope={[tab === 'ALL' ? 'All tab' : `${meta.tabs.find((t) => t.key === tab).label} tab`, filt.units && `Units: ${filt.units}`, filt.platform && `Platform: ${filt.platform}`, filt.plug_type && `Plug Type: ${filt.plug_type}`, filt.group && `Group: ${filt.group}`,
             (filt.from || filt.to) && `Dates: ${filt.from || '…'} → ${filt.to || '…'}`, q && `Search: “${q}”`].filter(Boolean)}
-          filters={{ team: tab === 'ALL' ? undefined : tab, units: filt.units || undefined, platform: filt.platform || undefined, plug_type: filt.plug_type || undefined, from: filt.from || undefined, to: filt.to || undefined, q: q || undefined }}
+          filters={{ team: tab === 'ALL' ? undefined : tab, units: filt.units || undefined, platform: filt.platform || undefined, plug_type: filt.plug_type || undefined, group: filt.group || undefined, group_date: filt.group_date || undefined, from: filt.from || undefined, to: filt.to || undefined, q: q || undefined }}
           onClose={() => setDeletingAll(false)}
           onDone={(out) => { setDeletingAll(false); afterBulk(out); }}
         />

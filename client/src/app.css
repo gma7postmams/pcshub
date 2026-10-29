@@ -1383,3 +1383,8 @@ tr.saved-flash td, tr.saved-flash { animation: saved-flash 2.4s ease-out; }
 /* the "Locations are…" note under IP Access: a small, tight note */
 .geo-compact { padding: 4px 18px 8px; margin: 0; }
 .geo-compact > div { margin-top: 0; }
+
+/* Workload: plug-group tag beside a Plug ID, and the chip that shows a group filter is on */
+.chip.wl-group { border: 0; cursor: pointer; padding: 1px 7px; margin-left: 6px; gap: 3px; font-size: 11.5px; vertical-align: middle; font-family: inherit; }
+.chip.wl-group:hover, .chip.wl-group-on:hover { filter: brightness(1.12); }
+.chip.wl-group-on { border: 0; cursor: pointer; font-family: inherit; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }

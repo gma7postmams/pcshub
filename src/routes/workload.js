@@ -312,6 +312,20 @@ const SELECT = `
   SELECT w.*, uu.full_name AS updated_by_name
     FROM workload_items w LEFT JOIN users uu ON uu.id = w.updated_by`;
 
+// ---- Plug groups: plug IDs that are the same except for the prefix before the first underscore belong together ----
+// PH_2323XX_232LAI_LN060, PD_2323XX_232LAI_LN060 and PV_2323XX_232LAI_LN060 are one group (same Work Date, same text after the prefix; capitals,
+// spaces and a trailing " - 24p" note are ignored; only the first line of the Plug ID cell counts). A group needs at least two DIFFERENT prefixes,
+// so the same plug listed twice under one prefix (e.g. with two PSDs) is not tagged. Nothing is stored: it is worked out from the rows each time.
+const PLUG_FIRST = "split_part(w.plug_id, E'\\n', 1)";
+const PLUG_PREFIX = `NULLIF(upper(btrim(substring(${PLUG_FIRST} from '^([^_]*)_'))), '')`;
+const PLUG_KEY = `(CASE WHEN ${PLUG_PREFIX} IS NOT NULL THEN NULLIF(upper(regexp_replace(regexp_replace(${PLUG_FIRST}, '\\s+-\\s+.*$', ''), '^[^_]*_|\\s', '', 'g')), '') END)`;
+const GROUP_WIN = `OVER (PARTITION BY w.work_date, ${PLUG_KEY})`;
+const IS_GROUPED = `(${PLUG_KEY} IS NOT NULL AND min(${PLUG_PREFIX}) ${GROUP_WIN} <> max(${PLUG_PREFIX}) ${GROUP_WIN})`;
+// extra columns of the list: group_key (null when the row is not in a group) and group_n (how many rows of the current view share it)
+const GROUP_COLS = `, CASE WHEN ${IS_GROUPED} THEN ${PLUG_KEY} END AS group_key, CASE WHEN ${IS_GROUPED} THEN (count(*) ${GROUP_WIN})::int ELSE 0 END AS group_n`;
+/** The text a ?group= filter is compared with: no prefix, no spaces, capitals. */
+const groupKeyOf = (raw) => String(raw || '').replace(/\s+/g, '').toUpperCase().slice(0, 200);
+
 function buildFilter(query, user) {
   const where = [];
   const params = [];
@@ -333,6 +347,8 @@ function buildFilter(query, user) {
   if (query.units === NOT_SET) where.push('w.units_concerned IS NULL');
   else if (query.units) add('w.units_concerned = ?', v.oneOf(canonUnit(query.units), UNITS, { field: 'units' }));
   if (query.platform) add('w.platform = ?', String(query.platform));
+  if (query.group) add(`${PLUG_KEY} = ?`, groupKeyOf(query.group));   // one plug group: every row whose Plug ID is this key under some prefix
+  if (query.group && query.group_date) add('w.work_date = ?', v.date(query.group_date, { field: 'group_date' }));   // a group is per day (the tag counts rows of that day)
   if (query.plug_type) add('w.plug_type = ?', String(query.plug_type));
   if (query.from) add('w.work_date >= ?', v.date(query.from, { field: 'from' }));
   if (query.to) add('w.work_date <= ?', v.date(query.to, { field: 'to' }));
@@ -394,7 +410,7 @@ router.get('/', asyncH(async (req, res) => {
   if (req.query.team === 'PREP') {
     // ready rows first (all four prep fields available), then the ones still waiting; each row says what is missing
     const { rows } = await db.query(
-      `SELECT * FROM (SELECT w.*, uu.full_name AS updated_by_name, ${PREP_MISSING_SQL} AS prep_missing
+      `SELECT * FROM (SELECT w.*, uu.full_name AS updated_by_name, ${PREP_MISSING_SQL} AS prep_missing${GROUP_COLS}
                         FROM workload_items w LEFT JOIN users uu ON uu.id = w.updated_by ${whereSql(where)}) w
         ORDER BY (cardinality(prep_missing) > 0), ${order} LIMIT ${limit} OFFSET ${offset}`, params
     );
@@ -402,7 +418,8 @@ router.get('/', asyncH(async (req, res) => {
     return res.json({ total: total.rows[0].n, prepReady: ready.rows[0].n, rows: rows.map(flattenCustom) });
   }
   const { rows } = await db.query(
-    `${SELECT} ${whereSql(where)} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params
+    `SELECT w.*, uu.full_name AS updated_by_name${GROUP_COLS}
+       FROM workload_items w LEFT JOIN users uu ON uu.id = w.updated_by ${whereSql(where)} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params
   );
   res.json({ total: total.rows[0].n, rows: rows.map(flattenCustom) });
 }));
