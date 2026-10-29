@@ -7,7 +7,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FlagIcon, FullscreenIcon, LockIcon, PlusIcon, SaveIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, ExportButton, FilterSelect, GroupTag, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useNarrow, useSpareRows } from '../components/wl.jsx';
+import { DateChip, DateRange, ExportButton, FilterSelect, GroupIcon, GroupTag, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useNarrow, useSpareRows } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive, useCellPresence, rangeCells, peerStyle } from '../lib/live.js';
@@ -464,7 +464,7 @@ export default function Workload() {
   const setMode = () => {};
   const isGrid = false;   // Excel mode = the editable grid; Table mode = rows with the New / Edit form (the layout around both is the same)
   const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('wl:rows3')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
-  const [filt, setFilt] = useState(() => ({ q: '', units: '', platform: '', plug_type: '', group: '', from: isoDate(), to: isoDate(), ...(loadViewState('workload', {}).filt || {}) }));   // a fresh tab starts on today   // kept across a refresh
+  const [filt, setFilt] = useState(() => ({ q: '', units: '', platform: '', plug_type: '', group: '', together: '1', from: isoDate(), to: isoDate(), ...(loadViewState('workload', {}).filt || {}) }));   // a fresh tab starts on today   // kept across a refresh
   const [stats, setStats] = useState(null);   // summary cards + tab badges
   const [offset, setOffset] = useState(() => loadViewState('workload', {}).offset || 0);   // the page you were on is kept across a refresh
   const [sort, setSortState] = useState(() => loadViewState('workload', {}).sort || { k: '', dir: 'asc' });   // clicked column header (Table mode)
@@ -603,9 +603,10 @@ export default function Workload() {
     if (tab !== 'ALL') p.set('team', tab);
     ['units', 'platform', 'plug_type', 'group', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
     if (q) p.set('q', q);
+    if (extra.limit !== undefined && tab !== 'PREP' && filt.together !== '0') p.set('together', '1');   // the list keeps the rows of a plug group together (counts and export do not need it)
     if (sort.k && extra.limit !== undefined) { p.set('sort', sort.k); p.set('dir', sort.dir); }   // only the table's own list and the export follow it; counts ignore it
     return p;
-  }, [tab, filt.units, filt.platform, filt.plug_type, filt.group, filt.from, filt.to, q, sort.k, sort.dir]);
+  }, [tab, filt.units, filt.platform, filt.plug_type, filt.group, filt.together, filt.from, filt.to, q, sort.k, sort.dir]);
 
   // Tab badges (the counts next to All / VGFX / VEDIT / Audio) follow every filter except the team tab
   const loadStats = useCallback(async () => {
@@ -680,9 +681,19 @@ export default function Workload() {
     setOffset(0);
   };
   const clearGroup = () => { setFilt((f) => ({ ...f, group: '' })); setOffset(0); };
-  const groupChip = filt.group ? (
-    <button type="button" className="chip c-blue wl-group-on" title="Show every row again" onClick={clearGroup}>Group: {filt.group} ✕</button>
+  const togglePill = tab !== 'PREP' ? (
+    <button type="button" className={`chip wl-together${filt.together !== '0' ? ' on' : ''}`} aria-pressed={filt.together !== '0'}
+      title="Keep the entries of one plug (e.g. PV_ / PN_ / PD_) together when sorting, so one person can take them all"
+      onClick={() => { setFilt((f) => ({ ...f, together: f.together === '0' ? '1' : '0' })); setOffset(0); }}>
+      <GroupIcon /> Group same plugs
+    </button>
   ) : null;
+  const groupChip = (
+    <>
+      {togglePill}
+      {filt.group ? <button type="button" className="chip c-blue wl-group-on" title="Show every row again" onClick={clearGroup}>{filt.group.startsWith('P:') ? 'Linked project' : `Group: ${filt.group}`} ✕</button> : null}
+    </>
+  );
 
   const setF = (k) => async (e) => {
     const val = e.target.value;
@@ -1351,6 +1362,20 @@ export default function Workload() {
   const total = data && data.total ? data.total : 0;
   const isAdminUser = !!(s.user && ['Admin', 'System Admin'].includes(s.user.role));
   const pageRows = data && data.rows ? data.rows : [];
+  // Plug groups on this page: each gets a colour (neighbouring groups differ) and its rows know if they are the first / middle / last of the run
+  const groupPos = (() => {
+    const hues = ['blue', 'pink', 'green', 'amber', 'red'];
+    const byKey = new Map();
+    const pos = pageRows.map((r, i) => {
+      const k = r.group_key;
+      if (!k) return null;
+      if (!byKey.has(k)) byKey.set(k, hues[byKey.size % hues.length]);
+      const prev = i > 0 && pageRows[i - 1].group_key === k;
+      const next = i < pageRows.length - 1 && pageRows[i + 1].group_key === k;
+      return { hue: byKey.get(k), cls: !prev && next ? 'grp-first' : prev && next ? 'grp-mid' : prev ? 'grp-last' : 'grp-only' };
+    });
+    return { pos, byKey };
+  })();
   const pickedRowsList = pageRows.filter((r) => (allMatching || picked.has(r.id)) && !isLocked(r.work_date, meta.locks));
   // Table mode Set / Remove Priority: the ticked rows, else the row(s) of a selected Breakdate / Time cell
   const bdColIdx = meta && meta.views && meta.views[viewKey] ? meta.views[viewKey].filter((k) => k !== 'breakdate_vedit').indexOf('breakdate_vgfx') : -1;
@@ -1362,6 +1387,36 @@ export default function Workload() {
   const pickable = pageRows.filter((r) => !lockedForPick(r));
   const pickedCount = allMatching ? total : picked.size;
   const pageAllPicked = !!pickable.length && pickable.every((r) => allMatching || picked.has(r.id));
+  // Plug groups by hand: the ticked rows, else the rows of the selected cells
+  const cellRowsSel = !picked.size && !allMatching && cellSel ? pageRows.slice(Math.min(cellSel.r0, cellSel.r1), Math.max(cellSel.r0, cellSel.r1) + 1).filter((r) => !isLocked(r.work_date, meta && meta.locks)) : [];
+  const linkRows = pickedRowsList.length ? pickedRowsList : cellRowsSel;
+  const NO_COPY = ['plug_id', 'work_date', 'platform', 'units_concerned', 'breakdate_vgfx', 'breakdate_vedit'];
+  const applySrc = !picked.size && !allMatching && cellSel && cellSel.r0 === cellSel.r1 ? pageRows[cellSel.r0] : null;
+  // the columns of the selected cell(s) that can be copied to the rest of the group (a function: tableCols is only known further down)
+  const applyKeysOf = () => (applySrc && applySrc.group_key
+    ? tableCols.slice(Math.min(cellSel.c0, cellSel.c1), Math.max(cellSel.c0, cellSel.c1) + 1)
+        .filter((k) => !NO_COPY.includes(k) && (k.startsWith('custom_') || (meta.fields[k] && ['text', 'select', 'date_or_text', 'audio_guide'].includes(meta.fields[k].kind)))) : []);
+  const linkSel = async (mode) => {
+    const ids = linkRows.map((r) => r.id).slice(0, 500);
+    try {
+      const out = await post('/api/workload/link', { ids, mode });
+      toast(mode === 'link' ? `${out.changed} entries linked as one project` : mode === 'unlink' ? `${out.changed} entr${out.changed === 1 ? 'y' : 'ies'} taken out of its group` : `${out.changed} entr${out.changed === 1 ? 'y' : 'ies'} back to automatic grouping`);
+      clearPicks();
+      load();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const applyToGroup = async () => {
+    const applyKeys = applyKeysOf();
+    if (!applySrc || !applyKeys.length) return;
+    const labels = applyKeys.map((k) => (meta.fields[k] ? meta.fields[k].label : (meta.customColumns || []).find((c) => c.col_key === k)?.label || k));
+    const others = Math.max(0, (applySrc.group_n || 1) - 1);
+    if (!(await confirm('Apply to the whole group?', `${labels.join(', ')} of this entry will be copied to the other ${others} entr${others === 1 ? 'y' : 'ies'} of its group, replacing what is there now.`))) return;
+    try {
+      const out = await post('/api/workload/apply-group', { id: applySrc.id, fields: applyKeys });
+      toast(`Copied to ${out.updated} entr${out.updated === 1 ? 'y' : 'ies'}${out.skipped ? ` (${out.skipped} in a locked period skipped)` : ''}`);
+      load();
+    } catch (e) { toast(e.message, 'err'); }
+  };
   const clearPicks = () => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; };
   const rangeIds = (a, b) => pageRows.slice(Math.min(a, b), Math.max(a, b) + 1).filter((r) => !lockedForPick(r)).map((r) => r.id);
   const selectPage = () => { setAllMatching(false); setPicked(new Set(pickable.map((r) => r.id))); };
@@ -1890,7 +1945,7 @@ export default function Workload() {
         return (
           <td {...common} className={r.is_priority && !cols.includes('breakdate_vgfx') ? 'prio' : undefined}>
             <span className="strong">{first}</span>
-            {r.group_key ? <> <GroupTag gkey={r.group_key} n={r.group_n} onPick={() => pickGroup(r)} /></> : null}
+            {r.group_key ? <> <GroupTag gkey={r.group_key} n={r.group_n} hue={groupPos.byKey.get(r.group_key)} onPick={() => pickGroup(r)} /></> : null}
             {rest.length ? <span className="dim-inline"> · {rest.join(' · ')}</span> : null}
           </td>
         );
@@ -2077,6 +2132,10 @@ export default function Workload() {
                 s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
                 canWrite && isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
+                canWrite && !isGrid && applyKeysOf().length > 0 && { id: 'apply-group-btn', label: 'Apply to whole group', icon: <GroupIcon />, onClick: applyToGroup },
+                canWrite && !isGrid && linkRows.length >= 2 && { id: 'link-group-btn', label: 'Link as one project', icon: <GroupIcon />, onClick: () => linkSel('link') },
+                canWrite && !isGrid && linkRows.some((r) => r.group_key) && { id: 'unlink-group-btn', label: 'Remove from group', icon: <GroupIcon />, onClick: () => linkSel('unlink') },
+                canWrite && !isGrid && linkRows.some((r) => r.project_group) && { id: 'auto-group-btn', label: 'Use automatic grouping', icon: <GroupIcon />, onClick: () => linkSel('auto') },
                 canWrite && !isGrid && prioRows.length > 0 && { id: 'priority-btn', label: pickedAllPrio ? 'Remove Priority' : 'Set Priority', icon: <FlagIcon />, onClick: toggleTablePriority },
               ]} />
             </div>
@@ -2246,7 +2305,7 @@ export default function Workload() {
                             <Fragment key={r.id}>
                             {isPrep ? prepDivider(r, idx > 0 ? data.rows[idx - 1] : null, idx === 0 && offset === 0) : null}
                             <tr data-id={r.id}
-                              className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}${isPrep && (r.prep_missing || []).length ? ' prep-wait' : ''}`.trim()}
+                              className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}${isPrep && (r.prep_missing || []).length ? ' prep-wait' : ''}${groupPos.pos[idx] ? ` grp ${groupPos.pos[idx].cls} c-${groupPos.pos[idx].hue}` : ''}`.trim()}
                               onMouseDown={cellDown}
                               onContextMenu={(e) => rowMenu(e, r)}
                               onClick={canWrite ? undefined : (e) => { if (!(e.target.closest && e.target.closest('.rn'))) setForm({ rec: r }); }}>

@@ -642,3 +642,7 @@ CREATE TABLE IF NOT EXISTS ip_rules (
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (kind, cidr)
 );
+
+-- Workload: entries of one project (the same plug on several platforms, e.g. PV_ / PN_ / PD_) are grouped automatically from the Plug ID. This lets
+-- people link entries by hand (or take one out of a group): '' = automatic, '-' = never group this row, anything else = a token shared by the linked rows.
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS project_group TEXT NOT NULL DEFAULT '';

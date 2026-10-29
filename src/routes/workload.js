@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const validator = require('validator');
 const db = require('../db');
@@ -319,7 +320,9 @@ const SELECT = `
 // date range, tab or filters on screen, so a plug is tagged even when the rest of its group is on another day.
 const PLUG_FIRST = "split_part(w.plug_id, E'\\n', 1)";
 const PLUG_PREFIX = `NULLIF(upper(btrim(substring(${PLUG_FIRST} from '^([^_]*)_'))), '')`;
-const PLUG_KEY = `(CASE WHEN ${PLUG_PREFIX} IS NOT NULL THEN NULLIF(upper(regexp_replace(regexp_replace(${PLUG_FIRST}, '\\s+-\\s+.*$', ''), '^[^_]*_|\\s', '', 'g')), '') END)`;
+const AUTO_KEY = `(CASE WHEN ${PLUG_PREFIX} IS NOT NULL THEN NULLIF(upper(regexp_replace(regexp_replace(${PLUG_FIRST}, '\\s+-\\s+.*$', ''), '^[^_]*_|\\s', '', 'g')), '') END)`;
+// A row linked by hand (project_group = a token) is keyed 'P:<token>'; '-' = taken out of every group; '' = the automatic Plug-ID key above.
+const PLUG_KEY = `(CASE WHEN w.project_group = '-' THEN NULL WHEN w.project_group <> '' THEN 'P:' || upper(w.project_group) ELSE ${AUTO_KEY} END)`;
 const GROUP_COLS = `, ${PLUG_KEY} AS group_key`;   // the row's key (null = no underscore prefix); attachGroups() keeps it only for real groups
 /** The text a ?group= filter is compared with: no prefix, no spaces, capitals. */
 const groupKeyOf = (raw) => String(raw || '').replace(/\s+/g, '').toUpperCase().slice(0, 200);
@@ -329,7 +332,7 @@ async function attachGroups(rows) {
   const found = new Map();
   if (keys.length) {
     const { rows: agg } = await db.query(
-      `SELECT k, count(*)::int AS n, min(p) <> max(p) AS multi
+      `SELECT k, count(*)::int AS n, (k LIKE 'P:%' AND count(*) >= 2) OR min(p) <> max(p) AS multi
          FROM (SELECT ${PLUG_KEY} AS k, ${PLUG_PREFIX} AS p FROM workload_items w) x
         WHERE k = ANY($1::text[]) GROUP BY k`, [keys]
     );
@@ -431,6 +434,17 @@ router.get('/', asyncH(async (req, res) => {
     );
     const ready = await db.query(`SELECT count(*)::int AS n FROM (SELECT ${PREP_MISSING_SQL} AS m FROM workload_items w ${whereSql(where)}) x WHERE cardinality(m) = 0`, filterParams);
     return res.json({ total: total.rows[0].n, prepReady: ready.rows[0].n, rows: (await attachGroups(rows)).map(flattenCustom) });
+  }
+  if (req.query.together === '1') {
+    // Keep the rows of a plug group together in whatever order is asked for: the group sits where its first member would, its other
+    // members right under it (in the same order). Rows in no group keep their place. Works on the whole filtered list, so paging stays right.
+    const { rows } = await db.query(
+      `SELECT * FROM (SELECT w.*, uu.full_name AS updated_by_name${GROUP_COLS}, row_number() OVER (ORDER BY ${order}) AS _rn
+                        FROM workload_items w LEFT JOIN users uu ON uu.id = w.updated_by ${whereSql(where)}) q
+        ORDER BY min(_rn) OVER (PARTITION BY COALESCE(group_key, '#' || id::text)), _rn LIMIT ${limit} OFFSET ${offset}`, params
+    );
+    rows.forEach((r) => { delete r._rn; });
+    return res.json({ total: total.rows[0].n, rows: (await attachGroups(rows)).map(flattenCustom) });
   }
   const { rows } = await db.query(
     `SELECT w.*, uu.full_name AS updated_by_name${GROUP_COLS}
@@ -742,6 +756,76 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
   await notifyFieldsSet(req, out.fieldsChanged);
   const { fieldsChanged, ...shown } = out;
   res.json({ ok: true, ...shown });
+}));
+
+// ---------- Plug groups by hand ----------
+// Link rows as one project (they share a token), take rows out of every group, or hand them back to the automatic Plug-ID match.
+// Rows in a locked period are left alone (counted as skipped).
+router.post('/link', requireAction('workload.write'), asyncH(async (req, res) => {
+  const mode = String((req.body && req.body.mode) || '');
+  if (!['link', 'unlink', 'auto'].includes(mode)) throw new HttpError(400, 'Unknown action');
+  const ids = Array.isArray(req.body.ids) ? [...new Set(req.body.ids.map((n) => v.id(n)))].slice(0, 500) : [];
+  if (!ids.length) throw new HttpError(400, 'No rows selected');
+  if (mode === 'link' && ids.length < 2) throw new HttpError(400, 'Select at least two rows to link');
+  const locks = await loadLocks(db);
+  const { rows: found } = await db.query('SELECT id, work_date, plug_id FROM workload_items WHERE id = ANY($1::bigint[])', [ids]);
+  const open = found.filter((r) => { try { assertNotLocked(locks, r.work_date); return true; } catch (e) { return false; } });
+  if (mode === 'link' && open.length < 2) throw new HttpError(400, 'Fewer than two of those rows can be changed (the others are in a locked period)');
+  if (!open.length) throw new HttpError(400, 'Those rows are in a locked period');
+  const token = mode === 'link' ? crypto.randomBytes(5).toString('hex').toUpperCase() : (mode === 'unlink' ? '-' : '');
+  await db.query('UPDATE workload_items SET project_group = $1, updated_by = $2, updated_at = now() WHERE id = ANY($3::bigint[])', [token, req.user.id, open.map((r) => r.id)]);
+  await audit(req, 'workload.group', 'workload_item', null, { mode, rows: open.length, sample: open.slice(0, 20).map((r) => String(r.plug_id || '').split('\n')[0]) });
+  res.json({ ok: true, changed: open.length, skipped: found.length - open.length });
+}));
+
+// Copy chosen columns of one row to the other rows of its group (e.g. whoever it is assigned to), so a plug is handled by one person.
+// Never copies the columns that identify or place a row (Plug ID, Work Date, Platform, Units Concerned) or the Breakdate / Time pills.
+const GROUP_COPY_KINDS = ['text', 'select', 'date_or_text', 'audio_guide'];
+router.post('/apply-group', requireAction('workload.write'), asyncH(async (req, res) => {
+  const id = v.id(req.body && req.body.id);
+  const customCols = await loadCustomCols(db);
+  const wanted = Array.isArray(req.body.fields) ? [...new Set(req.body.fields.map((k) => String(k)))].slice(0, 40) : [];
+  const fields = wanted.filter((k) => (COLS.includes(k) && !['plug_id', 'platform', 'units_concerned'].includes(k) && GROUP_COPY_KINDS.includes(FIELDS[k].kind)) || customCols.some((c) => c.col_key === k));
+  if (!fields.length) throw new HttpError(400, 'Those columns cannot be copied to a group');
+  const locks = await loadLocks(db);
+  let fieldsChanged = [];
+  const out = await db.tx(async (c) => {
+    const src = (await c.query('SELECT w.*, ' + PLUG_KEY + ' AS gk FROM workload_items w WHERE w.id = $1', [id])).rows[0];
+    if (!src) throw new HttpError(404, 'Workload item not found');
+    if (!src.gk) throw new HttpError(400, 'This row is not in a group');
+    const members = (await c.query(`SELECT w.id FROM workload_items w WHERE ${PLUG_KEY} = $1 AND w.id <> $2 ORDER BY w.id`, [src.gk, id])).rows.map((r) => r.id);
+    if (!members.length) throw new HttpError(400, 'This row is not in a group');
+    let updated = 0;
+    let skipped = 0;
+    for (const mid of members) {
+      const cur = (await c.query('SELECT * FROM workload_items WHERE id = $1 FOR UPDATE', [mid])).rows[0];
+      if (!cur) continue;
+      try { assertNotLocked(locks, cur.work_date); } catch (e) { skipped++; continue; }
+      const regular = fields.filter((k) => COLS.includes(k));
+      const custom = fields.filter((k) => !COLS.includes(k));
+      if (regular.length) {
+        const merged = {};
+        COLS.forEach((k) => { merged[k] = cur[k]; });
+        regular.forEach((k) => { merged[k] = src[k]; });
+        const rec = await parseRow(c, merged, cur, customCols);
+        const changed = regular.filter((k) => String(rec[k] ?? '') !== String(cur[k] ?? ''));
+        if (changed.length) {
+          await c.query(`UPDATE workload_items SET ${changed.map((k, i) => `"${k}"=$${i + 2}`).join(', ')}, updated_by=$${changed.length + 2}, updated_at=now() WHERE id=$1`, [mid, ...changed.map((k) => rec[k]), req.user.id]);
+          const notify = changed.filter((k) => NOTIFY_FIELDS[k]);
+          if (notify.length) fieldsChanged.push({ plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur, Object.fromEntries(notify.map((k) => [k, rec[k]]))) });
+        }
+      }
+      if (custom.length) {
+        const patch = Object.fromEntries(custom.map((k) => [k, String((src.custom_fields || {})[k] ?? '')]));
+        await c.query('UPDATE workload_items SET custom_fields = custom_fields || $2::jsonb, updated_by=$3, updated_at=now() WHERE id=$1', [mid, JSON.stringify(patch), req.user.id]);
+      }
+      await audit(req, 'workload.update', 'workload_item', mid, { via: 'apply-group', from: id, fields }, c);
+      updated++;
+    }
+    return { updated, skipped };
+  });
+  if (fieldsChanged.length) await notifyFieldsSet(req, fieldsChanged);
+  res.json({ ok: true, ...out, fields });
 }));
 
 // Save ONE field of a row (click-to-edit in the table). Only that column is written, so someone else's edit to a
