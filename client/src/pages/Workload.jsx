@@ -7,7 +7,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FlagIcon, FullscreenIcon, LockIcon, PlusIcon, SaveIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, ExportButton, FilterSelect, PlatformCell, PrefixChip, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useNarrow, useSpareRows } from '../components/wl.jsx';
+import { DateChip, DateRange, ExportButton, FilterSelect, GroupTag, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useNarrow, useSpareRows } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive, useCellPresence, rangeCells, peerStyle } from '../lib/live.js';
@@ -690,6 +690,11 @@ export default function Workload() {
   const goOffset = async (o) => { if (o === offset || !(await okToLeave())) return; setOffset(o); };
   const changeSize = async (e) => { const n = Number(e.target.value); if (n === size || !(await okToLeave())) return; try { localStorage.setItem('wl:rows3', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
   const sortBy = async (s2) => { if (!(await okToLeave())) return; setSort(s2); };
+  const pickGroup = async (r) => {   // the tag was clicked: show only this group (every row with the same Plug ID under any prefix, on any day)
+    if (!(await okToLeave())) return;
+    setFilt((f) => ({ ...f, group: r.group_key }));
+    setOffset(0);
+  };
   const clearGroup = () => { setFilt((f) => ({ ...f, group: '' })); setOffset(0); };
   const groupChip = filt.group ? (
     <button type="button" className="chip c-blue wl-group-on" title="Show every row again" onClick={clearGroup}>Group: {filt.group} ✕</button>
@@ -765,7 +770,7 @@ export default function Workload() {
       setData((d) => (d && d.rows ? { ...d, rows: d.rows.map((x) => (x.id === r.id ? { ...x, ...out.values } : x)) } : d));
       // close only THIS cell's editor: the person may already have opened another cell while this one was saving
       setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur));
-      if (['work_date', 'units_concerned', 'platform', 'plug_type', 'plug_id'].includes(k)) load();   // may change the row's place, filters or the counts
+      if (['work_date', 'units_concerned', 'platform', 'plug_type'].includes(k)) load();   // may change the row's place, filters or the counts
       if (move) moveEdit(r, k, move.dr, move.dc); else selectCell(r, k);
     } catch (e) { toast(e.message, 'err'); throw e; }
   };
@@ -1889,50 +1894,22 @@ export default function Workload() {
 
   // Cells wrap (pasted line breaks kept) instead of being cut off; data-label feeds the card layout.
   // Plug groups shown as one merged Plug ID cell: the rows of a group sit together (see groupAdjacent), the first row draws one tall cell with
-  // one coloured prefix pill per row and the shared ID once, the rows under it draw none. Each pill edits ITS row's full Plug ID (double-click,
-  // Enter, or a tap on a touch screen), like the pills of the Breakdate cell. Hovering the cell lights up every row it covers.
-  // Returns null = this row's cell is covered by the one above, undefined = not a merge (a group with a single row on this page), else the merged <td>.
-  // Not used in cards layout, the Prep list or Excel mode.
+  // the prefixes and the shared ID, the rows under it draw none. Returns null = this row's cell is covered by the one above, undefined = not a
+  // merge (a group with a single row on this page), else the merged <td>. Not used in cards layout, the Prep list or Excel mode.
   const mergedPlugCell = (rows, idx) => {
     const r = rows[idx];
     if (idx > 0 && rows[idx - 1].group_key === r.group_key) return null;
     let span = 1;
     while (idx + span < rows.length && rows[idx + span].group_key === r.group_key) span += 1;
     if (span < 2) return undefined;
-    const run = rows.slice(idx, idx + span);
-    const parts = run.map((x) => { const f = String(x.plug_id || '').split('\n')[0].trim(); const i = f.indexOf('_'); return { pre: i > 0 ? f.slice(0, i).trim().toUpperCase() : '', base: i > 0 ? f.slice(i + 1).trim() : f, full: f }; });
-    const light = (e, on) => {   // light up (or clear) every row the cell covers
-      const tb = e.currentTarget.closest('tbody');
-      if (!tb) return;
-      tb.querySelectorAll('tr.grp-hover').forEach((tr) => tr.classList.remove('grp-hover'));
-      if (on) for (const tr of tb.rows) { if (tr.dataset.gk === r.group_key) tr.classList.add('grp-hover'); }
-    };
+    const parts = rows.slice(idx, idx + span).map((x) => { const f = String(x.plug_id || '').split('\n')[0].trim(); const i = f.indexOf('_'); return { pre: i > 0 ? f.slice(0, i).trim().toUpperCase() : '', base: i > 0 ? f.slice(i + 1).trim() : f }; });
+    const prefixes = [...new Set(parts.map((x) => x.pre).filter(Boolean))];
     return (
       <td key="plug_id" data-k="plug_id" data-label={head('plug_id')} rowSpan={span} className="plug-merged" onMouseDown={(e) => e.stopPropagation()}
-        onMouseEnter={(e) => light(e, true)} onMouseLeave={(e) => light(e, false)}>
-        <div className="plug-prefixes">
-          {run.map((x, i) => {
-            if (canWrite && editing && editing.id === x.id && editing.k === 'plug_id') {
-              return (
-                <span key={x.id} className="cell-editor-inline plug-pfx-edit" onClick={(e) => e.stopPropagation()}>
-                  <CellEditor memo={`${x.id}:plug_id`} startText={editing.start} def={{ ...meta.fields.plug_id, multiline: false }} initial={x.plug_id} lookups={lookups}
-                    onSave={(value, move) => saveCell(x, 'plug_id', value, move)} onCancel={() => { setEditing(null); }}
-                    onUndo={(sh) => { setEditing(null); if (sh) redoTbl(); else undoTbl(); }} />
-                </span>
-              );
-            }
-            const clickable = canWrite && !rowLocked(x);
-            const open = () => setEditing({ id: x.id, k: 'plug_id' });
-            return (
-              <PrefixChip key={x.id} prefix={parts[i].pre || '?'} className={clickable ? 'wl-pill-edit' : ''} tabIndex={clickable ? 0 : undefined}
-                title={clickable ? `${parts[i].full}: double-click or press Enter to edit this Plug ID` : parts[i].full}
-                onClick={clickable ? (e) => { e.stopPropagation(); if (tapEdit()) open(); } : undefined}
-                onDoubleClick={clickable ? (e) => { e.stopPropagation(); open(); } : undefined}
-                onKeyDown={clickable ? (e) => { if (e.key === 'Enter') { e.preventDefault(); open(); } } : undefined} />
-            );
-          })}
-        </div>
+        title={`${span} rows share this Plug ID under different prefixes. To change one row's Plug ID, open its ⋯ menu and choose Edit.`}>
+        <div className="plug-prefixes">{prefixes.map((x) => <span key={x} className="chip c-gray sm">{x}_</span>)}</div>
         <span className="strong">{parts[0].base}</span>
+        {' '}<GroupTag gkey={r.group_key} n={r.group_n} onPick={() => pickGroup(r)} />
       </td>
     );
   };
@@ -1950,6 +1927,7 @@ export default function Workload() {
         return (
           <td {...common} className={r.is_priority && !cols.includes('breakdate_vgfx') ? 'prio' : undefined}>
             <span className="strong">{first}</span>
+            {r.group_key ? <> <GroupTag gkey={r.group_key} n={r.group_n} onPick={() => pickGroup(r)} /></> : null}
             {rest.length ? <span className="dim-inline"> · {rest.join(' · ')}</span> : null}
           </td>
         );
@@ -2304,7 +2282,7 @@ export default function Workload() {
                           {data.rows.map((r, idx) => (
                             <Fragment key={r.id}>
                             {isPrep ? prepDivider(r, idx > 0 ? data.rows[idx - 1] : null, idx === 0 && offset === 0) : null}
-                            <tr data-id={r.id} data-gk={r.group_key || undefined}
+                            <tr data-id={r.id}
                               className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}${isPrep && (r.prep_missing || []).length ? ' prep-wait' : ''}`.trim()}
                               onMouseDown={cellDown}
                               onContextMenu={(e) => rowMenu(e, r)}

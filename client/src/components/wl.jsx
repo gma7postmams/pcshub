@@ -15,12 +15,14 @@ export const Chip = ({ hue, dot, small, children }) => (
   <span className={`chip c-${hue}${small ? ' sm' : ''}`}>{dot ? <i className="dot" /> : null}{children}</span>
 );
 
-/** One prefix of a plug group (PH_, PD_, PV_ ...) in the merged Plug ID cell: a coloured pill, the colour follows the prefix so the same prefix always looks the same. */
-export const PrefixChip = ({ prefix, className = '', children, ...rest }) => (
-  <span className={`chip c-${hueOf(prefix)} pfx ${className}`.trim()} {...rest}>
-    <i className="dot" />{prefix}<b className="pfx-us">_</b>{children}
-  </span>
+/** The tag beside a Plug ID that shares its group with other rows (same ID under another prefix, e.g. PH_ / PD_ / PV_). Click = show only that group. */
+export const GroupTag = ({ gkey, n, onPick }) => (
+  <button type="button" className={`chip c-${hueOf(gkey)} wl-group`} title={`${n} plugs share ${gkey} under different prefixes (any day). Click to show only this group.`}
+    onMouseDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onPick(); }}>
+    <GroupIcon />×{n}
+  </button>
 );
+const GroupIcon = () => (<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.4" /><path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.33-1.33" /></svg>);
 
 const TYPE_HUE = { EPISODIC: 'blue', SEASONAL: 'pink', BUMPER: 'red', 'POP-UP/POP LOGO': 'blue', RADIO: 'green' };   // avoids purple/orange/teal (the team colours)
 export const TypePill = ({ value }) => (value ? <Chip hue={Object.prototype.hasOwnProperty.call(TYPE_HUE, value) ? TYPE_HUE[value] : hueOf(value)}>{value}</Chip> : null);
