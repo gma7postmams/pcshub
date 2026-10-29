@@ -1388,7 +1388,3 @@ tr.saved-flash td, tr.saved-flash { animation: saved-flash 2.4s ease-out; }
 .chip.wl-group { border: 0; cursor: pointer; padding: 1px 7px; margin-left: 6px; gap: 3px; font-size: 11.5px; vertical-align: middle; font-family: inherit; }
 .chip.wl-group:hover, .chip.wl-group-on:hover { filter: brightness(1.12); }
 .chip.wl-group-on { border: 0; cursor: pointer; font-family: inherit; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
-
-/* Workload: one merged Plug ID cell for the rows of a plug group */
-.t.wl td.plug-merged { vertical-align: middle; border-bottom: 1px solid var(--border); }
-.plug-merged .plug-prefixes { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; justify-content: center; }
