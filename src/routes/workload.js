@@ -313,18 +313,34 @@ const SELECT = `
     FROM workload_items w LEFT JOIN users uu ON uu.id = w.updated_by`;
 
 // ---- Plug groups: plug IDs that are the same except for the prefix before the first underscore belong together ----
-// PH_2323XX_232LAI_LN060, PD_2323XX_232LAI_LN060 and PV_2323XX_232LAI_LN060 are one group (same Work Date, same text after the prefix; capitals,
-// spaces and a trailing " - 24p" note are ignored; only the first line of the Plug ID cell counts). A group needs at least two DIFFERENT prefixes,
-// so the same plug listed twice under one prefix (e.g. with two PSDs) is not tagged. Nothing is stored: it is worked out from the rows each time.
+// PH_2323XX_232LAI_LN060, PD_2323XX_232LAI_LN060 and PV_2323XX_232LAI_LN060 are one group, on any Work Date (capitals, spaces and a trailing
+// " - 24p" note are ignored; only the first line of the Plug ID cell counts). A group needs at least two DIFFERENT prefixes, so the same plug
+// listed twice under one prefix (e.g. with two PSDs) is not tagged. Nothing is stored: the list asks the table each time, whatever the
+// date range, tab or filters on screen, so a plug is tagged even when the rest of its group is on another day.
 const PLUG_FIRST = "split_part(w.plug_id, E'\\n', 1)";
 const PLUG_PREFIX = `NULLIF(upper(btrim(substring(${PLUG_FIRST} from '^([^_]*)_'))), '')`;
 const PLUG_KEY = `(CASE WHEN ${PLUG_PREFIX} IS NOT NULL THEN NULLIF(upper(regexp_replace(regexp_replace(${PLUG_FIRST}, '\\s+-\\s+.*$', ''), '^[^_]*_|\\s', '', 'g')), '') END)`;
-const GROUP_WIN = `OVER (PARTITION BY w.work_date, ${PLUG_KEY})`;
-const IS_GROUPED = `(${PLUG_KEY} IS NOT NULL AND min(${PLUG_PREFIX}) ${GROUP_WIN} <> max(${PLUG_PREFIX}) ${GROUP_WIN})`;
-// extra columns of the list: group_key (null when the row is not in a group) and group_n (how many rows of the current view share it)
-const GROUP_COLS = `, CASE WHEN ${IS_GROUPED} THEN ${PLUG_KEY} END AS group_key, CASE WHEN ${IS_GROUPED} THEN (count(*) ${GROUP_WIN})::int ELSE 0 END AS group_n`;
+const GROUP_COLS = `, ${PLUG_KEY} AS group_key`;   // the row's key (null = no underscore prefix); attachGroups() keeps it only for real groups
 /** The text a ?group= filter is compared with: no prefix, no spaces, capitals. */
 const groupKeyOf = (raw) => String(raw || '').replace(/\s+/g, '').toUpperCase().slice(0, 200);
+/** Sets group_key / group_n on listed rows: group_n = every row of the table with that key; group_key is dropped unless 2+ different prefixes share it. */
+async function attachGroups(rows) {
+  const keys = [...new Set(rows.map((r) => r.group_key).filter(Boolean))];
+  const found = new Map();
+  if (keys.length) {
+    const { rows: agg } = await db.query(
+      `SELECT k, count(*)::int AS n, min(p) <> max(p) AS multi
+         FROM (SELECT ${PLUG_KEY} AS k, ${PLUG_PREFIX} AS p FROM workload_items w) x
+        WHERE k = ANY($1::text[]) GROUP BY k`, [keys]
+    );
+    agg.forEach((a) => found.set(a.k, a));
+  }
+  rows.forEach((r) => {
+    const g = r.group_key ? found.get(r.group_key) : null;
+    if (g && g.multi) r.group_n = g.n; else { r.group_key = null; r.group_n = 0; }
+  });
+  return rows;
+}
 
 function buildFilter(query, user) {
   const where = [];
@@ -347,11 +363,10 @@ function buildFilter(query, user) {
   if (query.units === NOT_SET) where.push('w.units_concerned IS NULL');
   else if (query.units) add('w.units_concerned = ?', v.oneOf(canonUnit(query.units), UNITS, { field: 'units' }));
   if (query.platform) add('w.platform = ?', String(query.platform));
-  if (query.group) add(`${PLUG_KEY} = ?`, groupKeyOf(query.group));   // one plug group: every row whose Plug ID is this key under some prefix
-  if (query.group && query.group_date) add('w.work_date = ?', v.date(query.group_date, { field: 'group_date' }));   // a group is per day (the tag counts rows of that day)
+  if (query.group) add(`${PLUG_KEY} = ?`, groupKeyOf(query.group));   // one plug group: every row whose Plug ID is this key under some prefix, on any day (so the date range is not applied)
   if (query.plug_type) add('w.plug_type = ?', String(query.plug_type));
-  if (query.from) add('w.work_date >= ?', v.date(query.from, { field: 'from' }));
-  if (query.to) add('w.work_date <= ?', v.date(query.to, { field: 'to' }));
+  if (query.from && !query.group) add('w.work_date >= ?', v.date(query.from, { field: 'from' }));
+  if (query.to && !query.group) add('w.work_date <= ?', v.date(query.to, { field: 'to' }));
   if (query.q) {
     params.push(v.like(query.q, 100));
     const p = `$${params.length}`;
@@ -415,13 +430,13 @@ router.get('/', asyncH(async (req, res) => {
         ORDER BY (cardinality(prep_missing) > 0), ${order} LIMIT ${limit} OFFSET ${offset}`, params
     );
     const ready = await db.query(`SELECT count(*)::int AS n FROM (SELECT ${PREP_MISSING_SQL} AS m FROM workload_items w ${whereSql(where)}) x WHERE cardinality(m) = 0`, filterParams);
-    return res.json({ total: total.rows[0].n, prepReady: ready.rows[0].n, rows: rows.map(flattenCustom) });
+    return res.json({ total: total.rows[0].n, prepReady: ready.rows[0].n, rows: (await attachGroups(rows)).map(flattenCustom) });
   }
   const { rows } = await db.query(
     `SELECT w.*, uu.full_name AS updated_by_name${GROUP_COLS}
        FROM workload_items w LEFT JOIN users uu ON uu.id = w.updated_by ${whereSql(where)} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params
   );
-  res.json({ total: total.rows[0].n, rows: rows.map(flattenCustom) });
+  res.json({ total: total.rows[0].n, rows: (await attachGroups(rows)).map(flattenCustom) });
 }));
 
 // Export (.xlsx) mirrors the template: sheet "MAIN" (rows that involve VGFX or VEDIT) and sheet "AUDIO"

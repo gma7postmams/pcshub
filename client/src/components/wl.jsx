@@ -17,7 +17,7 @@ export const Chip = ({ hue, dot, small, children }) => (
 
 /** The tag beside a Plug ID that shares its group with other rows (same ID under another prefix, e.g. PH_ / PD_ / PV_). Click = show only that group. */
 export const GroupTag = ({ gkey, n, onPick }) => (
-  <button type="button" className={`chip c-${hueOf(gkey)} wl-group`} title={`${n} plugs share ${gkey} under different prefixes. Click to show only this group.`}
+  <button type="button" className={`chip c-${hueOf(gkey)} wl-group`} title={`${n} plugs share ${gkey} under different prefixes (any day). Click to show only this group.`}
     onMouseDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onPick(); }}>
     <GroupIcon />×{n}
   </button>

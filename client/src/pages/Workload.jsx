@@ -464,7 +464,7 @@ export default function Workload() {
   const setMode = () => {};
   const isGrid = false;   // Excel mode = the editable grid; Table mode = rows with the New / Edit form (the layout around both is the same)
   const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('wl:rows3')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
-  const [filt, setFilt] = useState(() => ({ q: '', units: '', platform: '', plug_type: '', group: '', group_date: '', from: isoDate(), to: isoDate(), ...(loadViewState('workload', {}).filt || {}) }));   // a fresh tab starts on today   // kept across a refresh
+  const [filt, setFilt] = useState(() => ({ q: '', units: '', platform: '', plug_type: '', group: '', from: isoDate(), to: isoDate(), ...(loadViewState('workload', {}).filt || {}) }));   // a fresh tab starts on today   // kept across a refresh
   const [stats, setStats] = useState(null);   // summary cards + tab badges
   const [offset, setOffset] = useState(() => loadViewState('workload', {}).offset || 0);   // the page you were on is kept across a refresh
   const [sort, setSortState] = useState(() => loadViewState('workload', {}).sort || { k: '', dir: 'asc' });   // clicked column header (Table mode)
@@ -568,7 +568,7 @@ export default function Workload() {
   }, []);
   const q = useDebounced(filt.q, 300);
   // a different tab / filter / search is a different set of rows: drop the selection
-  useEffect(() => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; }, [tab, mode, filt.units, filt.platform, filt.plug_type, filt.group, filt.group_date, filt.from, filt.to, q]);
+  useEffect(() => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; }, [tab, mode, filt.units, filt.platform, filt.plug_type, filt.group, filt.from, filt.to, q]);
   // Table-mode keyboard + mouse (one set of window listeners that always call the latest handlers, assigned further down every render)
   useEffect(() => {
     const key = (e) => { if (keysRef.current) keysRef.current(e); };
@@ -601,11 +601,11 @@ export default function Workload() {
   const query = useCallback((extra = {}) => {
     const p = new URLSearchParams(extra);
     if (tab !== 'ALL') p.set('team', tab);
-    ['units', 'platform', 'plug_type', 'group', 'group_date', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
+    ['units', 'platform', 'plug_type', 'group', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
     if (q) p.set('q', q);
     if (sort.k && extra.limit !== undefined) { p.set('sort', sort.k); p.set('dir', sort.dir); }   // only the table's own list and the export follow it; counts ignore it
     return p;
-  }, [tab, filt.units, filt.platform, filt.plug_type, filt.group, filt.group_date, filt.from, filt.to, q, sort.k, sort.dir]);
+  }, [tab, filt.units, filt.platform, filt.plug_type, filt.group, filt.from, filt.to, q, sort.k, sort.dir]);
 
   // Tab badges (the counts next to All / VGFX / VEDIT / Audio) follow every filter except the team tab
   const loadStats = useCallback(async () => {
@@ -674,12 +674,12 @@ export default function Workload() {
   const goOffset = async (o) => { if (o === offset || !(await okToLeave())) return; setOffset(o); };
   const changeSize = async (e) => { const n = Number(e.target.value); if (n === size || !(await okToLeave())) return; try { localStorage.setItem('wl:rows3', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
   const sortBy = async (s2) => { if (!(await okToLeave())) return; setSort(s2); };
-  const pickGroup = async (r) => {   // the tag was clicked: show only this group (that day's rows with the same Plug ID under any prefix)
+  const pickGroup = async (r) => {   // the tag was clicked: show only this group (every row with the same Plug ID under any prefix, on any day)
     if (!(await okToLeave())) return;
-    setFilt((f) => ({ ...f, group: r.group_key, group_date: String(r.work_date || '').slice(0, 10) }));
+    setFilt((f) => ({ ...f, group: r.group_key }));
     setOffset(0);
   };
-  const clearGroup = () => { setFilt((f) => ({ ...f, group: '', group_date: '' })); setOffset(0); };
+  const clearGroup = () => { setFilt((f) => ({ ...f, group: '' })); setOffset(0); };
   const groupChip = filt.group ? (
     <button type="button" className="chip c-blue wl-group-on" title="Show every row again" onClick={clearGroup}>Group: {filt.group} ✕</button>
   ) : null;
@@ -2324,7 +2324,7 @@ export default function Workload() {
           total={total}
           scope={[tab === 'ALL' ? 'All tab' : `${meta.tabs.find((t) => t.key === tab).label} tab`, filt.units && `Units: ${filt.units}`, filt.platform && `Platform: ${filt.platform}`, filt.plug_type && `Plug Type: ${filt.plug_type}`, filt.group && `Group: ${filt.group}`,
             (filt.from || filt.to) && `Dates: ${filt.from || '…'} → ${filt.to || '…'}`, q && `Search: “${q}”`].filter(Boolean)}
-          filters={{ team: tab === 'ALL' ? undefined : tab, units: filt.units || undefined, platform: filt.platform || undefined, plug_type: filt.plug_type || undefined, group: filt.group || undefined, group_date: filt.group_date || undefined, from: filt.from || undefined, to: filt.to || undefined, q: q || undefined }}
+          filters={{ team: tab === 'ALL' ? undefined : tab, units: filt.units || undefined, platform: filt.platform || undefined, plug_type: filt.plug_type || undefined, group: filt.group || undefined, from: filt.from || undefined, to: filt.to || undefined, q: q || undefined }}
           onClose={() => setDeletingAll(false)}
           onDone={(out) => { setDeletingAll(false); afterBulk(out); }}
         />
