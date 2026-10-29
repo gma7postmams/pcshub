@@ -800,6 +800,13 @@ table.t.xl td[data-k="breakdate_vgfx"] .xl-cell { min-width: 250px; }
 .plug-add { margin-left: 8px; font-size: 10.5px; }
 .plug-sum { max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; margin-top: 10px; font-size: 13px; }
 .plug-sum > div { display: flex; justify-content: space-between; gap: 16px; padding: 3px 0; }
+.plug-tabmode { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; }
+.plug-tabtools { display: flex; align-items: center; gap: 14px; margin: 8px 0 4px; font-size: 13px; }
+.plug-tabtools .dim { margin-left: auto; }
+.plug-tabs { max-height: 280px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; font-size: 13px; }
+.plug-tabs label { display: flex; align-items: center; gap: 10px; padding: 5px 0; cursor: pointer; }
+.plug-tabs .plug-tabname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.plug-tabs .dim { margin-left: auto; white-space: nowrap; }
 .plug-warn { color: var(--danger, #c0392b); font-size: 13px; margin: 8px 0 0 18px; }
 select.plug-pick { margin-top: 6px; font-size: 12.5px; }
 

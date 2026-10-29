@@ -64,14 +64,17 @@ function monthDayOfCell(val) {
 }
 
 /**
- * Reads the whole workbook. Returns { sheets: [{ sheet, date, plugs: [...], skippedNoId, additional }], warnings: [] }.
+ * Reads the workbook (every tab, or only the tabs named in `only`). Returns { sheets: [{ sheet, date, plugs: [...], skippedNoId, additional }], warnings: [] }.
+ * `only` is an optional array of tab names; tabs not in it are not read at all (no plugs, no warnings). null / omitted = every tab.
  * A plug is { seq, list_no, plug_id, prog_name, psd, account_by, is_additional }. Pure (no database), so it can be tested alone.
  */
-function parsePlugWorkbook(wb, year) {
+function parsePlugWorkbook(wb, year, only = null) {
   const sheets = [];
   const warnings = [];
+  const chosen = Array.isArray(only) ? new Set(only) : null;
   for (const ws of wb.worksheets) {
     if (!ws || ws.rowCount < 2) continue;
+    if (chosen && !chosen.has(ws.name)) continue;   // a tab the person did not tick
     // header row: the one with a "Plug ID" cell (first 15 rows)
     let headerRow = 0;
     const col = {};
@@ -351,28 +354,65 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     res.send(Buffer.from(buffer));
   }));
 
-  // ---- import the PSD's daily plug list workbook ----
+  // The uploaded workbook, loaded, and the year its days belong to (typed in, else a year in the file name, else this year).
+  const readUpload = async (req, info) => {
+    if (!req.file) throw new HttpError(400, 'No file uploaded');
+    let ExcelJS;
+    try { ExcelJS = require('exceljs'); } catch (e) {
+      throw new HttpError(501, 'Import needs the "exceljs" package. Run "npm install" on the server, then restart.');
+    }
+    await assertSafeXlsx(req.file.buffer, req.file.originalname);   // file type + unpacked-size limits, before anything is loaded into memory
+    const wb = new ExcelJS.Workbook();
+    try { await wb.xlsx.load(req.file.buffer); } catch (e) { throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)'); }
+    // the list has no year in it: use the one typed in, else a year in the file name ("September_2026_Plug_List"), else this year
+    const typed = parseInt(req.body && req.body.year, 10);
+    const inName = /(?<!\d)(20\d{2})(?!\d)/.exec(req.file.originalname || '');   // not \b: "September_2026_Plug_List" has no word boundary around the year
+    const year = typed || (inName ? Number(inName[1]) : new Date().getFullYear());
+    if (year < 2000 || year > 2100) throw new HttpError(400, 'Year must be between 2000 and 2100');
+    if (info) info.year = year;
+    return { wb, year };
+  };
+
+  // Which tabs to import: the form field "sheets" is a JSON array of tab names. Not sent (or empty text) = every tab.
+  const tabChoice = (raw) => {
+    if (raw === undefined || raw === null || raw === '') return null;
+    let list = raw;
+    if (typeof raw === 'string') { try { list = JSON.parse(raw); } catch (e) { throw new HttpError(400, 'The chosen tabs could not be read'); } }
+    if (!Array.isArray(list) || !list.length || list.length > 500 || list.some((x) => typeof x !== 'string')) throw new HttpError(400, 'Choose at least one tab to import');
+    return [...new Set(list)];
+  };
+
+  // ---- step 1 of an import: which tabs does the workbook have? (nothing is saved) ----
+  // Returns every tab that has plugs, with the day(s) it covers, so the person can import all of them or tick just some.
+  router.post('/import/preview', requireAction('plugs.write'), upload.single('file'), oneImportAtATime, asyncH(async (req, res) => {
+    const { wb, year } = await readUpload(req, null);
+    const { sheets, warnings } = parsePlugWorkbook(wb, year);
+    const tabs = [];
+    for (const sh of sheets) {
+      let t = tabs.find((x) => x.sheet === sh.sheet);
+      if (!t) { t = { sheet: sh.sheet, days: 0, plugs: 0, from: sh.date, to: sh.date }; tabs.push(t); }
+      t.days += 1;
+      t.plugs += sh.plugs.length;
+      if (sh.date < t.from) t.from = sh.date;
+      if (sh.date > t.to) t.to = sh.date;
+    }
+    res.json({ ok: true, year, tabs, warnings: warnings.slice(0, 20) });
+  }));
+
+  // ---- import the PSD's daily plug list workbook (every tab, or only the tabs chosen in "sheets") ----
   router.post('/import', requireAction('plugs.write'), upload.single('file'), oneImportAtATime, asyncH(async (req, res) => {
     const t0 = Date.now();
     const info = { target: 'plug list', file: req.file ? req.file.originalname : null, bytes: req.file ? req.file.size : 0 };
     try {
-      if (!req.file) throw new HttpError(400, 'No file uploaded');
-      let ExcelJS;
-      try { ExcelJS = require('exceljs'); } catch (e) {
-        throw new HttpError(501, 'Import needs the "exceljs" package. Run "npm install" on the server, then restart.');
-      }
-      await assertSafeXlsx(req.file.buffer, req.file.originalname);   // file type + unpacked-size limits, before anything is loaded into memory
-      const wb = new ExcelJS.Workbook();
-      try { await wb.xlsx.load(req.file.buffer); } catch (e) { throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)'); }
-      // the list has no year in it: use the one typed in, else a year in the file name ("September_2026_Plug_List"), else this year
-      const typed = parseInt(req.body && req.body.year, 10);
-      const inName = /(?<!\d)(20\d{2})(?!\d)/.exec(req.file.originalname || '');   // not \b: "September_2026_Plug_List" has no word boundary around the year
-      const year = typed || (inName ? Number(inName[1]) : new Date().getFullYear());
-      if (year < 2000 || year > 2100) throw new HttpError(400, 'Year must be between 2000 and 2100');
-      info.year = year;
+      const only = tabChoice(req.body && req.body.sheets);
+      info.tabs = only ? `selected (${only.length})` : 'all';
+      const { wb, year } = await readUpload(req, info);
 
-      const { sheets, warnings } = parsePlugWorkbook(wb, year);
+      const { sheets, warnings } = parsePlugWorkbook(wb, year, only);
       if (!sheets.length) {
+        if (only) {
+          throw new HttpError(400, `No plugs found on the ${only.length === 1 ? 'tab' : 'tabs'} you chose (${only.slice(0, 5).map((x) => `"${x}"`).join(', ')}${only.length > 5 ? ', …' : ''}).${warnings.length ? ` (${warnings[0]})` : ''}`);
+        }
         throw new HttpError(400, 'No plugs found — expected one sheet per day with the columns NO, PLUG ID, PROG NAME/PROJ TITLE, PSD, Account By '
           + `and a date such as "September 28" in the DATE line or the sheet name.${warnings.length ? ` (${warnings[0]})` : ''}`);
       }
@@ -401,7 +441,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
       const total = result.reduce((o, s) => ({ plugs: o.plugs + s.plugs, added: o.added + s.added, skipped: o.skipped + s.skipped }), { plugs: 0, added: 0, skipped: 0 });
       await notifyAdded(req, total.added, `${total.added} plug${total.added === 1 ? '' : 's'} (${result[0].date === result[result.length - 1].date ? result[0].date : `${result[0].date} to ${result[result.length - 1].date}`}, imported from ${info.file || 'a file'})`);
       await emitTransfer(req, 'workload.plugs_import', { ...info, days: result.length, from: result[0].date, to: result[result.length - 1].date, ...total, workloadRowsFilled: filled, copiedToWorkload: copied ? copied.created : null, warnings: warnings.slice(0, 20), ms: Date.now() - t0 });
-      res.json({ ok: true, year, days: result.length, workloadRowsFilled: filled, copied, ...total, existing: total.plugs - total.added, sheets: result, warnings: warnings.slice(0, 20) });
+      res.json({ ok: true, year, tabs: only ? 'selected' : 'all', days: result.length, workloadRowsFilled: filled, copied, ...total, existing: total.plugs - total.added, sheets: result, warnings: warnings.slice(0, 20) });
     } catch (e) {
       await emitTransfer(req, 'workload.plugs_import_failed', { ...info, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
       throw e;

@@ -175,6 +175,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   }, []);
   const [needYear, setNeedYear] = useState(null);    // file waiting for a year (its name has none)
   const [year, setYear] = useState(new Date().getFullYear());
+  const [tabPick, setTabPick] = useState(null);      // { file, year, tabs, mode: 'all' | 'selected', ticked: Set } — the workbook has several tabs: import all, or only the ticked ones?
   const [summary, setSummary] = useState(null);      // result of the last import
   const [adding, setAdding] = useState(() => { const d = loadDialog('plugs'); return !!(d && d.rec && d.rec.adding); });   // an open Add / Edit dialog comes back after a refresh
   const [editing, setEditing] = useState(() => { const d = loadDialog('plugs'); return d && d.rec && d.rec.editing ? d.rec.editing : null; });      // the plug being edited
@@ -250,7 +251,7 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
   // other people's changes appear by themselves (Workload changes too: the "In Workload" flag) — not while a cell, form or dialog is open here
   useLive(['plugs'], () => { loadDays(true); loadOpts(); return loadRows(true); }, () => {
     const el = document.activeElement;
-    return !!(adding || editing || draft || cellEd || needYear || summary || importing || document.querySelector('.modal-backdrop') || (el && el.closest && el.closest('td') && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)));
+    return !!(adding || editing || draft || cellEd || needYear || tabPick || summary || importing || document.querySelector('.modal-backdrop') || (el && el.closest && el.closest('td') && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)));
   });
   const exportXlsx = async (byDate) => {   // the days and search on screen, in the sort on screen
     const p = new URLSearchParams({ order: period === 'all' ? 'desc' : 'asc' });
@@ -276,10 +277,11 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
     else if (period === 'month') setAnchor(addMonths(anchor, dir));
   };
 
-  const upload = async (file, yr) => {
+  const upload = async (file, yr, sheets) => {
     const form = new FormData();
     form.append('file', file);
     if (yr) form.append('year', String(yr));
+    if (sheets && sheets.length) form.append('sheets', JSON.stringify(sheets));   // only these tabs; left out = every tab
     setImporting(true);
     try {
       const out = await post('/api/plugs/import', form);
@@ -289,10 +291,29 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       loadRows();
     } catch (e) { toast(e.message, 'err'); } finally { setImporting(false); if (fileRef.current) fileRef.current.value = ''; }
   };
+  // Step 1: look at which tabs the workbook has. One tab (or none readable) = nothing to choose, import straight away;
+  // several tabs = ask: all of them, or only the ticked ones.
+  const review = async (file, yr) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (yr) form.append('year', String(yr));
+    setImporting(true);
+    let out;
+    try { out = await post('/api/plugs/import/preview', form); } catch (e) {
+      setImporting(false);
+      if (fileRef.current) fileRef.current.value = '';
+      toast(e.message, 'err');
+      return;
+    }
+    setImporting(false);
+    if (!out.tabs || out.tabs.length < 2) { upload(file, yr, null); return; }   // the server explains an empty result
+    setTabPick({ file, year: yr, tabs: out.tabs, mode: 'all', ticked: new Set(out.tabs.map((t) => t.sheet)) });
+  };
+  const cancelTabPick = () => { setTabPick(null); if (fileRef.current) fileRef.current.value = ''; };
   const pickFile = async (file) => {
     if (!file) return;
     if (!(await okToLeave())) { if (fileRef.current) fileRef.current.value = ''; return; }
-    if (/(?<!\d)20\d{2}(?!\d)/.test(file.name)) upload(file, null);   // "September_2026_Plug_List…" — the server reads the year from the name
+    if (/(?<!\d)20\d{2}(?!\d)/.test(file.name)) review(file, null);   // "September_2026_Plug_List…" — the server reads the year from the name
     else setNeedYear(file);                                           // the list has no year in it: ask
   };
 
@@ -1000,11 +1021,48 @@ export default function PlugList({ canWrite, canWorkload, onCopied }) {
       {needYear ? (
         <Modal title="Which year is this plug list for?" onClose={() => setNeedYear(null)}
           footer={(<><span className="grow" /><button type="button" className="btn" onClick={() => setNeedYear(null)}>Cancel</button>
-            <button type="button" className="btn primary" onClick={() => { const f = needYear; setNeedYear(null); upload(f, year); }}>Import</button></>)}>
+            <button type="button" className="btn primary" onClick={() => { const f = needYear; setNeedYear(null); review(f, year); }}>Next</button></>)}>
           <p>The plug list only has month and day (“September 28”), and the file name doesn’t include a year.</p>
           <label className="f"><span>Year</span><input type="number" min="2000" max="2100" value={year} onChange={(e) => setYear(e.target.value)} /></label>
         </Modal>
       ) : null}
+
+      {tabPick ? (() => {
+        const tp = tabPick;
+        const sel = tp.mode === 'selected';
+        const n = tp.ticked.size;
+        const allTicked = n === tp.tabs.length;
+        const label = (t) => (t.from === t.to ? dateLabel(t.from) : `${dateLabel(t.from)} – ${dateLabel(t.to)}`);
+        const toggle = (name) => setTabPick((cur) => { const next = new Set(cur.ticked); if (next.has(name)) next.delete(name); else next.add(name); return { ...cur, ticked: next }; });
+        const go = () => { const names = sel ? tp.tabs.filter((t) => tp.ticked.has(t.sheet)).map((t) => t.sheet) : null; setTabPick(null); upload(tp.file, tp.year, names); };
+        return (
+          <Modal title="Which tabs should be imported?" onClose={cancelTabPick}
+            footer={(<><span className="grow" /><button type="button" className="btn" onClick={cancelTabPick}>Cancel</button>
+              <button type="button" className="btn primary" disabled={sel && !n} onClick={go}>{sel ? `Import ${n} tab${n === 1 ? '' : 's'}` : `Import all ${tp.tabs.length} tabs`}</button></>)}>
+            <p>This workbook has <strong>{tp.tabs.length}</strong> tabs with plugs.</p>
+            <label className="plug-tabmode"><input type="radio" name="plug-tabs" checked={!sel} onChange={() => setTabPick({ ...tp, mode: 'all' })} /> <span>All tabs ({tp.tabs.length})</span></label>
+            <label className="plug-tabmode"><input type="radio" name="plug-tabs" checked={sel} onChange={() => setTabPick({ ...tp, mode: 'selected' })} /> <span>Selected tabs only</span></label>
+            {sel ? (
+              <>
+                <div className="plug-tabtools">
+                  <button type="button" className="linkbtn" onClick={() => setTabPick({ ...tp, ticked: new Set(tp.tabs.map((t) => t.sheet)) })} disabled={allTicked}>Select all</button>
+                  <button type="button" className="linkbtn" onClick={() => setTabPick({ ...tp, ticked: new Set() })} disabled={!n}>Clear</button>
+                  <span className="dim">{n} of {tp.tabs.length} selected</span>
+                </div>
+                <div className="plug-tabs">
+                  {tp.tabs.map((t) => (
+                    <label key={t.sheet}>
+                      <input type="checkbox" checked={tp.ticked.has(t.sheet)} onChange={() => toggle(t.sheet)} />
+                      <span className="plug-tabname">{t.sheet}</span>
+                      <span className="dim">{label(t)} · {t.plugs} plug{t.plugs === 1 ? '' : 's'}</span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            ) : null}
+          </Modal>
+        );
+      })() : null}
 
       {summary ? (
         <Modal title="Plug list imported" onClose={() => setSummary(null)} footer={(<><span className="grow" /><button type="button" className="btn primary" onClick={() => setSummary(null)}>Done</button></>)}>
