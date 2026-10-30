@@ -15,7 +15,7 @@ An internal web app for promotional content teams. Built with Node.js (Express),
 
 ## Requirements
 
-- Node.js 20 or newer
+- Node.js 22 or newer (Node 20 reached end-of-life in April 2026 and no longer gets security fixes; Administration → Security → Run security check warns about it). After moving a server to a new Node major version, reinstall the packages (`npm ci --omit=dev`, or `npm rebuild`) so native modules such as `bcrypt` are rebuilt for it, then restart the service.
 - PostgreSQL 14 or newer
 - nginx (or another reverse proxy) for HTTPS in production
 

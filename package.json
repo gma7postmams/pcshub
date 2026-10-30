@@ -14,7 +14,7 @@
     "geoip:update": "node scripts/update-geoip.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "archiver": "^7.0.1",
