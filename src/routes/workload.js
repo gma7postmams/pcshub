@@ -956,9 +956,10 @@ router.delete('/:id', requireAction('workload.write'), asyncH(async (req, res) =
 // for it automatically, so nothing in the file is silently dropped.
 const multer = require('multer');
 const { assertSafeXlsx, oneImportAtATime } = require('../xlsx-guard');
+const virusScan = require('../virus-scan').guard;   // every upload is checked by ClamAV before the route sees it (src/virus-scan.js)
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
 
-router.post('/import', requireAction('workload.write'), upload.single('file'), oneImportAtATime, asyncH(async (req, res) => {
+router.post('/import', requireAction('workload.write'), upload.single('file'), virusScan, oneImportAtATime, asyncH(async (req, res) => {
   const t0 = Date.now();
   const importInfo = { file: req.file ? req.file.originalname : null, bytes: req.file ? req.file.size : 0, sheets: [] };
   try {
@@ -1159,7 +1160,7 @@ const resolveKey = (map, idx, k, claimed) => {
   return { list: map.get(ck), loose: true, key: ck };
 };
 
-router.post('/fill', requireAction('workload.write'), upload.single('file'), oneImportAtATime, asyncH(async (req, res) => {
+router.post('/fill', requireAction('workload.write'), upload.single('file'), virusScan, oneImportAtATime, asyncH(async (req, res) => {
   const t0 = Date.now();
   const apply = req.query.apply === '1';
   const info = { file: req.file ? req.file.originalname : null, bytes: req.file ? req.file.size : 0 };

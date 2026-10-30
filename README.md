@@ -225,6 +225,35 @@ npm test
 
 The name set in Administration → Branding is used everywhere, including the places the browser reads before the app loads: the tab title, the installed-app (PWA) name and home-screen label (`/manifest.webmanifest` is generated from it; the label is the name cut to about 12 characters at a word boundary), and the offline page. An already-installed PWA picks up a new name the next time the browser refreshes its manifest (reinstall to force it).
 
+## Virus scan
+
+Every uploaded file (Ingest, Plug List and Workload imports, Knowledge Base documents, profile pictures, logos, backup ZIPs) is scanned by ClamAV before the page's own code sees it. A file with a virus is refused (422), its temporary copy deleted, the attempt written to the Audit Log (`security.malware_blocked`) and the System Admins alerted.
+
+Set it up once on the server:
+
+```
+sudo apt install clamav-daemon clamav-freshclam      # freshclam keeps the signatures current
+# .env:  CLAMAV_SOCKET=/var/run/clamav/clamd.ctl     (or CLAMAV_HOST=127.0.0.1 and CLAMAV_PORT=3310)
+sudo systemctl restart pcshub
+```
+
+- Scanner down: uploads are refused with a clear message (`CLAMAV_FAIL=closed`, the default) and the System Admins are told once. `CLAMAV_FAIL=open` lets files through unchecked instead (audited).
+- clamd only reads `StreamMaxLength` bytes per file (25 MB by default). Bigger files are accepted but audited as "not scanned"; raise `StreamMaxLength` in `/etc/clamav/clamd.conf` and set `CLAMAV_MAX_MB` to match, or set `CLAMAV_LARGE=block` to refuse them.
+- Encrypted backups (`.zip.enc`) cannot be scanned; they are signed with this server's own key and checked by the restore analysis.
+- The Security self-check proves it works by sending the harmless EICAR test string, and warns when the signatures are more than 3 days old.
+
+## Audit trail on another machine
+
+`AUDIT_SYSLOG=tcp://log-server:514` (also `udp://` and `tls://`) sends every sign-in, security and admin audit line to a syslog server as it happens (RFC 5424, JSON in the message), so an intruder who takes over this server cannot erase it. `AUDIT_SYSLOG_ALL=true` sends every audit line. Messages queue in memory while the server is unreachable; the self-check shows failures.
+
+## Automatic checks, sign-out and confirmations
+
+- The Security self-check runs by itself every `SECURITY_CHECK_HOURS` (default 24) and alerts the System Admins (bell, phone, email) only about problems that are NEW since the last run. The last result is shown on the Security page.
+- Admins and System Admins are signed out after **Admin idle sign-out** minutes (default 30, Security → Rules) without a click or key press. An open tab left alone does not keep the session alive.
+- Sensitive admin actions ask for the password again (and not again for a few minutes): deleting users, resetting a password or 2FA, changing an Admin role, role permissions, the security rules, maintenance mode, and removing or importing IP rules or adding a trusted address.
+- Scanner probes (`/api/graphql`, `/wp-login.php`, `/.env`, `*.php` ...) get a plain 404 and are logged. An address that asks for three different ones is blocked for 24 hours (Administration → IP Access); addresses inside your network and the proxy are never blocked. `AUTO_BLOCK_PROBES=false` turns the blocking off.
+- Audit Log and Security page: a **Block** button next to any address adds it to the block list (1 hour to permanent) without leaving the page.
+
 ## Security self-check
 
 Administration → Security → **Run security check** (System Admin) inspects the running server and reports what to fix, in plain words: server settings (HTTPS cookies, session secret, proxy, `.env` and backup-folder permissions), accounts (admins without 2FA, password rules, stale accounts), monitoring (email, alerts, audit protection), backups (age, encrypted, signed) and a live test of its own front door (headers, sign-in required, source files not served). It also runs `npm audit` for known package problems.

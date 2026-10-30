@@ -11,6 +11,7 @@ const FIELDS = {
   lockMinutes: { key: 'sec_lock_minutes', def: 15, min: 1, max: 1440 },
   idleSignOutHours: { key: 'sec_idle_hours', def: env(process.env.SESSION_HOURS, 12), min: 1, max: 72 },
   maxSessionHours: { key: 'sec_max_hours', def: env(process.env.SESSION_MAX_HOURS, 168), min: 1, max: 720 },
+  adminIdleMinutes: { key: 'sec_admin_idle', def: 30, min: 5, max: 720 },   // Admins and System Admins: signed out after this long without real activity
 };
 const ADMIN_2FA_KEY = 'sec_admin_2fa';
 const EMAIL_2FA_KEY = 'sec_email_2fa';
@@ -58,9 +59,11 @@ async function save(next, client = db) {
 const apply = (next) => { cur = normalise({ ...Object.fromEntries(Object.entries(FIELDS).map(([k, f]) => [f.key, next[k]])), [ADMIN_2FA_KEY]: next.requireAdmin2fa ? '1' : '0', [EMAIL_2FA_KEY]: next.allowEmail2fa ? '1' : '0', [ALERT_EMAIL_KEY]: cleanEmails(next.alertEmail) }); return cur; };
 
 const idleMs = () => get().idleSignOutHours * 3600 * 1000;
+/** Idle limit for an Admin / System Admin session: never longer than the general idle sign-out. */
+const adminIdleMs = () => Math.min(get().adminIdleMinutes * 60 * 1000, idleMs());
 const maxMs = () => Math.max(get().maxSessionHours, get().idleSignOutHours) * 3600 * 1000;
 
 /** The security alert addresses as a list. */
 const alertEmails = () => (get().alertEmail ? get().alertEmail.split(', ') : []);
 
-module.exports = { cleanEmails, alertEmails, FIELDS, get, load, save, apply, defaults, idleMs, maxMs };
+module.exports = { cleanEmails, alertEmails, FIELDS, get, load, save, apply, defaults, idleMs, adminIdleMs, maxMs };

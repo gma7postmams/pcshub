@@ -2,6 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const virusScan = require('../virus-scan').guard;   // every upload is checked by ClamAV before the route sees it (src/virus-scan.js)
 const bcrypt = require('bcrypt');
 const QRCode = require('qrcode');
 const validator = require('validator');
@@ -162,7 +163,7 @@ const avatarFile = (id) => path.join(AVATAR_DIR, `${Number(id)}.jpg`);
 router.post('/avatar', (req, res, next) => avatarUpload.single('avatar')(req, res, (err) => {
   if (err) return next(new HttpError(400, err.code === 'LIMIT_FILE_SIZE' ? 'That picture is too large (400 KB at most after it is cropped).' : 'Could not read that picture.'));
   return next();
-}), asyncH(async (req, res) => {
+}), virusScan, asyncH(async (req, res) => {
   const f = req.file;
   if (!f || f.buffer.length < 200 || !(f.buffer[0] === 0xff && f.buffer[1] === 0xd8 && f.buffer[2] === 0xff)) throw new HttpError(400, 'Choose a JPEG, PNG or WebP picture.');
   await fs.promises.mkdir(AVATAR_DIR, { recursive: true });

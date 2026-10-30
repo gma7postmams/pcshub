@@ -42,9 +42,28 @@ const loadUser = asyncH(async (req, res, next) => {
   );
   const u = rows[0];
   if (!u || !u.is_active) return endSession(req, res, next);
+  // Admins and System Admins are signed out after a short spell without real activity (their sessions are the ones worth stealing). Quiet background
+  // calls (polling, live streams) do not count, so an unattended open tab cannot keep the session alive; the presence heartbeat does, because the page only
+  // sends it while the person is really using the app.
+  if (u.role === 'Admin' || u.role === 'System Admin') {
+    const now = Date.now();
+    const limit = require('./security-settings').adminIdleMs();
+    if (req.session.activeAt && now - req.session.activeAt > limit) {
+      require('./audit').audit(req, 'auth.idle_signout', 'user', u.id, { username: u.username, minutes: Math.round(limit / 60000) }).catch(() => {});
+      return endSession(req, res, next);
+    }
+    if (!req.session.activeAt || isRealActivity(req)) req.session.activeAt = now;
+  }
   req.user = u;
   next();
 });
+
+/** A click, a save or a page load: not a background poll. */
+function isRealActivity(req) {
+  const url = (req.originalUrl || '').split('?')[0];
+  if (req.method === 'GET' || req.method === 'HEAD') return !url.startsWith('/api/');   // opening a page
+  return url !== '/api/presence/leave';   // any change the person makes, and the heartbeat
+}
 
 function isApi(req) {
   return req.originalUrl.startsWith('/api/');
@@ -53,7 +72,8 @@ function isApi(req) {
 function requireAuth(req, res, next) {
   if (req.user) return next();
   if (isApi(req)) {
-    if (req.originalUrl.split('?')[0] !== '/api/auth/me') watch().event(req, 'security.unauthenticated');   // /me is how every signed-out page load starts
+    // Not worth a line: /me is how every signed-out page load starts, and a tab left open after its session ended keeps polling / sending its leave beacon
+    if (!/^\/api\/(auth\/me|presence|live|notifications)(\/|$)/.test(req.originalUrl.split('?')[0])) watch().event(req, 'security.unauthenticated');
     return res.status(401).json({ error: 'Not authenticated' });
   }
   return res.redirect('/login');
@@ -149,4 +169,4 @@ function errorHandler(err, req, res, _next) {
   res.status(status).send(message);
 }
 
-module.exports = { clearSessionCookie, asyncH, HttpError, loadUser, requireAuth, requirePageAccess, requireAnyPage, requireAction, requireSection, csrfGuard, errorHandler, CLIENT_DIST, INDEX_HTML };
+module.exports = { isRealActivity, clearSessionCookie, asyncH, HttpError, loadUser, requireAuth, requirePageAccess, requireAnyPage, requireAction, requireSection, csrfGuard, errorHandler, CLIENT_DIST, INDEX_HTML };

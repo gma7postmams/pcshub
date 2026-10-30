@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const multer = require('multer');
+const virusScan = require('../virus-scan').guard;   // every upload is checked by ClamAV before the route sees it (src/virus-scan.js)
 const db = require('../db');
 const v = require('../validate');
 const { asyncH, HttpError, requireAction } = require('../middleware');
@@ -171,7 +172,7 @@ router.get('/:id(\\d+)/file', asyncH(async (req, res) => {
 // Drag-and-drop / browse upload: field name "files", up to MAX_FILES PDFs. "titles" is a JSON array of names, one per file
 // (a blank or missing one defaults to the file name); "tags" is a JSON array applied to every file in the upload.
 // Each file gets its own result so one bad file does not lose the rest.
-router.post('/', requireAction('knowledge.write'), receive, asyncH(async (req, res) => {
+router.post('/', requireAction('knowledge.write'), receive, virusScan, asyncH(async (req, res) => {
   const files = req.files || [];
   const discard = () => files.forEach((f) => rm(f.path));
   if (!files.length) {
@@ -227,7 +228,7 @@ const receiveOne = (req, res, next) => upload.single('file')(req, res, (err) => 
   if (err.code === 'LIMIT_FILE_SIZE') return next(new HttpError(413, `The file is larger than ${MAX_MB} MB`));
   return next(err.code === 'LIMIT_UNEXPECTED_FILE' ? new HttpError(400, 'Send one file') : err);
 });
-router.post('/:id(\\d+)/file', requireAction('knowledge.write'), receiveOne, asyncH(async (req, res) => {
+router.post('/:id(\\d+)/file', requireAction('knowledge.write'), receiveOne, virusScan, asyncH(async (req, res) => {
   const f = req.file;
   try {
     if (!f) throw new HttpError(400, 'No file uploaded');

@@ -6,6 +6,7 @@
 // The Workload Tracker copies Plug ID, PSD and Prog. Name from this list (see fillFromPlugList in workload.js and the tab in the UI).
 const multer = require('multer');
 const { assertSafeXlsx, oneImportAtATime } = require('../xlsx-guard');
+const virusScan = require('../virus-scan').guard;   // every upload is checked by ClamAV before the route sees it (src/virus-scan.js)
 const db = require('../db');
 const v = require('../validate');
 const express = require('express');
@@ -384,7 +385,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
 
   // ---- step 1 of an import: which tabs does the workbook have? (nothing is saved) ----
   // Returns every tab that has plugs, with the day(s) it covers, so the person can import all of them or tick just some.
-  router.post('/import/preview', requireAction('plugs.write'), upload.single('file'), oneImportAtATime, asyncH(async (req, res) => {
+  router.post('/import/preview', requireAction('plugs.write'), upload.single('file'), virusScan, oneImportAtATime, asyncH(async (req, res) => {
     const { wb, year } = await readUpload(req, null);
     const { sheets, warnings } = parsePlugWorkbook(wb, year);
     const tabs = [];
@@ -400,7 +401,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
   }));
 
   // ---- import the PSD's daily plug list workbook (every tab, or only the tabs chosen in "sheets") ----
-  router.post('/import', requireAction('plugs.write'), upload.single('file'), oneImportAtATime, asyncH(async (req, res) => {
+  router.post('/import', requireAction('plugs.write'), upload.single('file'), virusScan, oneImportAtATime, asyncH(async (req, res) => {
     const t0 = Date.now();
     const info = { target: 'plug list', file: req.file ? req.file.originalname : null, bytes: req.file ? req.file.size : 0 };
     try {

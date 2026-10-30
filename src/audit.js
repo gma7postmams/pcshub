@@ -3,7 +3,8 @@ const db = require('./db');
 
 // Sign-ins, security blocks and admin actions are the trail an intruder would want gone. They are:
 //  - kept for AUDIT_PROTECT_DAYS (default 365) even when an Admin runs Clear Data or the retention clean-up (PROTECTED_SQL), and
-//  - also written to the server log (journalctl -u pcshub), which nobody can delete from inside the app.
+//  - also written to the server log (journalctl -u pcshub), which nobody can delete from inside the app, and
+//  - sent to a syslog server on another machine when AUDIT_SYSLOG is set (src/audit-forward.js).
 const PROTECTED_RE = /^(auth|security|admin)\./;
 const protectDays = () => {
   const n = parseInt(process.env.AUDIT_PROTECT_DAYS, 10);
@@ -32,8 +33,12 @@ async function audit(req, action, entity, entityId, details, client) {
         req.ip,
       ]
     );
-    if (PROTECTED_RE.test(action)) {
-      console.log(`[audit] ${JSON.stringify({ at: new Date().toISOString(), action, user: req.user ? req.user.username : (details && details.username) || null, ip: req.ip || null, entity: entity || null, id: entityId != null ? String(entityId) : null, details: details || null })}`.slice(0, 4000));
+    const protectedLine = PROTECTED_RE.test(action);
+    const forward = require('./audit-forward');
+    if (protectedLine || (forward.configured() && forward.all())) {
+      const line = { at: new Date().toISOString(), action, user: req.user ? req.user.username : (details && details.username) || null, ip: req.ip || null, entity: entity || null, id: entityId != null ? String(entityId) : null, details: details || null };
+      if (protectedLine) console.log(`[audit] ${JSON.stringify(line)}`.slice(0, 4000));
+      forward.send(line);   // a copy to the syslog server on another machine (AUDIT_SYSLOG), when set up
     }
     setTimeout(() => auditBus.emit('change'), 400);   // a little later, so a line written inside a transaction has been committed
   } catch (e) {

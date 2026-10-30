@@ -57,6 +57,8 @@ app.use((req, res, next) => {
 
 // Blocked addresses (Administration > IP Access) get 403 before anything else runs: no session, no database work.
 app.use(require('./src/ip-rules').middleware);
+// Scanner probes (/api/graphql, /wp-login.php, /.env ...) get a plain 404 here, are logged, and an address that tries several is blocked (src/probe-guard.js).
+app.use(require('./src/probe-guard').middleware);
 
 // During a restore everything except the status endpoint answers 503. Registered before sessions: it must not touch the database.
 const maintenance = require('./src/backup/maintenance');
@@ -243,6 +245,7 @@ boot
     const HOST = process.env.HOST || (PROD ? '127.0.0.1' : '0.0.0.0');
 
     try { require('./src/backup/scheduler').start(); } catch (e) { console.error('[backup] scheduler not started:', e.message); }
+    try { require('./src/security-check-schedule').start(); } catch (e) { console.error('[security-check] schedule not started:', e.message); }
     try { require('./src/node-sync').start(); } catch (e) { console.error('[node-sync] not started:', e.message); }
 
     app.listen(PORT, HOST, () =>

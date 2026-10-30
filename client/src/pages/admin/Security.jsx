@@ -3,6 +3,7 @@ import { get, post, put } from '../../lib/api.js';
 import { fmtDateTime } from '../../lib/util.js';
 import { Empty, useConfirm, useToast } from '../../components/ui.jsx';
 import { Geo, GeoNote } from '../../components/Geo.jsx';
+import BlockIp from '../../components/BlockIp.jsx';
 
 const EVENT = {
   'auth.login_failed': 'Failed sign-in', 'auth.locked': 'Account locked', 'auth.password_reset_self': 'Password reset by the user (Forgot password)', 'auth.login_blocked_locked': 'Sign-in blocked (locked)', 'auth.2fa_failed': 'Wrong 2FA code',
@@ -95,7 +96,7 @@ export default function Security({ go }) {
           <table className="t wl">
             <thead><tr><th>Time</th><th>Who</th><th>Event</th><th>IP</th></tr></thead>
             <tbody>{d.events.length ? d.events.map((e) => (
-              <tr key={e.id}><td className="nowrap dim">{fmtDateTime(e.created_at)}</td><td className="mono">{e.username || '—'}</td><td>{EVENT[e.action] || e.action}{e.action.startsWith('admin.') && e.target ? <> — <strong className="mono">{e.target}</strong></> : null}</td><td className="dim"><span className="mono">{e.ip || ''}</span>{d.geo && e.ip ? <Geo g={d.geo[e.ip]} /> : null}</td></tr>
+              <tr key={e.id}><td className="nowrap dim">{fmtDateTime(e.created_at)}</td><td className="mono">{e.username || '—'}</td><td>{EVENT[e.action] || e.action}{e.action.startsWith('admin.') && e.target ? <> — <strong className="mono">{e.target}</strong></> : null}</td><td className="dim"><span className="mono">{e.ip || ''}</span><BlockIp ip={e.ip} source="Security page" />{d.geo && e.ip ? <Geo g={d.geo[e.ip]} /> : null}</td></tr>
             )) : <tr><td colSpan={4} className="empty">Nothing to report.</td></tr>}</tbody>
           </table>
         </div>
@@ -111,6 +112,7 @@ const NUM = [
   ['lockMinutes', 'Lock lasts', 'minutes', 'An Admin can unlock sooner (Users > Unlock).'],
   ['idleSignOutHours', 'Sign out after being idle', 'hours', 'Counted from the last activity.'],
   ['maxSessionHours', 'Longest session', 'hours', 'Then sign in again, however active.'],
+  ['adminIdleMinutes', 'Admin idle sign-out', 'minutes', 'For Admins and System Admins only, counted from their last click or key press (an open tab left alone does not count).'],
 ];
 
 // The rules an Admin can change here. Range-checked on the server; every change is written to the Audit Log.
@@ -124,7 +126,7 @@ function Rules({ policy, limits, email, onSaved }) {
   const bad = Object.entries(limits).find(([k, l]) => !(Number(f[k]) >= l.min && Number(f[k]) <= l.max));
   const save = async () => {
     const weaker = f.minPasswordLength < policy.minPasswordLength || f.lockAfterFailures > policy.lockAfterFailures
-      || f.maxSessionHours > policy.maxSessionHours || (policy.requireAdmin2fa && !f.requireAdmin2fa);
+      || f.maxSessionHours > policy.maxSessionHours || f.adminIdleMinutes > policy.adminIdleMinutes || (policy.requireAdmin2fa && !f.requireAdmin2fa);
     if (weaker && !(await confirm('Weaken a security rule?', 'One of the changes makes the rules less strict. Save it anyway?', { okText: 'Save', danger: true }))) return;
     setBusy(true);
     try {

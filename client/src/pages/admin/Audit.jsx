@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { get } from '../../lib/api.js';
 import { fmtBytes, fmtDateTime } from '../../lib/util.js';
 import { Empty, Pager, usePageSize, useDebounced } from '../../components/ui.jsx';
+import BlockIp from '../../components/BlockIp.jsx';
 import { Geo, GeoNote } from '../../components/Geo.jsx';
 
 
@@ -15,10 +16,16 @@ const ACTION_LABELS = {
   'auth.login_blocked_locked': 'Login Blocked (Locked Account)',
   'security.denied': 'Blocked (No Permission)',
   'security.unauthenticated': 'Blocked (Not Signed In)',
-  'security.csrf_blocked': 'Blocked (Cross-Site Request)',
+  'security.csrf_blocked': 'Blocked (Not From The App)',
   'security.rate_limited': 'Blocked (Rate Limit)',
   'security.alert': 'Security Alert',
   'security.ip_blocked': 'Blocked (IP Block List)',
+  'security.probe': 'Blocked (Scanner Probe)',
+  'security.ip_auto_blocked': 'IP Blocked Automatically',
+  'security.malware_blocked': 'Blocked (Virus In Upload)',
+  'security.scan_failed': 'Upload Not Scanned (Scanner Down)',
+  'security.scan_skipped': 'Upload Not Scanned',
+  'auth.idle_signout': 'Signed Out (Idle Admin)',
   'admin.ip_rule_add': 'IP Rule Added',
   'admin.ip_rule_remove': 'IP Rule Removed',
   'admin.ip_rule_import': 'IP Rules Imported',
@@ -308,7 +315,7 @@ function formatDetails(row) {
     case 'admin.security_check':
       return `Security check: ${d.fail ?? 0} to fix now, ${d.warn ?? 0} should fix${d.failed && d.failed.length ? ` (${d.failed.join(', ')})` : ''}`;
     case 'admin.security_update': {
-      const L = { minPasswordLength: 'min password', lockAfterFailures: 'lock after', lockMinutes: 'lock minutes', idleSignOutHours: 'idle hours', maxSessionHours: 'max session hours', requireAdmin2fa: 'Admin 2FA' };
+      const L = { minPasswordLength: 'min password', lockAfterFailures: 'lock after', lockMinutes: 'lock minutes', idleSignOutHours: 'idle hours', maxSessionHours: 'max session hours', adminIdleMinutes: 'admin idle minutes', requireAdmin2fa: 'Admin 2FA' };
       const ch = Object.keys(L).filter((k) => d.from && d.to && d.from[k] !== d.to[k]).map((k) => `${L[k]}: ${d.from[k]} → ${d.to[k]}`);
       return ch.length ? ch.join('; ') : 'Saved without changes';
     }
@@ -619,7 +626,19 @@ function formatDetails(row) {
     case 'security.unauthenticated':
       return `Refused ${d.route || ''} — not signed in`;
     case 'security.csrf_blocked':
-      return `Refused ${d.route || ''} — ${d.reason === 'cross_site' ? `sent from another site (${d.origin || 'unknown origin'})` : 'missing the app request header'}`;
+      return `Refused ${d.route || ''} — ${d.reason === 'cross_site' ? `sent from another site (${d.origin || 'unknown origin'})` : 'not sent by the app (missing its request header): a script, scanner or old page'}`;
+    case 'security.probe':
+      return `Refused ${d.method || ''} ${d.route || ''} — a path only attack tools ask for (this app has none)`;
+    case 'security.ip_auto_blocked':
+      return `Blocked ${d.ip || 'an address'} for ${d.hours || 24} hours after it asked for ${d.paths || 'several'} paths only scanners use`;
+    case 'security.malware_blocked':
+      return `Refused the upload "${d.file || ''}" — the virus scanner found ${d.signature || 'a virus'}`;
+    case 'security.scan_failed':
+      return `Could not scan "${d.file || ''}" (${d.reason || 'scanner not answering'}) — ${d.refused ? 'upload refused' : 'let through unchecked'}`;
+    case 'security.scan_skipped':
+      return `Not scanned: "${d.file || ''}" (${d.reason || ''})`;
+    case 'auth.idle_signout':
+      return `Signed out after ${d.minutes || ''} minutes without activity`;
     case 'security.rate_limited':
       return `Too many ${d.limiter === 'login' ? 'login' : 'API'} requests from this address — blocked (${d.route || ''})`;
     case 'security.alert':
@@ -815,7 +834,7 @@ export default function Audit() {
                         {formatDetails(r)}
                       </td>
 
-                      <td className="dim"><span className="mono">{r.ip || ''}</span>{d.geo && r.ip ? <Geo g={d.geo[r.ip]} /> : null}</td>
+                      <td className="dim"><span className="mono">{r.ip || ''}</span><BlockIp ip={r.ip} />{d.geo && r.ip ? <Geo g={d.geo[r.ip]} /> : null}</td>
                     </tr>
                     {isOpen ? <tr className="audit-more"><td /><td colSpan={6}><Expanded row={r} /></td></tr> : null}
                   </Fragment>

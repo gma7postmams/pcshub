@@ -20,6 +20,7 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
     if (raw.length > 200) throw new HttpError(400, 'Change at most 200 users at a time');
     const ids = [...new Set(raw.map((x) => v.id(x)))];
     const action = v.oneOf(req.body.action, BULK, { field: 'Action' });
+    if (['role', 'reset-2fa', 'deactivate'].includes(action)) await stepUp.confirm(req, `admin.bulk_${action}`, action === 'role' ? 'change these roles' : action === 'reset-2fa' ? 'reset 2FA for these users' : 'deactivate these users');
     let role = null; let groupId = null;
     if (action === 'role') role = v.oneOf(req.body.value, ROLES, { field: 'Role' });
     if (action === 'group') {
@@ -98,10 +99,11 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
     });
   }));
 
-  const LABEL = { minPasswordLength: 'Minimum password length', lockAfterFailures: 'Lock after wrong passwords', lockMinutes: 'Lock duration', idleSignOutHours: 'Idle sign-out', maxSessionHours: 'Longest session' };
+  const LABEL = { minPasswordLength: 'Minimum password length', lockAfterFailures: 'Lock after wrong passwords', lockMinutes: 'Lock duration', idleSignOutHours: 'Idle sign-out', maxSessionHours: 'Longest session', adminIdleMinutes: 'Admin idle sign-out' };
   // Change the rules. Every field is range-checked; the change is audited with before and after.
   router.put('/security/settings', asyncH(async (req, res) => {
     const b = req.body || {};
+    await stepUp.confirm(req, 'admin.security_update', 'change the security rules');
     const prev = settings.get();
     const next = {};
     for (const [k, f] of Object.entries(settings.FIELDS)) {
@@ -133,10 +135,16 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
   // Send a test message to the signed-in Admin's own address, to prove the server's email settings work.
   // Security self-check: inspects this server and attacks its own front door. Read-only; counts only go to the audit log.
   let lastCheck = 0;
+  router.get('/security/check', asyncH(async (req, res) => {   // the last result (scheduled or by hand), so the page need not run it again
+    const sch = require('./security-check-schedule');
+    const l = await sch.last();
+    res.json({ last: l, everyHours: sch.hours() });
+  }));
   router.post('/security/check', asyncH(async (req, res) => {
     if (Date.now() - lastCheck < 8000) throw new HttpError(429, 'Wait a few seconds between checks');
     lastCheck = Date.now();
     const r = await require('./security-check').run();
+    await require('./security-check-schedule').record(r, { source: 'manual', alert: false }).catch(() => {});   // the next scheduled run compares with what the Admin just saw
     await audit(req, 'admin.security_check', 'app_settings', null, { fail: r.fail, warn: r.warn, info: r.info, ok: r.ok, failed: r.checks.filter((c) => c.status === 'fail').map((c) => c.id) });
     res.json(r);
   }));
@@ -155,6 +163,7 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
 
   // Everyone except the person pressing the button must choose a new password at their next sign-in.
   router.post('/security/force-password-change', asyncH(async (req, res) => {
+    await stepUp.confirm(req, 'admin.force_password_change', 'make everyone change their password');
     const r = await db.query('UPDATE users SET must_change_password=TRUE, updated_at=now() WHERE is_active AND id <> $1', [req.user.id]);
     // After a suspected leak a stolen session must not be the one that picks the new password: everyone else signs in again first
     const s = await db.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int <> $1`, [req.user.id]);
@@ -171,6 +180,7 @@ module.exports = function mount(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, a
   router.get('/maintenance', (req, res) => res.json(maintView()));
   router.put('/maintenance', asyncH(async (req, res) => {
     const b = req.body || {};
+    await stepUp.confirm(req, 'admin.maintenance', b.on ? 'turn maintenance mode on' : 'turn maintenance mode off');
     if (typeof b.on !== 'boolean') throw new HttpError(400, 'Say whether maintenance mode is on or off');
     const message = typeof b.message === 'string' ? b.message.trim() : '';
     if (message.length > maintenance.MAX_MESSAGE) throw new HttpError(400, `The message can be at most ${maintenance.MAX_MESSAGE} characters`);

@@ -6,6 +6,7 @@ const { asyncH, HttpError } = require('../middleware');
 const { audit } = require('../audit');
 const ipRules = require('../ip-rules');
 const guard = require('../login-guard');
+const stepUp = require('../reauth');
 const geoip = require('../geoip');
 
 const router = express.Router();
@@ -44,6 +45,7 @@ const room = async (c, extra) => {
 
 router.post('/', asyncH(async (req, res) => {
   const kind = listName(req.body.list);
+  if (kind === 'allow') await stepUp.confirm(req, 'admin.ip_rule_allow', 'add a trusted address');   // a block is quick to add (an attack may be under way); trusting an address weakens the defences
   let cidr; let expires; let note;
   try { ({ cidr } = ipRules.check(kind, req.body.ip, { self: selfOf(req) })); expires = ipRules.parseExpiry(req.body.expires); note = ipRules.cleanNote(req.body.note); } catch (e) { throw new HttpError(400, e.message); }
   await room(db, 1);
@@ -55,6 +57,7 @@ router.post('/', asyncH(async (req, res) => {
 
 router.delete('/:id', asyncH(async (req, res) => {
   const id = v.id(req.params.id);
+  await stepUp.confirm(req, 'admin.ip_rule_remove', 'remove this entry');
   const { rows } = await db.query('DELETE FROM ip_rules WHERE id=$1 RETURNING kind, cidr', [id]);
   if (!rows.length) throw new HttpError(404, 'Entry not found');
   await ipRules.load(db);
@@ -64,6 +67,7 @@ router.delete('/:id', asyncH(async (req, res) => {
 
 // Remove several at once: { ids: [...] }
 router.post('/remove', asyncH(async (req, res) => {
+  await stepUp.confirm(req, 'admin.ip_rule_remove', 'remove these entries');
   const ids = [...new Set((Array.isArray(req.body.ids) ? req.body.ids : []).map((x) => v.id(x)))];
   if (!ids.length || ids.length > ipRules.MAX_RULES) throw new HttpError(400, 'Choose the entries to remove');
   const { rows } = await db.query('DELETE FROM ip_rules WHERE id = ANY($1::int[]) RETURNING kind, cidr', [ids]);
@@ -87,6 +91,7 @@ router.post('/import', asyncH(async (req, res) => {
     block: entries.filter((e) => e.kind === 'block').length, allow: entries.filter((e) => e.kind === 'allow').length,
   };
   if (req.body.dryRun) return res.json({ ok: true, dryRun: true, ...summary });
+  await stepUp.confirm(req, 'admin.ip_rule_import', 'import these entries');
   if (!entries.length) throw new HttpError(400, errors.length ? 'No valid entries in this file' : 'The file has no entries');
   await db.tx(async (c) => {
     await room(c, fresh);

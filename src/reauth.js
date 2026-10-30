@@ -75,4 +75,16 @@ async function recentOrVerify(req, log, creds) {
   await verify(req, log, creds);
 }
 
-module.exports = { verify, recentOrVerify, attempt, succeed };
+/**
+ * "Confirm it's you" for a route that has no password field of its own. The page sends { ..., reauth: { password, code } } (the shared api client does this
+ * after it shows its prompt); a confirmation given in the last few minutes still counts. Throws 403 { reauth: true, auto: true, what } when it is missing or wrong.
+ *   key = the audit name of the action, what = the words for the prompt ("delete these users").
+ */
+async function confirm(req, key, what) {
+  try { await recentOrVerify(req, { action: 'auth.reauth_failed', entity: 'user', id: req.user.id, details: { for: key, outcome: 'denied', reason: 'reauth_failed' } }, req.body && req.body.reauth); } catch (e) {
+    if (e instanceof HttpError && e.extra && e.extra.reauth) e.extra = { ...e.extra, auto: true, what };
+    throw e;
+  }
+}
+
+module.exports = { verify, recentOrVerify, confirm, attempt, succeed };

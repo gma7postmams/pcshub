@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const path = require('path');
 const express = require('express');
 const multer = require('multer');
+const virusScan = require('../virus-scan').guard;   // every upload is checked by ClamAV before the route sees it (src/virus-scan.js)
 const rateLimit = require('express-rate-limit');
 const v = require('../validate');
 const stepUp = require('../reauth');
@@ -122,7 +123,7 @@ const receive = (req, res, next) => {
   });
 };
 
-router.post('/analyze', analyzeLimiter, receive, asyncH(async (req, res) => {
+router.post('/analyze', analyzeLimiter, receive, virusScan, asyncH(async (req, res) => {
   if (!req.file) throw new HttpError(400, 'No file uploaded');
   try {
     res.status(202).json({ analysis: await analysis.start(req, req.file, req.file.originalname) });

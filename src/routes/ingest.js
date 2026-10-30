@@ -316,6 +316,7 @@ router.get('/export', asyncH(async (req, res) => {
 // only read for PCS / OCS, like everywhere else.
 const multer = require('multer');
 const { assertSafeXlsx, oneImportAtATime } = require('../xlsx-guard');
+const virusScan = require('../virus-scan').guard;   // every upload is checked by ClamAV before the route sees it (src/virus-scan.js)
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
 const IMPORT_HEADERS = {
   'prog. name / proj. title': 'program', 'program': 'program', 'prog name/proj title': 'program',
@@ -345,7 +346,7 @@ function episodeFromCell(val) {   // one date, or "start – end" / "start to en
   if (parts.length === 2) return `${oneDay(parts[0])}/${oneDay(parts[1])}`;
   throw new HttpError(400, `Episode / Breakdate "${String(val).trim()}" is not a date or a date range`);
 }
-router.post('/import', requireAction('ingest.write'), upload.single('file'), oneImportAtATime, asyncH(async (req, res) => {
+router.post('/import', requireAction('ingest.write'), upload.single('file'), virusScan, oneImportAtATime, asyncH(async (req, res) => {
   if (!req.file) throw new HttpError(400, 'No file uploaded');
   await assertSafeXlsx(req.file.buffer, req.file.originalname);
   const ExcelJS = require('exceljs');

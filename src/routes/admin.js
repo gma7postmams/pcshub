@@ -4,6 +4,8 @@ const fs = require('fs');
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const multer = require('multer');
+const stepUp = require('../reauth');
+const virusScan = require('../virus-scan').guard;   // every upload is checked by ClamAV before the route sees it (src/virus-scan.js)
 const validator = require('validator');
 const db = require('../db');
 const v = require('../validate');
@@ -83,6 +85,7 @@ router.post('/roles', asyncH(async (req, res) => {
 }));
 
 router.put('/roles/:name', asyncH(async (req, res) => {
+  await stepUp.confirm(req, 'admin.role_update', 'change this role\u2019s permissions');
   const old = req.params.name;
   const b = parseRole(req.body || {});
   const cur = await db.query('SELECT is_builtin FROM roles WHERE name=$1', [old]);
@@ -107,6 +110,7 @@ router.put('/roles/:name', asyncH(async (req, res) => {
 }));
 
 router.delete('/roles/:name', asyncH(async (req, res) => {
+  await stepUp.confirm(req, 'admin.role_delete', 'delete this role');
   const name = req.params.name;
   const cur = await db.query('SELECT is_builtin, (SELECT count(*)::int FROM users WHERE role=$1) AS users FROM roles WHERE name=$1', [name]);
   if (!cur.rows.length) throw new HttpError(404, 'Role not found');
@@ -260,6 +264,7 @@ router.get('/users/export', asyncH(async (req, res) => {
 // New users get a random password nobody knows and must choose their own at first sign-in, so give each person one with
 // Manage > Reset password. (Import the Groups file first: a user whose group is not there yet is skipped, and says so.)
 router.post('/users/import', asyncH(async (req, res) => {
+  await stepUp.confirm(req, 'admin.users_import', 'import users');
   const list = req.body && req.body.users;
   if (!Array.isArray(list)) throw new HttpError(400, 'Not a users export file (missing "users")');
   if (list.length > IMPORT_MAX) throw new HttpError(400, `Too many users (max ${IMPORT_MAX})`);
@@ -349,6 +354,7 @@ async function assertAnotherAdmin(c, excludingId) {
 
 router.post('/users', asyncH(async (req, res) => {
   const u = await parseUser(req.body, { creating: true });
+  if (u.role === 'Admin' || u.role === 'System Admin') await stepUp.confirm(req, 'admin.user_create_admin', 'create an Admin account');
   // mode 'generate': a random temporary password (shown once; always must be changed). Otherwise the Admin typed one (forcing a change is the default, not a must).
   const generate = req.body.mode === 'generate';
   const sendMail = req.body.send_email === true;   // (`email` is the address itself)
@@ -386,6 +392,11 @@ router.post('/users', asyncH(async (req, res) => {
 router.put('/users/:id', asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const u = await parseUser(req.body, { creating: false });
+  {   // changing who is an Admin (or an Admin's own details) needs the password again; ordinary edits do not
+    const before = (await db.query('SELECT role FROM users WHERE id=$1', [id])).rows[0];
+    const adminish = (r) => r === 'Admin' || r === 'System Admin';
+    if (before && (before.role !== u.role) && (adminish(before.role) || adminish(u.role))) await stepUp.confirm(req, 'admin.user_role_change', 'change an Admin role');
+  }
   await db.tx(async (c) => {
     const cur = await c.query('SELECT username, full_name, email, role, group_id, is_active FROM users WHERE id=$1 FOR UPDATE', [id]);
     if (!cur.rows.length) throw new HttpError(404, 'User not found');
@@ -422,6 +433,7 @@ router.put('/users/:id', asyncH(async (req, res) => {
 // Delete one or several users. Their records stay (created-by / requested-by links are cleared), their sessions end,
 // and the audit log keeps their user name. You cannot delete yourself or the last active Admin.
 router.post('/users/delete', asyncH(async (req, res) => {
+  await stepUp.confirm(req, 'admin.user_delete', 'delete these users');
   const raw = req.body && req.body.ids;
   if (!Array.isArray(raw) || !raw.length) throw new HttpError(400, 'Choose at least one user');
   if (raw.length > 200) throw new HttpError(400, 'Delete at most 200 users at a time');
@@ -445,6 +457,7 @@ router.post('/users/delete', asyncH(async (req, res) => {
 // Reset a password. mode: 'generate' (random; shown once), 'manual' (the Admin types it; `password`), 'email' (random, emailed to the user and never shown).
 // The user must choose their own password at the next sign-in (always for a generated one; optional for one typed by the Admin), every device is signed out and a lock is cleared.
 router.post('/users/:id/reset-password', asyncH(async (req, res) => {
+  await stepUp.confirm(req, 'admin.user_reset_password', 'reset this password');
   const id = v.id(req.params.id);
   const target = (await db.query('SELECT username, full_name, email FROM users WHERE id=$1', [id])).rows[0];
   if (!target) throw new HttpError(404, 'User not found');
@@ -483,6 +496,7 @@ router.post('/users/:id/reset-password', asyncH(async (req, res) => {
 // Only an Admin can turn 2FA on or off for an account. On: the user must enrol an authenticator at next use.
 // Off: their authenticator is removed too, so they sign in with the password alone again.
 router.post('/users/:id/2fa', asyncH(async (req, res) => {
+  await stepUp.confirm(req, 'admin.user_2fa', 'change 2FA for this user');
   const id = v.id(req.params.id);
   if (typeof req.body.enabled !== 'boolean') throw new HttpError(400, 'enabled must be true or false');
   const enabled = req.body.enabled;
@@ -508,6 +522,7 @@ router.post('/users/:id/2fa', asyncH(async (req, res) => {
 }));
 
 router.post('/users/:id/reset-2fa', asyncH(async (req, res) => {
+  await stepUp.confirm(req, 'admin.user_reset_2fa', 'reset 2FA for this user');
   const id = v.id(req.params.id);
   if (!(await db.query('SELECT 1 FROM users WHERE id=$1', [id])).rowCount) throw new HttpError(404, 'User not found');
   const r = await db.query(
@@ -808,7 +823,7 @@ function sniff(buf) {
 }
 
 // The browser sends the logo plus `icon`: a square 512 px PNG it drew from the logo for the installed-app (PWA) icon.
-router.post('/branding/logo', upload.fields([{ name: 'logo', maxCount: 1 }, { name: 'icon', maxCount: 1 }]), asyncH(async (req, res) => {
+router.post('/branding/logo', upload.fields([{ name: 'logo', maxCount: 1 }, { name: 'icon', maxCount: 1 }]), virusScan, asyncH(async (req, res) => {
   const logo = req.files && req.files.logo && req.files.logo[0];
   const icon = req.files && req.files.icon && req.files.icon[0];
   const drop = () => [logo, icon].forEach((f) => { if (f) fs.unlink(f.path, () => {}); });

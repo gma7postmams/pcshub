@@ -222,10 +222,25 @@ function toCsv(list) {
 }
 const toJson = (list) => JSON.stringify(list.map((r) => ({ ip: r.cidr, list: r.kind, note: r.note || '', expires: r.expires_at ? new Date(r.expires_at).toISOString() : null, addedBy: r.created_by, addedAt: r.created_at })), null, 2);
 
+/** Block an address for `hours` on the watch's own initiative (a scanner). Returns false when it was not added (list full, or invalid). */
+async function autoBlock(ip, note, hours, db = require('./db')) {
+  const p = parseEntry(unmap(ip));
+  if (covers(p.cidr, '127.0.0.1') || covers(p.cidr, '::1')) return false;
+  const { rows } = await db.query('SELECT count(*)::int AS n FROM ip_rules');
+  if (rows[0].n >= MAX_RULES) return false;
+  await db.query(
+    `INSERT INTO ip_rules (kind, cidr, note, expires_at, created_by, created_by_name) VALUES ('block',$1,$2, now() + ($3 || ' hours')::interval, NULL, 'security-watch')
+     ON CONFLICT (kind, cidr) DO UPDATE SET note = EXCLUDED.note, expires_at = EXCLUDED.expires_at`,
+    [p.cidr, String(note || '').slice(0, MAX_NOTE), String(hours)]
+  );
+  await load(db);
+  return true;
+}
+
 /** For tests */
 function _set(list) { rules = list.map((r, i) => ({ id: i + 1, expiresMs: r.expires_at ? new Date(r.expires_at).getTime() : null, ...r })); rebuild(); }
 
 module.exports = {
-  parseEntry, covers, check, parseExpiry, cleanNote, parseImport, toCsv, toJson, load, shape, isAllowed, isBlocked, middleware, unmap,
+  parseEntry, covers, check, parseExpiry, cleanNote, parseImport, toCsv, toJson, load, shape, isAllowed, isBlocked, middleware, unmap, autoBlock, disabled,
   MAX_RULES, LISTS, _set, rules: () => rules,
 };

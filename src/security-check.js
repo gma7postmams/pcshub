@@ -44,7 +44,7 @@ function configChecks(a) {
     a('bkperm', 'Server', 'Backup folder is private', open ? 'warn' : 'ok', open ? `${bcfg.BACKUP_DIR} permissions are ${(st.mode & 0o777).toString(8)}: other users can read backups (password hashes, 2FA secrets).` : `Permissions ${(st.mode & 0o777).toString(8)}.`, `chmod 700 ${bcfg.BACKUP_DIR}`);
   } catch (_) { a('bkperm', 'Server', 'Backup folder is private', 'info', 'No backup folder yet.'); }
   const major = parseInt(process.versions.node, 10);
-  a('node', 'Server', 'Node.js version is supported', major >= 20 ? 'ok' : 'warn', `Node.js ${process.versions.node}.`, 'Move to a current LTS release (20 or newer).');
+  a('node', 'Server', 'Node.js version still gets security fixes', major >= 22 ? 'ok' : major >= 20 ? 'warn' : 'fail', `Node.js ${process.versions.node}.${major < 22 ? ' Node 20 reached end-of-life in April 2026 and no longer receives security fixes.' : ''}`, 'Install Node 22 LTS (or newer), run npm ci --omit=dev and npm run build, then restart.');
 }
 
 // ---- people and rules ----
@@ -81,6 +81,25 @@ async function monitorChecks(a) {
   a('auditkeep', 'Monitoring', 'Sign-in, security and admin lines are protected', 'ok', `Kept ${require('./audit').protectDays()} days through Clear Data and retention, and copied to the server log.`, null);
   const geo = require('./geoip').status();
   a('geo', 'Monitoring', 'IP location data is installed', geo && geo.installed ? 'ok' : 'info', geo && geo.installed ? 'Installed.' : 'Not installed: locations are not shown next to addresses.', 'On the server: npm run geoip:update');
+}
+
+// ---- defences added around the app: virus scan, off-box audit copy, automatic checks ----
+async function protectionChecks(a) {
+  const av = await require('./virus-scan').status();
+  if (!av.enabled) a('virus', 'Protection', 'Uploads are scanned for viruses', 'warn', av.configured ? 'CLAMAV_MODE=off: uploaded files are not scanned.' : 'ClamAV is not set up: files uploaded to Ingest, Plug List, Workload, Knowledge Base, profile pictures and backups are not scanned.', 'On the server: sudo apt install clamav-daemon clamav-freshclam, then set CLAMAV_SOCKET=/var/run/clamav/clamd.ctl in .env and restart.');
+  else if (!av.reachable) a('virus', 'Protection', 'Uploads are scanned for viruses', 'fail', `The scanner does not answer (${av.error}). ${av.failOpen ? 'Uploads are being accepted WITHOUT a check (CLAMAV_FAIL=open).' : 'Uploads are being refused until it is back.'}`, 'Check: systemctl status clamav-daemon (the first start takes a minute while signatures load).');
+  else if (!av.detectsTestFile) a('virus', 'Protection', 'Uploads are scanned for viruses', 'fail', `${av.version} answers but did not flag the standard EICAR test file, so its signatures are missing or broken.`, 'Run: sudo freshclam, then restart clamav-daemon.');
+  else {
+    const age = av.databaseAt ? Math.floor((Date.now() - new Date(av.databaseAt).getTime()) / 86400000) : null;
+    a('virus', 'Protection', 'Uploads are scanned for viruses', age != null && age > 3 ? 'warn' : 'ok', `${av.version}, ${av.signatures ? `${av.signatures} signature set` : 'signatures loaded'}${age != null ? `, ${age} day${age === 1 ? '' : 's'} old` : ''}. It flagged the EICAR test file.${av.failOpen ? ' CLAMAV_FAIL=open: if it goes down, uploads pass unchecked.' : ''}`, age != null && age > 3 ? 'Signatures are not updating: systemctl status clamav-freshclam' : null);
+  }
+  const fw = require('./audit-forward').status();
+  if (!fw.configured) a('syslog', 'Protection', 'Audit trail is copied to another machine', fw.invalid ? 'warn' : 'info', fw.invalid ? 'AUDIT_SYSLOG is not a valid address (use udp://host:514, tcp://host:514 or tls://host:6514).' : 'Not set up: the audit trail exists only on this server. An intruder who takes it over could erase it.', 'Set AUDIT_SYSLOG=tcp://your-log-server:514 in .env and restart.');
+  else a('syslog', 'Protection', 'Audit trail is copied to another machine', fw.lastError && !fw.connected ? 'warn' : 'ok', fw.lastError && !fw.connected ? `Cannot reach ${fw.target}: ${fw.lastError}. ${fw.queued} message(s) waiting, ${fw.dropped} dropped.` : `Sending to ${fw.target} (${fw.sent} sent${fw.dropped ? `, ${fw.dropped} dropped` : ''}).`, 'Check that the log server is up, listening on that port, and reachable from here.');
+  const every = require('./security-check-schedule').hours();
+  a('autocheck', 'Protection', 'This check runs by itself', every ? 'ok' : 'info', every ? `Every ${every} hour${every === 1 ? '' : 's'}; System Admins are alerted when something new is wrong.` : 'Off (SECURITY_CHECK_HOURS=0): problems are only found when someone runs it.', 'Remove SECURITY_CHECK_HOURS from .env (default 24).');
+  const idle = settings.get().adminIdleMinutes;
+  a('adminidle', 'Protection', 'Admin sessions end sooner when idle', idle <= 60 ? 'ok' : 'warn', `Admins and System Admins are signed out after ${idle} minutes without activity (everyone else: ${settings.get().idleSignOutHours} hours).`, 'Security → Rules → Admin idle sign-out: 30 or 60 minutes.');
 }
 
 // ---- backups ----
@@ -155,7 +174,7 @@ function run() {
     const a = add(list);
     const steps = [
       ['server settings', async () => configChecks(a)], ['people and rules', () => accountChecks(a)], ['monitoring', () => monitorChecks(a)],
-      ['backups', () => backupChecks(a)], ['live test', () => liveChecks(a)], ['packages', () => auditChecks(a)],
+      ['protection', () => protectionChecks(a)], ['backups', () => backupChecks(a)], ['live test', () => liveChecks(a)], ['packages', () => auditChecks(a)],
     ];
     for (const [name, fn] of steps) {
       try { await fn(); } catch (e) { a(`err-${name}`, 'Self-check', `Could not check ${name}`, 'info', String(e.message).slice(0, 200), null); }
