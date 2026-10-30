@@ -306,7 +306,7 @@ export function ToolMenu({ items }) {
       {open ? (
         <div className="tpop-panel tpop-menu" role="menu">
           {list.map((it) => (
-            <button key={it.label} type="button" role="menuitem" id={it.id} className={it.danger ? 'danger' : ''} disabled={it.disabled} data-keep-sel={it.keep ? '' : undefined}
+            <button key={it.id || it.label} type="button" role="menuitem" id={it.id} className={it.danger ? 'danger' : ''} disabled={it.disabled} data-keep-sel={it.keep ? '' : undefined}
               onClick={() => { setOpen(false); it.onClick(); }}>{it.icon}{it.label}</button>
           ))}
         </div>

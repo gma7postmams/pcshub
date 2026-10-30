@@ -2131,7 +2131,7 @@ export default function Workload() {
                 s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
                 canWrite && isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
-                !isGrid && tab !== 'PREP' && { id: 'auto-detect-btn', label: `Auto-detect similar projects: ${filt.auto !== '0' ? 'On' : 'Off'}`, icon: <GroupIcon />, onClick: toggleAuto },
+                !isGrid && tab !== 'PREP' && { id: 'auto-detect-btn', label: <>Auto-detect similar projects: <b className={`wl-onoff ${filt.auto !== '0' ? 'on' : 'off'}`}>{filt.auto !== '0' ? 'ON' : 'OFF'}</b></>, icon: <GroupIcon />, onClick: toggleAuto },
                 canWrite && !isGrid && applyKeysOf().length > 0 && { id: 'apply-group-btn', label: 'Apply to whole group', icon: <GroupIcon />, onClick: applyToGroup },
                 canWrite && !isGrid && linkRows.some((r) => r.group_key) && { id: 'unlink-group-btn', label: 'Remove from group', icon: <GroupIcon />, onClick: () => linkSel('unlink') },
                 canWrite && !isGrid && linkRows.some((r) => r.project_group) && { id: 'auto-group-btn', label: 'Use automatic grouping', icon: <GroupIcon />, onClick: () => linkSel('auto') },
