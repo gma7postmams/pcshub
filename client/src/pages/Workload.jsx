@@ -1396,15 +1396,18 @@ export default function Workload() {
   const applyKeysOf = () => (applySrc && applySrc.group_key
     ? tableCols.slice(Math.min(cellSel.c0, cellSel.c1), Math.max(cellSel.c0, cellSel.c1) + 1)
         .filter((k) => !NO_COPY.includes(k) && (k.startsWith('custom_') || (meta.fields[k] && ['text', 'select', 'date_or_text', 'audio_guide'].includes(meta.fields[k].kind)))) : []);
-  const linkSel = async (mode) => {
+  const linkSel = async (mode, keepSel = false) => {
     const ids = linkRows.map((r) => r.id).slice(0, 500);
     try {
       const out = await post('/api/workload/link', { ids, mode });
       toast(mode === 'link' ? `${out.changed} entries linked as one project` : mode === 'unlink' ? `${out.changed} entr${out.changed === 1 ? 'y' : 'ies'} taken out of its group` : `${out.changed} entr${out.changed === 1 ? 'y' : 'ies'} back to automatic grouping`);
-      clearPicks();
+      if (!keepSel) clearPicks();   // the Auto-detect switch keeps the selection, so it can be flipped back
       load();
     } catch (e) { toast(e.message, 'err'); }
   };
+  // Auto-detect for the selection: ticked rows, or cells dragged across 2+ rows. ON = they follow auto-detect (any manual link / removal is cleared), OFF = kept out of every group.
+  const scopeRows = linkRows.length >= 2 || pickedRowsList.length ? linkRows : [];
+  const scopeAuto = scopeRows.length > 0 && scopeRows.every((r) => !r.project_group);
   const applyToGroup = async () => {
     const applyKeys = applyKeysOf();
     if (!applySrc || !applyKeys.length) return;
@@ -2131,10 +2134,12 @@ export default function Workload() {
                 s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
                 canWrite && isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
-                !isGrid && tab !== 'PREP' && { id: 'auto-detect-btn', label: <>Auto-detect similar projects<span className={`wl-switch${filt.auto !== '0' ? ' on' : ''}`} role="switch" aria-checked={filt.auto !== '0'} aria-label="Auto-detect similar projects"><i /></span></>, stay: true, icon: <GroupIcon />, onClick: toggleAuto },
+                !isGrid && tab !== 'PREP' && (canWrite && scopeRows.length
+                  ? { id: 'auto-detect-sel-btn', icon: <GroupIcon />, stay: true, onClick: () => linkSel(scopeAuto ? 'unlink' : 'auto', true),
+                      label: <>Auto-detect for selected ({scopeRows.length})<span className={`wl-switch${scopeAuto ? ' on' : ''}`} role="switch" aria-checked={scopeAuto} aria-label="Auto-detect for the selected entries"><i /></span></> }
+                  : { id: 'auto-detect-btn', icon: <GroupIcon />, stay: true, onClick: toggleAuto,
+                      label: <>Auto-detect similar projects<span className={`wl-switch${filt.auto !== '0' ? ' on' : ''}`} role="switch" aria-checked={filt.auto !== '0'} aria-label="Auto-detect similar projects"><i /></span></> }),
                 canWrite && !isGrid && applyKeysOf().length > 0 && { id: 'apply-group-btn', label: 'Apply to whole group', icon: <GroupIcon />, onClick: applyToGroup },
-                canWrite && !isGrid && linkRows.some((r) => r.group_key) && { id: 'unlink-group-btn', label: 'Remove from group', icon: <GroupIcon />, onClick: () => linkSel('unlink') },
-                canWrite && !isGrid && linkRows.some((r) => r.project_group) && { id: 'auto-group-btn', label: 'Use automatic grouping', icon: <GroupIcon />, onClick: () => linkSel('auto') },
                 canWrite && !isGrid && prioRows.length > 0 && { id: 'priority-btn', label: pickedAllPrio ? 'Remove Priority' : 'Set Priority', icon: <FlagIcon />, onClick: toggleTablePriority },
               ]} />
             </div>
