@@ -322,18 +322,20 @@ const PLUG_FIRST = "split_part(w.plug_id, E'\\n', 1)";
 const PLUG_PREFIX = `NULLIF(upper(btrim(substring(${PLUG_FIRST} from '^([^_]*)_'))), '')`;
 const AUTO_KEY = `(CASE WHEN ${PLUG_PREFIX} IS NOT NULL THEN NULLIF(upper(regexp_replace(regexp_replace(${PLUG_FIRST}, '\\s+-\\s+.*$', ''), '^[^_]*_|\\s', '', 'g')), '') END)`;
 // A row linked by hand (project_group = a token) is keyed 'P:<token>'; '-' = taken out of every group; '' = the automatic Plug-ID key above.
-const PLUG_KEY = `(CASE WHEN w.project_group = '-' THEN NULL WHEN w.project_group <> '' THEN 'P:' || upper(w.project_group) ELSE ${AUTO_KEY} END)`;
-const GROUP_COLS = `, ${PLUG_KEY} AS group_key`;   // the row's key (null = no underscore prefix); attachGroups() keeps it only for real groups
+// auto = false switches the Plug-ID match off (the "auto-detect similar projects" toggle): only rows linked by hand are grouped then
+const groupKeySql = (auto = true) => `(CASE WHEN w.project_group = '-' THEN NULL WHEN w.project_group <> '' THEN 'P:' || upper(w.project_group) ELSE ${auto ? AUTO_KEY : 'NULL'} END)`;
+const autoOn = (q) => String((q && q.auto) ?? '1') !== '0';
+const groupCols = (auto = true) => `, ${groupKeySql(auto)} AS group_key`;   // the row's key (null = no underscore prefix); attachGroups() keeps it only for real groups
 /** The text a ?group= filter is compared with: no prefix, no spaces, capitals. */
 const groupKeyOf = (raw) => String(raw || '').replace(/\s+/g, '').toUpperCase().slice(0, 200);
 /** Sets group_key / group_n on listed rows: group_n = every row of the table with that key; group_key is dropped unless 2+ different prefixes share it. */
-async function attachGroups(rows) {
+async function attachGroups(rows, auto = true) {
   const keys = [...new Set(rows.map((r) => r.group_key).filter(Boolean))];
   const found = new Map();
   if (keys.length) {
     const { rows: agg } = await db.query(
       `SELECT k, count(*)::int AS n, (k LIKE 'P:%' AND count(*) >= 2) OR min(p) <> max(p) AS multi
-         FROM (SELECT ${PLUG_KEY} AS k, ${PLUG_PREFIX} AS p FROM workload_items w) x
+         FROM (SELECT ${groupKeySql(auto)} AS k, ${PLUG_PREFIX} AS p FROM workload_items w) x
         WHERE k = ANY($1::text[]) GROUP BY k`, [keys]
     );
     agg.forEach((a) => found.set(a.k, a));
@@ -366,7 +368,7 @@ function buildFilter(query, user) {
   if (query.units === NOT_SET) where.push('w.units_concerned IS NULL');
   else if (query.units) add('w.units_concerned = ?', v.oneOf(canonUnit(query.units), UNITS, { field: 'units' }));
   if (query.platform) add('w.platform = ?', String(query.platform));
-  if (query.group) add(`${PLUG_KEY} = ?`, groupKeyOf(query.group));   // one plug group: every row whose Plug ID is this key under some prefix, on any day (so the date range is not applied)
+  if (query.group) add(`${groupKeySql(autoOn(query))} = ?`, groupKeyOf(query.group));   // one plug group: every row whose Plug ID is this key under some prefix, on any day (so the date range is not applied)
   if (query.plug_type) add('w.plug_type = ?', String(query.plug_type));
   if (query.from && !query.group) add('w.work_date >= ?', v.date(query.from, { field: 'from' }));
   if (query.to && !query.group) add('w.work_date <= ?', v.date(query.to, { field: 'to' }));
@@ -425,32 +427,33 @@ router.get('/', asyncH(async (req, res) => {
   const total = await db.query(`SELECT count(*)::int AS n FROM workload_items w ${whereSql(where)}`, params);
   const filterParams = params.slice();   // orderBy() may add a parameter after this
   const order = orderBy(req.query, params);   // may add a parameter (custom column key), so it runs after the count
+  const auto = autoOn(req.query);   // false = only rows linked by hand are grouped
   if (req.query.team === 'PREP') {
     // ready rows first (all four prep fields available), then the ones still waiting; each row says what is missing
     const { rows } = await db.query(
-      `SELECT * FROM (SELECT w.*, uu.full_name AS updated_by_name, ${PREP_MISSING_SQL} AS prep_missing${GROUP_COLS}
+      `SELECT * FROM (SELECT w.*, uu.full_name AS updated_by_name, ${PREP_MISSING_SQL} AS prep_missing${groupCols(auto)}
                         FROM workload_items w LEFT JOIN users uu ON uu.id = w.updated_by ${whereSql(where)}) w
         ORDER BY (cardinality(prep_missing) > 0), ${order} LIMIT ${limit} OFFSET ${offset}`, params
     );
     const ready = await db.query(`SELECT count(*)::int AS n FROM (SELECT ${PREP_MISSING_SQL} AS m FROM workload_items w ${whereSql(where)}) x WHERE cardinality(m) = 0`, filterParams);
-    return res.json({ total: total.rows[0].n, prepReady: ready.rows[0].n, rows: (await attachGroups(rows)).map(flattenCustom) });
+    return res.json({ total: total.rows[0].n, prepReady: ready.rows[0].n, rows: (await attachGroups(rows, auto)).map(flattenCustom) });
   }
   if (req.query.together === '1') {
     // Keep the rows of a plug group together in whatever order is asked for: the group sits where its first member would, its other
     // members right under it (in the same order). Rows in no group keep their place. Works on the whole filtered list, so paging stays right.
     const { rows } = await db.query(
-      `SELECT * FROM (SELECT w.*, uu.full_name AS updated_by_name${GROUP_COLS}, row_number() OVER (ORDER BY ${order}) AS _rn
+      `SELECT * FROM (SELECT w.*, uu.full_name AS updated_by_name${groupCols(auto)}, row_number() OVER (ORDER BY ${order}) AS _rn
                         FROM workload_items w LEFT JOIN users uu ON uu.id = w.updated_by ${whereSql(where)}) q
         ORDER BY min(_rn) OVER (PARTITION BY COALESCE(group_key, '#' || id::text)), _rn LIMIT ${limit} OFFSET ${offset}`, params
     );
     rows.forEach((r) => { delete r._rn; });
-    return res.json({ total: total.rows[0].n, rows: (await attachGroups(rows)).map(flattenCustom) });
+    return res.json({ total: total.rows[0].n, rows: (await attachGroups(rows, auto)).map(flattenCustom) });
   }
   const { rows } = await db.query(
-    `SELECT w.*, uu.full_name AS updated_by_name${GROUP_COLS}
+    `SELECT w.*, uu.full_name AS updated_by_name${groupCols(auto)}
        FROM workload_items w LEFT JOIN users uu ON uu.id = w.updated_by ${whereSql(where)} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params
   );
-  res.json({ total: total.rows[0].n, rows: (await attachGroups(rows)).map(flattenCustom) });
+  res.json({ total: total.rows[0].n, rows: (await attachGroups(rows, auto)).map(flattenCustom) });
 }));
 
 // Export (.xlsx) mirrors the template: sheet "MAIN" (rows that involve VGFX or VEDIT) and sheet "AUDIO"
@@ -790,10 +793,11 @@ router.post('/apply-group', requireAction('workload.write'), asyncH(async (req, 
   const locks = await loadLocks(db);
   let fieldsChanged = [];
   const out = await db.tx(async (c) => {
-    const src = (await c.query('SELECT w.*, ' + PLUG_KEY + ' AS gk FROM workload_items w WHERE w.id = $1', [id])).rows[0];
+    const auto = autoOn(req.body);
+    const src = (await c.query('SELECT w.*, ' + groupKeySql(auto) + ' AS gk FROM workload_items w WHERE w.id = $1', [id])).rows[0];
     if (!src) throw new HttpError(404, 'Workload item not found');
     if (!src.gk) throw new HttpError(400, 'This row is not in a group');
-    const members = (await c.query(`SELECT w.id FROM workload_items w WHERE ${PLUG_KEY} = $1 AND w.id <> $2 ORDER BY w.id`, [src.gk, id])).rows.map((r) => r.id);
+    const members = (await c.query(`SELECT w.id FROM workload_items w WHERE ${groupKeySql(auto)} = $1 AND w.id <> $2 ORDER BY w.id`, [src.gk, id])).rows.map((r) => r.id);
     if (!members.length) throw new HttpError(400, 'This row is not in a group');
     let updated = 0;
     let skipped = 0;
@@ -911,7 +915,7 @@ router.post('/bulk-delete', requireAction('workload.write'), asyncH(async (req, 
     if (!req.user || !['Admin', 'System Admin'].includes(req.user.role)) throw new HttpError(403, 'Only an Admin can delete all rows');
     mode = 'all matching';
     filters = {};
-    ['team', 'units', 'platform', 'plug_type', 'from', 'to', 'q'].forEach((k) => { if (body.filters && body.filters[k]) filters[k] = String(body.filters[k]).slice(0, 200); });
+    ['team', 'units', 'platform', 'plug_type', 'group', 'auto', 'from', 'to', 'q'].forEach((k) => { if (body.filters && body.filters[k]) filters[k] = String(body.filters[k]).slice(0, 200); });
     ({ where, params } = buildFilter(filters, req.user));
   } else {
     mode = 'selected';

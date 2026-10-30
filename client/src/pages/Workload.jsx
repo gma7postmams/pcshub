@@ -464,7 +464,7 @@ export default function Workload() {
   const setMode = () => {};
   const isGrid = false;   // Excel mode = the editable grid; Table mode = rows with the New / Edit form (the layout around both is the same)
   const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('wl:rows3')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
-  const [filt, setFilt] = useState(() => ({ q: '', units: '', platform: '', plug_type: '', group: '', together: '1', from: isoDate(), to: isoDate(), ...(loadViewState('workload', {}).filt || {}) }));   // a fresh tab starts on today   // kept across a refresh
+  const [filt, setFilt] = useState(() => ({ q: '', units: '', platform: '', plug_type: '', group: '', auto: '1', from: isoDate(), to: isoDate(), ...(loadViewState('workload', {}).filt || {}) }));   // a fresh tab starts on today   // kept across a refresh
   const [stats, setStats] = useState(null);   // summary cards + tab badges
   const [offset, setOffset] = useState(() => loadViewState('workload', {}).offset || 0);   // the page you were on is kept across a refresh
   const [sort, setSortState] = useState(() => loadViewState('workload', {}).sort || { k: '', dir: 'asc' });   // clicked column header (Table mode)
@@ -603,10 +603,11 @@ export default function Workload() {
     if (tab !== 'ALL') p.set('team', tab);
     ['units', 'platform', 'plug_type', 'group', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
     if (q) p.set('q', q);
-    if (extra.limit !== undefined && tab !== 'PREP' && filt.together !== '0') p.set('together', '1');   // the list keeps the rows of a plug group together (counts and export do not need it)
+    if (filt.auto === '0') p.set('auto', '0');   // auto-detect similar projects is off: only entries linked by hand are grouped
+    if (extra.limit !== undefined && tab !== 'PREP') p.set('together', '1');   // the list keeps the rows of a plug group together (counts and export do not need it)
     if (sort.k && extra.limit !== undefined) { p.set('sort', sort.k); p.set('dir', sort.dir); }   // only the table's own list and the export follow it; counts ignore it
     return p;
-  }, [tab, filt.units, filt.platform, filt.plug_type, filt.group, filt.together, filt.from, filt.to, q, sort.k, sort.dir]);
+  }, [tab, filt.units, filt.platform, filt.plug_type, filt.group, filt.auto, filt.from, filt.to, q, sort.k, sort.dir]);
 
   // Tab badges (the counts next to All / VGFX / VEDIT / Audio) follow every filter except the team tab
   const loadStats = useCallback(async () => {
@@ -676,16 +677,22 @@ export default function Workload() {
   const changeSize = async (e) => { const n = Number(e.target.value); if (n === size || !(await okToLeave())) return; try { localStorage.setItem('wl:rows3', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
   const sortBy = async (s2) => { if (!(await okToLeave())) return; setSort(s2); };
   const clearGroup = () => { setFilt((f) => ({ ...f, group: '' })); setOffset(0); };
-  const togglePill = tab !== 'PREP' ? (
-    <button type="button" className={`chip wl-together${filt.together !== '0' ? ' on' : ''}`} aria-pressed={filt.together !== '0'}
-      title="Keep the entries of one plug (e.g. PV_ / PN_ / PD_) together when sorting, so one person can take them all"
-      onClick={() => { setFilt((f) => ({ ...f, together: f.together === '0' ? '1' : '0' })); setOffset(0); }}>
-      <GroupIcon /> Group same plugs
+  const autoToggle = tab !== 'PREP' ? (
+    <button type="button" className={`chip wl-together${filt.auto !== '0' ? ' on' : ''}`} aria-pressed={filt.auto !== '0'}
+      title={filt.auto !== '0' ? 'On: entries of one plug (the same Plug ID under another prefix, e.g. PV_ / PN_ / PD_) are grouped automatically. Click to group only the entries you link yourself.' : 'Off: only the entries you link yourself are grouped. Click to detect similar projects automatically.'}
+      onClick={async () => { if (!(await okToLeave())) return; setFilt((f) => ({ ...f, auto: f.auto === '0' ? '1' : '0', group: '' })); setOffset(0); }}>
+      <GroupIcon /> Auto-detect similar projects
     </button>
   ) : null;
-  const groupChip = (
+  const groupBtn = () => (canWrite && !isGrid && linkRows.length >= 2 ? (
+    <button type="button" className="chip wl-groupbtn" data-keep-sel title="Treat the selected entries as one project, so they sit together and can be given to one person" onClick={() => linkSel('link')}>
+      <GroupIcon /> Group same plugs ({linkRows.length})
+    </button>
+  ) : null);
+  const groupChip = () => (
     <>
-      {togglePill}
+      {groupBtn()}
+      {autoToggle}
       {filt.group ? <button type="button" className="chip c-blue wl-group-on" title="Show every row again" onClick={clearGroup}>{filt.group.startsWith('P:') ? 'Linked project' : `Group: ${filt.group}`} ✕</button> : null}
     </>
   );
@@ -1395,7 +1402,7 @@ export default function Workload() {
     const ids = linkRows.map((r) => r.id).slice(0, 500);
     try {
       const out = await post('/api/workload/link', { ids, mode });
-      toast(mode === 'link' ? `${out.changed} entries linked as one project` : mode === 'unlink' ? `${out.changed} entr${out.changed === 1 ? 'y' : 'ies'} taken out of its group` : `${out.changed} entr${out.changed === 1 ? 'y' : 'ies'} back to automatic grouping`);
+      toast(mode === 'link' ? `${out.changed} entries linked as one project` : mode === 'unlink' ? `${out.changed} entr${out.changed === 1 ? 'y' : 'ies'} taken out of its group` : `Manual grouping cleared on ${out.changed} entr${out.changed === 1 ? 'y' : 'ies'}`);
       clearPicks();
       load();
     } catch (e) { toast(e.message, 'err'); }
@@ -1407,7 +1414,7 @@ export default function Workload() {
     const others = Math.max(0, (applySrc.group_n || 1) - 1);
     if (!(await confirm('Apply to the whole group?', `${labels.join(', ')} of this entry will be copied to the other ${others} entr${others === 1 ? 'y' : 'ies'} of its group, replacing what is there now.`))) return;
     try {
-      const out = await post('/api/workload/apply-group', { id: applySrc.id, fields: applyKeys });
+      const out = await post('/api/workload/apply-group', { id: applySrc.id, fields: applyKeys, auto: filt.auto === '0' ? '0' : '1' });
       toast(`Copied to ${out.updated} entr${out.updated === 1 ? 'y' : 'ies'}${out.skipped ? ` (${out.skipped} in a locked period skipped)` : ''}`);
       load();
     } catch (e) { toast(e.message, 'err'); }
@@ -2096,7 +2103,7 @@ export default function Workload() {
               <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
             </FiltersMenu>
             <DateRange from={filt.from} to={filt.to} onChange={setRange} />
-            {groupChip}
+            {groupChip()}
             <span className="grow" />
             <div className="wl-presence"><PresenceAvatars path="/workload" peers={peers} describe={describePeer} /></div>
             <div className="wl-iconbar">
@@ -2127,9 +2134,8 @@ export default function Workload() {
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
                 canWrite && isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
                 canWrite && !isGrid && applyKeysOf().length > 0 && { id: 'apply-group-btn', label: 'Apply to whole group', icon: <GroupIcon />, onClick: applyToGroup },
-                canWrite && !isGrid && linkRows.length >= 2 && { id: 'link-group-btn', label: 'Link as one project', icon: <GroupIcon />, onClick: () => linkSel('link') },
                 canWrite && !isGrid && linkRows.some((r) => r.group_key) && { id: 'unlink-group-btn', label: 'Remove from group', icon: <GroupIcon />, onClick: () => linkSel('unlink') },
-                canWrite && !isGrid && linkRows.some((r) => r.project_group) && { id: 'auto-group-btn', label: 'Use automatic grouping', icon: <GroupIcon />, onClick: () => linkSel('auto') },
+                canWrite && !isGrid && linkRows.some((r) => r.project_group) && { id: 'auto-group-btn', label: 'Clear manual grouping', icon: <GroupIcon />, onClick: () => linkSel('auto') },
                 canWrite && !isGrid && prioRows.length > 0 && { id: 'priority-btn', label: pickedAllPrio ? 'Remove Priority' : 'Set Priority', icon: <FlagIcon />, onClick: toggleTablePriority },
               ]} />
             </div>
@@ -2188,7 +2194,7 @@ export default function Workload() {
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
           <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
           <DateRange from={filt.from} to={filt.to} onChange={setRange} />
-          {groupChip}
+          {groupChip()}
           <div className="wl-presence"><PresenceAvatars path="/workload" peers={peers} describe={describePeer} /></div>
         </div>
 
