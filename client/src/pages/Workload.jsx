@@ -7,7 +7,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FlagIcon, FullscreenIcon, LockIcon, PlusIcon, SaveIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, ExportButton, FilterSelect, GroupIcon, PlatformCell, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useNarrow, useSpareRows } from '../components/wl.jsx';
+import { DateChip, DateRange, ExportButton, ApplyGroupIcon, AutoDetectIcon, FilterSelect, GroupIcon, PlatformCell, ResetIcon, UngroupIcon, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useNarrow, useSpareRows } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive, useCellPresence, rangeCells, peerStyle } from '../lib/live.js';
@@ -1401,13 +1401,14 @@ export default function Workload() {
     try {
       const out = await post('/api/workload/link', { ids, mode });
       toast(mode === 'link' ? `${out.changed} entries linked as one project` : mode === 'unlink' ? `${out.changed} entr${out.changed === 1 ? 'y' : 'ies'} taken out of its group` : `${out.changed} entr${out.changed === 1 ? 'y' : 'ies'} back to automatic grouping`);
-      if (!keepSel) clearPicks();   // the Auto-detect switch keeps the selection, so it can be flipped back
+      if (!keepSel) clearPicks();
       load();
     } catch (e) { toast(e.message, 'err'); }
   };
-  // Auto-detect for the selection: ticked rows, or cells dragged across 2+ rows. ON = they follow auto-detect (any manual link / removal is cleared), OFF = kept out of every group.
+  // The selection the group actions work on: ticked rows, or cells dragged across 2+ rows
   const scopeRows = linkRows.length >= 2 || pickedRowsList.length ? linkRows : [];
-  const scopeAuto = scopeRows.length > 0 && scopeRows.every((r) => !r.project_group);
+  const selMode = canWrite && scopeRows.length > 0;   // entries are selected: the menu offers group actions for them instead of the view-wide switch
+  const inOneGroup = scopeRows.length >= 2 && scopeRows.every((r) => r.group_key && r.group_key === scopeRows[0].group_key);
   const applyToGroup = async () => {
     const applyKeys = applyKeysOf();
     if (!applySrc || !applyKeys.length) return;
@@ -2134,12 +2135,12 @@ export default function Workload() {
                 s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
                 canWrite && isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
-                !isGrid && tab !== 'PREP' && (canWrite && scopeRows.length
-                  ? { id: 'auto-detect-sel-btn', icon: <GroupIcon />, stay: true, onClick: () => linkSel(scopeAuto ? 'unlink' : 'auto', true),
-                      label: <>Auto-detect for selected ({scopeRows.length})<span className={`wl-switch${scopeAuto ? ' on' : ''}`} role="switch" aria-checked={scopeAuto} aria-label="Auto-detect for the selected entries"><i /></span></> }
-                  : { id: 'auto-detect-btn', icon: <GroupIcon />, stay: true, onClick: toggleAuto,
-                      label: <>Auto-detect similar projects<span className={`wl-switch${filt.auto !== '0' ? ' on' : ''}`} role="switch" aria-checked={filt.auto !== '0'} aria-label="Auto-detect similar projects"><i /></span></> }),
-                canWrite && !isGrid && applyKeysOf().length > 0 && { id: 'apply-group-btn', label: 'Apply to whole group', icon: <GroupIcon />, onClick: applyToGroup },
+                !isGrid && tab !== 'PREP' && !selMode && { id: 'auto-detect-btn', icon: <AutoDetectIcon />, stay: true, onClick: toggleAuto,
+                  label: <>Auto-detect similar projects<span className={`wl-switch${filt.auto !== '0' ? ' on' : ''}`} role="switch" aria-checked={filt.auto !== '0'} aria-label="Auto-detect similar projects"><i /></span></> },
+                !isGrid && selMode && scopeRows.length >= 2 && !inOneGroup && { id: 'group-selected-btn', label: `Group selected (${scopeRows.length})`, icon: <GroupIcon />, onClick: () => linkSel('link') },
+                !isGrid && selMode && scopeRows.some((r) => r.group_key) && { id: 'ungroup-selected-btn', label: `Ungroup selected (${scopeRows.length})`, icon: <UngroupIcon />, onClick: () => linkSel('unlink') },
+                !isGrid && selMode && scopeRows.some((r) => r.project_group) && { id: 'auto-group-btn', label: 'Use automatic grouping', icon: <ResetIcon />, onClick: () => linkSel('auto') },
+                canWrite && !isGrid && applyKeysOf().length > 0 && { id: 'apply-group-btn', label: 'Apply to whole group', icon: <ApplyGroupIcon />, onClick: applyToGroup },
                 canWrite && !isGrid && prioRows.length > 0 && { id: 'priority-btn', label: pickedAllPrio ? 'Remove Priority' : 'Set Priority', icon: <FlagIcon />, onClick: toggleTablePriority },
               ]} />
             </div>
