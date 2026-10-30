@@ -7,7 +7,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FlagIcon, FullscreenIcon, LockIcon, PlusIcon, SaveIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, ExportButton, ApplyGroupIcon, AutoDetectIcon, FilterSelect, GroupIcon, PlatformCell, ResetIcon, UngroupIcon, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useNarrow, useSpareRows } from '../components/wl.jsx';
+import { DateChip, DateRange, ExportButton, ApplyGroupIcon, AutoDetectIcon, FilterSelect, GroupIcon, PlatformCell, UngroupIcon, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useNarrow, useSpareRows } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive, useCellPresence, rangeCells, peerStyle } from '../lib/live.js';
@@ -2139,7 +2139,6 @@ export default function Workload() {
                   label: <>Auto-detect similar projects<span className={`wl-switch${filt.auto !== '0' ? ' on' : ''}`} role="switch" aria-checked={filt.auto !== '0'} aria-label="Auto-detect similar projects"><i /></span></> },
                 !isGrid && selMode && scopeRows.length >= 2 && !inOneGroup && { id: 'group-selected-btn', label: `Group selected (${scopeRows.length})`, icon: <GroupIcon />, onClick: () => linkSel('link') },
                 !isGrid && selMode && scopeRows.some((r) => r.group_key) && { id: 'ungroup-selected-btn', label: `Ungroup selected (${scopeRows.length})`, icon: <UngroupIcon />, onClick: () => linkSel('unlink') },
-                !isGrid && selMode && scopeRows.some((r) => r.project_group) && { id: 'auto-group-btn', label: 'Use automatic grouping', icon: <ResetIcon />, onClick: () => linkSel('auto') },
                 canWrite && !isGrid && applyKeysOf().length > 0 && { id: 'apply-group-btn', label: 'Apply to whole group', icon: <ApplyGroupIcon />, onClick: applyToGroup },
                 canWrite && !isGrid && prioRows.length > 0 && { id: 'priority-btn', label: pickedAllPrio ? 'Remove Priority' : 'Set Priority', icon: <FlagIcon />, onClick: toggleTablePriority },
               ]} />
