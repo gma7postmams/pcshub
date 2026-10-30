@@ -766,7 +766,31 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
 // Rows in a locked period are left alone (counted as skipped).
 router.post('/link', requireAction('workload.write'), asyncH(async (req, res) => {
   const mode = String((req.body && req.body.mode) || '');
-  if (!['link', 'unlink', 'auto'].includes(mode)) throw new HttpError(400, 'Unknown action');
+  if (!['link', 'unlink', 'auto', 'restore'].includes(mode)) throw new HttpError(400, 'Unknown action');
+  if (mode === 'restore') {
+    // Undo / redo of the actions below: put each row's setting back to the value it had ('' automatic, '-' never group, or a link token)
+    const list = Array.isArray(req.body.values) ? req.body.values.slice(0, 500) : [];
+    if (!list.length) throw new HttpError(400, 'Nothing to restore');
+    const byValue = new Map();
+    list.forEach((x) => {
+      const val = String((x && x.value) ?? '');
+      if (!/^[A-Za-z0-9-]{0,40}$/.test(val)) throw new HttpError(400, 'Invalid group value');
+      const id = v.id(x && x.id);
+      if (!byValue.has(val)) byValue.set(val, []);
+      byValue.get(val).push(id);
+    });
+    const locksR = await loadLocks(db);
+    let changed = 0;
+    for (const [val, ids] of byValue) {
+      const { rows: found } = await db.query('SELECT id, work_date FROM workload_items WHERE id = ANY($1::bigint[])', [ids]);
+      const open = found.filter((r) => { try { assertNotLocked(locksR, r.work_date); return true; } catch (e) { return false; } });
+      if (!open.length) continue;
+      await db.query('UPDATE workload_items SET project_group = $1, updated_by = $2, updated_at = now() WHERE id = ANY($3::bigint[])', [val, req.user.id, open.map((r) => r.id)]);
+      changed += open.length;
+    }
+    await audit(req, 'workload.group', 'workload_item', null, { mode, rows: changed });
+    return res.json({ ok: true, changed });
+  }
   const ids = Array.isArray(req.body.ids) ? [...new Set(req.body.ids.map((n) => v.id(n)))].slice(0, 500) : [];
   if (!ids.length) throw new HttpError(400, 'No rows selected');
   if (mode === 'link' && ids.length < 2) throw new HttpError(400, 'Select at least two rows to link');
@@ -778,7 +802,7 @@ router.post('/link', requireAction('workload.write'), asyncH(async (req, res) =>
   const token = mode === 'link' ? crypto.randomBytes(5).toString('hex').toUpperCase() : (mode === 'unlink' ? '-' : '');
   await db.query('UPDATE workload_items SET project_group = $1, updated_by = $2, updated_at = now() WHERE id = ANY($3::bigint[])', [token, req.user.id, open.map((r) => r.id)]);
   await audit(req, 'workload.group', 'workload_item', null, { mode, rows: open.length, sample: open.slice(0, 20).map((r) => String(r.plug_id || '').split('\n')[0]) });
-  res.json({ ok: true, changed: open.length, skipped: found.length - open.length });
+  res.json({ ok: true, changed: open.length, skipped: found.length - open.length, token });
 }));
 
 // Copy chosen columns of one row to the other rows of its group (e.g. whoever it is assigned to), so a plug is handled by one person.

@@ -1397,9 +1397,14 @@ export default function Workload() {
     ? tableCols.slice(Math.min(cellSel.c0, cellSel.c1), Math.max(cellSel.c0, cellSel.c1) + 1)
         .filter((k) => !NO_COPY.includes(k) && (k.startsWith('custom_') || (meta.fields[k] && ['text', 'select', 'date_or_text', 'audio_guide'].includes(meta.fields[k].kind)))) : []);
   const linkSel = async (mode, keepSel = false) => {
-    const ids = linkRows.map((r) => r.id).slice(0, 500);
+    const rowsNow = linkRows.slice(0, 500);
+    const before = rowsNow.map((r) => ({ id: r.id, value: r.project_group || '' }));   // for undo
     try {
-      const out = await post('/api/workload/link', { ids, mode });
+      const out = await post('/api/workload/link', { ids: rowsNow.map((r) => r.id), mode });
+      const nv = mode === 'link' ? (out.token || '') : mode === 'unlink' ? '-' : '';
+      const after = rowsNow.map((r) => ({ id: r.id, value: nv }));
+      const restore = (values) => async () => { await post('/api/workload/link', { mode: 'restore', values }); };
+      pushTbl({ label: mode === 'link' ? 'group selected' : mode === 'unlink' ? 'ungroup selected' : 'automatic grouping', undo: restore(before), redo: restore(after) });
       toast(mode === 'link' ? `${out.changed} entries linked as one project` : mode === 'unlink' ? `${out.changed} entr${out.changed === 1 ? 'y' : 'ies'} taken out of its group` : `${out.changed} entr${out.changed === 1 ? 'y' : 'ies'} back to automatic grouping`);
       if (!keepSel) clearPicks();
       load();
