@@ -1397,6 +1397,9 @@ table.t.wl tbody tr.grp-last td { border-bottom: 1px solid color-mix(in srgb, va
 .chip.wl-groupbtn { border: 0; cursor: pointer; font-family: inherit; gap: 5px; font-weight: 600; background: var(--accent); color: #fff; }
 .chip.wl-groupbtn:hover { filter: brightness(1.1); }
 
-.wl-onoff { font-weight: 800; letter-spacing: .04em; margin-left: 2px; }
-.wl-onoff.on { color: var(--green); }
-.wl-onoff.off { color: var(--red); }
+/* a switch inside a menu item (Workload ⋮ menu: Auto-detect similar projects) */
+.wl-switch { margin-left: auto; padding-left: 0; width: 34px; height: 19px; flex: none; border-radius: 999px; background: var(--gray); position: relative; transition: background .15s; }
+.wl-switch i { position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.35); transition: transform .15s; }
+.wl-switch.on { background: var(--green); }
+.wl-switch.on i { transform: translateX(15px); }
+.tpop-menu button .wl-switch { margin-left: 18px; }

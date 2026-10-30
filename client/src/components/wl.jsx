@@ -293,7 +293,7 @@ export function FiltersMenu({ count, onClear, children }) {
   );
 }
 
-/** "…" button: the less-used toolbar actions. items = [{ label, icon, onClick, disabled, danger, keep }] (falsy entries are skipped) */
+/** "…" button: the less-used toolbar actions. items = [{ label, icon, onClick, disabled, danger, keep, stay }] (stay = the menu stays open after the click, for switches) (falsy entries are skipped) */
 export function ToolMenu({ items }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -307,7 +307,7 @@ export function ToolMenu({ items }) {
         <div className="tpop-panel tpop-menu" role="menu">
           {list.map((it) => (
             <button key={it.id || it.label} type="button" role="menuitem" id={it.id} className={it.danger ? 'danger' : ''} disabled={it.disabled} data-keep-sel={it.keep ? '' : undefined}
-              onClick={() => { setOpen(false); it.onClick(); }}>{it.icon}{it.label}</button>
+              onClick={() => { if (!it.stay) setOpen(false); it.onClick(); }}>{it.icon}{it.label}</button>
           ))}
         </div>
       ) : null}
