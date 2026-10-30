@@ -677,13 +677,12 @@ export default function Workload() {
   const changeSize = async (e) => { const n = Number(e.target.value); if (n === size || !(await okToLeave())) return; try { localStorage.setItem('wl:rows3', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
   const sortBy = async (s2) => { if (!(await okToLeave())) return; setSort(s2); };
   const clearGroup = () => { setFilt((f) => ({ ...f, group: '' })); setOffset(0); };
-  const autoToggle = tab !== 'PREP' ? (
-    <button type="button" className={`chip wl-together${filt.auto !== '0' ? ' on' : ''}`} aria-pressed={filt.auto !== '0'}
-      title={filt.auto !== '0' ? 'On: entries of one plug (the same Plug ID under another prefix, e.g. PV_ / PN_ / PD_) are grouped automatically. Click to group only the entries you link yourself.' : 'Off: only the entries you link yourself are grouped. Click to detect similar projects automatically.'}
-      onClick={async () => { if (!(await okToLeave())) return; setFilt((f) => ({ ...f, auto: f.auto === '0' ? '1' : '0', group: '' })); setOffset(0); }}>
-      <GroupIcon /> Auto-detect similar projects
-    </button>
-  ) : null;
+  // "Auto-detect similar projects": off = only the entries linked by hand are grouped. A switch in the ⋮ menu, kept per person with the other view settings.
+  const toggleAuto = async () => {
+    if (!(await okToLeave())) return;
+    setFilt((f) => ({ ...f, auto: f.auto === '0' ? '1' : '0', group: '' }));
+    setOffset(0);
+  };
   const groupBtn = () => (canWrite && !isGrid && linkRows.length >= 2 ? (
     <button type="button" className="chip wl-groupbtn" data-keep-sel title="Treat the selected entries as one project, so they sit together and can be given to one person" onClick={() => linkSel('link')}>
       <GroupIcon /> Group same plugs ({linkRows.length})
@@ -692,7 +691,6 @@ export default function Workload() {
   const groupChip = () => (
     <>
       {groupBtn()}
-      {autoToggle}
       {filt.group ? <button type="button" className="chip c-blue wl-group-on" title="Show every row again" onClick={clearGroup}>{filt.group.startsWith('P:') ? 'Linked project' : `Group: ${filt.group}`} ✕</button> : null}
     </>
   );
@@ -1402,7 +1400,7 @@ export default function Workload() {
     const ids = linkRows.map((r) => r.id).slice(0, 500);
     try {
       const out = await post('/api/workload/link', { ids, mode });
-      toast(mode === 'link' ? `${out.changed} entries linked as one project` : mode === 'unlink' ? `${out.changed} entr${out.changed === 1 ? 'y' : 'ies'} taken out of its group` : `Manual grouping cleared on ${out.changed} entr${out.changed === 1 ? 'y' : 'ies'}`);
+      toast(mode === 'link' ? `${out.changed} entries linked as one project` : mode === 'unlink' ? `${out.changed} entr${out.changed === 1 ? 'y' : 'ies'} taken out of its group` : `${out.changed} entr${out.changed === 1 ? 'y' : 'ies'} back to automatic grouping`);
       clearPicks();
       load();
     } catch (e) { toast(e.message, 'err'); }
@@ -2133,9 +2131,10 @@ export default function Workload() {
                 s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
                 s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
                 canWrite && isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
+                !isGrid && tab !== 'PREP' && { id: 'auto-detect-btn', label: `Auto-detect similar projects: ${filt.auto !== '0' ? 'On' : 'Off'}`, icon: <GroupIcon />, onClick: toggleAuto },
                 canWrite && !isGrid && applyKeysOf().length > 0 && { id: 'apply-group-btn', label: 'Apply to whole group', icon: <GroupIcon />, onClick: applyToGroup },
                 canWrite && !isGrid && linkRows.some((r) => r.group_key) && { id: 'unlink-group-btn', label: 'Remove from group', icon: <GroupIcon />, onClick: () => linkSel('unlink') },
-                canWrite && !isGrid && linkRows.some((r) => r.project_group) && { id: 'auto-group-btn', label: 'Clear manual grouping', icon: <GroupIcon />, onClick: () => linkSel('auto') },
+                canWrite && !isGrid && linkRows.some((r) => r.project_group) && { id: 'auto-group-btn', label: 'Use automatic grouping', icon: <GroupIcon />, onClick: () => linkSel('auto') },
                 canWrite && !isGrid && prioRows.length > 0 && { id: 'priority-btn', label: pickedAllPrio ? 'Remove Priority' : 'Set Priority', icon: <FlagIcon />, onClick: toggleTablePriority },
               ]} />
             </div>
