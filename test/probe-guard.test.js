@@ -71,3 +71,19 @@ test('autoBlock refuses localhost and writes a timed rule', async () => {
   assert.strictEqual(await rules.autoBlock('198.51.100.4', 'x', 24), true);
   assert.ok(sqls.some((s) => /now\(\) \+/.test(s.q)));
 });
+
+test('a scanner that gets auto-blocked produces one alert, not a second "repeated blocked requests" one', async () => {
+  w.reset(); audits.length = 0; sqls.length = 0;
+  for (const p of ['/a.php', '/b.php', '/c.php', '/d.php', '/e.php', '/f.php', '/g.php', '/h.php']) w.probe(req('203.0.113.60', p));   // a fast run, many in flight before the block lands
+  await tick(); await tick();
+  const titles = audits.filter((a) => a.action === 'security.alert').map((a) => a.d.title);
+  assert.strictEqual(titles.length, 1, titles.join(' | '));
+  assert.match(titles[0], /^Scanner blocked/);
+});
+
+test('inside the network (never auto-blocked) the burst alarm still fires', async () => {
+  w.reset(); audits.length = 0;
+  for (const p of ['/a.php', '/b.php', '/c.php', '/d.php', '/e.php', '/f.php']) w.probe(req('10.9.9.9', p));
+  await tick(); await tick();
+  assert.ok(audits.some((a) => a.action === 'security.alert' && /Repeated blocked/.test(a.d.title)));
+});

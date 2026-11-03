@@ -151,9 +151,10 @@ async function autoBlock(req, paths) {
   const off = String(process.env.AUTO_BLOCK_PROBES || '').toLowerCase() === 'false';
   if (off || !ip || rules.isAllowed(ip) || rules.isBlocked(ip) || isPrivateIp(ip) || proxied || rules.disabled()) return;   // inside the network, or already dealt with: the alert below still tells the Admins
   probes.delete(ip);
+  alerted.set(`burst|${ip}`, Date.now());   // one email per scanner: the block alert below says it all, so the burst alarm for this address stays quiet (requests already in flight would otherwise trigger it)
   try {
     const ok = await rules.autoBlock(ip, `Automatic: asked for ${paths.length} scanner-only paths (${paths.slice(0, 3).join(', ')})`, PROBE_BLOCK_HOURS);
-    if (!ok) return;
+    if (!ok) { alerted.delete(`burst|${ip}`); return; }   // not blocked after all: let the burst alarm speak
     console.warn(`[security] ALERT scanner ${ip} blocked for ${PROBE_BLOCK_HOURS} h (${paths.join(', ')})`);
     audit({ ...SYSTEM, ip }, 'security.ip_auto_blocked', 'security', null, { ip, hours: PROBE_BLOCK_HOURS, paths: paths.length, sample: paths.slice(0, 5) }).catch(() => {});
     raise(`probe-block|${ip}`, ip, `Scanner blocked: ${ip}`, `${ip} asked for ${paths.length} paths that only attack tools use (${paths.slice(0, 3).join(', ')}) and was blocked for ${PROBE_BLOCK_HOURS} hours. Remove it in Administration → IP Access if that was a mistake.`, { ip, hours: PROBE_BLOCK_HOURS, paths: paths.length });
