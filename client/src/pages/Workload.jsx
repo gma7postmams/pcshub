@@ -683,11 +683,26 @@ export default function Workload() {
     setFilt((f) => ({ ...f, auto: f.auto === '0' ? '1' : '0', group: '' }));
     setOffset(0);
   };
-  const groupBtn = () => (canWrite && !isGrid && linkRows.length >= 2 ? (
-    <button type="button" className="chip wl-groupbtn" data-keep-sel title="Treat the selected entries as one project, so they sit together and can be given to one person" onClick={() => linkSel('link')}>
-      <GroupIcon /> Group same plugs ({linkRows.length})
-    </button>
-  ) : null);
+  // Toolbar buttons beside the date range, only while entries are selected: Group (2+ entries that are not already one group) and Ungroup (some selected entry is in a group)
+  const groupBtn = () => {
+    if (!canWrite || isGrid || !scopeRows.length) return null;
+    const canGroup = scopeRows.length >= 2 && !inOneGroup;
+    const canUngroup = scopeRows.some((r) => r.group_key);
+    return (
+      <>
+        {canGroup ? (
+          <button type="button" className="chip wl-groupbtn" data-keep-sel title="Treat the selected entries as one project, so they sit together and can be given to one person" onClick={() => linkSel('link')}>
+            <GroupIcon /> Group same plugs ({scopeRows.length})
+          </button>
+        ) : null}
+        {canUngroup ? (
+          <button type="button" className="chip wl-groupbtn" data-keep-sel title="Take the selected entries out of their group (they stay out until you group them again)" onClick={() => linkSel('unlink')}>
+            <UngroupIcon /> Ungroup ({scopeRows.length})
+          </button>
+        ) : null}
+      </>
+    );
+  };
   const groupChip = () => (
     <>
       {groupBtn()}
@@ -2143,7 +2158,6 @@ export default function Workload() {
                 !isGrid && tab !== 'PREP' && !selMode && { id: 'auto-detect-btn', icon: <AutoDetectIcon />, stay: true, onClick: toggleAuto,
                   label: <>Auto-detect similar projects<span className={`wl-switch${filt.auto !== '0' ? ' on' : ''}`} role="switch" aria-checked={filt.auto !== '0'} aria-label="Auto-detect similar projects"><i /></span></> },
                 !isGrid && selMode && scopeRows.length >= 2 && !inOneGroup && { id: 'group-selected-btn', label: `Group selected (${scopeRows.length})`, icon: <GroupIcon />, onClick: () => linkSel('link') },
-                !isGrid && selMode && scopeRows.some((r) => r.group_key) && { id: 'ungroup-selected-btn', label: `Ungroup selected (${scopeRows.length})`, icon: <UngroupIcon />, onClick: () => linkSel('unlink') },
                 canWrite && !isGrid && applyKeysOf().length > 0 && { id: 'apply-group-btn', label: 'Apply to whole group', icon: <ApplyGroupIcon />, onClick: applyToGroup },
                 canWrite && !isGrid && prioRows.length > 0 && { id: 'priority-btn', label: pickedAllPrio ? 'Remove Priority' : 'Set Priority', icon: <FlagIcon />, onClick: toggleTablePriority },
               ]} />
