@@ -3,6 +3,7 @@
 # Install:
 #   sudo useradd --system --home /opt/promo-hub --shell /usr/sbin/nologin promohub
 #   sudo cp -r promo-hub /opt/promo-hub && cd /opt/promo-hub && sudo -u promohub npm ci --omit=dev
+#   sudo install -d -o promohub -g promohub -m 700 /opt/promo-hub/backups
 #   sudo cp deploy/promo-hub.service /etc/systemd/system/
 #   sudo systemctl daemon-reload && sudo systemctl enable --now promo-hub
 # Logs:    journalctl -u promo-hub -f
@@ -28,7 +29,8 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/promo-hub/uploads
+# backups/ must be writable too, or manual and scheduled backups fail (BACKUP_DIR defaults to /opt/promo-hub/backups)
+ReadWritePaths=/opt/promo-hub/uploads /opt/promo-hub/backups
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

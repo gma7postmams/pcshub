@@ -7,8 +7,9 @@ const cookieSecure = process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === '
 const COOKIE_NAME = cookieSecure ? '__Host-phub.sid' : 'phub.sid';
 
 // 2FA is off for everyone by default. An Admin turns it on (or off) per user; a user it is on for must enrol before using the app.
+// Also on for every Admin when Admin > Security > "Require 2FA for Admins" is switched on.
 function twofaRequired(user) {
-  return Boolean(user && user.twofa_required);
+  return Boolean(user && (user.twofa_required || (['Admin', 'System Admin'].includes(user.role) && require('./security-settings').get().requireAdmin2fa)));
 }
 
 // Trust proxy: required behind nginx/Traefik so rate limits and audit logs see real client IPs
@@ -51,10 +52,12 @@ function startupChecks() {
   // Required in every mode: there is no built-in fallback, so a forgotten setting can never leave sessions signed with a known key.
   if (APP_ORIGIN_PROBLEMS.length) problems.push(`APP_ORIGIN is not a web address: ${APP_ORIGIN_PROBLEMS.join(', ')}. Use the form https://hub.example.com`);
   if (weakSecret(process.env.SESSION_SECRET)) problems.push('SESSION_SECRET must be 32+ random characters, not a placeholder. Generate one with: openssl rand -hex 48');
+  if (PROD && !process.env.BACKUP_ENC_KEY) warn.push('BACKUP_ENC_KEY not set: backups are stored unencrypted (they hold password hashes and 2FA secrets). Set it with: openssl rand -hex 32, and keep a copy off this server');
   if (PROD && !process.env.BACKUP_SIGNING_KEY) warn.push('BACKUP_SIGNING_KEY not set: backups are created unsigned, so a tampered archive cannot be told apart from a real one. Set it with: openssl rand -hex 32');
   if (PROD && /change[-_ ]?me/i.test(process.env.ADMIN_PASSWORD || '')) warn.push('ADMIN_PASSWORD is still the placeholder from .env.example. Change it (and remove it from .env once the first Admin has signed in).');
   if (PROD && !cookieSecure) warn.push('COOKIE_SECURE=false in production: sessions travel without the Secure flag. Only acceptable on an isolated LAN.');
-  if (PROD && !process.env.TRUST_PROXY) warn.push('TRUST_PROXY not set. If this runs behind a reverse proxy, every user shares the proxy IP for rate limiting and audit logs. Set TRUST_PROXY=1.');
+  if (PROD && !process.env.TRUST_PROXY) warn.push('TRUST_PROXY not set. If this runs behind a reverse proxy, every user shares the proxy IP: the audit log shows the gateway, and one person\'s wrong passwords shut out everybody behind it. Set TRUST_PROXY=1 (and see set_real_ip_from in deploy/nginx.conf if another gateway is in front of nginx).');
+  if (/^(true|yes|on)$/i.test(process.env.TRUST_PROXY || '')) warn.push('TRUST_PROXY=true trusts any X-Forwarded-For a client sends, so the audit log and the sign-in limits can be faked. Use the number of proxies (1) or their addresses.');
   warn.forEach((w) => console.warn(`[security] ${w}`));
   if (problems.length) {
     problems.forEach((p) => console.error(`[security] ${p}`));
@@ -63,6 +66,6 @@ function startupChecks() {
 }
 
 module.exports = {
-  PROD, cookieSecure, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks,
+  PROD, cookieSecure, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks, weakSecret,
   SESSION_IDLE_MS, SESSION_MAX_MS, API_RATE_LIMIT, APP_ORIGINS,
 };

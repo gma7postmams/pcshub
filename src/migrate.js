@@ -46,6 +46,8 @@ async function upgradeIngestRecords(db) {
             AND cm_non_compliant_reason IS NOT NULL AND length(btrim(cm_non_compliant_reason)) > 0)
       );
     END $$`);
+    // Page renamed: the built-in Ingest role's description no longer says "Ingest Tracker" (only if nobody edited it)
+    await client.query(`UPDATE roles SET description = REPLACE(description, 'Ingest Tracker only', 'Ingest only') WHERE name = 'Ingest' AND description LIKE 'Ingest Tracker only:%'`);
     // The Approval page was merged into the Ingest Tracker: carry the approver's name onto the record, and drop the old page grant.
     await client.query(
       `UPDATE ingest_records i SET approved_by = u.full_name
@@ -109,8 +111,8 @@ async function seedAdmin(db) {
   const username = (process.env.ADMIN_USERNAME || '').trim();
   const password = process.env.ADMIN_PASSWORD || '';
   if (!username || !password) {
-    const { rows } = await db.query(`SELECT 1 FROM users WHERE role='Admin' LIMIT 1`);
-    if (!rows.length) console.warn('[seed] No Admin exists and ADMIN_USERNAME/ADMIN_PASSWORD not set.');
+    const { rows } = await db.query(`SELECT 1 FROM users WHERE role='System Admin' LIMIT 1`);
+    if (!rows.length) console.warn('[seed] No System Admin exists and ADMIN_USERNAME/ADMIN_PASSWORD not set.');
     return;
   }
   const { rows } = await db.query('SELECT id FROM users WHERE lower(username)=lower($1)', [username]);
@@ -122,10 +124,10 @@ async function seedAdmin(db) {
   const hash = await bcrypt.hash(password, 12);
   await db.query(
     `INSERT INTO users (username, full_name, email, password_hash, role, must_change_password)
-     VALUES ($1,$2,$3,$4,'Admin',TRUE)`,
+     VALUES ($1,$2,$3,$4,'System Admin',TRUE)`,
     [username, process.env.ADMIN_FULLNAME || 'System Administrator', email, hash]
   );
-  console.log(`[seed] Admin user "${username}" created (password change required on first login).`);
+  console.log(`[seed] System Admin user "${username}" created (password change required on first login).`);
 }
 
 module.exports = { migrate };

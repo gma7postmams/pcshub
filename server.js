@@ -13,8 +13,9 @@ const {
   loadUser, requireAuth, requirePageAccess, csrfGuard, errorHandler, CLIENT_DIST, INDEX_HTML,
 } = require('./src/middleware');
 const { PAGE_BY_PATH, landingPath } = require('./src/permissions');
+const live = require('./src/live');   // live updates for the trackers
 const {
-  PROD, cookieSecure, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks, SESSION_IDLE_MS, API_RATE_LIMIT,
+  PROD, cookieSecure, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks, API_RATE_LIMIT,
 } = require('./src/config');
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
@@ -54,6 +55,11 @@ app.use((req, res, next) => {
   next();
 });
 
+// Blocked addresses (Administration > IP Access) get 403 before anything else runs: no session, no database work.
+app.use(require('./src/ip-rules').middleware);
+// Scanner probes (/api/graphql, /wp-login.php, /.env ...) get a plain 404 here, are logged, and an address that tries several is blocked (src/probe-guard.js).
+app.use(require('./src/probe-guard').middleware);
+
 // During a restore everything except the status endpoint answers 503. Registered before sessions: it must not touch the database.
 const maintenance = require('./src/backup/maintenance');
 app.use(maintenance.middleware);
@@ -75,9 +81,11 @@ app.use(session({
     sameSite: 'lax',
     secure: cookieSecure,
     path: '/',
-    maxAge: SESSION_IDLE_MS,
+    maxAge: require('./src/security-settings').idleMs(),
   },
 }));
+// Idle sign-out is an Admin setting: each request renews the cookie and its store row with the current value.
+app.use((req, res, next) => { if (req.session) req.session.cookie.maxAge = require('./src/security-settings').idleMs(); next(); });
 
 // ---------- Static assets (React build) ----------
 // Pages are NOT served from here: index.html is only returned by the access-controlled page routes below.
@@ -91,6 +99,8 @@ app.get('/sw.js', (req, res) => {
   res.set('Service-Worker-Allowed', '/');
   res.sendFile(path.join(CLIENT_DIST, 'sw.js'));
 });
+app.get('/manifest.webmanifest', require('./src/app-shell').manifest);
+app.get('/app-icon/:size.png', require('./src/app-shell').appIconRoute);   // the home-screen icon, logo filling the tile
 // Hashed bundles never change → cache for a year
 app.use('/assets', express.static(path.join(CLIENT_DIST, 'assets'), { immutable: true, maxAge: '365d', index: false }));
 // The app shell is only handed out by the access-controlled page routes further down, never as a plain file
@@ -102,6 +112,8 @@ app.use('/uploads/branding', express.static(path.join(__dirname, 'uploads', 'bra
 }));
 
 app.use(loadUser);
+// Planned maintenance (MAINTENANCE_MODE in .env, or a MAINTENANCE file): only a System Admin gets past this. See src/maintenance-mode.js.
+app.use(require('./src/maintenance-mode').guard);
 
 // Workload / Plug List imports and exports announce themselves through src/transfer-hook.js; this writes each one
 // (and each failure) to the audit log: who, file name and size, filters, row counts, duration. Never row contents.
@@ -114,16 +126,23 @@ const apiLimiter = rateLimit({
   limit: API_RATE_LIMIT,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  skip: (req) => require('./src/ip-rules').isAllowed(req.ip),   // trusted addresses (IP Access > Allowed)
   message: { error: 'Too many requests, slow down.' },
+  handler: (req, res, _next, options) => {
+    require('./src/security-watch').event(req, 'security.rate_limited', { limiter: 'api' });
+    res.status(options.statusCode).json(options.message);
+  },
 });
 // API answers are per-user data: neither the browser nor a proxy in between may keep a copy
 // (the few routes that serve files set their own Cache-Control afterwards).
 const noStoreApi = (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); };
 app.use('/api', apiLimiter, csrfGuard, noStoreApi);
+app.use('/api', require('./src/node').readOnlyGuard);   // a backup server is read-only (see src/node.js)
 
 // Public
 app.use('/api/branding', require('./src/routes/branding'));
 app.use('/api/auth', require('./src/routes/auth'));
+app.use('/api/node-sync', require('./src/routes/node-sync'));   // the backup server pulls from here with NODE_SYNC_TOKEN (main server only)
 
 // Everything below needs a signed-in user
 app.use('/api', requireAuth);
@@ -144,14 +163,17 @@ app.use('/api', (req, res, next) => {
 
 app.use('/api/profile',       requirePageAccess('/profile'),   require('./src/routes/profile'));
 app.use('/api/notifications', require('./src/routes/notifications'));
+app.use('/api/live',          require('./src/live'));   // pushes "the trackers changed" to every open browser (see src/live.js)
 app.use('/api/presence',      require('./src/routes/presence'));   // who is working right now (feeds the Dashboard's Active users)
 app.use('/api',               require('./src/routes/lookups'));
 app.use('/api/dashboard',     requirePageAccess('/dashboard'), require('./src/routes/dashboard'));
-app.use('/api/ingest',        requirePageAccess('/ingest'),    require('./src/routes/ingest'));
-app.use('/api/workload',      requirePageAccess('/workload'),  require('./src/routes/workload'));
-app.use('/api/plugs',         require('./src/routes/plugs')(require('./src/routes/workload').helpers));   // PSD Daily Plug List (page + API of its own)
+app.use('/api/ingest',        requirePageAccess('/ingest'),    live.track('ingest'),   require('./src/routes/ingest'));
+app.use('/api/workload',      requirePageAccess('/workload'),  live.track('workload'), require('./src/routes/workload'));
+app.use('/api/plugs',         live.track('plugs'), require('./src/routes/plugs')(require('./src/routes/workload').helpers));   // PSD Daily Plug List (page + API of its own)
 app.use('/api/knowledge',     requirePageAccess('/knowledge'), require('./src/routes/knowledge'));
+app.use('/api/admin/ip-rules', requirePageAccess('/admin'),    require('./src/routes/ip-rules'));
 app.use('/api/admin/backups', requirePageAccess('/admin'),     require('./src/routes/backups'));
+app.use('/api/admin/node',    requirePageAccess('/admin'),     require('./src/routes/node-admin'));
 app.use('/api/admin',         requirePageAccess('/admin'),     require('./src/routes/admin'));
 
 
@@ -161,7 +183,7 @@ app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 // One React app. Each page URL is gated server-side (role + group) before index.html is returned,
 // so a locked page answers 403 even on a direct visit; the API behind it is gated the same way.
 const noStore = (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); };
-const sendApp = (req, res) => res.sendFile(INDEX_HTML);
+const sendApp = require('./src/app-shell').sendApp();   // index.html with the Branding name in the title
 
 app.get('/login', noStore, (req, res) => {
   if (req.user) return res.redirect(landingPath(req.user));
@@ -183,11 +205,11 @@ for (const page of Object.keys(PAGE_BY_PATH)) {
 }
 
 // Unknown URL: signed-in users get the app's 404 screen; others go to sign-in
-app.use((req, res) => {
+app.use((req, res, next) => {
   if (req.method !== 'GET' || !req.accepts('html')) return res.status(404).send('Not found');
   if (!req.user) return res.redirect('/login');
   res.set('Cache-Control', 'no-store');
-  return res.status(404).sendFile(INDEX_HTML);
+  return require('./src/app-shell').sendApp(404)(req, res, next);
 });
 app.use(errorHandler);
 
@@ -200,6 +222,10 @@ const boot = process.env.MIGRATE_ON_START === 'false'
 
 boot
   .then(() => require('./src/roles').loadRoles(db))
+  .then(() => require('./src/security-settings').load())
+  .then(() => require('./src/ip-rules').load(db))
+  .then(() => require('./src/geoip').load().catch(() => {}))
+  .then(() => require('./src/maintenance-mode').loadUi(db))
   .then(() => require('./src/backup/service').recoverStale())
   .then(() => require('./src/backup/analysis').startupCleanup())
   .then(async () => {
@@ -217,6 +243,10 @@ boot
 
     // Production default: localhost only — users reach the app through the HTTPS reverse proxy.
     const HOST = process.env.HOST || (PROD ? '127.0.0.1' : '0.0.0.0');
+
+    try { require('./src/backup/scheduler').start(); } catch (e) { console.error('[backup] scheduler not started:', e.message); }
+    try { require('./src/security-check-schedule').start(); } catch (e) { console.error('[security-check] schedule not started:', e.message); }
+    try { require('./src/node-sync').start(); } catch (e) { console.error('[node-sync] not started:', e.message); }
 
     app.listen(PORT, HOST, () =>
       console.log(

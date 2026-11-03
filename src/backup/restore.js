@@ -78,6 +78,14 @@ async function startRollback(req, restoreId) {
   });
 }
 
+/** The backup server restores the main server's backup over itself: no analysis, no pre-restore backup, and the main server's audit trail comes along. */
+async function startNodeSync({ file, filename, sizeBytes, sha256 }, onDone) {
+  return begin({ user: { id: null, username: 'backup-server-sync' }, ip: null }, {
+    file, filename, sizeBytes, expectSha: sha256, risk: null, sourceBackupId: null, skipPreBackup: true, nodeSync: true,
+    summaryBase: { nodeSync: true }, onDone,
+  });
+}
+
 async function begin(req, ctx) {
   const release = await svc.acquire();
   let job;
@@ -156,7 +164,7 @@ async function runRestore(job, req, ctx, release) {
     if (toc.disallowed.length) throw new Error(`The dump contains unsupported objects: ${toc.disallowed.join(', ')}`);
 
     stage('Preserving audit trail and job history');
-    snap = await takeSnapshot(work, req);
+    snap = await takeSnapshot(work, req, { keepAudit: !ctx.nodeSync });
     const dumpTables = await pg.tocTables(dumpPath);
     ownerDb = owner();
 
@@ -173,7 +181,7 @@ async function runRestore(job, req, ctx, release) {
     await migrate(ownerDb, { seed: false });
 
     stage('Re-applying audit trail and job history');
-    await reinsertSnapshot(ownerDb, snap, req);
+    await reinsertSnapshot(ownerDb, snap, req, { keepAudit: !ctx.nodeSync });
     historyRestored = true;
     await reapplyGrants(ownerDb);
 
@@ -205,7 +213,7 @@ async function runRestore(job, req, ctx, release) {
       } catch (err) { console.error('[restore] could not restore previous files:', err.message); }
     }
     if (snap && jobsDropped && !historyRestored) {
-      try { ownerDb = ownerDb || owner(); await migrate(ownerDb, { seed: false }); await reinsertSnapshot(ownerDb, snap, req); historyRestored = true; await reapplyGrants(ownerDb); } catch (err) { console.error('[restore] could not rebuild job history:', err.message); }
+      try { ownerDb = ownerDb || owner(); await migrate(ownerDb, { seed: false }); await reinsertSnapshot(ownerDb, snap, req, { keepAudit: !ctx.nodeSync }); historyRestored = true; await reapplyGrants(ownerDb); } catch (err) { console.error('[restore] could not rebuild job history:', err.message); }
     }
   }
 
@@ -223,6 +231,7 @@ async function runRestore(job, req, ctx, release) {
   } catch (e) { console.error('[restore] could not record the result:', e.message); }
 
   try {
+    if (ctx.nodeSync) throw Object.assign(new Error('skip'), { skipAudit: true });   // the sync result is shown on the Backup Server tab, not in the audit log
     const auditReq = await safeAuditReq(req);
     await audit(auditReq, 'admin.backup_restore', 'backup', ctx.sourceBackupId || id, {
       outcome: outcome === 'succeeded' ? 'success' : 'failed', restoreJobId: id, filename: ctx.filename, sha256: ctx.expectSha,
@@ -230,7 +239,7 @@ async function runRestore(job, req, ctx, release) {
       impact: summary.totals || null, filesRestored: swapped.length > 0 && outcome === 'succeeded', dbModified: summary.dbModified,
       rollbackOf: ctx.rollbackOf || null, rolledBack: false, error: errorMsg, durationMs,
     });
-  } catch (e) { console.error('[restore] audit failed:', e.message); }
+  } catch (e) { if (!e.skipAudit) console.error('[restore] audit failed:', e.message); }
 
   try {
     if (outcome === 'succeeded') await fsp.rm(oldDir, { recursive: true, force: true }).catch(() => {});
@@ -262,12 +271,12 @@ async function createPreBackup(req, restoreId) {
 }
 
 // ---------- preserved data ----------
-async function takeSnapshot(work, req) {
+async function takeSnapshot(work, req, { keepAudit = true } = {}) {
   const jobs = (await db.query('SELECT to_jsonb(t) AS j FROM backup_jobs t')).rows.map((r) => r.j);
   const auditFile = path.join(work, 'snapshot-audit.jsonl');
   const out = fs.createWriteStream(auditFile, { mode: 0o600 });
   let last = 0; let count = 0;
-  for (;;) {
+  for (; keepAudit;) {
     const { rows } = await db.query('SELECT id, to_jsonb(t) AS j FROM audit_logs t WHERE id > $1 ORDER BY id LIMIT 5000', [last]);
     if (!rows.length) break;
     for (const r of rows) { if (!out.write(`${JSON.stringify(r.j)}\n`)) await new Promise((res) => out.once('drain', res)); }
@@ -290,14 +299,14 @@ async function insertRows(ownerDb, table, rows, userCols, userIds) {
   }
 }
 
-async function reinsertSnapshot(ownerDb, snap, req) {
+async function reinsertSnapshot(ownerDb, snap, req, { keepAudit = true } = {}) {
   const userIds = new Set((await ownerDb.query('SELECT id FROM users')).rows.map((r) => r.id));
   await ownerDb.query('DELETE FROM backup_jobs');
   await insertRows(ownerDb, 'backup_jobs', snap.jobs, ['created_by', 'verified_by', 'deleted_by'], userIds);
 
-  // The live audit trail always wins over the backup's copy.
-  await ownerDb.query('DELETE FROM audit_logs');
-  const lines = fs.createReadStream(snap.auditFile, { encoding: 'utf8' });
+  // The live audit trail always wins over the backup's copy (not on a backup server: there the main server's trail is the one to keep).
+  if (keepAudit) await ownerDb.query('DELETE FROM audit_logs');
+  const lines = !keepAudit ? [] : fs.createReadStream(snap.auditFile, { encoding: 'utf8' });
   let buf = ''; let batch = [];
   const flush = async () => { if (batch.length) { await insertRows(ownerDb, 'audit_logs', batch, ['user_id'], userIds); batch = []; } };
   for await (const chunk of lines) {
@@ -312,7 +321,7 @@ async function reinsertSnapshot(ownerDb, snap, req) {
 
   // Only the acting admin's session survives, and only if that account still exists as an active Admin.
   if (snap.session) {
-    const ok = await ownerDb.query(`SELECT 1 FROM users WHERE id=$1 AND role='Admin' AND is_active`, [snap.adminId]);
+    const ok = await ownerDb.query(`SELECT 1 FROM users WHERE id=$1 AND role IN ('Admin','System Admin') AND is_active`, [snap.adminId]);
     if (ok.rowCount) await ownerDb.query('INSERT INTO user_sessions SELECT * FROM jsonb_populate_recordset(null::user_sessions, $1::jsonb) ON CONFLICT DO NOTHING', [JSON.stringify([snap.session])]);
   }
 }
@@ -351,7 +360,7 @@ async function validate(ownerDb, backupSummary, meta) {
     add('Core tables readable', 'pass', `${tables.length} tables checked`);
   } catch (e) { add('Core tables readable', 'fail', trunc(e.message)); return checks; }
 
-  const admins = (await ownerDb.query(`SELECT count(*)::int AS n FROM users WHERE role='Admin' AND is_active`)).rows[0].n;
+  const admins = (await ownerDb.query(`SELECT count(*)::int AS n FROM users WHERE role IN ('Admin','System Admin') AND is_active`)).rows[0].n;
   add('Administrator access', admins > 0 ? 'pass' : 'fail', `${admins} active Admin account(s)`);
   add('Roles present', counts.roles >= 4 ? 'pass' : 'fail', `${counts.roles} roles`);
 
@@ -369,10 +378,10 @@ async function validate(ownerDb, backupSummary, meta) {
   const off = Object.keys(live).filter((k) => expected[k] != null && expected[k] !== live[k]);
   add('Record counts match the backup', off.length ? 'warn' : 'pass', off.length ? `Differences in ${off.join(', ')} (the backup counts were taken just before the dump)` : 'Counts agree with the backup summary');
 
-  const { rows: docs } = await ownerDb.query('SELECT stored_name FROM knowledge_docs');
+  const { rows: docs } = await ownerDb.query('SELECT stored_name FROM knowledge_docs WHERE stored_name IS NOT NULL');   // items added by name only have no file yet
   const missing = docs.filter((d) => !fs.existsSync(path.join(cfg.UPLOADS_ROOT, 'knowledge', path.basename(d.stored_name)))).length;
   add('Knowledge files present', missing ? 'warn' : 'pass', missing ? `${missing} document record(s) have no file on disk` : `${docs.length} document file(s) found`);
   return checks;
 }
 
-module.exports = { start, startRollback };
+module.exports = { start, startRollback, startNodeSync };

@@ -6,12 +6,15 @@
 // The Workload Tracker copies Plug ID, PSD and Prog. Name from this list (see fillFromPlugList in workload.js and the tab in the UI).
 const multer = require('multer');
 const { assertSafeXlsx, oneImportAtATime } = require('../xlsx-guard');
+const virusScan = require('../virus-scan').guard;   // every upload is checked by ClamAV before the route sees it (src/virus-scan.js)
 const db = require('../db');
 const v = require('../validate');
 const express = require('express');
+const { groupByDate, truthy, dateTag } = require('../export-sheets');
 const { asyncH, HttpError, requireAction, requireAnyPage } = require('../middleware');
 const { audit } = require('../audit');
 const { logRun } = require('../transferlog');
+const { notifyPageUsers } = require('../notify');
 const { emitTransfer } = require('../transfer-hook');   // import events — the audit log subscribes to these (see src/transfer-hook.js)
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
@@ -37,19 +40,42 @@ function titleOf(val) {
   return textOf(val).replace(/\s+/g, ' ').trim();
 }
 function monthDay(text) {
-  const m = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*(\d{1,2})\b/i.exec(String(text || ''));
-  return m ? { month: MONTHS[m[1].toLowerCase()], day: Number(m[2]) } : null;
+  const t = String(text || '');
+  let m = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*(\d{1,2})\b/i.exec(t);   // "September 28", "Sept. 28"
+  if (m) return { month: MONTHS[m[1].toLowerCase()], day: Number(m[2]) };
+  m = /\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.exec(t);   // "28 September", "28th of Sept"
+  if (m) return { month: MONTHS[m[2].toLowerCase()], day: Number(m[1]) };
+  m = /\b(\d{1,2})[\/.-](\d{1,2})(?:[\/.-]\d{2,4})?\b/.exec(t);   // "9/28", "09-28-2026", "28/9/2026" (day first only when the first number can't be a month)
+  if (m) {
+    const a = Number(m[1]), b = Number(m[2]);
+    if (a >= 1 && a <= 12 && b >= 1 && b <= 31) return { month: a, day: b };
+    if (b >= 1 && b <= 12 && a >= 1 && a <= 31) return { month: b, day: a };
+  }
+  return null;
+}
+/** The month and day in a cell: text like "September 28,Monday Plug list", or a real Excel date / date number. */
+function monthDayOfCell(val) {
+  if (val instanceof Date) return Number.isNaN(val.getTime()) ? null : { month: val.getUTCMonth() + 1, day: val.getUTCDate() };
+  if (typeof val === 'object' && val && val.result !== undefined) return monthDayOfCell(val.result);
+  if (typeof val === 'number' && val > 36526 && val < 73050) {   // an Excel date serial (years 2000-2099)
+    const d = new Date(Math.round((val - 25569) * 86400000));
+    return { month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+  }
+  return monthDay(textOf(val));
 }
 
 /**
- * Reads the whole workbook. Returns { sheets: [{ sheet, date, plugs: [...], skippedNoId, additional }], warnings: [] }.
+ * Reads the workbook (every tab, or only the tabs named in `only`). Returns { sheets: [{ sheet, date, plugs: [...], skippedNoId, additional }], warnings: [] }.
+ * `only` is an optional array of tab names; tabs not in it are not read at all (no plugs, no warnings). null / omitted = every tab.
  * A plug is { seq, list_no, plug_id, prog_name, psd, account_by, is_additional }. Pure (no database), so it can be tested alone.
  */
-function parsePlugWorkbook(wb, year) {
+function parsePlugWorkbook(wb, year, only = null) {
   const sheets = [];
   const warnings = [];
+  const chosen = Array.isArray(only) ? new Set(only) : null;
   for (const ws of wb.worksheets) {
     if (!ws || ws.rowCount < 2) continue;
+    if (chosen && !chosen.has(ws.name)) continue;   // a tab the person did not tick
     // header row: the one with a "Plug ID" cell (first 15 rows)
     let headerRow = 0;
     const col = {};
@@ -61,23 +87,68 @@ function parsePlugWorkbook(wb, year) {
         else if (/^prog.*(name|title)|^proj.*title/.test(t)) found.prog = c;
         else if (t === 'psd') found.psd = c;
         else if (t.startsWith('accountby')) found.acct = c;
+        else if (t.startsWith('requestedby')) found.req = c;
+        else if (t === 'date') found.date = c;
         else if (t === 'no') found.no = c;
       });
       if (found.plug) { headerRow = r; Object.assign(col, found); }
     }
     if (!headerRow) { warnings.push(`Sheet "${ws.name}": no PLUG ID column header found, skipped`); continue; }
 
+    if (col.date) {
+      // A flat list (the file this page's own Export makes): one table for all days, with a DATE column on every row.
+      const byDate = new Map();
+      const badDates = new Set();
+      for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+        const row = ws.getRow(r);
+        const plugId = textOf(row.getCell(col.plug).value).replace(/\s+/g, ' ').trim();
+        if (!plugId) continue;
+        const dv = row.getCell(col.date).value;
+        let date = '';
+        if (dv instanceof Date && !Number.isNaN(dv.getTime())) date = dv.toISOString().slice(0, 10);
+        else {
+          const tx = textOf(dv && dv.result !== undefined ? dv.result : dv).trim();
+          const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(tx);
+          if (iso) date = `${iso[1]}-${iso[2]}-${iso[3]}`;
+          else { const md2 = monthDayOfCell(dv); if (md2) date = `${year}-${pad(md2.month)}-${pad(md2.day)}`; }
+        }
+        const chk = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+        if (!chk || new Date(Date.UTC(+chk[1], +chk[2] - 1, +chk[3])).getUTCDate() !== +chk[3]) { badDates.add(r); continue; }
+        const prog = titleOf(row.getCell(col.prog || 0).value);
+        const psd = textOf(col.psd ? row.getCell(col.psd).value : '').replace(/\s+/g, ' ').trim();
+        const acct = textOf(col.acct ? row.getCell(col.acct).value : '').replace(/\s+/g, ' ').trim();
+        const reqBy = textOf(col.req ? row.getCell(col.req).value : '').replace(/\s+/g, ' ').trim();
+        if (!byDate.has(date)) byDate.set(date, { plugs: [], seen: new Set() });
+        const d = byDate.get(date);
+        const key = `${plugId}|${prog}|${psd}`.toUpperCase();
+        if (d.seen.has(key)) continue;
+        d.seen.add(key);
+        d.plugs.push({ seq: d.plugs.length + 1, list_no: null, plug_id: plugId.slice(0, 200), prog_name: prog.slice(0, 300), psd: psd.slice(0, 200), account_by: acct.slice(0, 100), requested_by: reqBy.slice(0, 200), is_additional: false });
+      }
+      if (badDates.size) warnings.push(`Sheet "${ws.name}": ${badDates.size} row(s) have no readable DATE, skipped`);
+      for (const [date, d] of [...byDate.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+        sheets.push({ sheet: ws.name, date, plugs: d.plugs, skippedNoId: 0, additional: 0 });
+      }
+      continue;
+    }
+
     // the sheet's date: a "Sept 28,Monday plug list" style line in the first rows, else the sheet's name ("Sept 28")
     let md = null;
     let dayText = '';
+    const seenTop = [];
     for (let r = 1; r < headerRow && !md; r++) {
-      ws.getRow(r).eachCell((cell) => { if (!md) { const t = textOf(cell.value); const hit = monthDay(t); if (hit) { md = hit; dayText = t; } } });
+      ws.getRow(r).eachCell((cell) => {
+        if (md) return;
+        const hit = monthDayOfCell(cell.value);
+        if (hit) { md = hit; dayText = textOf(cell.value); }
+        else { const t = textOf(cell.value).trim() || (cell.value instanceof Date ? cell.value.toISOString().slice(0, 10) : ''); if (t && seenTop.length < 4) seenTop.push(t.slice(0, 40)); }
+      });
     }
     if (!md) { md = monthDay(ws.name); dayText = ''; }
     let hasData = false;
     for (let r = headerRow + 1; r <= ws.rowCount && !hasData; r++) hasData = !!textOf(ws.getRow(r).getCell(col.plug).value).trim();
     if (!md && !hasData) continue;   // a blank template sheet: nothing to import and nothing to warn about
-    if (!md) { warnings.push(`Sheet "${ws.name}": no date found (expected something like "September 28" in the DATE line or the sheet name), skipped`); continue; }
+    if (!md) { warnings.push(`Sheet "${ws.name}": no date found (expected something like "September 28" in the DATE line or the sheet name${seenTop.length ? `; the rows above the table say: ${seenTop.map((x) => `"${x}"`).join(', ')}` : '; there are no rows above the table'}), skipped`); continue; }
     const probe = new Date(Date.UTC(year, md.month - 1, md.day));
     if (probe.getUTCMonth() !== md.month - 1 || probe.getUTCDate() !== md.day) { warnings.push(`Sheet "${ws.name}": ${md.month}/${md.day} is not a real date, skipped`); continue; }
     const date = `${year}-${pad(md.month)}-${pad(md.day)}`;
@@ -153,11 +224,21 @@ function plugFilter(query) {
     params.push(v.like(query.q, 80));
     where.push(`(p.plug_id ILIKE $${params.length} OR p.prog_name ILIKE $${params.length} OR p.psd ILIKE $${params.length})`);
   }
+  // exact (case-insensitive) PSD / Account By, and in_workload=yes|no (is the plug already in the Workload Tracker)
+  if (query.psd) add('lower(btrim(p.psd)) = ?', v.str(query.psd, { field: 'PSD', max: 200 }).trim().toLowerCase());
+  if (query.account_by) add('lower(btrim(p.account_by)) = ?', v.str(query.account_by, { field: 'Account By', max: 100 }).trim().toLowerCase());
+  if (query.in_workload === 'yes' || query.in_workload === 'no') {
+    where.push(`${query.in_workload === 'no' ? 'NOT ' : ''}EXISTS (SELECT 1 FROM workload_items w WHERE w.work_date = p.plug_date
+      AND upper(p.plug_id) IN (SELECT upper(btrim(x)) FROM unnest(string_to_array(w.plug_id, E'\\n')) AS x))`);
+  }
   return { where, params };
 }
 const whereSql = (where) => (where.length ? `WHERE ${where.join(' AND ')}` : '');
 
-module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked }) {
+/** The name stored as Requested By: the signed-in person's full name, else their username. */
+const whoIs = (req) => String((req.user && (req.user.full_name || '').trim()) || (req.user && req.user.username) || '');
+
+module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked, exportPalette }) {
   const router = express.Router();
   // Mounted at /api/plugs. Anyone who can open the PSD Daily Plug List page OR the Workload Tracker may read the list (the tracker
   // uses it to fill PSD / PROG. NAME); changing it needs the plugs.write action (Manager / Admin + the Plug List page), and the two
@@ -176,6 +257,12 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
   }));
 
   // ---- list: ?date=YYYY-MM-DD, or ?from=&to=, optional ?q= and ?used=1 (adds in_workload: is it already in the Workload Tracker) ----
+  // distinct PSD / Account By values, for the Filters menu
+  router.get('/options', asyncH(async (req, res) => {
+    const pick = async (col) => (await db.query(`SELECT min(btrim(${col})) AS v FROM workload_plugs WHERE btrim(${col}) <> '' GROUP BY lower(btrim(${col})) ORDER BY lower(btrim(${col}))`)).rows.map((r) => r.v);
+    res.json({ psd: await pick('psd'), account_by: await pick('account_by') });
+  }));
+
   router.get('/', asyncH(async (req, res) => {
     const { where, params } = plugFilter(req.query);
     const used = req.query.used === '1'
@@ -183,78 +270,150 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
            AND upper(p.plug_id) IN (SELECT upper(btrim(x)) FROM unnest(string_to_array(w.plug_id, E'\\n')) AS x)) AS in_workload`
       : '';
     const { limit, offset } = v.paging(req.query, { def: 3000, max: 5000 });
-    let order = req.query.order === 'desc' ? 'p.plug_date DESC, p.seq, p.id' : 'p.plug_date, p.seq, p.id';   // newest day first, or oldest first; list order within a day
+    let order = req.query.newest === '1' ? `p.plug_date ${req.query.order === 'desc' ? 'DESC' : 'ASC'}, p.id DESC`   // grouped by date, and inside a date the newest entry first (phone, and every web view that spans several days)
+      : req.query.order === 'desc' ? 'p.plug_date DESC, p.row_pos NULLS LAST, p.seq, p.id' : 'p.plug_date, p.row_pos NULLS LAST, p.seq, p.id';   // rows stay on the row they were entered in   // newest day first, or oldest first; list order within a day
     // a clicked column header (?sort=&dir=) sorts the whole result, text case-insensitively, empty values last
-    const SORTS = { plug_date: 'p.plug_date', plug_id: 'lower(p.plug_id)', prog_name: 'lower(p.prog_name)', psd: 'lower(p.psd)', account_by: 'lower(p.account_by)' };
+    const SORTS = { plug_date: 'p.plug_date', plug_id: 'lower(p.plug_id)', prog_name: 'lower(p.prog_name)', psd: 'lower(p.psd)', account_by: 'lower(p.account_by)', requested_by: 'lower(p.requested_by)' };
     if (used) SORTS.in_workload = 'in_workload';
     if (Object.prototype.hasOwnProperty.call(SORTS, req.query.sort)) {
-      order = `${SORTS[req.query.sort]} ${req.query.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, p.plug_date, p.seq, p.id`;
+      order = `${SORTS[req.query.sort]} ${req.query.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, p.plug_date, p.row_pos NULLS LAST, p.seq, p.id`;
     }
     const total = (await db.query(`SELECT count(*)::int AS n FROM workload_plugs p ${whereSql(where)}`, params)).rows[0].n;
     const { rows } = await db.query(
-      `SELECT p.id, p.plug_date, p.seq, p.list_no, p.plug_id, p.prog_name, p.psd, p.account_by, p.is_additional${used}
+      `SELECT p.id, p.plug_date, p.seq, p.row_pos, p.list_no, p.plug_id, p.prog_name, p.psd, p.account_by, p.requested_by, p.is_additional${used}
          FROM workload_plugs p ${whereSql(where)} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params
     );
-    res.json({ rows, total });
+    // one day on screen: the row numbers in use that day (also by plugs a search hides), so only the really blank rows are drawn
+    let maxPos = 0; let usedPos = [];
+    if (req.query.from && req.query.from === req.query.to && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from)) {
+      usedPos = (await db.query('SELECT row_pos FROM workload_plugs WHERE plug_date = $1 AND row_pos IS NOT NULL ORDER BY row_pos LIMIT 20000', [req.query.from])).rows.map((x) => x.row_pos);
+      maxPos = usedPos.length ? usedPos[usedPos.length - 1] : 0;
+    }
+    res.json({ rows, total, maxPos, usedPos });
   }));
 
   // ---- Excel export of what the list shows (same filters, search and sort); logged in the audit trail ----
   router.get('/export', asyncH(async (req, res) => {
     const ExcelJS = require('exceljs');
     const { where, params } = plugFilter(req.query);
-    const SORTS = { plug_date: 'p.plug_date', plug_id: 'lower(p.plug_id)', prog_name: 'lower(p.prog_name)', psd: 'lower(p.psd)', account_by: 'lower(p.account_by)' };
+    const SORTS = { plug_date: 'p.plug_date', plug_id: 'lower(p.plug_id)', prog_name: 'lower(p.prog_name)', psd: 'lower(p.psd)', account_by: 'lower(p.account_by)', requested_by: 'lower(p.requested_by)' };
     const order = Object.prototype.hasOwnProperty.call(SORTS, req.query.sort)
-      ? `${SORTS[req.query.sort]} ${req.query.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, p.plug_date, p.seq, p.id`
-      : (req.query.order === 'desc' ? 'p.plug_date DESC, p.seq, p.id' : 'p.plug_date, p.seq, p.id');
+      ? `${SORTS[req.query.sort]} ${req.query.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, p.plug_date, p.row_pos NULLS LAST, p.seq, p.id`
+      : (req.query.order === 'desc' ? 'p.plug_date DESC, p.row_pos NULLS LAST, p.seq, p.id' : 'p.plug_date, p.row_pos NULLS LAST, p.seq, p.id');
     const { rows } = await db.query(
-      `SELECT p.plug_date, p.plug_id, p.prog_name, p.psd, p.account_by, p.is_additional,
+      `SELECT p.plug_date, p.plug_id, p.prog_name, p.psd, p.account_by, p.requested_by, p.is_additional,
               EXISTS (SELECT 1 FROM workload_items w WHERE w.work_date = p.plug_date
                  AND upper(p.plug_id) IN (SELECT upper(btrim(x)) FROM unnest(string_to_array(w.plug_id, E'\n')) AS x)) AS in_workload
          FROM workload_plugs p ${whereSql(where)} ORDER BY ${order} LIMIT 20000`, params
     );
+    // Same look as the Workload Tracker's export: the web table's tinted header, thin vertical grid lines, centred cells, bold Plug ID / program,
+    // real Excel dates, coloured "In workload" text, columns sized to their content.
+    const pal = await exportPalette(db);
+    const thin = { style: 'thin', color: { argb: pal.gridBorder } };
     const wb = new ExcelJS.Workbook();
     wb.creator = 'PromoHub';
-    const ws = wb.addWorksheet('PSD Daily Plug List');
-    ws.columns = [
-      { header: 'DATE', key: 'd', width: 14 }, { header: 'PLUG ID', key: 'plug_id', width: 18 },
-      { header: 'PROG. NAME / PROJ. TITLE', key: 'prog_name', width: 40 }, { header: 'PSD', key: 'psd', width: 20 },
-      { header: 'ACCOUNT BY', key: 'account_by', width: 16 }, { header: 'IN WORKLOAD', key: 'in_workload', width: 14 },
+    const fill = (ws, rows) => {
+    const COLS = [
+      { header: 'DATE', key: 'd' }, { header: 'PLUG ID', key: 'plug_id' }, { header: 'PROG. NAME / PROJ. TITLE', key: 'prog_name' },
+      { header: 'PSD', key: 'psd' }, { header: 'REQUESTED BY', key: 'requested_by' }, { header: 'IN WORKLOAD', key: 'in_workload' },
     ];
-    for (const r of rows) {
-      ws.addRow({ d: r.plug_date instanceof Date ? r.plug_date.toISOString().slice(0, 10) : String(r.plug_date).slice(0, 10), plug_id: r.plug_id + (r.is_additional ? ' (additional)' : ''), prog_name: r.prog_name, psd: r.psd, account_by: r.account_by, in_workload: r.in_workload ? 'Yes' : 'No' });
-    }
-    ws.getRow(1).font = { bold: true };
+    ws.columns = COLS.map((c) => ({ ...c, width: 16, style: c.key === 'd' ? { numFmt: 'ddd, mmm d, yyyy' } : {} }));
+    ws.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: pal.black }, size: 11 };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pal.headerFill } };
+      cell.border = { bottom: thin, right: thin };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
     ws.views = [{ state: 'frozen', ySplit: 1 }];
-    ws.autoFilter = { from: 'A1', to: { row: 1, column: ws.columns.length } };
+    const asDate = (v) => { const t = v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10); return new Date(`${t}T00:00:00Z`); };
+    for (const r of rows) {
+      const row = ws.addRow({ d: asDate(r.plug_date), plug_id: r.plug_id, prog_name: r.prog_name || '', psd: r.psd || '', requested_by: r.requested_by || '', in_workload: r.in_workload ? 'In workload' : '—' });
+      row.alignment = { wrapText: false, vertical: 'middle', horizontal: 'center' };
+      row.eachCell({ includeEmpty: true }, (cell) => { cell.border = { right: thin }; });
+      const pid = row.getCell('plug_id');
+      pid.font = { bold: true };
+      if (r.is_additional) pid.value = { richText: [{ text: `${r.plug_id}  `, font: { bold: true, color: { argb: pal.black } } }, { text: 'Added', font: { bold: true, color: { argb: pal.pillFg('orange') } } }] };   // the “Added” chip: listed under “Additional for …”
+      row.getCell('prog_name').font = { bold: true };
+      if (r.in_workload) row.getCell('in_workload').font = { bold: true, color: { argb: pal.pillFg('green') } };
+      else row.getCell('in_workload').font = { color: { argb: pal.pillFg('gray') } };
+    }
+    // size every column to its longest value (plus a margin for wide capitals), so nothing is cropped
+    const textLen = (v) => (v == null ? 0 : v.richText ? v.richText.map((t) => t.text).join('').length : v instanceof Date ? 18 : String(v).length);
+    ws.columns.forEach((column) => {
+      let max = String(column.header).length;
+      column.eachCell({ includeEmpty: false }, (cell) => { if (cell.fullAddress.row > 1) max = Math.max(max, textLen(cell.value)); });
+      column.width = Math.ceil(max * 1.15) + 3;
+    });
+    ws.autoFilter = { from: 'A1', to: { row: 1, column: COLS.length } };
+    };
+    if (truthy(req.query.by_date) && rows.length) groupByDate(rows, (r) => r.plug_date).forEach((g) => fill(wb.addWorksheet(g.name), g.rows));
+    else fill(wb.addWorksheet('PSD Daily Plug List'), rows);
     const buffer = await wb.xlsx.writeBuffer();
-    const filename = `PSD_Plug_List_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `${['PSD_Plug_List', dateTag(req.query.from, req.query.to)].filter(Boolean).join('_')}${truthy(req.query.by_date) && rows.length ? '_tabs' : ''}.xlsx`;
     await audit(req, 'workload.plugs_export', 'workload_plug', null, { rows: rows.length, truncated: rows.length >= 20000, filters: { date: req.query.date, from: req.query.from, to: req.query.to, q: req.query.q }, file: filename });
     res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="${filename}"` });
     res.send(Buffer.from(buffer));
   }));
 
-  // ---- import the PSD's daily plug list workbook ----
-  router.post('/import', requireAction('plugs.write'), upload.single('file'), oneImportAtATime, asyncH(async (req, res) => {
+  // The uploaded workbook, loaded, and the year its days belong to (typed in, else a year in the file name, else this year).
+  const readUpload = async (req, info) => {
+    if (!req.file) throw new HttpError(400, 'No file uploaded');
+    let ExcelJS;
+    try { ExcelJS = require('exceljs'); } catch (e) {
+      throw new HttpError(501, 'Import needs the "exceljs" package. Run "npm install" on the server, then restart.');
+    }
+    await assertSafeXlsx(req.file.buffer, req.file.originalname);   // file type + unpacked-size limits, before anything is loaded into memory
+    const wb = new ExcelJS.Workbook();
+    try { await wb.xlsx.load(req.file.buffer); } catch (e) { throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)'); }
+    // the list has no year in it: use the one typed in, else a year in the file name ("September_2026_Plug_List"), else this year
+    const typed = parseInt(req.body && req.body.year, 10);
+    const inName = /(?<!\d)(20\d{2})(?!\d)/.exec(req.file.originalname || '');   // not \b: "September_2026_Plug_List" has no word boundary around the year
+    const year = typed || (inName ? Number(inName[1]) : new Date().getFullYear());
+    if (year < 2000 || year > 2100) throw new HttpError(400, 'Year must be between 2000 and 2100');
+    if (info) info.year = year;
+    return { wb, year };
+  };
+
+  // Which tabs to import: the form field "sheets" is a JSON array of tab names. Not sent (or empty text) = every tab.
+  const tabChoice = (raw) => {
+    if (raw === undefined || raw === null || raw === '') return null;
+    let list = raw;
+    if (typeof raw === 'string') { try { list = JSON.parse(raw); } catch (e) { throw new HttpError(400, 'The chosen tabs could not be read'); } }
+    if (!Array.isArray(list) || !list.length || list.length > 500 || list.some((x) => typeof x !== 'string')) throw new HttpError(400, 'Choose at least one tab to import');
+    return [...new Set(list)];
+  };
+
+  // ---- step 1 of an import: which tabs does the workbook have? (nothing is saved) ----
+  // Returns every tab that has plugs, with the day(s) it covers, so the person can import all of them or tick just some.
+  router.post('/import/preview', requireAction('plugs.write'), upload.single('file'), virusScan, oneImportAtATime, asyncH(async (req, res) => {
+    const { wb, year } = await readUpload(req, null);
+    const { sheets, warnings } = parsePlugWorkbook(wb, year);
+    const tabs = [];
+    for (const sh of sheets) {
+      let t = tabs.find((x) => x.sheet === sh.sheet);
+      if (!t) { t = { sheet: sh.sheet, days: 0, plugs: 0, from: sh.date, to: sh.date }; tabs.push(t); }
+      t.days += 1;
+      t.plugs += sh.plugs.length;
+      if (sh.date < t.from) t.from = sh.date;
+      if (sh.date > t.to) t.to = sh.date;
+    }
+    res.json({ ok: true, year, tabs, warnings: warnings.slice(0, 20) });
+  }));
+
+  // ---- import the PSD's daily plug list workbook (every tab, or only the tabs chosen in "sheets") ----
+  router.post('/import', requireAction('plugs.write'), upload.single('file'), virusScan, oneImportAtATime, asyncH(async (req, res) => {
     const t0 = Date.now();
     const info = { target: 'plug list', file: req.file ? req.file.originalname : null, bytes: req.file ? req.file.size : 0 };
     try {
-      if (!req.file) throw new HttpError(400, 'No file uploaded');
-      let ExcelJS;
-      try { ExcelJS = require('exceljs'); } catch (e) {
-        throw new HttpError(501, 'Import needs the "exceljs" package. Run "npm install" on the server, then restart.');
-      }
-      await assertSafeXlsx(req.file.buffer, req.file.originalname);   // file type + unpacked-size limits, before anything is loaded into memory
-      const wb = new ExcelJS.Workbook();
-      try { await wb.xlsx.load(req.file.buffer); } catch (e) { throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)'); }
-      // the list has no year in it: use the one typed in, else a year in the file name ("September_2026_Plug_List"), else this year
-      const typed = parseInt(req.body && req.body.year, 10);
-      const inName = /(?<!\d)(20\d{2})(?!\d)/.exec(req.file.originalname || '');   // not \b: "September_2026_Plug_List" has no word boundary around the year
-      const year = typed || (inName ? Number(inName[1]) : new Date().getFullYear());
-      if (year < 2000 || year > 2100) throw new HttpError(400, 'Year must be between 2000 and 2100');
-      info.year = year;
+      const only = tabChoice(req.body && req.body.sheets);
+      info.tabs = only ? `selected (${only.length})` : 'all';
+      const { wb, year } = await readUpload(req, info);
 
-      const { sheets, warnings } = parsePlugWorkbook(wb, year);
+      const { sheets, warnings } = parsePlugWorkbook(wb, year, only);
       if (!sheets.length) {
+        if (only) {
+          throw new HttpError(400, `No plugs found on the ${only.length === 1 ? 'tab' : 'tabs'} you chose (${only.slice(0, 5).map((x) => `"${x}"`).join(', ')}${only.length > 5 ? ', …' : ''}).${warnings.length ? ` (${warnings[0]})` : ''}`);
+        }
         throw new HttpError(400, 'No plugs found — expected one sheet per day with the columns NO, PLUG ID, PROG NAME/PROJ TITLE, PSD, Account By '
           + `and a date such as "September 28" in the DATE line or the sheet name.${warnings.length ? ` (${warnings[0]})` : ''}`);
       }
@@ -263,76 +422,156 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
         for (const sh of sheets) {
           const p = sh.plugs;
           const { rows } = await c.query(
-            `INSERT INTO workload_plugs (plug_date, seq, list_no, plug_id, prog_name, psd, account_by, is_additional, source_file, created_by)
-             SELECT $1::date, t.seq, t.list_no, t.plug_id, t.prog_name, t.psd, t.account_by, t.addl, $2, $3
-               FROM unnest($4::int[], $5::int[], $6::text[], $7::text[], $8::text[], $9::text[], $10::bool[]) AS t(seq, list_no, plug_id, prog_name, psd, account_by, addl)
+            `INSERT INTO workload_plugs (plug_date, seq, list_no, plug_id, prog_name, psd, account_by, is_additional, source_file, created_by, requested_by, row_pos)
+             SELECT $1::date, t.seq, t.list_no, t.plug_id, t.prog_name, t.psd, t.account_by, t.addl, $2, $3, COALESCE(NULLIF(t.req, ''), $11),
+                    (SELECT COALESCE(MAX(x.row_pos), 0) FROM workload_plugs x WHERE x.plug_date = $1::date) + row_number() OVER (ORDER BY t.seq)
+               FROM unnest($4::int[], $5::int[], $6::text[], $7::text[], $8::text[], $9::text[], $10::bool[], $12::text[]) AS t(seq, list_no, plug_id, prog_name, psd, account_by, addl, req)
              ON CONFLICT (plug_date, plug_id, prog_name, psd)
              DO UPDATE SET seq = EXCLUDED.seq, list_no = EXCLUDED.list_no, account_by = EXCLUDED.account_by,
                            is_additional = EXCLUDED.is_additional, source_file = EXCLUDED.source_file, updated_at = now()
              RETURNING (xmax = 0) AS inserted`,
             [sh.date, req.file.originalname || null, req.user.id, p.map((x) => x.seq), p.map((x) => x.list_no), p.map((x) => x.plug_id),
-              p.map((x) => x.prog_name), p.map((x) => x.psd), p.map((x) => x.account_by), p.map((x) => x.is_additional)]
+              p.map((x) => x.prog_name), p.map((x) => x.psd), p.map((x) => x.account_by), p.map((x) => x.is_additional), whoIs(req), p.map((x) => x.requested_by || '')]
           );
           const added = rows.filter((r) => r.inserted).length;
           result.push({ sheet: sh.sheet, date: sh.date, plugs: p.length, added, existing: p.length - added, additional: sh.additional, skipped: sh.skippedNoId });
         }
       });
       const filled = await backfillWorkload(db, { from: result[0].date, to: result[result.length - 1].date, userId: req.user.id });   // rows already in the tracker with blank PSD / Prog. Name
+      const copied = await autoCopy(req, 'p.plug_date = ANY($1::date[])', [result.map((r) => r.date)]);   // new plugs go straight into the Workload page
       const total = result.reduce((o, s) => ({ plugs: o.plugs + s.plugs, added: o.added + s.added, skipped: o.skipped + s.skipped }), { plugs: 0, added: 0, skipped: 0 });
-      await emitTransfer(req, 'workload.plugs_import', { ...info, days: result.length, from: result[0].date, to: result[result.length - 1].date, ...total, workloadRowsFilled: filled, warnings: warnings.slice(0, 20), ms: Date.now() - t0 });
-      res.json({ ok: true, year, days: result.length, workloadRowsFilled: filled, ...total, existing: total.plugs - total.added, sheets: result, warnings: warnings.slice(0, 20) });
+      await notifyAdded(req, total.added, `${total.added} plug${total.added === 1 ? '' : 's'} (${result[0].date === result[result.length - 1].date ? result[0].date : `${result[0].date} to ${result[result.length - 1].date}`}, imported from ${info.file || 'a file'})`);
+      await emitTransfer(req, 'workload.plugs_import', { ...info, days: result.length, from: result[0].date, to: result[result.length - 1].date, ...total, workloadRowsFilled: filled, copiedToWorkload: copied ? copied.created : null, warnings: warnings.slice(0, 20), ms: Date.now() - t0 });
+      res.json({ ok: true, year, tabs: only ? 'selected' : 'all', days: result.length, workloadRowsFilled: filled, copied, ...total, existing: total.plugs - total.added, sheets: result, warnings: warnings.slice(0, 20) });
     } catch (e) {
       await emitTransfer(req, 'workload.plugs_import_failed', { ...info, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
       throw e;
     }
   }));
 
-  // ---- add / edit / delete a single plug by hand ----
-  const plugBody = (body) => ({
-    plug_date: v.date(body.plug_date, { field: 'Date', required: true }),
-    plug_id: (v.str(body.plug_id, { field: 'Plug ID', max: 200, required: true }) || '').replace(/\s+/g, ' ').trim(),
-    prog_name: v.str(body.prog_name, { field: 'PROG. NAME / PROJ. TITLE', max: 300 }) || '',
-    psd: v.str(body.psd, { field: 'PSD', max: 200 }) || '',
-    account_by: v.str(body.account_by, { field: 'Account By', max: 100 }) || '',
-  });
-  const dupe = (e) => { if (e && e.code === '23505') throw new HttpError(409, 'That plug (same Plug ID, program and PSD) is already on this day\'s list'); throw e; };
-
-  const checkProg = async (name, current) => {
-    if (!name || name === current) return;
-    const { rows } = await db.query("SELECT 1 FROM dropdown_options WHERE category='program' AND value=$1 AND is_active", [name]);
-    if (!rows.length) throw new HttpError(400, `PROG. NAME / PROJ. TITLE "${name}" is not a valid option`);
+  // Everyone who can open the Plug List hears when plugs are added (never the person who added them). Best effort: a failed notification never fails the save.
+  const notifyAdded = async (req, count, what) => {
+    if (!count) return;
+    try {
+      await notifyPageUsers('plugs', {
+        title: `${count} new plug${count === 1 ? '' : 's'} added`,
+        body: `${req.user.full_name} added ${what} to the PSD Daily Plug List.`,
+        link: '/plug-list', kind: 'plugs_added',
+      }, { excludeUserId: req.user.id, linkIf: { key: 'workload', link: '/workload' } });   // new plugs are copied into Workload: whoever can open it lands there
+    } catch (e) { console.error('[plugs] notification failed:', e.message); }
   };
 
+  // ---- add / edit / delete a single plug by hand ----
+  // `blankOk`: a row started in a blank spare row may exist with no Plug ID yet (the Plug ID is filled in next)
+  const plugBody = (body, blankOk = false) => ({
+    plug_date: v.date(body.plug_date, { field: 'Date', required: true }),
+    plug_id: (v.str(body.plug_id, { field: 'Plug ID', max: 200, required: !blankOk }) || '').replace(/\s+/g, ' ').trim(),
+    prog_name: v.str(body.prog_name, { field: 'PROG. NAME / PROJ. TITLE', max: 300 }) || '',
+    psd: v.str(body.psd, { field: 'PSD', max: 200 }) || '',
+    // Account By is no longer shown or edited in the app; when a request leaves it out, an edit keeps what is stored (null = keep)
+    account_by: body.account_by === undefined ? null : (v.str(body.account_by, { field: 'Account By', max: 100 }) || ''),
+  });
+  // The row a new plug takes in its day: the one it was typed into (when free), else the next after the day's last. Call inside a transaction holding the table lock.
+  const posFor = async (c, date, want) => {
+    if (Number.isInteger(want) && want >= 1 && want <= 1000000) {
+      const taken = (await c.query('SELECT 1 FROM workload_plugs WHERE plug_date = $1 AND row_pos = $2', [date, want])).rowCount > 0;
+      if (!taken) return want;
+    }
+    return (await c.query('SELECT COALESCE(MAX(row_pos), 0) + 1 AS p FROM workload_plugs WHERE plug_date = $1', [date])).rows[0].p;
+  };
+  const LOCK_PLUGS = 'LOCK TABLE workload_plugs IN SHARE ROW EXCLUSIVE MODE';
+  const dupe = (e) => { if (e && e.code === '23505') throw new HttpError(409, 'That plug (same Plug ID, program and PSD) is already on this day\'s list'); throw e; };
+
+
   router.post('/', requireAction('plugs.write'), asyncH(async (req, res) => {
-    const b = plugBody(req.body || {});
-    await checkProg(b.prog_name, null);
+    const b = plugBody(req.body || {}, (req.body || {}).partial === true);
     let row;
     try {
-      ({ rows: [row] } = await db.query(
-        `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by)
-         VALUES ($1, (SELECT COALESCE(MAX(seq), 0) + 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6) RETURNING id`,
-        [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by, req.user.id]
-      ));
+      row = await db.tx(async (c) => {
+        await c.query(LOCK_PLUGS);
+        const pos = await posFor(c, b.plug_date, (req.body || {}).row_pos);
+        return (await c.query(
+          `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by, requested_by, row_pos)
+           VALUES ($1, (SELECT COALESCE(MIN(seq), 1) - 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6, $7, $8) RETURNING id`,
+          [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by || '', req.user.id, whoIs(req), pos]
+        )).rows[0];
+      });
     } catch (e) { dupe(e); }
     await audit(req, 'workload.plug_add', 'workload_plug', row.id, { plug_date: b.plug_date, plug_id: b.plug_id });
+    if (!b.plug_id) return res.status(201).json({ id: row.id, workloadRowsFilled: 0, copied: null });   // no Plug ID yet: nothing to copy to the Workload or announce until it has one
     const filled = await backfillWorkload(db, { from: b.plug_date, to: b.plug_date, userId: req.user.id });
-    res.status(201).json({ id: row.id, workloadRowsFilled: filled });
+    const copied = await autoCopy(req, 'p.id = $1', [row.id]);
+    await notifyAdded(req, 1, `${b.plug_id} (${b.plug_date})`);
+    res.status(201).json({ id: row.id, workloadRowsFilled: filled, copied });
+  }));
+
+  // Excel mode: save a whole grid at once — rows with an id are updated, rows without are added; all or nothing (an error names the grid row).
+  const MAX_BATCH = 500;
+  router.post('/batch', requireAction('plugs.write'), asyncH(async (req, res) => {
+    const list = req.body && req.body.rows;
+    if (!Array.isArray(list) || !list.length) throw new HttpError(400, 'No rows to save');
+    if (list.length > MAX_BATCH) throw new HttpError(400, `Save at most ${MAX_BATCH} rows at a time`);
+    const out = await db.tx(async (c) => {
+      await c.query(LOCK_PLUGS);
+      const addedIds = [];
+      const readyIds = [];   // the new ones (and the ones that just got their Plug ID) that have a Plug ID (a row still without one is not copied to the Workload or announced yet)
+      const days = new Set();
+      let updated = 0;
+      for (let i = 0; i < list.length; i++) {   // in order: a block of new plugs takes consecutive rows
+        const row = list[i] || {};
+        try {
+          const b = plugBody(row, row.partial === true);
+          days.add(b.plug_date);
+          if (row.id) {
+            const id = v.id(row.id);
+            const cur = await c.query('SELECT prog_name, plug_id FROM workload_plugs WHERE id=$1 FOR UPDATE', [id]);
+            if (!cur.rows.length) throw new HttpError(404, 'Plug no longer exists (deleted by someone else?)');
+            await c.query(`UPDATE workload_plugs SET row_pos = CASE WHEN plug_date = $2::date THEN row_pos ELSE (SELECT COALESCE(MAX(x.row_pos), 0) + 1 FROM workload_plugs x WHERE x.plug_date = $2::date) END,
+                plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=COALESCE($6, account_by), updated_at=now() WHERE id=$1`,
+              [id, b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by]);
+            await audit(req, 'workload.plug_edit', 'workload_plug', id, { plug_date: b.plug_date, plug_id: b.plug_id }, c);
+            updated++;
+            if (b.plug_id && !String(cur.rows[0].plug_id || '').trim()) readyIds.push(id);   // it just got its Plug ID: now it is a real plug (copied to the Workload and announced)
+          } else {
+            const ins = await c.query(
+              `INSERT INTO workload_plugs (plug_date, seq, plug_id, prog_name, psd, account_by, source_file, created_by, requested_by, row_pos)
+               VALUES ($1, (SELECT COALESCE(MIN(seq), 1) - 1 FROM workload_plugs WHERE plug_date = $1), $2, $3, $4, $5, 'added by hand', $6, $7, $8) RETURNING id`,
+              [b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by || '', req.user.id, whoIs(req), await posFor(c, b.plug_date, row.row_pos)]);   // the row it was typed into, else after the day's last
+            await audit(req, 'workload.plug_add', 'workload_plug', ins.rows[0].id, { plug_date: b.plug_date, plug_id: b.plug_id }, c);
+            addedIds.push(ins.rows[0].id);
+            if (b.plug_id) readyIds.push(ins.rows[0].id);
+          }
+        } catch (e) {
+          if (e && e.code === '23505') throw new HttpError(409, `Row ${i + 1}: that plug (same Plug ID, program and PSD) is already on this day's list`);
+          if (e instanceof HttpError) throw new HttpError(e.status, `Row ${i + 1}: ${e.message}`);
+          throw e;
+        }
+      }
+      return { added: addedIds.length, updated, addedIds, readyIds, days: [...days].sort() };
+    });
+    const filled = await backfillWorkload(db, { from: out.days[0], to: out.days[out.days.length - 1], userId: req.user.id });
+    const copied = out.readyIds.length ? await autoCopy(req, 'p.id = ANY($1::bigint[])', [out.readyIds]) : null;
+    if (out.readyIds.length) await notifyAdded(req, out.readyIds.length, `${out.readyIds.length} plug${out.readyIds.length === 1 ? '' : 's'} (${out.days[0]}${out.days.length > 1 ? ` to ${out.days[out.days.length - 1]}` : ''})`);
+    res.json({ ok: true, added: out.added, updated: out.updated, addedIds: out.addedIds, workloadRowsFilled: filled, copied });
   }));
 
   router.put('/:id(\\d+)', requireAction('plugs.write'), asyncH(async (req, res) => {
-    const b = plugBody(req.body || {});
-    const cur = await db.query('SELECT prog_name FROM workload_plugs WHERE id=$1', [req.params.id]);
-    await checkProg(b.prog_name, cur.rows[0] && cur.rows[0].prog_name);
+    const cur = await db.query('SELECT plug_id FROM workload_plugs WHERE id=$1', [req.params.id]);
+    const wasBlank = cur.rows.length > 0 && !String(cur.rows[0].plug_id || '').trim();   // still being filled in: its Plug ID may stay empty while the other cells are typed
+    const b = plugBody(req.body || {}, wasBlank);
     try {
       const r = await db.query(
-        `UPDATE workload_plugs SET plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=$6, updated_at=now() WHERE id=$1`,
+        `UPDATE workload_plugs SET row_pos = CASE WHEN plug_date = $2::date THEN row_pos ELSE (SELECT COALESCE(MAX(x.row_pos), 0) + 1 FROM workload_plugs x WHERE x.plug_date = $2::date) END,
+               plug_date=$2, plug_id=$3, prog_name=$4, psd=$5, account_by=COALESCE($6, account_by), updated_at=now() WHERE id=$1`,
         [req.params.id, b.plug_date, b.plug_id, b.prog_name, b.psd, b.account_by]
       );
       if (!r.rowCount) throw new HttpError(404, 'Plug not found');
     } catch (e) { dupe(e); }
     await audit(req, 'workload.plug_edit', 'workload_plug', req.params.id, { plug_date: b.plug_date, plug_id: b.plug_id });
-    const filled = await backfillWorkload(db, { from: b.plug_date, to: b.plug_date, userId: req.user.id });
-    res.json({ ok: true, workloadRowsFilled: filled });
+    const filled = b.plug_id ? await backfillWorkload(db, { from: b.plug_date, to: b.plug_date, userId: req.user.id }) : 0;
+    let copied = null;
+    if (wasBlank && b.plug_id) { copied = await autoCopy(req, 'p.id = $1', [req.params.id]); await notifyAdded(req, 1, `${b.plug_id} (${b.plug_date})`); }   // it just got its Plug ID: now it is a real plug
+    res.json({ ok: true, workloadRowsFilled: filled, copied });
   }));
 
   router.delete('/:id(\\d+)', requireAction('plugs.write'), asyncH(async (req, res) => {
@@ -354,7 +593,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
 
   // ---- delete all: the selected day's list, or every day's (Admin only). Workload rows already made from plugs are not touched. ----
   router.post('/delete-all', requireAction('plugs.write'), asyncH(async (req, res) => {
-    if (!req.user || req.user.role !== 'Admin') throw new HttpError(403, 'Only an Admin can delete the whole plug list');
+    if (!req.user || !['Admin', 'System Admin'].includes(req.user.role)) throw new HttpError(403, 'Only an Admin can delete the whole plug list');
     const body = req.body || {};
     const scope = body.scope === 'all' ? 'all' : 'range';   // 'range' = what a view shows: ?from / ?to / ?q (a single day is from = to)
     let filters = null;
@@ -370,8 +609,73 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     res.json({ ok: true, deleted: result.rowCount });
   }));
 
-  // ---- copy a day's plugs (or the chosen ones) into the Workload Tracker: one new row per plug not already there ----
-  router.post('/copy', requireAction('workload.write'), asyncH(async (req, res) => {
+  // Delete the plugs ticked in the table (Table mode "Delete Selected"). Workload rows already made from them are not touched.
+  router.post('/delete-selected', requireAction('plugs.write'), asyncH(async (req, res) => {
+    const list = req.body && req.body.ids;
+    if (!Array.isArray(list) || !list.length) throw new HttpError(400, 'No plugs selected');
+    if (list.length > 1000) throw new HttpError(400, 'Select at most 1000 plugs at a time');
+    const ids = [...new Set(list.map((x) => v.id(x)))];
+    const out = await db.tx(async (c) => {
+      const { rows } = await c.query('DELETE FROM workload_plugs WHERE id = ANY($1::bigint[]) RETURNING id, plug_date, plug_id', [ids]);
+      for (const r of rows) await audit(req, 'workload.plug_delete', 'workload_plug', r.id, { plug_date: r.plug_date, plug_id: r.plug_id, batch: true }, c);
+      return rows.length;
+    });
+    res.json({ ok: true, deleted: out });
+  }));
+
+  // ---- copy a day's plugs (or the chosen ones) into the Workload Tracker: one new row per plug LINE not already there ----
+  // The shared core of "Copy to Workload". A plug ID listed twice on one day (different PSDs, say) is two assignments, so it gets two rows. A line is
+  // "already there" when the day already has that many rows for the Plug ID (matched in any letter case, also inside a multi-line Plug ID cell): the
+  // first N lines are taken to be those N rows, so copying again never doubles anything up. Days in a locked period are skipped. Used by the Copy
+  // button and, automatically, after an import or a new plug.
+  const copyPlugs = async (req, plugs, units) => {
+    const locks = await loadLocks(db);
+    const dates = [...new Set(plugs.map((p) => p.plug_date))];
+    const { rows: have } = await db.query(
+      `SELECT w.work_date AS d, upper(btrim(x)) AS id, count(DISTINCT w.id)::int AS n FROM workload_items w, unnest(string_to_array(w.plug_id, E'\\n')) AS x
+        WHERE w.work_date = ANY($1::date[]) GROUP BY 1, 2`, [dates]
+    );
+    const rowsFor = new Map(have.map((r) => [`${r.d}|${r.id}`, r.n]));
+    const lineNo = new Map();
+    const customCols = await loadCustomCols(db);
+    let created = 0;
+    let already = 0;
+    let locked = 0;
+    const errors = [];
+    await db.tx(async (c) => {
+      for (const p of plugs) {
+        const key = `${p.plug_date}|${p.plug_id.toUpperCase()}`;
+        const nth = (lineNo.get(key) || 0) + 1;
+        lineNo.set(key, nth);
+        if (nth <= (rowsFor.get(key) || 0)) { already++; continue; }
+        try { assertNotLocked(locks, p.plug_date); } catch (e) { locked++; continue; }   // a day inside a locked period is skipped
+        try {
+          const rec = await parseRow(c, { work_date: p.plug_date, units_concerned: units, plug_id: p.plug_id, psd: p.psd, prog_name: p.prog_name }, null, customCols, { allowBlankUnits: true });
+          const id = await insertRow(c, rec, req.user.id);
+          await audit(req, 'workload.create', 'workload_item', id, { from_plug_list: true, plug_id: p.plug_id }, c);
+          created++;
+        } catch (e) {
+          errors.push(`${p.plug_date} ${p.plug_id}: ${e instanceof HttpError ? e.message : 'unexpected error'}`);
+        }
+      }
+    });
+    return { created, already, locked, errors, dates };
+  };
+  // After an import or a hand-added plug: the same copy, done for you. Quiet on failure (the plug list change itself already succeeded).
+  // Done whoever adds the plugs, even someone who cannot open the Workload Tracker (an Editor with only the PSD Daily Plug List): the plug list
+  // feeds the tracker, so the rows must arrive either way. (The manual Copy button still needs the Workload write action.)
+  const autoCopy = async (req, where, params) => {
+    try {
+      const { rows } = await db.query(`SELECT p.id, p.plug_date, p.plug_id, p.prog_name, p.psd FROM workload_plugs p WHERE ${where} ORDER BY p.plug_date, p.seq, p.id LIMIT 5000`, params);
+      if (!rows.length) return { created: 0, already: 0, locked: 0, errors: [] };
+      const out = await copyPlugs(req, rows, null);
+      await logRun(req, 'workload.plugs_copy', { mode: 'automatic', days: out.dates.length, from: out.dates[0], to: out.dates[out.dates.length - 1], units: '(blank)', requested: rows.length,
+        created: out.created, alreadyInWorkload: out.already, skippedLocked: out.locked, errors: out.errors.slice(0, 20) });
+      return { created: out.created, already: out.already, locked: out.locked, errors: out.errors.slice(0, 5) };
+    } catch (e) { console.error('[plugs] automatic copy failed', e.message); return null; }
+  };
+
+  router.post('/copy', requireAction('plugs.write'), asyncH(async (req, res) => {
     const t0 = Date.now();
     const body = req.body || {};
     // Units Concerned is NOT known from the plug list: rows are made with it blank (they show under All until someone sets it).
@@ -390,33 +694,7 @@ module.exports = function build({ UNITS, canonUnit = (x) => x, parseRow, insertR
     const truncated = found.rows.length > LIMIT;
     const plugs = found.rows.slice(0, LIMIT);
     if (!plugs.length) return res.json({ ok: true, created: 0, already: 0, locked: 0, errors: [], truncated: false });
-    const locks = await loadLocks(db);
-    const dates = [...new Set(plugs.map((p) => p.plug_date))];
-    const { rows: have } = await db.query(
-      `SELECT DISTINCT w.work_date AS d, upper(btrim(x)) AS id FROM workload_items w, unnest(string_to_array(w.plug_id, E'\\n')) AS x WHERE w.work_date = ANY($1::date[])`, [dates]
-    );
-    const taken = new Set(have.map((r) => `${r.d}|${r.id}`));
-    const customCols = await loadCustomCols(db);
-    let created = 0;
-    let already = 0;
-    let locked = 0;
-    const errors = [];
-    await db.tx(async (c) => {
-      for (const p of plugs) {
-        const key = `${p.plug_date}|${p.plug_id.toUpperCase()}`;
-        if (taken.has(key)) { already++; continue; }
-        try { assertNotLocked(locks, p.plug_date); } catch (e) { locked++; continue; }   // a day inside a locked period is skipped
-        try {
-          const rec = await parseRow(c, { work_date: p.plug_date, units_concerned: units, plug_id: p.plug_id, psd: p.psd, prog_name: p.prog_name }, null, customCols, { allowBlankUnits: true });
-          const id = await insertRow(c, rec, req.user.id);
-          await audit(req, 'workload.create', 'workload_item', id, { from_plug_list: true, plug_id: p.plug_id }, c);
-          taken.add(key);
-          created++;
-        } catch (e) {
-          errors.push(`${p.plug_date} ${p.plug_id}: ${e instanceof HttpError ? e.message : 'unexpected error'}`);
-        }
-      }
-    });
+    const { created, already, locked, errors, dates } = await copyPlugs(req, plugs, units);
     await logRun(req, 'workload.plugs_copy', {
       mode: ids ? 'selected' : 'view', days: dates.length, from: dates[0], to: dates[dates.length - 1], units: units || '(blank)', requested: plugs.length,
       created, alreadyInWorkload: already, skippedLocked: locked, truncated, errors: errors.slice(0, 20), ms: Date.now() - t0,

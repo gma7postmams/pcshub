@@ -47,8 +47,8 @@ function UploadCard({ busy, uploadPct, onAnalyze }) {
           onDrop={(e) => { e.preventDefault(); setOver(false); pick(e.dataTransfer.files[0]); }}
           onClick={() => !busy && input.current.click()}
         >
-          <input ref={input} type="file" accept=".zip,application/zip" hidden onChange={(e) => { pick(e.target.files[0]); e.target.value = ''; }} />
-          {file ? <><strong>{file.name}</strong><span className="dim">{fmtBytes(file.size)}</span></> : <span className="dim">Drop a backup .zip here, or click to browse</span>}
+          <input ref={input} type="file" accept=".zip,.enc,application/zip" hidden onChange={(e) => { pick(e.target.files[0]); e.target.value = ''; }} />
+          {file ? <><strong>{file.name}</strong><span className="dim">{fmtBytes(file.size)}</span></> : <span className="dim">Drop a backup (.zip or .zip.enc) here, or click to browse</span>}
         </div>
         {busy && uploadPct != null && uploadPct < 1 ? <progress className="mt-12" max="1" value={uploadPct} style={{ width: '100%' }} /> : null}
         <div className="row mt-12">
@@ -189,8 +189,8 @@ function Report({ a, onDiscard, onRestore }) {
       <div className="card mb-12">
         <div className="card-head">
           <h2>Restore readiness report</h2>
-          <button type="button" className="btn sm" onClick={onDiscard}>Discard analysis</button>
-          <button type="button" className="btn danger sm" disabled={r.readiness.state === 'blocked'} title={r.readiness.state === 'blocked' ? 'Resolve the failed checks first' : undefined} onClick={onRestore}>Restore</button>
+          <button type="button" className="btn" onClick={onDiscard}>Discard analysis</button>
+          <button type="button" className="btn danger" disabled={r.readiness.state === 'blocked'} title={r.readiness.state === 'blocked' ? 'Resolve the failed checks first' : undefined} onClick={onRestore}>Restore</button>
         </div>
         <div className="card-pad">
           <div className="readiness">
@@ -336,7 +336,7 @@ export default function RestoreTab({ onRestoreStarted }) {
 
   return (
     <>
-      <div className="alert info mb-12">Upload a backup to see exactly what a restore would change, before anything is touched. This analysis never modifies the live system.</div>
+      <div className="alert info restore-intro">Upload a backup to see exactly what a restore would change, before anything is touched. This analysis never modifies the live system.</div>
       <UploadCard busy={uploading || Boolean(running)} uploadPct={pct} onAnalyze={analyze} />
       {running ? <div className="card mb-12"><div className="card-pad"><strong>Analyzing…</strong> <span className="dim">{analysis.stage}</span></div></div> : null}
       {analysis && analysis.status === 'failed' ? <div className="alert err mb-12">Analysis failed: {analysis.error}</div> : null}

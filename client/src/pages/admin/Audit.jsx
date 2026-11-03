@@ -1,22 +1,51 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { get } from '../../lib/api.js';
 import { fmtBytes, fmtDateTime } from '../../lib/util.js';
-import { Empty, useDebounced } from '../../components/ui.jsx';
+import { Empty, Pager, usePageSize, useDebounced } from '../../components/ui.jsx';
+import BlockIp from '../../components/BlockIp.jsx';
+import { Geo, GeoNote } from '../../components/Geo.jsx';
 
-const PAGE = 50;
 
 const ACTION_LABELS = {
   'auth.login': 'User Login',
   'auth.logout': 'User Logout',
   'auth.login_failed': 'Failed Login',
   'auth.locked': 'Account Locked',
+  'auth.password_forgot': 'Password Reset Code Requested',
+  'auth.password_reset_self': 'Password Reset (Forgot Password)',
   'auth.login_blocked_locked': 'Login Blocked (Locked Account)',
+  'security.denied': 'Blocked (No Permission)',
+  'security.unauthenticated': 'Blocked (Not Signed In)',
+  'security.csrf_blocked': 'Blocked (Not From The App)',
+  'security.rate_limited': 'Blocked (Rate Limit)',
+  'security.alert': 'Security Alert',
+  'security.ip_blocked': 'Blocked (IP Block List)',
+  'security.probe': 'Blocked (Scanner Probe)',
+  'security.ip_auto_blocked': 'IP Blocked Automatically',
+  'security.malware_blocked': 'Blocked (Virus In Upload)',
+  'security.scan_failed': 'Upload Not Scanned (Scanner Down)',
+  'security.scan_skipped': 'Upload Not Scanned',
+  'auth.idle_signout': 'Signed Out (Idle Admin)',
+  'admin.ip_rule_add': 'IP Rule Added',
+  'admin.ip_rule_remove': 'IP Rule Removed',
+  'admin.ip_rule_import': 'IP Rules Imported',
+  'admin.ip_rule_export': 'IP Rules Exported',
+  'admin.ip_auto_unblock': 'Address Let Back In',
+  'auth.login_blocked_maintenance': 'Login Blocked (Maintenance Mode)',
+  'admin.group_export': 'Exported Groups',
+  'admin.group_import': 'Imported Groups',
+  'admin.user_export': 'Exported Users',
+  'admin.user_import': 'Imported Users',
+  'admin.maintenance_on': 'Maintenance Mode Turned On',
+  'admin.maintenance_off': 'Maintenance Mode Turned Off',
 
   'ingest.create': 'Created Ingest Record',
   'ingest.export': 'Exported Ingest Records',
+  'ingest.import': 'Imported Ingest Records',
   'workload.plugs_export': 'Exported Plug List',
   'ingest.update': 'Updated Ingest Record',
   'ingest.delete': 'Deleted Ingest Record',
+  'ingest.delete_all': 'Deleted Ingest Records (Select all)',
   'ingest.edit_blocked': 'Ingest Edit Refused (CM Locked)',
   'ingest.delete_blocked': 'Ingest Delete Refused',
   'ingest.send_for_approval': 'Submitted For Approval',
@@ -61,6 +90,8 @@ const ACTION_LABELS = {
   'workload.export_failed': 'Workload Export Failed',
   'workload.import': 'Imported Workload',
   'workload.import_failed': 'Workload Import Failed',
+  'workload.fill': 'Filled Workload from Team Workbook',
+  'workload.fill_failed': 'Workload Fill Failed',
   'workload.bulk_delete': 'Bulk-Deleted Workload Items',
   'workload.plugs_import': 'Imported Plug List',
   'workload.plugs_import_failed': 'Plug List Import Failed',
@@ -75,6 +106,8 @@ const ACTION_LABELS = {
   'profile.password_change': 'Password Changed',
 
   'auth.2fa_failed': '2FA Verification Failed',
+  'auth.2fa_email_failed': '2FA Email Not Sent',
+  'admin.test_email': 'Sent Test Email',
   'auth.reauth_failed': 'Identity Confirmation Failed',
   'profile.2fa_enable': 'Enabled 2FA',
   'profile.2fa_disable': 'Disabled 2FA',
@@ -82,7 +115,11 @@ const ACTION_LABELS = {
   'knowledge.seed': 'Seeded Knowledge Document',
   'knowledge.upload': 'Uploaded Knowledge Document',
   'knowledge.rename': 'Renamed Knowledge Document',
-  'knowledge.delete': 'Deleted Knowledge Document',
+  'knowledge.create': 'Created Knowledge Item',
+  'knowledge.attach': 'Added Knowledge Document File',
+  'knowledge.delete': 'Moved Knowledge Document to Trash',
+  'knowledge.restore': 'Restored Knowledge Document',
+  'knowledge.purge': 'Permanently Deleted Knowledge Document',
 
   'admin.workload_column_add': 'Added Workload Column',
   'admin.workload_column_delete': 'Deleted Workload Column',
@@ -95,6 +132,24 @@ const ACTION_LABELS = {
   'admin.backup_verify': 'Verified Backup',
   'admin.backup_analyze': 'Verified Backup',
   'admin.backup_restore': 'Restored Backup',
+  'admin.backup_schedule': 'Changed Backup Schedule',
+  'admin.backup_scheduled': 'Scheduled Backup',
+  'admin.retention_update': 'Changed Data Retention',
+  'admin.retention_run': 'Removed Old Records',
+  'admin.retention_download': 'Downloaded Retention Archive',
+  'admin.clear_data': 'Cleared Data',
+  'admin.node_sync': 'Backup Server: Sync Started',
+  'admin.node_promote': 'Backup Server: Promoted to Main',
+  'admin.node_standalone': 'Backup Server: Made Standalone',
+  'admin.node_demote': 'Server Made a Backup Server',
+  'admin.user_bulk': 'Changed Several Users',
+  'admin.user_signout': 'Signed User Out',
+  'admin.dropdown_merge': 'Merged Dropdown Options',
+  'admin.dropdown_bulk_add': 'Added Dropdown Options',
+  'admin.audit_export': 'Exported Audit Log',
+  'admin.security_update': 'Changed Security Rules',
+  'admin.security_check': 'Ran Security Check',
+  'admin.force_password_change': 'Forced Password Change',
 };
 
 function formatAction(action) {
@@ -236,6 +291,56 @@ function formatDetails(row) {
       }
       return 'Login attempt failed';
 
+    case 'admin.user_bulk':
+      return `${({ activate: 'Activated', deactivate: 'Deactivated', role: `Set role to ${d.role}`, group: d.group_id ? 'Changed group' : 'Removed from group',
+        'reset-2fa': 'Reset 2FA for', 'sign-out': 'Signed out', unlock: 'Unlocked' })[d.action] || d.action} ${n(d.count, 'user')}${d.users && d.users.length ? `: ${d.users.slice(0, 5).join(', ')}${d.users.length > 5 ? '…' : ''}` : ''}`;
+
+    case 'admin.user_signout':
+      return `Signed ${d.username || 'user'} out of ${n(d.sessions, 'device')}`;
+
+    case 'admin.dropdown_merge':
+      return `Merged "${d.from}" into "${d.into}" (${d.category}) — ${n(d.moved, 'record')} updated`;
+
+    case 'admin.dropdown_bulk_add':
+      return `Added ${n(d.added, 'option')} to ${d.category}${d.skipped ? `, ${d.skipped} already existed` : ''}`;
+
+    case 'admin.security_check':
+      return `Security check: ${d.fail ?? 0} to fix now, ${d.warn ?? 0} should fix${d.failed && d.failed.length ? ` (${d.failed.join(', ')})` : ''}`;
+    case 'admin.security_update': {
+      const L = { minPasswordLength: 'min password', lockAfterFailures: 'lock after', lockMinutes: 'lock minutes', idleSignOutHours: 'idle hours', maxSessionHours: 'max session hours', adminIdleMinutes: 'admin idle minutes', requireAdmin2fa: 'Admin 2FA' };
+      const ch = Object.keys(L).filter((k) => d.from && d.to && d.from[k] !== d.to[k]).map((k) => `${L[k]}: ${d.from[k]} → ${d.to[k]}`);
+      return ch.length ? ch.join('; ') : 'Saved without changes';
+    }
+
+    case 'admin.force_password_change':
+      return `${n(d.users, 'user')} must choose a new password at next sign-in`;
+
+    case 'admin.audit_export':
+      return `Exported ${n(d.rows, 'entry', 'entries')}${d.truncated ? ' (stopped at the limit)' : ''}`;
+
+    case 'admin.backup_schedule':
+      return `Schedule: ${d.to && d.to.mode === 'off' ? 'off' : `${d.to && d.to.mode} at ${d.to && d.to.time}`}, keep ${d.to && d.to.keep}`;
+
+    case 'admin.backup_scheduled':
+      return d.outcome === 'failed' ? `Scheduled backup could not start: ${d.error || ''}` : `Scheduled ${d.mode || ''} backup started`;
+
+    case 'admin.retention_update':
+      return 'Changed how long records are kept';
+
+    case 'admin.retention_run': {
+      const r = d.results || {};
+      const n = Object.entries(r).map(([k, x]) => `${k}: ${x.deleted}`).join(', ');
+      return `${d.trigger === 'scheduled' ? 'Scheduled' : 'Manual'} removal of old records${n ? ` (${n})` : ''}`;
+    }
+
+    case 'admin.clear_data': {
+      const n = Object.entries(d.results || {}).map(([k, x]) => `${k}: ${x.deleted}`).join(', ');
+      return `Cleared ${n || (d.areas || []).join(', ')} · ${d.from || d.to ? `${d.from || 'start'} to ${d.to || 'today'}` : 'all dates'}`;
+    }
+
+    case 'admin.retention_download':
+      return `Downloaded ${d.file || 'archive'}`;
+
     case 'admin.dropdown_create':
       return `Created ${d.category}: ${d.value}`;
 
@@ -313,6 +418,9 @@ function formatDetails(row) {
       return `Updated ingest record${d.program ? ` (${d.program})` : ''}${list ? ` — ${list}` : ''}`;
     }
 
+    case 'ingest.import':
+      return `Imported ingest records from ${d.file || 'Excel'} — ${d.created ?? 0} added${d.existing ? `, ${d.existing} already there` : ''}${d.skipped ? `, ${d.skipped} skipped` : ''}`;
+
     case 'ingest.export':
       return `Exported ${d.rows ?? ''} ingest record(s) to Excel${d.truncated ? ' (stopped at 20,000 rows)' : ''}`;
 
@@ -321,6 +429,9 @@ function formatDetails(row) {
 
     case 'ingest.delete':
       return `Deleted ingest record${d.program ? ` (${d.program})` : ''}${d.cm_status ? ` — CM status was ${d.cm_status}` : ''}${d.batch ? ' (batch delete)' : ''}`;
+
+    case 'ingest.delete_all':
+      return `Deleted ${d.deleted ?? ''} ingest record(s) with Select all${d.kept ? ` (${d.kept} kept: CM decided or not theirs)` : ''}${d.filters && Object.keys(d.filters).length ? ` — filters: ${Object.entries(d.filters).map(([k, x]) => `${k}=${x}`).join(', ')}` : ''}`;
 
     case 'ingest.edit_blocked':
       return `Edit refused: ingest record${d.program ? ` (${d.program})` : ''} is ${d.cm_status || 'locked'} in CM${d.field ? ` (tried to change ${d.field})` : ''}`;
@@ -412,13 +523,25 @@ function formatDetails(row) {
       return `Seeded knowledge document: ${d.filename || ''}`;
 
     case 'knowledge.upload':
-      return `Uploaded knowledge document: ${d.filename || ''}`;
+      return `Uploaded knowledge document: ${d.title || d.filename || ''}${Array.isArray(d.tags) && d.tags.length ? ` · tags: ${d.tags.join(', ')}` : ''}`;
+
+    case 'knowledge.create':
+      return `Created knowledge item (no document yet): ${d.title || ''}${Array.isArray(d.tags) && d.tags.length ? ` · tags: ${d.tags.join(', ')}` : ''}`;
+
+    case 'knowledge.attach':
+      return `${d.replaced ? 'Replaced' : 'Added'} the document of “${d.title || ''}”: ${d.filename || ''}`;
 
     case 'knowledge.rename':
-      return `Renamed knowledge document to: ${d.title || ''}`;
+      return `${d.title ? `Renamed knowledge document to: ${d.title}` : 'Changed knowledge document'}${Array.isArray(d.tags) ? ` · tags: ${d.tags.join(', ') || 'none'}` : ''}`;
 
     case 'knowledge.delete':
-      return `Deleted knowledge document: ${d.title || d.filename || ''}`;
+      return `Moved knowledge document to Trash: ${d.title || d.filename || ''}`;
+
+    case 'knowledge.restore':
+      return `Restored knowledge document from Trash: ${d.title || d.filename || ''}`;
+
+    case 'knowledge.purge':
+      return `Permanently deleted knowledge document: ${d.title || d.filename || ''}`;
 
     case 'ingest.approve':
       return d.program
@@ -480,6 +603,12 @@ function formatDetails(row) {
     case 'workload.import_failed':
       return `Workload import failed${fileOf(d)}: ${d.error || 'unknown error'}`;
 
+    case 'workload.fill':
+      return `Filled blanks from${fileOf(d)}: ${n(d.updated, 'row')} updated (${n(d.cells, 'cell')}), ${d.unchanged || 0} already complete, ${d.noMatch || 0} not found in the workbook`;
+
+    case 'workload.fill_failed':
+      return `Workload fill failed${fileOf(d)}: ${d.error || 'unknown error'}`;
+
     case 'workload.bulk_delete':
       return `Deleted ${n(d.deleted, 'workload row')}`
         + `${d.sample?.length ? `: ${d.sample.slice(0, 3).join(', ')}` : ''}`
@@ -496,7 +625,7 @@ function formatDetails(row) {
         : 'Plug list import failed';
 
     case 'workload.plugs_copy':
-      return `Copied ${n(d.created, 'plug')} to the Workload Tracker${rangeOf(d)}`
+      return `Copied ${n(d.created, 'plug')} to the Workload page${rangeOf(d)}`
         + `${d.alreadyInWorkload ? `, ${d.alreadyInWorkload} already there` : ''}${d.skippedLocked ? `, ${d.skippedLocked} on locked days` : ''}`;
 
     case 'workload.plugs_fill':
@@ -510,11 +639,67 @@ function formatDetails(row) {
     case 'workload.plug_delete':
       return `${{ 'workload.plug_add': 'Added', 'workload.plug_edit': 'Edited', 'workload.plug_delete': 'Deleted' }[row.action]} plug ${d.plug_id || ''}${d.plug_date ? ` (${String(d.plug_date).slice(0, 10)})` : ''}`;
 
+    case 'security.denied':
+      return `Refused ${d.method || ''} ${d.route || ''} — needs ${d.need || 'a permission this user lacks'}`;
+    case 'security.unauthenticated':
+      return `Refused ${d.route || ''} — not signed in`;
+    case 'security.csrf_blocked':
+      return `Refused ${d.route || ''} — ${d.reason === 'cross_site' ? `sent from another site (${d.origin || 'unknown origin'})` : 'not sent by the app (missing its request header): a script, scanner or old page'}`;
+    case 'security.probe':
+      return `Refused ${d.method || ''} ${d.route || ''} — a path only attack tools ask for (this app has none)`;
+    case 'security.ip_auto_blocked':
+      return `Blocked ${d.ip || 'an address'} for ${d.hours || 24} hours after it asked for ${d.paths || 'several'} paths only scanners use`;
+    case 'security.malware_blocked':
+      return `Refused the upload "${d.file || ''}" — the virus scanner found ${d.signature || 'a virus'}`;
+    case 'security.scan_failed':
+      return `Could not scan "${d.file || ''}" (${d.reason || 'scanner not answering'}) — ${d.refused ? 'upload refused' : 'let through unchecked'}`;
+    case 'security.scan_skipped':
+      return `Not scanned: "${d.file || ''}" (${d.reason || ''})`;
+    case 'auth.idle_signout':
+      return `Signed out after ${d.minutes || ''} minutes without activity`;
+    case 'security.rate_limited':
+      return `Too many ${d.limiter === 'login' ? 'login' : 'API'} requests from this address — blocked (${d.route || ''})`;
+    case 'security.alert':
+      return d.title || 'Security alert';
+    case 'security.ip_blocked':
+      return `Refused ${d.method || ''} ${d.route || ''} — this address is on the block list${d.rule ? ` (${d.rule})` : ''}`;
+    case 'admin.ip_rule_add':
+      return `${d.updated ? 'Updated' : 'Added'} ${d.ip} on the ${d.list === 'allow' ? 'allow' : 'block'} list${d.note ? ` — ${d.note}` : ''}${d.expires ? `, until ${String(d.expires).slice(0, 16).replace('T', ' ')}` : ''}`;
+    case 'admin.ip_rule_remove':
+      return d.ip ? `Removed ${d.ip} from the ${d.list === 'allow' ? 'allow' : 'block'} list` : `Removed ${d.count ?? 0} IP rule(s)`;
+    case 'admin.ip_rule_import':
+      return `Imported IP rules: ${d.added ?? 0} new, ${d.updated ?? 0} updated, ${d.invalid ?? 0} skipped (${d.block ?? 0} block, ${d.allow ?? 0} allow)`;
+    case 'admin.ip_rule_export':
+      return `Exported ${d.count ?? 0} IP rule(s) as ${String(d.format || '').toUpperCase()}`;
+    case 'admin.ip_auto_unblock':
+      return `Let ${d.ip || 'an address'} back in to ${d.username || 'an account'}`;
+
     case 'auth.locked':
       return 'Account locked due to multiple failed login attempts';
 
     case 'auth.login_blocked_locked':
       return 'Login blocked because account is currently locked';     
+
+    case 'admin.group_export':
+      return `Exported ${d.groups ?? 0} group(s) as JSON`;
+
+    case 'admin.group_import':
+      return `Imported groups from JSON: ${d.added ?? 0} added, ${d.existing ?? 0} already there`;
+
+    case 'admin.user_export':
+      return `Exported ${d.users ?? 0} user(s) as JSON (no passwords)`;
+
+    case 'admin.user_import':
+      return `Imported users from JSON: ${d.added ?? 0} added, ${d.existing ?? 0} already there, ${d.skipped ?? 0} skipped`;
+
+    case 'admin.maintenance_on':
+      return `Turned maintenance mode on${d.message ? `: “${d.message}”` : ''}`;
+
+    case 'admin.maintenance_off':
+      return 'Turned maintenance mode off';
+
+    case 'auth.login_blocked_maintenance':
+      return 'Sign-in refused because maintenance mode is on (only System Admins may sign in)';
 
     case 'admin.user_unlock':
       return `Unlocked user: ${d.username || ''}`;      
@@ -526,19 +711,59 @@ function formatDetails(row) {
 
 
 
+// Where "Open" takes you for a record type. Only pages that exist; others show no link.
+const RECORD_LINK = {
+  user: '/admin#access/users', group: '/admin#access/groups', role: '/admin#access/roles', dropdown_option: '/admin#dropdowns', backup: '/admin#backup',
+  ingest_record: '/ingest', approval_request: '/ingest', workload_item: '/workload', workload_plug: '/plug-list', knowledge_document: '/knowledge', knowledge_docs: '/knowledge',
+};
+const CATEGORIES = [['', 'Everything'], ['auth', 'Sign-ins'], ['ingest', 'Ingest'], ['approval', 'Approvals'], ['workload', 'Workload'], ['knowledge', 'Knowledge Base'], ['admin', 'Admin changes'], ['profile', 'Profile']];
+
+const show = (x) => (x == null || x === '' ? '—' : typeof x === 'object' ? JSON.stringify(x) : String(x));
+/** Readable before / after: a {from, to} pair of objects becomes one row per changed field; everything else is a field list. */
+function Expanded({ row }) {
+  const d = row.details;
+  if (!d || typeof d !== 'object') return <span className="dim">No more detail was recorded.</span>;
+  const from = d.from && typeof d.from === 'object' ? d.from : null;
+  const to = d.to && typeof d.to === 'object' ? d.to : null;
+  if (from && to) {
+    const keys = [...new Set([...Object.keys(from), ...Object.keys(to)])].filter((k) => JSON.stringify(from[k]) !== JSON.stringify(to[k]));
+    const rest = Object.entries(d).filter(([k]) => k !== 'from' && k !== 'to');
+    return (
+      <>
+        <table className="t audit-diff">
+          <thead><tr><th>Field</th><th>Before</th><th>After</th></tr></thead>
+          <tbody>{keys.length ? keys.map((k) => <tr key={k}><td>{USER_FIELD_LABELS[k] || k}</td><td className="was">{show(from[k])}</td><td className="now">{show(to[k])}</td></tr>)
+            : <tr><td colSpan={3} className="dim">Nothing changed.</td></tr>}</tbody>
+        </table>
+        {rest.length ? <dl className="audit-fields">{rest.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{show(v)}</dd></div>)}</dl> : null}
+      </>
+    );
+  }
+  return <dl className="audit-fields">{Object.entries(d).map(([k, v]) => <div key={k}><dt>{USER_FIELD_LABELS[k] || k}</dt><dd>{show(v)}</dd></div>)}</dl>;
+}
+
 export default function Audit() {
   const isActivityHistory =
     window.location.pathname === '/activity-history';
 
-  const [f, setF] = useState({ action: '', user: '', from: '', to: '' });
+  const [f, setF] = useState({ action: '', category: '', user: '', q: '', record: '', from: '', to: '' });
   const [offset, setOffset] = useState(0);
+  const [PAGE, setPage] = usePageSize(window.location.pathname === '/activity-history' ? 'activity' : 'audit');
   const [d, setD] = useState(null);
+  const [open, setOpen] = useState(() => new Set());
   const action = useDebounced(f.action);
   const user = useDebounced(f.user);
+  const q = useDebounced(f.q);
+  const record = useDebounced(f.record);
+
+  const params = () => {
+    const p = new URLSearchParams();
+    Object.entries({ action, category: f.category, user, q, record, from: f.from, to: f.to }).forEach(([k, v]) => { if (v) p.set(k, v); });
+    return p;
+  };
 
   useEffect(() => {
-    const p = new URLSearchParams({ limit: PAGE, offset });
-    Object.entries({ action, user, from: f.from, to: f.to }).forEach(([k, v]) => { if (v) p.set(k, v); });
+    const p = params(); p.set('limit', PAGE); p.set('offset', offset);
     const endpoint =
       window.location.pathname === '/activity-history'
         ? '/api/profile/activity-history'
@@ -546,13 +771,15 @@ export default function Audit() {
 
     get(`${endpoint}?${p}`)
       .then((data) => {
-        setD(data);
+        setD(data); setOpen(new Set());
       })
       .catch(() => setD({ rows: [], total: 0 }));
-  }, [action, user, f.from, f.to, offset]);
+  }, [action, f.category, user, q, record, f.from, f.to, offset, PAGE]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (k) => (e) => { setF((x) => ({ ...x, [k]: e.target.value })); setOffset(0); };
   const total = d ? d.total : 0;
+  const any = Object.values(f).some(Boolean);
+  const toggle = (id) => setOpen((o) => { const n2 = new Set(o); if (n2.has(id)) n2.delete(id); else n2.add(id); return n2; });
 
   return (
     <div className="card">
@@ -563,71 +790,80 @@ export default function Audit() {
           placeholder={
             isActivityHistory
               ? 'Search activity'
-              : 'Action (e.g. ingest, approval, auth)'
+              : 'Action contains…'
           }
           value={f.action}
           onChange={set('action')}
         />
 
         {!isActivityHistory && (
-          <input
-            type="search"
-            placeholder="Username"
-            value={f.user}
-            onChange={set('user')}
-          />
+          <>
+            <select aria-label="Kind of activity" value={f.category} onChange={set('category')}>{CATEGORIES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+            <input type="search" placeholder="Username" value={f.user} onChange={set('user')} />
+            <input type="search" placeholder="Search inside details" value={f.q} onChange={set('q')} />
+            <input type="search" placeholder="Record #" value={f.record} onChange={set('record')} className="narrow" aria-label="Record number" />
+          </>
         )}
 
         <input
           type="date"
           value={f.from}
+          aria-label="From date"
           onChange={set('from')}
         />
 
         <input
           type="date"
           value={f.to}
+          aria-label="To date"
           onChange={set('to')}
         />
+        {any ? <button type="button" className="btn ghost" onClick={() => { setF({ action: '', category: '', user: '', q: '', record: '', from: '', to: '' }); setOffset(0); }}>Clear</button> : null}
+        {!isActivityHistory ? <a className="btn" href={`/api/admin/audit/export?${params()}`} download>Export to Excel</a> : null}
       </div>
 
 
       <div className="table-wrap">
         {!d ? <Empty>Loading…</Empty> : !d.rows.length ? <Empty>No audit entries.</Empty> : (
-          <table className="t wl">
-            <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Entity</th><th>Details</th><th>IP</th></tr></thead>
+          <table className="t wl audit-t">
+            <thead><tr><th className="chk" /><th>Time</th><th>User</th><th>Action</th><th>Entity</th><th>Details</th><th>IP</th></tr></thead>
             <tbody>
               {d.rows.map((r) => {
                 const details = r.details ? JSON.stringify(r.details) : '';
+                const isOpen = open.has(r.id);
+                const link = r.entity && RECORD_LINK[r.entity];
                 return (
-                  <tr key={r.id}>
-                    <td className="nowrap dim">{fmtDateTime(r.created_at)}</td>
-                    <td className="mono">{r.username || '—'}</td>
+                  <Fragment key={r.id}>
+                    <tr className={isOpen ? 'audit-open' : ''}>
+                      <td className="chk">
+                        {details ? <button type="button" className="exp" aria-expanded={isOpen} aria-label={isOpen ? 'Hide detail' : 'Show detail'} onClick={() => toggle(r.id)}>{isOpen ? '▾' : '▸'}</button> : null}
+                      </td>
+                      <td className="nowrap dim">{fmtDateTime(r.created_at)}</td>
+                      <td className="mono">{r.username || '—'}</td>
 
-                    <td>{formatAction(r.action)}</td>
+                      <td>{formatAction(r.action)}</td>
 
-                    <td className="nowrap">
-                      {formatEntity(r)}
-                    </td>
+                      <td className="nowrap">
+                        {formatEntity(r)}
+                        {link && !isActivityHistory ? <> <a className="linklike" href={link}>Open</a></> : null}
+                      </td>
 
-                    <td title={details}>
-                      {formatDetails(r)}
-                    </td>
+                      <td title={details}>
+                        {formatDetails(r)}
+                      </td>
 
-                    <td className="mono dim">{r.ip || ''}</td>
-                  </tr>
+                      <td className="dim"><span className="mono">{r.ip || ''}</span><BlockIp ip={r.ip} />{d.geo && r.ip ? <Geo g={d.geo[r.ip]} /> : null}</td>
+                    </tr>
+                    {isOpen ? <tr className="audit-more"><td /><td colSpan={6}><Expanded row={r} /></td></tr> : null}
+                  </Fragment>
                 );
               })}
             </tbody>
           </table>
         )}
       </div>
-      <div className="pager">
-        <span>{total ? `${offset + 1}–${Math.min(offset + PAGE, total)} of ${total}` : ''}</span>
-        <span className="grow" />
-        <button type="button" className="btn sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</button>
-        <button type="button" className="btn sm" disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</button>
-      </div>
+      <Pager total={total} offset={offset} size={PAGE} onOffset={setOffset} onSize={setPage} />
+      {d && d.geo ? <div className="geo-compact"><GeoNote status={d.geoip} /></div> : null}
     </div>
   );
 }

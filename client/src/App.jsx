@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import { BrandingProvider, SessionProvider, useBranding, useSession } from './context.jsx';
 import TopNav from './components/TopNav.jsx';
 import { ConfirmProvider, ToastProvider } from './components/ui.jsx';
+import GlobalReauth from './components/GlobalReauth.jsx';
 import Login from './pages/Login.jsx';
 import { post } from './lib/api.js';
 
@@ -108,6 +109,7 @@ function AppShell() {
     <SessionProvider fallback={<Loading />}>
       <TopNav />
       <Presence />
+      <GlobalReauth />
       <Suspense fallback={<Loading />}>
         <Routes>
           <Route path="/" element={<Landing />} />

@@ -4,6 +4,8 @@ const fs = require('fs');
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const multer = require('multer');
+const stepUp = require('../reauth');
+const virusScan = require('../virus-scan').guard;   // every upload is checked by ClamAV before the route sees it (src/virus-scan.js)
 const validator = require('validator');
 const db = require('../db');
 const v = require('../validate');
@@ -15,15 +17,21 @@ const { loadRoles } = require('../roles');
 
 // Mounted behind requirePageAccess('/admin') => Admin role only; the role is re-checked here as defence in depth.
 const router = express.Router();
-router.use((req, res, next) => (req.user && req.user.role === 'Admin' ? next() : res.status(403).json({ error: 'Admin role required' })));
+// System Admin: everything here. Admin: only the Audit Log, the Dropdowns and Branding (and the access-model reference the Admin page loads).
+const ADMIN_ALLOWED = /^\/(audit|dropdowns|branding)(\/|$)|^\/access-model$/;
+router.use((req, res, next) => {
+  const role = req.user && req.user.role;
+  if (role === 'System Admin' || (role === 'Admin' && ADMIN_ALLOWED.test(req.path))) return next();
+  res.status(403).json({ error: role === 'Admin' ? 'This needs the System Admin role' : 'System Admin role required' });
+});
 
 const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads', 'branding');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-const DROPDOWN_CATEGORIES = ['program', 'platform', 'workload_platform', 'plug_type'];
+// (The PROG. NAME / PROJ. TITLE list was removed: titles are free text everywhere. Old 'program' rows stay in the table, unused, and the audit log keeps its history.)
+const DROPDOWN_CATEGORIES = ['platform', 'workload_platform', 'plug_type'];
 // Which table/column each dropdown category is stored in (used for usage counts, rename propagation, delete guard)
 const DROPDOWN_USAGE = Object.assign(Object.create(null), {
-  program: [{ table: 'ingest_records', col: 'program' }, { table: 'workload_items', col: 'prog_name' }, { table: 'workload_plugs', col: 'prog_name' }],
   platform: { table: 'ingest_records', col: 'platform' },
   workload_platform: { table: 'workload_items', col: 'platform' },
   plug_type: { table: 'workload_items', col: 'plug_type' },
@@ -42,7 +50,7 @@ router.get('/roles', asyncH(async (req, res) => {
             (SELECT count(*)::int FROM users u WHERE u.role = r.name) AS users
        FROM roles r ORDER BY r.rank DESC, r.name`
   );
-  res.json(rows.map((r) => (r.name === 'Admin' ? { ...r, actions: [...ALL_ACTIONS] } : r)));
+  res.json(rows.map((r) => (r.name === 'System Admin' ? { ...r, actions: [...ALL_ACTIONS] } : r.name === 'Admin' ? { ...r, actions: r.actions.filter((a) => a !== 'admin') } : r)));
 }));
 
 function parseRole(body) {
@@ -77,11 +85,12 @@ router.post('/roles', asyncH(async (req, res) => {
 }));
 
 router.put('/roles/:name', asyncH(async (req, res) => {
+  await stepUp.confirm(req, 'admin.role_update', 'change this role\u2019s permissions');
   const old = req.params.name;
   const b = parseRole(req.body || {});
   const cur = await db.query('SELECT is_builtin FROM roles WHERE name=$1', [old]);
   if (!cur.rows.length) throw new HttpError(404, 'Role not found');
-  if (old === 'Admin') throw new HttpError(400, 'The Admin role is fixed and cannot be changed');
+  if (old === 'System Admin') throw new HttpError(400, 'The System Admin role is fixed and cannot be changed');
   if (cur.rows[0].is_builtin && b.name !== old) throw new HttpError(400, 'Built-in roles cannot be renamed');
   const before = (await db.query('SELECT action FROM role_actions WHERE role=$1', [old])).rows.map((r) => r.action);
   const added = b.actions.filter((a) => !before.includes(a));
@@ -101,6 +110,7 @@ router.put('/roles/:name', asyncH(async (req, res) => {
 }));
 
 router.delete('/roles/:name', asyncH(async (req, res) => {
+  await stepUp.confirm(req, 'admin.role_delete', 'delete this role');
   const name = req.params.name;
   const cur = await db.query('SELECT is_builtin, (SELECT count(*)::int FROM users WHERE role=$1) AS users FROM roles WHERE name=$1', [name]);
   if (!cur.rows.length) throw new HttpError(404, 'Role not found');
@@ -189,10 +199,123 @@ router.delete('/groups/:id', asyncH(async (req, res) => {
 }));
 
 // ---------- Users ----------
+// ---------- Groups and Users: JSON export / import (same idea as the Dropdowns') ----------
+// Nothing in a file ever deletes or changes something that already exists: Import only ADDS what is missing (a group by name,
+// a user by username) and says how many it left alone. Passwords, 2FA secrets and sessions are never exported.
+const sendJson = (res, name, obj) => {
+  res.set({
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Disposition': `attachment; filename="${name}-${new Date().toISOString().slice(0, 10)}.json"`,
+    'Cache-Control': 'no-store',
+  });
+  res.send(JSON.stringify(obj, null, 2));
+};
+const IMPORT_MAX = 5000;
+
+router.get('/groups/export', asyncH(async (req, res) => {
+  const { rows } = await db.query(
+    `SELECT g.name, g.description,
+            COALESCE((SELECT array_agg(gp.perm_key ORDER BY gp.perm_key) FROM group_permissions gp WHERE gp.group_id = g.id), '{}') AS perms
+       FROM groups g ORDER BY lower(g.name)`
+  );
+  await audit(req, 'admin.group_export', 'group', null, { groups: rows.length });
+  sendJson(res, 'groups', { app: 'promo-hub', type: 'groups', version: 1, exported_at: new Date().toISOString(),
+    groups: rows.map((r) => ({ name: r.name, description: r.description || '', perms: r.perms })) });
+}));
+
+router.post('/groups/import', asyncH(async (req, res) => {
+  const list = req.body && req.body.groups;
+  if (!Array.isArray(list)) throw new HttpError(400, 'Not a groups export file (missing "groups")');
+  if (list.length > IMPORT_MAX) throw new HttpError(400, `Too many groups (max ${IMPORT_MAX})`);
+  const plan = [];
+  const seen = new Set();
+  list.forEach((item, i) => {
+    if (!item || typeof item !== 'object') throw new HttpError(400, `Entry ${i + 1} is not a group`);
+    const g = parseGroup(item);
+    const key = g.name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    plan.push(g);
+  });
+  const out = { added: 0, existing: 0 };
+  await db.tx(async (c) => {
+    for (const g of plan) {
+      const cur = await c.query('SELECT 1 FROM groups WHERE lower(name)=lower($1)', [g.name]);
+      if (cur.rows.length) { out.existing += 1; continue; }
+      const r = await c.query('INSERT INTO groups (name, description) VALUES ($1,$2) RETURNING id', [g.name, g.description]);
+      await writePerms(c, r.rows[0].id, g.perms);
+      out.added += 1;
+    }
+    await audit(req, 'admin.group_import', 'group', null, out, c);
+  });
+  res.json({ ok: true, ...out });
+}));
+
+router.get('/users/export', asyncH(async (req, res) => {
+  const { rows } = await db.query(
+    `SELECT u.username, u.full_name, u.email, u.role, g.name AS group_name, u.is_active
+       FROM users u LEFT JOIN groups g ON g.id = u.group_id ORDER BY lower(u.username)`
+  );
+  await audit(req, 'admin.user_export', 'user', null, { users: rows.length });
+  sendJson(res, 'users', { app: 'promo-hub', type: 'users', version: 1, exported_at: new Date().toISOString(),
+    users: rows.map((r) => ({ username: r.username, full_name: r.full_name, email: r.email || '', role: r.role, group: r.group_name || '', active: r.is_active })) });
+}));
+
+// New users get a random password nobody knows and must choose their own at first sign-in, so give each person one with
+// Manage > Reset password. (Import the Groups file first: a user whose group is not there yet is skipped, and says so.)
+router.post('/users/import', asyncH(async (req, res) => {
+  await stepUp.confirm(req, 'admin.users_import', 'import users');
+  const list = req.body && req.body.users;
+  if (!Array.isArray(list)) throw new HttpError(400, 'Not a users export file (missing "users")');
+  if (list.length > IMPORT_MAX) throw new HttpError(400, `Too many users (max ${IMPORT_MAX})`);
+  const out = { added: 0, existing: 0, skipped: 0, errors: [] };
+  const skip = (i, name, why) => { out.skipped += 1; if (out.errors.length < 20) out.errors.push(`${name || `Entry ${i + 1}`}: ${why}`); };
+  await db.tx(async (c) => {
+    const groups = new Map((await c.query('SELECT id, lower(name) AS n FROM groups')).rows.map((r) => [r.n, r.id]));
+    const seen = new Set();
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i];
+      if (!item || typeof item !== 'object') { skip(i, '', 'not a user'); continue; }
+      const username = typeof item.username === 'string' ? item.username.trim() : '';
+      if (!/^[A-Za-z0-9._-]{3,60}$/.test(username)) { skip(i, username, 'username must be 3–60 chars: letters, numbers, . _ -'); continue; }
+      if (seen.has(username.toLowerCase())) continue;
+      seen.add(username.toLowerCase());
+      let u;
+      try {
+        u = {
+          full_name: v.str(item.full_name, { field: 'Full name', max: 120, required: true }),
+          email: v.str(item.email, { field: 'Email', max: 200 }),
+          role: v.oneOf(item.role, ROLES, { field: 'Role' }),
+          is_active: item.active === undefined ? true : !!item.active,
+        };
+        if (u.email && !validator.isEmail(u.email)) throw new HttpError(400, 'Invalid email');
+      } catch (e) { skip(i, username, e.message); continue; }
+      const gname = typeof item.group === 'string' ? item.group.trim() : '';
+      let groupId = null;
+      if (gname) {
+        groupId = groups.get(gname.toLowerCase());
+        if (!groupId) { skip(i, username, `group "${gname}" does not exist (import the groups first)`); continue; }
+      }
+      const cur = await c.query('SELECT 1 FROM users WHERE lower(username)=lower($1)', [username]);
+      if (cur.rows.length) { out.existing += 1; continue; }
+      const hash = await bcrypt.hash(crypto.randomBytes(24).toString('base64url'), 12);
+      await c.query(
+        `INSERT INTO users (username, full_name, email, password_hash, role, group_id, is_active, must_change_password)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE)`,
+        [username, u.full_name, u.email, hash, u.role, groupId, u.is_active]
+      );
+      out.added += 1;
+    }
+    await audit(req, 'admin.user_import', 'user', null, { added: out.added, existing: out.existing, skipped: out.skipped }, c);
+  });
+  res.json({ ok: true, ...out });
+}));
+
 router.get('/users', asyncH(async (req, res) => {
   const { rows } = await db.query(
     `SELECT u.id, u.username, u.full_name, u.email, u.role, u.group_id, g.name AS group_name, u.is_active,
-            u.totp_enabled, u.twofa_required, u.must_change_password, u.last_login_at, u.locked_until, u.created_at
+            u.totp_enabled, u.twofa_required, u.twofa_method, u.must_change_password, u.last_login_at, u.locked_until, u.created_at, u.failed_attempts,
+            (SELECT count(*)::int FROM user_sessions s WHERE (s.sess->>'userId')::int = u.id AND s.expire > now()) AS sessions
        FROM users u LEFT JOIN groups g ON g.id = u.group_id
       ORDER BY u.is_active DESC, u.full_name`
   );
@@ -217,29 +340,49 @@ async function parseUser(body, { creating }) {
     if (!/^[A-Za-z0-9._-]{3,60}$/.test(out.username)) {
       throw new HttpError(400, 'Username must be 3–60 chars: letters, numbers, . _ -');
     }
-    out.password = v.password(body.password, { username: out.username, fullName: out.full_name });
+    if (body.mode !== 'generate') out.password = v.password(body.password, { username: out.username, fullName: out.full_name });
   }
   return out;
 }
 
 async function assertAnotherAdmin(c, excludingId) {
   const { rows } = await c.query(
-    `SELECT count(*)::int AS n FROM users WHERE role='Admin' AND is_active AND id <> $1`, [excludingId]
+    `SELECT count(*)::int AS n FROM users WHERE role='System Admin' AND is_active AND id <> $1`, [excludingId]
   );
   if (rows[0].n === 0) throw new HttpError(400, 'At least one active Admin must remain');
 }
 
 router.post('/users', asyncH(async (req, res) => {
   const u = await parseUser(req.body, { creating: true });
-  const hash = await bcrypt.hash(u.password, 12);
+  if (u.role === 'Admin' || u.role === 'System Admin') await stepUp.confirm(req, 'admin.user_create_admin', 'create an Admin account');
+  // mode 'generate': a random temporary password (shown once; always must be changed). Otherwise the Admin typed one (forcing a change is the default, not a must).
+  const generate = req.body.mode === 'generate';
+  const sendMail = req.body.send_email === true;   // (`email` is the address itself)
+  const mailer = require('../mailer');
+  if (sendMail) {
+    if (!u.email) throw new HttpError(400, 'Fill in the email address to email the password.');
+    if (!mailer.configured()) throw new HttpError(400, 'Email is not set up on the server, so a password cannot be emailed.');
+  }
+  const temp = generate ? `${crypto.randomBytes(12).toString('base64url')}${crypto.randomInt(10, 99)}` : u.password;
+  const force = generate || req.body.force_change !== false;
+  const hash = await bcrypt.hash(temp, 12);
   try {
-    const { rows } = await db.query(
-      `INSERT INTO users (username, full_name, email, password_hash, role, group_id, is_active, must_change_password)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE) RETURNING id`,
-      [u.username, u.full_name, u.email, hash, u.role, u.group_id, u.is_active]
-    );
-    await audit(req, 'admin.user_create', 'user', rows[0].id, { username: u.username, role: u.role, group_id: u.group_id });
-    res.status(201).json({ ok: true, id: rows[0].id });
+    const id = await db.tx(async (c) => {
+      const { rows } = await c.query(
+        `INSERT INTO users (username, full_name, email, password_hash, role, group_id, is_active, must_change_password)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+        [u.username, u.full_name, u.email, hash, u.role, u.group_id, u.is_active, force]
+      );
+      if (sendMail) {   // sent before the user is committed: if the email cannot be sent, no account is created
+        try { await require('../password-mail').sendTemporaryPassword(u, temp, { force }); } catch (e) {
+          console.error('[create-user] email failed:', e.message);
+          throw new HttpError(503, 'The email could not be sent, so the user was not created. Check the email settings.');
+        }
+      }
+      return rows[0].id;
+    });
+    await audit(req, 'admin.user_create', 'user', id, { username: u.username, role: u.role, group_id: u.group_id, via: generate ? 'generate' : 'manual', emailed: sendMail || undefined });
+    res.status(201).json({ ok: true, id, ...(generate ? { temporary_password: temp } : {}), ...(sendMail ? { emailed: true, sentTo: mailer.mask(u.email) } : {}) });
   } catch (e) {
     if (e.code === '23505') throw new HttpError(409, 'Username already exists');
     throw e;
@@ -249,11 +392,16 @@ router.post('/users', asyncH(async (req, res) => {
 router.put('/users/:id', asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const u = await parseUser(req.body, { creating: false });
+  {   // changing who is an Admin (or an Admin's own details) needs the password again; ordinary edits do not
+    const before = (await db.query('SELECT role FROM users WHERE id=$1', [id])).rows[0];
+    const adminish = (r) => r === 'Admin' || r === 'System Admin';
+    if (before && (before.role !== u.role) && (adminish(before.role) || adminish(u.role))) await stepUp.confirm(req, 'admin.user_role_change', 'change an Admin role');
+  }
   await db.tx(async (c) => {
     const cur = await c.query('SELECT username, full_name, email, role, group_id, is_active FROM users WHERE id=$1 FOR UPDATE', [id]);
     if (!cur.rows.length) throw new HttpError(404, 'User not found');
-    const wasAdmin = cur.rows[0].role === 'Admin' && cur.rows[0].is_active;
-    const staysAdmin = u.role === 'Admin' && u.is_active;
+    const wasAdmin = cur.rows[0].role === 'System Admin' && cur.rows[0].is_active;
+    const staysAdmin = u.role === 'System Admin' && u.is_active;
     if (wasAdmin && !staysAdmin) await assertAnotherAdmin(c, id);
     await c.query(
       `UPDATE users SET full_name=$2, email=$3, role=$4, group_id=$5, is_active=$6, updated_at=now() WHERE id=$1`,
@@ -285,6 +433,7 @@ router.put('/users/:id', asyncH(async (req, res) => {
 // Delete one or several users. Their records stay (created-by / requested-by links are cleared), their sessions end,
 // and the audit log keeps their user name. You cannot delete yourself or the last active Admin.
 router.post('/users/delete', asyncH(async (req, res) => {
+  await stepUp.confirm(req, 'admin.user_delete', 'delete these users');
   const raw = req.body && req.body.ids;
   if (!Array.isArray(raw) || !raw.length) throw new HttpError(400, 'Choose at least one user');
   if (raw.length > 200) throw new HttpError(400, 'Delete at most 200 users at a time');
@@ -293,8 +442,8 @@ router.post('/users/delete', asyncH(async (req, res) => {
   const gone = await db.tx(async (c) => {
     const { rows } = await c.query('SELECT id, username, full_name, role, is_active FROM users WHERE id = ANY($1::int[]) FOR UPDATE', [ids]);
     if (!rows.length) throw new HttpError(404, 'User not found');
-    if (rows.some((u) => u.role === 'Admin' && u.is_active)) {
-      const left = await c.query(`SELECT count(*)::int AS n FROM users WHERE role='Admin' AND is_active AND id <> ALL($1::int[])`, [rows.map((u) => u.id)]);
+    if (rows.some((u) => u.role === 'System Admin' && u.is_active)) {
+      const left = await c.query(`SELECT count(*)::int AS n FROM users WHERE role='System Admin' AND is_active AND id <> ALL($1::int[])`, [rows.map((u) => u.id)]);
       if (left.rows[0].n === 0) throw new HttpError(400, 'At least one active Admin must remain');
     }
     await c.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = ANY($1::int[])`, [rows.map((u) => u.id)]);
@@ -305,48 +454,83 @@ router.post('/users/delete', asyncH(async (req, res) => {
   res.json({ ok: true, deleted: gone });
 }));
 
+// Reset a password. mode: 'generate' (random; shown once), 'manual' (the Admin types it; `password`), 'email' (random, emailed to the user and never shown).
+// The user must choose their own password at the next sign-in (always for a generated one; optional for one typed by the Admin), every device is signed out and a lock is cleared.
 router.post('/users/:id/reset-password', asyncH(async (req, res) => {
+  await stepUp.confirm(req, 'admin.user_reset_password', 'reset this password');
   const id = v.id(req.params.id);
-  const target = (await db.query('SELECT username, full_name FROM users WHERE id=$1', [id])).rows[0];
+  const target = (await db.query('SELECT username, full_name, email FROM users WHERE id=$1', [id])).rows[0];
   if (!target) throw new HttpError(404, 'User not found');
-  const temp = req.body.password ? v.password(req.body.password, { username: target.username, fullName: target.full_name })
+  const mailer = require('../mailer');
+  const mode = req.body.mode === 'manual' || (req.body.mode !== 'generate' && req.body.password) ? 'manual' : 'generate';
+  const sendMail = req.body.email === true || req.body.mode === 'email';   // optional with either way of choosing the password
+  if (sendMail) {
+    if (!mailer.configured()) throw new HttpError(400, 'Email is not set up on the server, so a password cannot be emailed.');
+    if (!target.email) throw new HttpError(400, 'This account has no email address. Add one to the user first.');
+  }
+  const temp = mode === 'manual' ? v.password(req.body.password, { username: target.username, fullName: target.full_name })
     : `${crypto.randomBytes(12).toString('base64url')}${crypto.randomInt(10, 99)}`;
   const hash = await bcrypt.hash(temp, 12);
-  const r = await db.query(
-    `UPDATE users SET password_hash=$2, must_change_password=TRUE, failed_attempts=0, locked_until=NULL, updated_at=now()
-      WHERE id=$1`, [id, hash]
-  );
-  if (!r.rowCount) throw new HttpError(404, 'User not found');
+  // A generated password is always temporary. One the Admin typed can be kept as is (force_change: false).
+  const force = mode === 'generate' || req.body.force_change !== false;
+  await db.tx(async (c) => {
+    const r = await c.query(
+      `UPDATE users SET password_hash=$2, must_change_password=$3, failed_attempts=0, locked_until=NULL, updated_at=now()
+        WHERE id=$1`, [id, hash, force]
+    );
+    if (!r.rowCount) throw new HttpError(404, 'User not found');
+    require('../login-guard').clearUser(target.username);
+    if (sendMail) {   // sent before the change is committed: if the email cannot be sent, the old password stays
+      try { await require('../password-mail').sendTemporaryPassword(target, temp, { force }); } catch (e) {
+        console.error('[reset-password] email failed:', e.message);
+        throw new HttpError(503, 'The email could not be sent, so the password was not changed. Check the email settings.');
+      }
+    }
+  });
   await db.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = $1`, [id]);
-  await audit(req, 'admin.user_reset_password', 'user', id, { username: target.username });
-  res.json({ ok: true, temporary_password: temp });
+  await audit(req, 'admin.user_reset_password', 'user', id, { username: target.username, via: mode, emailed: sendMail || undefined, must_change: force });
+  res.json({ ok: true, ...(mode === 'generate' ? { temporary_password: temp } : {}), ...(sendMail ? { emailed: true, sentTo: mailer.mask(target.email) } : {}) });
 }));
+
 
 // Only an Admin can turn 2FA on or off for an account. On: the user must enrol an authenticator at next use.
 // Off: their authenticator is removed too, so they sign in with the password alone again.
 router.post('/users/:id/2fa', asyncH(async (req, res) => {
+  await stepUp.confirm(req, 'admin.user_2fa', 'change 2FA for this user');
   const id = v.id(req.params.id);
   if (typeof req.body.enabled !== 'boolean') throw new HttpError(400, 'enabled must be true or false');
   const enabled = req.body.enabled;
-  if (!(await db.query('SELECT 1 FROM users WHERE id=$1', [id])).rowCount) throw new HttpError(404, 'User not found');
+  const cur = (await db.query('SELECT email, twofa_method FROM users WHERE id=$1', [id])).rows[0];
+  if (!cur) throw new HttpError(404, 'User not found');
+  const method = req.body.method === undefined ? cur.twofa_method : v.oneOf(req.body.method, ['app', 'email'], { field: 'Method' });
+  if (enabled && method === 'email') {
+    if (!require('../security-settings').get().allowEmail2fa || !require('../mailer').configured()) throw new HttpError(400, 'Email codes are not switched on (Administration → Security) or email is not set up on the server');
+    if (!cur.email) throw new HttpError(400, 'Add an email address to this account first');
+  }
+  // Changing the method of an account that already enrolled makes it enrol again with the new one.
+  const reenrol = enabled && method !== cur.twofa_method;
   const r = await db.query(
     enabled
-      ? 'UPDATE users SET twofa_required=TRUE, updated_at=now() WHERE id=$1 RETURNING username'
+      ? `UPDATE users SET twofa_required=TRUE, twofa_method=$2${reenrol ? ', totp_secret=NULL, totp_enabled=FALSE, totp_last_step=NULL' : ''}, updated_at=now() WHERE id=$1 RETURNING username`
       : 'UPDATE users SET twofa_required=FALSE, totp_secret=NULL, totp_enabled=FALSE, totp_last_step=NULL, updated_at=now() WHERE id=$1 RETURNING username',
-    [id]
+    enabled ? [id, method] : [id]
   );
-  await audit(req, enabled ? 'admin.user_2fa_enable' : 'admin.user_2fa_disable', 'user', id, { username: r.rows[0].username });
+  // 2FA taken away or reset: sessions opened with the old second factor end (it may be why it was reset: a lost phone)
+  const signedOut = (!enabled || reenrol) ? (await db.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = $1`, [id])).rowCount : 0;
+  await audit(req, enabled ? 'admin.user_2fa_enable' : 'admin.user_2fa_disable', 'user', id, { username: r.rows[0].username, method: enabled ? method : undefined, reenrol: reenrol || undefined, sessionsEnded: signedOut || undefined });
   res.json({ ok: true });
 }));
 
 router.post('/users/:id/reset-2fa', asyncH(async (req, res) => {
+  await stepUp.confirm(req, 'admin.user_reset_2fa', 'reset 2FA for this user');
   const id = v.id(req.params.id);
   if (!(await db.query('SELECT 1 FROM users WHERE id=$1', [id])).rowCount) throw new HttpError(404, 'User not found');
   const r = await db.query(
     `UPDATE users SET totp_secret=NULL, totp_enabled=FALSE, totp_last_step=NULL, updated_at=now() WHERE id=$1 RETURNING username`, [id]
   );
   if (!r.rowCount) throw new HttpError(404, 'User not found');
-  await audit(req, 'admin.user_reset_2fa', 'user', id, { username: r.rows[0].username });
+  const ended = (await db.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = $1`, [id])).rowCount;   // a lost phone: its sessions go too
+  await audit(req, 'admin.user_reset_2fa', 'user', id, { username: r.rows[0].username, sessionsEnded: ended });
   res.json({ ok: true });
 }));
 
@@ -363,6 +547,7 @@ router.post('/users/:id/unlock', asyncH(async (req, res) => {
     'UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=$1',
     [id]
   );
+  require('../login-guard').clearUser(cur.rows[0].username);   // addresses shut out of this account start fresh too
 
   await audit(req, 'admin.user_unlock', 'user', id, {
     username: cur.rows[0].username
@@ -375,11 +560,11 @@ router.get('/dropdowns', asyncH(async (req, res) => {
   const { rows } = await db.query(
     `SELECT d.*, (
               (SELECT count(*)::int FROM ingest_records i
-                WHERE (d.category='program' AND i.program=d.value) OR (d.category='platform' AND i.platform=d.value))
+                WHERE d.category='platform' AND i.platform=d.value)
             + (SELECT count(*)::int FROM workload_items w
                 WHERE (d.category='workload_platform' AND w.platform=d.value)
                    OR (d.category='plug_type' AND w.plug_type=d.value))) AS usage
-       FROM dropdown_options d ORDER BY category, sort_order, value`
+       FROM dropdown_options d WHERE d.category <> 'program' ORDER BY category, sort_order, value`
   );
   res.json({ categories: DROPDOWN_CATEGORIES, rows });
 }));
@@ -422,7 +607,7 @@ router.get('/dropdowns/export', asyncH(async (req, res) => {
 router.post('/dropdowns/import', asyncH(async (req, res) => {
   const src = req.body && req.body.dropdowns;
   if (!src || typeof src !== 'object' || Array.isArray(src)) throw new HttpError(400, 'Not a dropdown export file (missing "dropdowns")');
-  const unknown = Object.keys(src).filter((k) => !DROPDOWN_CATEGORIES.includes(k));
+  const unknown = Object.keys(src).filter((k) => k !== 'program' && !DROPDOWN_CATEGORIES.includes(k));   // 'program' (an older export) is ignored
   if (unknown.length) throw new HttpError(400, `Unknown dropdown list: ${unknown.slice(0, 3).join(', ')}`);
   const plan = [];
   for (const cat of DROPDOWN_CATEGORIES) {
@@ -589,7 +774,7 @@ router.delete('/workload-locks/:id', asyncH(async (req, res) => {
 router.put('/branding', asyncH(async (req, res) => {
   const app_name = v.str(req.body.app_name, { field: 'App name', max: 80, required: true });
   const tagline = v.str(req.body.tagline, { field: 'Tagline', max: 120 }) || '';
-  const theme = v.oneOf(req.body.theme, THEME_KEYS, { field: 'Theme', def: 'midnight' });
+  const theme = v.oneOf(req.body.theme, THEME_KEYS, { field: 'Theme', def: 'graphite' });
   const accent_color = v.str(req.body.accent_color, { field: 'Accent color', max: 7 }) || '';
   if (accent_color && !/^#[0-9a-fA-F]{6}$/.test(accent_color)) throw new HttpError(400, 'Accent color must be a hex value like #4f8cff (or empty to use the theme accent)');
   await db.tx(async (c) => {
@@ -622,7 +807,7 @@ const upload = multer({
     destination: UPLOAD_DIR,
     filename: (req, file, cb) => cb(null, `logo-${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ALLOWED_LOGO[file.mimetype]}`),
   }),
-  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 2 * 1024 * 1024, files: 2 },
   fileFilter: (req, file, cb) => {
     if (ALLOWED_LOGO[file.mimetype]) return cb(null, true);
     cb(new HttpError(400, 'Logo must be PNG, JPEG or WebP'));
@@ -637,32 +822,43 @@ function sniff(buf) {
   return null;
 }
 
-router.post('/branding/logo', upload.single('logo'), asyncH(async (req, res) => {
-  if (!req.file) throw new HttpError(400, 'No file uploaded');
-  const fd = fs.openSync(req.file.path, 'r');
-  const head = Buffer.alloc(12);
-  fs.readSync(fd, head, 0, 12, 0);
-  fs.closeSync(fd);
-  if (sniff(head) !== req.file.mimetype) {
-    fs.unlinkSync(req.file.path);
+// The browser sends the logo plus `icon`: a square 512 px PNG it drew from the logo for the installed-app (PWA) icon.
+router.post('/branding/logo', upload.fields([{ name: 'logo', maxCount: 1 }, { name: 'icon', maxCount: 1 }]), virusScan, asyncH(async (req, res) => {
+  const logo = req.files && req.files.logo && req.files.logo[0];
+  const icon = req.files && req.files.icon && req.files.icon[0];
+  const drop = () => [logo, icon].forEach((f) => { if (f) fs.unlink(f.path, () => {}); });
+  const head = (f) => { const fd = fs.openSync(f.path, 'r'); const h = Buffer.alloc(12); fs.readSync(fd, h, 0, 12, 0); fs.closeSync(fd); return h; };
+  if (!logo) { drop(); throw new HttpError(400, 'No file uploaded'); }
+  if (sniff(head(logo)) !== logo.mimetype || (icon && (icon.mimetype !== 'image/png' || sniff(head(icon)) !== 'image/png'))) {
+    drop();
     throw new HttpError(400, 'File content does not match its type');
   }
-  const url = `/uploads/branding/${req.file.filename}`;
-  const prev = await db.query(`SELECT value FROM app_settings WHERE key='logo_path'`);
-  await db.query(
-    `INSERT INTO app_settings (key, value, updated_at) VALUES ('logo_path',$1,now())
-     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [url]
-  );
-  removeOldLogo(prev.rows[0] && prev.rows[0].value);
-  await audit(req, 'admin.branding_logo', 'app_settings', null, { file: req.file.filename, size: req.file.size });
+  const key = logoKey(req);
+  const iconKey = key === 'logo_dark_path' ? 'logo_dark_icon_path' : 'logo_icon_path';
+  const url = `/uploads/branding/${logo.filename}`;
+  const iconUrl = icon ? `/uploads/branding/${icon.filename}` : '';
+  const prev = await db.query(`SELECT key, value FROM app_settings WHERE key IN ($1,$2)`, [key, iconKey]);
+  for (const [k, v] of [[key, url], [iconKey, iconUrl]]) {
+    await db.query(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES ($1,$2,now())
+       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [k, v]
+    );
+  }
+  prev.rows.forEach((r) => removeOldLogo(r.value));
+  await audit(req, 'admin.branding_logo', 'app_settings', null, { file: logo.filename, size: logo.size, mode: key === 'logo_dark_path' ? 'dark' : 'light' });
   res.json({ ok: true, logo_url: url });
 }));
 
+// ?mode=dark is the dark-mode logo; anything else is the light-mode (or only) logo.
+const logoKey = (req) => (req.query.mode === 'dark' ? 'logo_dark_path' : 'logo_path');
+
 router.delete('/branding/logo', asyncH(async (req, res) => {
-  const prev = await db.query(`SELECT value FROM app_settings WHERE key='logo_path'`);
-  await db.query(`UPDATE app_settings SET value='', updated_at=now() WHERE key='logo_path'`);
-  removeOldLogo(prev.rows[0] && prev.rows[0].value);
-  await audit(req, 'admin.branding_logo_remove', 'app_settings', null);
+  const key = logoKey(req);
+  const iconKey = key === 'logo_dark_path' ? 'logo_dark_icon_path' : 'logo_icon_path';
+  const prev = await db.query(`SELECT value FROM app_settings WHERE key IN ($1,$2)`, [key, iconKey]);
+  await db.query(`UPDATE app_settings SET value='', updated_at=now() WHERE key IN ($1,$2)`, [key, iconKey]);
+  prev.rows.forEach((r) => removeOldLogo(r.value));
+  await audit(req, 'admin.branding_logo_remove', 'app_settings', null, { mode: key === 'logo_dark_path' ? 'dark' : 'light' });
   res.json({ ok: true });
 }));
 
@@ -673,21 +869,35 @@ function removeOldLogo(url) {
 }
 
 // ---------- Audit ----------
-router.get('/audit', asyncH(async (req, res) => {
+// Shared by the list and the Excel export. Filters: action text, category (auth / ingest / workload / knowledge / admin / profile),
+// user, entity type, record id, free text inside the details, and a date range.
+const AUDIT_CATEGORIES = ['auth', 'ingest', 'approval', 'workload', 'knowledge', 'admin', 'profile'];
+function auditWhere(q) {
   const params = [];
   const where = [];
   const add = (sql, val) => { params.push(val); where.push(sql.replace('?', `$${params.length}`)); };
-  if (req.query.action) add('action ILIKE ?', v.like(req.query.action, 60));
-  if (req.query.user) add('username ILIKE ?', v.like(req.query.user, 60));
-  if (req.query.from) add('created_at >= ?::date', v.date(req.query.from, { field: 'From' }));
-  if (req.query.to) add(`created_at < (?::date + 1)`, v.date(req.query.to, { field: 'To' }));
-  const { limit, offset } = v.paging(req.query, { def: 50, max: 200 });
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  if (q.action) add('action ILIKE ?', v.like(q.action, 60));
+  if (q.category && AUDIT_CATEGORIES.includes(q.category)) add('action LIKE ?', `${q.category}.%`);
+  if (q.user) add('username ILIKE ?', v.like(q.user, 60));
+  if (q.entity) add('entity = ?', v.str(q.entity, { field: 'Entity', max: 40 }));
+  if (q.record) add('entity_id = ?', v.str(q.record, { field: 'Record', max: 40 }));
+  if (q.q) add('(details::text ILIKE ? OR action ILIKE ?)', v.like(q.q, 80));
+  if (q.from) add('created_at >= ?::date', v.date(q.from, { field: 'From' }));
+  if (q.to) add(`created_at < (?::date + 1)`, v.date(q.to, { field: 'To' }));
+  return { params, whereSql: where.length ? `WHERE ${where.join(' AND ')}` : '' };
+}
+router.get('/audit', asyncH(async (req, res) => {
+  const { params, whereSql } = auditWhere(req.query);
+  const { limit, offset } = v.paging(req.query, { def: 25, max: 200 });
   const [cnt, list] = await Promise.all([
     db.query(`SELECT count(*)::int AS n FROM audit_logs ${whereSql}`, params),
     db.query(`SELECT * FROM audit_logs ${whereSql} ORDER BY created_at DESC, id DESC LIMIT ${limit} OFFSET ${offset}`, params),
   ]);
-  res.json({ total: cnt.rows[0].n, rows: list.rows });
+  const geoip = require('../geoip');
+  const geo = geoip.mapFor(req, list.rows.map((r) => r.ip));   // locations: System Admin only
+  res.json({ total: cnt.rows[0].n, rows: list.rows, ...(geo ? { geo, geoip: geoip.status() } : {}) });
 }));
+
+require('../admin-extra')(router, { DROPDOWN_CATEGORIES, DROPDOWN_USAGE, auditWhere });
 
 module.exports = router;

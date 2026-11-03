@@ -1,22 +1,31 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api.js';
-import { ago, downloadFile, fmtDate, fmtDateTime } from '../lib/util.js';
+import { isBlockText, pasteFallback } from '../lib/pasteFallback.js';
+import { parseEpisodeText } from '../lib/episode.js';
+import { loadView, saveView, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
+import { ago, downloadFile, fmtDate, fmtDateTime, isoDate as todayISO } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { PlusIcon, SearchIcon, DownloadIcon } from '../components/Icons.jsx';
-import { Chip, DateChip, DateRange, FilterSelect, Pager, PlatformCell, SortTh, useNarrow } from '../components/wl.jsx';
+import { PlusIcon, SearchIcon, DownloadIcon, UploadIcon, TrashIcon, FullscreenIcon, ExitFullscreenIcon } from '../components/Icons.jsx';
+import { normDate, parseTsv, tsvCell } from '../components/PlugGrid.jsx';
+import { Chip, DateChip, DateRange, ExportButton, FilterSelect, FiltersMenu, Pager, PlatformCell, SortTh, SpareRows, ToolMenu, useFitBox, useNarrow, useSpareRows } from '../components/wl.jsx';
+import PresenceAvatars from '../components/PresenceAvatars.jsx';
+import { useLive, useCellPresence, rangeCells, peerStyle } from '../lib/live.js';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 
 // Status (CM) is blank (Pending) until CM picks one of these
 const CM_OPTIONS = ['DONE', 'NON-COMPLIANT'];
 const STATUS_FILTER = ['PENDING', ...CM_OPTIONS];
-const PAGE = 50;
+const PAGE = 25;
+const ALL_ROWS = 5000;                         // the "All" choice in Rows: up to this many on one page (more are reached with the page buttons)
+const ROW_SIZES = [25, 50, 100, 200, ALL_ROWS];   // rows per page
 const withCurrent = (list, v) => (v && !list.includes(v) ? [...list, v] : list);
 const isoDate = (x) => (/^\d{4}-\d{2}-\d{2}/.test(x || '') ? String(x).slice(0, 10) : '');
 
 // Status (CM) cell: the decision plus its audit-trail timestamp. Same chips as the Workload Tracker (soft colour + dot).
 const CM_HUE = { DONE: 'green', 'NON-COMPLIANT': 'red', PENDING: 'amber' };
 const CmChip = ({ s }) => <Chip hue={CM_HUE[s] || 'amber'} dot>{s}</Chip>;
+const isApprovedRow = (r) => !!(r && (r.approved_at || (r.approved_by && String(r.approved_by).trim())));
 const CmStatus = ({ r, inline }) => (r.cm_status
   ? (
     <div className={`stack${inline ? ' inline' : ''}`}>
@@ -40,13 +49,34 @@ const ApprovedBy = ({ r, canApprove }) => {
   return canApprove ? <span className="dim">Awaiting approval</span> : null;
 };
 const RANGE = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/;
+const SEG = '\\d{4}-\\d{2}-\\d{2}(?:/\\d{4}-\\d{2}-\\d{2})?';
+const LIST = new RegExp(`^${SEG}(?:,${SEG})+$`);   // several dates / ranges: "2026-09-14/2026-09-18,2026-09-21/2026-09-25"
+const EPFMT = { test: (x) => RANGE.test(x) || LIST.test(x) };   // a stored range or list is kept as it is
+const MONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// "Sep 14–18, 21–25, 2026" — the month and year are written once while they stay the same
+const listText = (x) => {
+  const iso = (d) => d.y * 10000 + d.m * 100 + d.d;
+  const segs = String(x).split(',').map((g) => { const [a, b] = g.split('/'); const P = (d) => { const [y, m, dd] = d.split('-'); return { y: +y, m: +m, d: +dd }; }; return { a: P(a), b: b ? P(b) : null }; });
+  let cm = 0; let cy = 0; let prevEnd = 0; let prevCross = false; let out = '';
+  segs.forEach((g, i) => {
+    // the month is left out only when it is plainly the previous one's: same month, later than the previous end, and the previous did not run into another month
+    const same = i > 0 && g.a.m === cm && g.a.y === cy && iso(g.a) > prevEnd && !prevCross;
+    if (i) out += ', ';
+    if (i && g.a.y !== cy) out = out.replace(/, $/, `, ${cy}, `);
+    out += `${same ? '' : `${MONS[g.a.m - 1]} `}${g.a.d}`;
+    cm = g.a.m; cy = g.a.y; prevCross = false;
+    if (g.b) { const cross = g.b.m !== g.a.m || g.b.y !== g.a.y; out += `–${cross ? `${MONS[g.b.m - 1]} ` : ''}${g.b.d}`; if (g.b.y !== g.a.y) out += `, ${g.b.y}`; cm = g.b.m; cy = g.b.y; prevCross = cross; }
+    prevEnd = iso(g.b || g.a);
+  });
+  return `${out}, ${cy}`;
+};
 const splitRange = (x) => { const m = RANGE.exec(String(x || '')); return m ? { from: m[1], to: m[2] } : { from: isoDate(x) || '', to: '' }; };
-const dayText = (x) => { const m = RANGE.exec(String(x || '')); return m ? `${fmtDate(m[1])} – ${fmtDate(m[2])}` : (isoDate(x) ? fmtDate(isoDate(x)) : (x || '')); };   // a single date, a range, or old free text as written; a real date reads like the Workload Tracker's; old free text is shown as written
+const dayText = (x) => { if (LIST.test(String(x || ''))) return listText(x); const m = RANGE.exec(String(x || '')); return m ? `${fmtDate(m[1])} – ${fmtDate(m[2])}` : (isoDate(x) ? fmtDate(isoDate(x)) : (x || '')); };   // a single date, a range, or old free text as written; a real date reads like the Workload page's; old free text is shown as written
 
 // Columns that can be edited right in the table, like the Workload Tracker: click a cell, change it, Enter or click away saves, Esc cancels.
 // Requested By is not one of them — it is filled in from whoever created the request. Destination Folder and Approved By are for PCS / OCS only.
 const CELLS = {
-  program: { kind: 'select' },
+  program: { kind: 'text', max: 200 },
   platform: { kind: 'select' },
   billable_party: { kind: 'text', max: 200 },
   episode_break_date_text: { kind: 'daterange' },   // one date or a from–to range, with the browser's own date pickers
@@ -55,52 +85,153 @@ const CELLS = {
   destination_folder: { kind: 'area', max: 1000, approve: true },
   cm_status: { kind: 'select', cm: true, blank: 'PENDING' },   // Status (CM): a dropdown for CM users; NON-COMPLIANT then asks for its reason
 };
-const cellInitial = (r, k) => (k === 'cm_status' ? (r.cm_status || '') : k === 'episode_break_date_text' ? (RANGE.test(r.episode_break_date_text || '') ? r.episode_break_date_text : (isoDate(r.episode_break_date_text) || isoDate(r.episode_date)))
+const cellInitial = (r, k) => (k === 'cm_status' ? (r.cm_status || '') : k === 'episode_break_date_text' ? (EPFMT.test(r.episode_break_date_text || '') ? r.episode_break_date_text : (isoDate(r.episode_break_date_text) || isoDate(r.episode_date)))
   : r[k] == null ? '' : String(r[k]));
 
-// Episode / Breakdate: a date, or a from – to range (the second date is optional). The value is "YYYY-MM-DD" or "YYYY-MM-DD/YYYY-MM-DD".
+// The table's columns in order (for cell blocks, copy and paste). Only some can be written from the table: Requested By is the person who created the request,
+// Approved By is set by the Approve button, Status (CM) has its own flow (and a reason for NON-COMPLIANT).
+const COLS = ['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', 'requested_by', 'destination_folder', 'approved_by', 'cm_status'];
+const WRITE = new Set(['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', 'destination_folder']);
+const REQUIRED = new Set(['program', 'platform']);   // can't be cleared
+const textOf = (r, k) => (k === 'requested_by' ? (r.requested_by_psd || r.requested_by_name || '') : k === 'approved_by' ? (r.approved_by || '') : k === 'cm_status' ? (r.cm_status || 'PENDING') : cellInitial(r, k));
+const cleanVal = (k, raw) => { const t = String(raw ?? '').replace(/\s*\n\s*/g, ' ').trim(); return k === 'episode_break_date_text' ? (EPFMT.test(t) ? t : (parseEpisodeText(t) || normDate(t))) : t; };
+async function writeClipboard(text) {   // the async API where the page may use it (https / localhost), else a hidden textarea + the copy command
+  try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; } } catch (e) { /* fall through */ }
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+  document.body.appendChild(ta);
+  const prev = document.activeElement;
+  ta.focus(); ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+  document.body.removeChild(ta);
+  if (prev && prev.focus) prev.focus({ preventScroll: true });
+  return ok;
+}
+function CellMenu({ x, y, children, ...rest }) {   // a right-click menu that always fits in the window
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.maxHeight = `${window.innerHeight - 16}px`;
+    el.style.overflowY = 'auto';
+    const r = el.getBoundingClientRect();
+    el.style.left = `${Math.max(8, Math.min(x, window.innerWidth - r.width - 8))}px`;
+    el.style.top = `${Math.max(8, Math.min(y, window.innerHeight - r.height - 8))}px`;
+  }, [x, y]);
+  return <div ref={ref} className="xl-menu" style={{ left: x, top: y }} {...rest}>{children}</div>;
+}
+
+// Episode / Breakdate: a date, a from – to range (the second date is optional), or several of those. The value is "YYYY-MM-DD", "YYYY-MM-DD/YYYY-MM-DD"
+// or several joined by commas, oldest first.
 function DateRangeInput({ value, onChange, disabled }) {
   const { from, to } = splitRange(value);
   const join = (a, b) => (a && b ? `${a}/${b}` : a || '');
+  const [rows, setRows] = useState(() => (LIST.test(value || '') ? String(value).split(',').map((g) => { const [a, b] = g.split('/'); return { a, b: b || '' }; }) : null));   // null = one date / range; else the rows (may include empty ones)
+  const emit = (rs) => onChange([...new Set(rs.filter((r) => r.a).map((r) => join(r.a, r.b && r.b >= r.a ? r.b : '')))].sort().join(','));
+  // Ctrl+V while the field is open: text such as "Sep 14-18, 21-25" or "Sep 1, 7, 14" fills it (the date boxes themselves can't take pasted text)
+  const applyEp = (t) => {
+    const parsed = t ? parseEpisodeText(t) : null;
+    if (!parsed) return false;
+    if (parsed.includes(',')) setRows(parsed.split(',').map((g) => { const [a, b] = g.split('/'); return { a, b: b || '' }; })); else if (rows) setRows([{ a: parsed.slice(0, 10), b: parsed.includes('/') ? parsed.slice(-10) : '' }]);
+    onChange(parsed);
+    return true;
+  };
+  const onPaste = (e) => { if (applyEp(e.clipboardData ? e.clipboardData.getData('text/plain') : '')) e.preventDefault(); };
+  const onKey = (e) => pasteFallback(e, (t) => applyEp(t));
+  if (rows) {
+    const edit = (i, part) => { const n = rows.map((r, j) => (j === i ? { ...r, ...part } : r)); setRows(n); emit(n); };
+    const del = (i) => { const n = rows.filter((_, j) => j !== i); setRows(n.length ? n : [{ a: '', b: '' }]); emit(n); };
+    return (
+      <span className="dri-list" onPaste={onPaste} onKeyDown={onKey}>
+        {rows.map((r, i) => (
+          <span className="dri-day" key={i}>
+            <span className="dri">
+              <input type="date" value={r.a} disabled={disabled} max={r.b || undefined} aria-label={`From (${i + 1})`} onChange={(e) => edit(i, { a: e.target.value })} />
+              <span className="dim dri-dash">–</span>
+              <input type="date" value={r.b} disabled={disabled || !r.a} min={r.a || undefined} aria-label={`To (${i + 1}, optional)`} onChange={(e) => edit(i, { b: e.target.value })} />
+            </span>
+            {rows.length > 1 ? <button type="button" className="btn ibtn" aria-label="Remove this date" title="Remove this date" disabled={disabled} onClick={() => del(i)}>×</button> : null}
+          </span>
+        ))}
+        <span className="dri-links">
+          <button type="button" className="linkish" disabled={disabled || rows.length >= 60} onClick={() => setRows([...rows, { a: '', b: '' }])}>+ Add another date / range</button>
+          <button type="button" className="linkish" disabled={disabled} onClick={() => { const f = rows.find((r) => r.a); setRows(null); onChange(f ? join(f.a, f.b) : ''); }}>Back to one date / range</button>
+        </span>
+      </span>
+    );
+  }
   return (
-    <span className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
-      <input type="date" value={from} disabled={disabled} max={to || undefined} aria-label="From" onChange={(e) => onChange(join(e.target.value, to))} />
-      <span className="dim">–</span>
-      <input type="date" value={to} disabled={disabled || !from} min={from || undefined} aria-label="To (optional)" onChange={(e) => onChange(join(from, e.target.value))} />
+    <span className="dri-wrap" onPaste={onPaste} onKeyDown={onKey}>
+      <span className="dri">
+        <input type="date" value={from} disabled={disabled} max={to || undefined} aria-label="From" onChange={(e) => onChange(join(e.target.value, to))} />
+        <span className="dim dri-dash">–</span>
+        <input type="date" value={to} disabled={disabled || !from} min={from || undefined} aria-label="To (optional)" onChange={(e) => onChange(join(from, e.target.value))} />
+      </span>
+      <span className="dri-links"><button type="button" className="linkish" disabled={disabled} onClick={() => setRows([{ a: from, b: to }, { a: '', b: '' }])}>Several dates / ranges</button></span>
     </span>
   );
 }
 
 // One table cell turned into its own editor. Dropdowns save as soon as you pick; a failed save keeps the editor open with the message shown.
-function InlineCell({ def, initial, options, onSave, onCancel }) {
-  const [val, setVal] = useState(initial);
+function InlineCell({ def, initial, options, onSave, onCancel, onUndo, memo, startText }) {
+  const [val, setValRaw] = useState(() => (startText !== undefined ? startText : memo ? loadCellText('ingest', memo, initial) : initial));   // startText: the key pressed on a selected cell, which replaces what was there
+  const setVal = (v) => { setValRaw(v); if (memo) saveCellText('ingest', memo, v); };
   const [busy, setBusy] = useState(false);
   const box = useRef(null);
   const finished = useRef(false);
+  const latest = useRef({});
+  latest.current = { val, initial, onSave };
+  // the cell is closed by something else (a click on another cell or a row number): what was typed / pasted is still saved, like clicking away
+  useEffect(() => () => {
+    const L = latest.current;
+    if (finished.current || String(L.val ?? '') === String(L.initial ?? '')) return;
+    finished.current = true;
+    Promise.resolve(L.onSave(L.val)).catch(() => { /* the message was already shown */ });
+  }, []);
   const field = () => box.current && box.current.querySelector('input, select, textarea');
   useEffect(() => {
     const el = field();
     if (!el) return;
     el.focus();
     if (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type === 'text')) el.setSelectionRange(el.value.length, el.value.length);
-    try { if (el.tagName === 'SELECT') el.showPicker(); } catch (e) { /* needs a user gesture; the field is focused anyway */ }
   }, []);
-  const save = async (value) => {
+  const save = async (value, move) => {
     if (finished.current) return;
     finished.current = true;
     setBusy(true);
-    try { await onSave(value); } catch (e) {
+    try { await onSave(value, move); } catch (e) {
       finished.current = false;
       setBusy(false);
       setTimeout(() => { const el = field(); if (el) el.focus(); }, 0);
     }
   };
   const change = (e) => { const nv = e.target.value; setVal(nv); if (def.kind === 'select') save(nv); };
+  // Ctrl+V while a dropdown or date box is open: the copied text picks the matching option / sets the date (these boxes can't take pasted text themselves)
+  const applyText = (raw, el) => {
+    const text = String(raw || '').replace(/\s*\n\s*/g, ' ').trim();
+    if (!text || !el) return false;
+    if (el.tagName === 'SELECT') {
+      const opt = [...el.options].find((o) => o.value && (o.value.toLowerCase() === text.toLowerCase() || o.text.trim().toLowerCase() === text.toLowerCase()));
+      if (opt) change({ target: { value: opt.value } });
+      return true;
+    }
+    if (el.tagName === 'INPUT' && el.type === 'date') {
+      const d = normDate(text);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) { change({ target: { value: d } }); return true; }
+    }
+    return false;
+  };
+  const paste = (e) => { const t = e.clipboardData ? e.clipboardData.getData('text/plain') : ''; if (applyText(t, e.target)) e.preventDefault(); };
   const blur = (e) => { if (box.current && !box.current.contains(e.relatedTarget)) save(val); };
   const key = (e) => {
+    // Ctrl+Z in a cell you have not changed undoes the last table edit (inside a box with typing in it, it undoes the typing)
+    if (onUndo && (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'z' && String(val ?? '') === String(initial ?? '')) { e.preventDefault(); finished.current = true; onUndo(e.shiftKey); return; }
+    pasteFallback(e, applyText);
     if (e.key === 'Escape') { finished.current = true; onCancel(); return; }
     const tag = e.target.tagName;
-    if (e.key === 'Enter' && tag !== 'SELECT' && (tag !== 'TEXTAREA' || e.ctrlKey || e.metaKey)) { e.preventDefault(); save(val); }
+    if (e.key === 'Enter' && tag !== 'SELECT' && (tag !== 'TEXTAREA' || e.ctrlKey || e.metaKey)) { e.preventDefault(); save(val, def.kind === 'daterange' ? undefined : { dr: e.shiftKey ? -1 : 1, dc: 0 }); }   // Enter saves and moves down (Shift+Enter up)
+    else if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey && def.kind !== 'daterange') { e.preventDefault(); save(val, { dr: 0, dc: e.shiftKey ? -1 : 1 }); }   // Tab / Shift+Tab move sideways
   };
   let input;
   if (def.kind === 'select') input = <select value={val} disabled={busy} onChange={change}><Options list={options} blank={def.blank || 'Select…'} /></select>;
@@ -109,7 +240,7 @@ function InlineCell({ def, initial, options, onSave, onCancel }) {
   else if (def.kind === 'number') input = <input type="number" min="0" step="1" value={val} disabled={busy} onChange={change} />;
   else if (def.kind === 'area') input = <textarea className="mono" maxLength={def.max} value={val} disabled={busy} onChange={change} />;
   else input = <input maxLength={def.max} value={val} disabled={busy} onChange={change} />;
-  return <div className={`cell-editor${def.kind === 'number' ? ' num' : def.kind === 'date' || def.kind === 'daterange' ? ' date' : ''}${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key}>{input}</div>;
+  return <div className={`cell-editor${def.kind === 'number' ? ' num' : def.kind === 'date' || def.kind === 'daterange' ? ' date' : ''}${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key} onPaste={paste}>{input}</div>;
 }
 
 // NON-COMPLIANT needs a reason: asked here right after it is picked in the Status (CM) cell.
@@ -123,7 +254,7 @@ function ReasonModal({ r, onClose, onSave }) {
     try { await onSave(reason); } catch (e) { toast(e.message, 'err'); setBusy(false); }
   };
   return (
-    <Modal title={`Ingest #${r.no ?? r.id}: NON-COMPLIANT`} onClose={() => { if (!busy) onClose(); }}
+    <Modal title="NON-COMPLIANT" onClose={() => { if (!busy) onClose(); }}
       footer={(<>
         <button type="button" className="btn" disabled={busy} onClick={onClose}>Cancel</button>
         <button type="button" className="btn primary" disabled={busy} onClick={save}>Save</button>
@@ -140,41 +271,111 @@ export default function Ingest() {
   const confirm = useConfirm();
   const [params] = useSearchParams();
   const canWrite = s.can('ingest.write');
-  const canDelete = s.can('ingest.delete');
+  const canDeleteAny = s.can('ingest.delete');
+  const isAdminUser = !!(s.user && ['Admin', 'System Admin'].includes(s.user.role));
+  const canDelete = canDeleteAny || canWrite;   // an Editor can delete the requests she created herself
+  // May this person delete this request? (the server decides again): an Admin any; others only while there is no CM decision, and an Editor only her own
+  const mayDelete = (r) => !!r && (isAdminUser || (!r.cm_status && (canDeleteAny || (canWrite && r.created_by === (s.user && s.user.id)))));
 
   const narrow = useNarrow();
   const [lookups, setLookups] = useState(null);
-  const [filt, setFilt] = useState({ q: '', status: /^pending$/i.test(params.get('status') || '') ? 'PENDING' : (params.get('status') || ''), program: '', platform: '', from: '', to: '', approval: /^pending$/i.test(params.get('approval') || '') ? 'pending' : '' });
-  const [offset, setOffset] = useState(0);
-  const [sort, setSortState] = useState({ k: '', dir: 'asc' });   // clicked column header
+  const [filt, setFilt] = useState(() => {   // the last filters of this tab (kept across a refresh), unless a dashboard link brought its own
+    const mine = loadView('ingest', {}).filt || {};
+    const base = { q: '', status: '', program: '', platform: '', from: todayISO(), to: todayISO(), approval: '', ...mine };   // a fresh tab starts on today
+    if (params.get('status')) base.status = /^pending$/i.test(params.get('status')) ? 'PENDING' : params.get('status');
+    if (params.get('approval')) base.approval = /^pending$/i.test(params.get('approval')) ? 'pending' : params.get('approval');
+    if (params.get('status') || params.get('approval')) { base.from = ''; base.to = ''; }   // a Dashboard link to the pending items shows them on every date
+    return base;
+  });
+  const [offset, setOffset] = useState(() => loadView('ingest', {}).offset || 0);   // the page you were on is kept across a refresh
+  const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('ing:rows3')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
+  const changeSize = (e) => { const n = Number(e.target.value); try { localStorage.setItem('ing:rows3', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
+  const [sort, setSortState] = useState(() => loadView('ingest', {}).sort || { k: '', dir: 'asc' });   // clicked column header
+  useEffect(() => { saveView('ingest', { filt, sort, offset }); }, [filt, sort, offset]);
   const setSort = (s2) => { setSortState(s2); setOffset(0); };
   const [data, setData] = useState(null);
-  const [form, setForm] = useState(null);     // null | {} (new) | record (edit)
+  const [form, setForm] = useState(() => { const d = loadDialog('ingest'); return d ? d.rec : null; });     // null | {} (new) | record (edit); an open one comes back after a refresh
+  useEffect(() => { syncDialog('ingest', form); }, [form]);
   const [detail, setDetail] = useState(null);
   const [reasonFor, setReasonFor] = useState(null);   // the record whose NON-COMPLIANT reason is being asked for
-  const [editing, setEditing] = useState(null);   // { id, k }: the one cell being edited in the table
+  const [editing, setEditing] = useState(() => loadEdit('ingest').cell || null);   // { id, k }: the one cell being edited in the table (comes back after a refresh)
+  const curCell = useRef(null);   // the cell I have open or selected (announced to the others by useCellPresence)
+  const peers = useCellPresence('ingest', curCell);   // cells other people have open or selected
   const [picked, setPicked] = useState(() => new Set());   // rows ticked for batch delete
+  const [allMatching, setAllMatching] = useState(false);   // "Select all N": every request matching the filters, on every page
+  const [deletingAll, setDeletingAll] = useState(false);
   const q = useDebounced(filt.q, 300);
 
   useEffect(() => {
-    get('/api/dropdowns?categories=platform,program').then(setLookups);
+    get('/api/dropdowns?categories=platform').then(setLookups);
   }, []);
 
-  const load = useCallback(async () => {
-    const p = new URLSearchParams({ limit: PAGE, offset });
+  // quiet = a re-read because somebody else changed the list: keep the person's picked rows and the table as it is if the read fails
+  // Only today's list (no other filter, no search, no sort) keeps rows where they were typed (blank rows, fixed spots); every other view lists the rows in the order they were added, numbered 1, 2, 3…
+  const follow = useRef(null);   // the id of the record just saved: the screen follows it
+  const jumped = useRef(0);
+  const keepNow = () => !narrow && !sort.k && !!filt.from && filt.from === filt.to && filt.from === todayISO() && !filt.status && !filt.program && !filt.platform && !filt.approval && !q;
+  const fetchPage = useCallback(async (quiet) => {
+    const p = new URLSearchParams({ limit: size, offset });
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
-    if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
-    setPicked(new Set());
-    try { setData(await get(`/api/ingest?${p}`)); } catch (e) { setData({ error: e.message, rows: [], total: 0 }); }
-  }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset, sort.k, sort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); } else if (narrow && !!filt.from && filt.from === filt.to && filt.from === todayISO() && !filt.status && !filt.program && !filt.platform && !filt.approval && !q) p.set('newest', '1');   // phone: only today's plain list has the newest on top; every other date / filter / search is like the desktop (newest at the bottom)
+    if (!quiet) { setPicked(new Set()); setAllMatching(false); }
+    const keep = keepNow();
+    if (keep) p.set('keep', '1');   // today's list only: every row keeps the row it was typed into
+    if (follow.current) p.set('locate', String(follow.current));   // just saved: ask where the record is in this list
+    try {
+      const res = await get(`/api/ingest?${p}`);
+      // the saved record is on another page (a new entry goes to the last page of All dates): go to that page; the next read shows it
+      if (follow.current && res.at != null && !quiet) {
+        const sz = Number(size) || 25;
+        if ((res.at < offset || res.at >= offset + sz) && jumped.current < 2) { jumped.current += 1; setOffset(Math.floor(res.at / sz) * sz); return; }
+      }
+      setData({ ...res, _sort: !!sort.k, _keep: keep });
+    } catch (e) { if (!quiet) setData({ error: e.message, rows: [], total: 0 }); }
+  }, [filt.status, filt.program, filt.platform, filt.from, filt.to, filt.approval, q, offset, size, sort.k, sort.dir, narrow]); // eslint-disable-line react-hooks/exhaustive-deps
+  const load = useCallback(() => fetchPage(false), [fetchPage]);
+  // after a save the screen follows the entry: it scrolls to the saved record and flashes it, so it is not lost in a long list (the phone especially)
+  useEffect(() => {
+    const id = follow.current;
+    if (!id || !data || !data.rows) return;
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`.wl-card tr[data-id="${id}"]`);
+      if (!el) { if (data.at == null || jumped.current >= 2) follow.current = null; return; }   // not here yet: a read of its page is on the way
+      follow.current = null;
+      if (el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el.classList.add('saved-flash');
+      setTimeout(() => el.classList.remove('saved-flash'), 2400);
+    });
+  }, [data]);
+  useEffect(() => { const t = setInterval(() => { if (follow.current && Date.now() - (follow.since || 0) > 8000) follow.current = null; }, 4000); return () => clearInterval(t); }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  const exportXlsx = async () => {   // what the table shows: same filters, search and sort
+  const fileRef = useRef(null);
+  const [importing, setImporting] = useState(false);
+  // Import from Excel: a file shaped like this page's own Export; every row becomes a new request from you (rows already in the list are left out)
+  const importFile = async (file) => {
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    setImporting(true);
+    try {
+      const out = await post('/api/ingest/import', fd);
+      const bits = [`${out.created} request${out.created === 1 ? '' : 's'} imported`];
+      if (out.existing) bits.push(`${out.existing} already in the list`);
+      if (out.skipped) bits.push(`${out.skipped} skipped`);
+      toast(bits.join(' — '), out.skipped && !out.created ? 'err' : undefined);
+      if (out.errors && out.errors.length) console.warn('Import errors:', out.errors);   // eslint-disable-line no-console
+      if (out.skipped && out.errors && out.errors[0]) toast(out.errors[0], 'err');
+      load();
+    } catch (e) { toast(e.message, 'err'); } finally { setImporting(false); if (fileRef.current) fileRef.current.value = ''; }
+  };
+  const exportXlsx = async (byDate) => {   // what the table shows: same filters, search and sort
     const p = new URLSearchParams();
     Object.entries({ ...filt, q }).forEach(([k, v]) => { if (v) p.set(k, v); });
     if (sort.k) { p.set('sort', sort.k); p.set('dir', sort.dir); }
-    try { await downloadFile(`/api/ingest/export?${p}`, 'Ingest.xlsx'); } catch (e) { toast(e.message, 'err'); }
+    if (byDate) p.set('by_date', '1');
+    try { await downloadFile(`/api/ingest/export?${p}`, byDate ? 'Ingest_tabs.xlsx' : 'Ingest.xlsx'); } catch (e) { toast(e.message, 'err'); }
   };
 
   const openDetail = useCallback(async (id) => {
@@ -188,7 +389,23 @@ export default function Ingest() {
 
   const canApprove = s.can('ingest.approve');
   const canCm = s.can('ingest.cm_complete');
-  const closeCell = (r, k) => setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur));
+  // Google-Sheets style: a click only SELECTS a cell; typing, Enter, F2 or a double-click opens its editor
+  const closeCell = (r, k) => { setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur)); if (r.id !== 'draft') selectCell(r, k); };
+  const selectCell = (r, k) => {
+    const ri = rows.findIndex((x) => x.id === r.id); const ci = COLS.indexOf(k);
+    if (ri >= 0 && ci >= 0) setCellSel({ r0: ri, c0: ci, r1: ri, c1: ci });
+  };
+  const tapEdit = () => narrow || (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches);   // a phone / tablet has no double-click or keyboard focus: a tap opens the editor as before
+  const openSelected = (start) => {
+    const n = normCells();
+    if (!n || n.r0 !== n.r1 || n.c0 !== n.c1) return false;
+    const row = rows[n.r0]; const k = COLS[n.c0];
+    if (!row || !k || !WRITE.has(k) && k !== 'cm_status' || !CELLS[k] || !may(row, k)) return false;
+    const kind = CELLS[k].kind;
+    const typed = start !== undefined && (kind === 'text' || kind === 'area' || (kind === 'number' && /^\d$/.test(start))) ? start : undefined;
+    setEditing({ id: row.id, k, start: typed });
+    return true;
+  };
   // Save ONE cell (PATCH writes only that column, so other people's edits to the row are kept)
   const decide = async (r, decision, reason) => {
     await post(`/api/ingest/${r.id}/cm-decision`, { decision, reason: decision === 'NON-COMPLIANT' ? reason : '' });
@@ -213,10 +430,93 @@ export default function Ingest() {
       toast('Approval removed');
     } catch (e) { toast(e.message, 'err'); }
   };
-  const saveCell = async (r, k, value, initial) => {
+  // ---- table state: full screen, the Add Row draft, the right-click menu, a block of picked cells, undo / redo ----
+  const rows = data && data.rows ? data.rows : [];
+  const rowsRef = useRef(rows); rowsRef.current = rows;
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    const esc = (e) => { if (e.key === 'Escape' && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || '')) setFull(false); };
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, []);
+  const [draft, setDraft] = useState(() => loadEdit('ingest').draft || null);          // the empty row Add Row put at the top, not saved yet (kept across a refresh)
+  const prevEd = useRef(editing ? `${editing.id}:${editing.k}` : null);
+  useEffect(() => { prevEd.current = syncEdit('ingest', editing, draft, prevEd.current); }, [editing, draft]);
+  useEffect(() => { if (editing && editing.id !== 'draft' && data && data.rows && !data.rows.some((r) => r.id === editing.id)) setEditing(null); }, [data]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // other people's changes appear by themselves (not while a cell, form, detail or dialog is open here, so nothing is overwritten under your hands)
+  useLive(['ingest'], () => fetchPage(true), () => !!(editing || form || detail || reasonFor || draft || document.querySelector('.modal-backdrop')));
+  const [ctx, setCtx] = useState(null);              // right-click menu position
+  const [pinned, setPinned] = useState(null);   // a row just saved from a spare row stays in that spot (no jump) until I move on { id, slot, row }
+  useEffect(() => {   // moving on from the row (a click anywhere else, or Esc) lets it settle into its sorted place
+    if (!pinned) return undefined;
+    const down = (e) => { if (!(e.target && e.target.closest && e.target.closest('tr[data-pinned]'))) setPinned(null); };
+    const esc = (e) => { if (e.key === 'Escape' && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target || {}).tagName || '')) setPinned(null); };
+    document.addEventListener('mousedown', down, true); document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', down, true); document.removeEventListener('keydown', esc); };
+  }, [pinned]);
+  useEffect(() => { if (pinned && rows.some((x) => x.id === pinned.id)) setPinned(null); }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setPinned(null); }, [offset, size, filt.from, filt.to, filt.status, filt.program, filt.platform, filt.approval, q, sort.k, sort.dir]);
+  const [spareSel, setSpareSel] = useState(null);   // the blank cell picked in a spare row { slot, k }
+  const [cellSel, setCellSel] = useState(null);      // a block of cells picked by dragging { r0, c0, r1, c1 }
+  const hist = useRef({ past: [], future: [] });
+  const internalClip = useRef(null);
+  const lastPick = useRef(null);
+  const drag = useRef(null);
+  const cellDrag = useRef(null);
+  const suppress = useRef(false);
+  const keysRef = useRef(null);
+  const pasteRef = useRef(null);
+  const clearPicksRef = useRef(() => {});
+  const clearPicks = () => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; };
+  clearPicksRef.current = clearPicks;
+  const chosen = rows.filter((r) => picked.has(r.id));
+
+  const describePeer = (key) => { const [id, k] = key.split(':'); const r = rows.find((x) => String(x.id) === id); return `${(LBL && LBL[k]) || k}${r ? ` · ${r.program}` : ''}`; };
+  // May this person change this cell? (a CM-decided record is locked unless you are CM; Destination Folder is PCS / OCS only)
+  const may = (r, k) => { const def = CELLS[k]; if (!def) return false; return def.cm ? (canCm && isApprovedRow(r)) : canWrite && (!r.cm_status || canCm) && (!def.approve || canApprove); };
+
+  const patchCell = async (id, k, value) => {
+    const out = await patch(`/api/ingest/${id}`, { field: k, value: k === 'materials_count' ? (value === '' ? null : Number(value)) : value });
+    setData((d) => (d && d.rows ? { ...d, rows: d.rows.map((x) => (x.id === id ? { ...x, ...out.row } : x)) } : d));
+    return out.row;
+  };
+  const pushH = (entry) => { const h = hist.current; h.past.push(entry); if (h.past.length > 50) h.past.shift(); h.future = []; };
+  const step = async (from, to, verb) => {
+    const e = hist.current[from].pop();
+    if (!e) { toast(`Nothing to ${verb}`); return; }
+    try { await e[verb](); hist.current[to].push(e); toast(`${verb === 'undo' ? 'Undone' : 'Redone'}: ${e.label}`); } catch (err) { hist.current[from].push(e); toast(err.message, 'err'); }
+    clearPicks(); setCellSel(null);
+    load();
+  };
+  const undo = () => step('past', 'future', 'undo');
+  const redo = () => step('future', 'past', 'redo');
+
+  // go to the next cell you may edit (Enter / Tab in a cell editor)
+  const moveEdit = (r, k, { dr, dc }) => {
+    const list = [...(draft && draft.at !== 'bottom' ? [{ ...draft, id: 'draft' }] : []), ...rows, ...(draft && draft.at === 'bottom' ? [{ ...draft, id: 'draft' }] : [])];
+    let ri = list.findIndex((x) => x.id === r.id);
+    let ci = COLS.indexOf(k);
+    if (ri < 0 || ci < 0) return;
+    for (let n = 0; n < COLS.length * (list.length + 1) + 2; n++) {
+      if (dc) { ci += dc; if (ci >= COLS.length) { ci = 0; ri += 1; } else if (ci < 0) { ci = COLS.length - 1; ri -= 1; } } else ri += dr;
+      if (ri < 0 || ri >= list.length) return;
+      const kk = COLS[ci]; const rr = list[ri];
+      if (WRITE.has(kk) && (rr.id === 'draft' ? canWrite && (kk !== 'destination_folder' || canApprove) : may(rr, kk))) { if (rr.id === 'draft') setEditing({ id: rr.id, k: kk }); else selectCell(rr, kk); return; }   // the unsaved new row keeps opening editors
+    }
+  };
+  // Save ONE cell (PATCH writes only that column, so other people's edits to the row are kept)
+  const saveCell = async (r, k, value, initial, move) => {
+    if (r.id === 'draft') {
+      const merged = draft ? { ...draft, [k]: value } : null;
+      setDraft((d) => (d ? { ...d, [k]: value } : d)); closeCell(r, k);
+      if (merged && merged.at === 'bottom' && ['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', 'destination_folder'].some((f) => String(merged[f] == null ? '' : merged[f]).trim())) { saveDraft(merged, true, move, k); return; }   // a row started in a spare row saves as soon as any cell has something in it
+      if (move) moveEdit(r, k, move);
+      return;
+    }
     if (String(value ?? '') === String(initial ?? '')) {
       closeCell(r, k);
       if (k === 'cm_status' && value === 'NON-COMPLIANT') setReasonFor(r);   // picking NON-COMPLIANT again = update its reason
+      else if (move) moveEdit(r, k, move);
       return;
     }
     if (k === 'cm_status') {
@@ -226,86 +526,575 @@ export default function Ingest() {
       return;
     }
     try {
-      const out = await patch(`/api/ingest/${r.id}`, { field: k, value: k === 'materials_count' ? (value === '' ? null : Number(value)) : value });
-      setData((d) => (d && d.rows ? { ...d, rows: d.rows.map((x) => (x.id === r.id ? { ...x, ...out.row } : x)) } : d));
+      await patchCell(r.id, k, value);
+      pushH({ label: 'cell edit', undo: async () => { await patchCell(r.id, k, initial); }, redo: async () => { await patchCell(r.id, k, value); } });
       closeCell(r, k);
+      if (move) moveEdit(r, k, move);
     } catch (e) { toast(e.message, 'err'); throw e; }
   };
+
   // A cell in the table: editable in place when you may change it, otherwise plain (clicking it opens the details as before).
   const LBL = { program: 'PROG. NAME / PROJ. TITLE', platform: 'Platform', billable_party: 'Billable Party', episode_break_date_text: 'Episode / Breakdate', source: 'Source', materials_count: 'No. of Materials', requested_by: 'Requested By', destination_folder: 'Destination Folder', approved_by: 'Approved By', cm_status: 'Status (CM)', updated: 'Updated' };
+  const normCells = () => (cellSel ? { r0: Math.min(cellSel.r0, cellSel.r1), r1: Math.max(cellSel.r0, cellSel.r1), c0: Math.min(cellSel.c0, cellSel.c1), c1: Math.max(cellSel.c0, cellSel.c1) } : null);
+  { const n = !editing && cellSel ? normCells() : null;
+    const cells = n ? rangeCells(rows, COLS, n.r0, n.r1, n.c0, n.c1) : [];
+    const bd = draft && draft.at === 'bottom' ? draft : null;   // a new row being filled in a blank spare row: everybody sees the whole row as typed, even before it can be saved
+    const filled = bd ? ['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', 'destination_folder'].filter((f) => String(bd[f] == null ? '' : bd[f]).trim()) : [];
+    const dKeys = filled.map((f) => `spare:${bd.slot}:${f}`);
+    const dTexts = Object.fromEntries(filled.map((f) => [`spare:${bd.slot}:${f}`, String(bd[f])]));
+    const lead = editing && bd && editing.id === 'draft' ? `spare:${bd.slot}:${editing.k}` : !editing && spareSel && !cells.length ? `spare:${spareSel.slot}:${spareSel.k}` : null;
+    const base = editing && editing.id !== 'draft' ? { cells: [`${editing.id}:${editing.k}|tblr`], kind: 'edit' }
+      : lead ? { cells: [`${lead}|tblr`], kind: editing ? 'edit' : 'select' }
+      : cells.length ? { cells, kind: 'select' } : null;
+    const extra = dKeys.filter((x) => !(base && base.cells.some((c) => c.split('|')[0] === x))).map((x) => `${x}|tblr`);   // the unsaved new row stays visible to the others while I am elsewhere
+    curCell.current = base || extra.length ? { cells: [...(base ? base.cells : []), ...extra], kind: base ? base.kind : 'select', texts: dKeys.length ? dTexts : undefined } : null; }
   const cell = (r, k, children, props0 = {}) => {
+    const p = peers[r.id === 'draft' && draft && draft.slot !== undefined ? `spare:${draft.slot}:${k}` : `${r.id}:${k}`];
     const props = { 'data-k': k, 'data-label': LBL[k], ...props0 };
+    if (p) { props.className = [props.className, 'peer-on'].filter(Boolean).join(' '); props['data-peer'] = p.name; props['data-peer-uid'] = p.first ? p.uid : undefined; props.style = { ...(props.style || {}), ...peerStyle(p) }; }
+    if (p && p.text != null && !(editing && editing.id === r.id && editing.k === k)) children = <span className="peer-text">{p.text}</span>;   // somebody is typing in this cell: show it as they type
+    const ci = COLS.indexOf(k);
+    if (r.__i !== undefined && ci >= 0) {
+      props['data-r'] = r.__i; props['data-c'] = ci;
+      const n = normCells();
+      if (n && r.__i >= n.r0 && r.__i <= n.r1 && ci >= n.c0 && ci <= n.c1) props['data-sel'] = '1';
+    }
     const def = CELLS[k];
-    const may = def && def.cm ? canCm : canWrite && (!r.cm_status || canCm) && (!def || !def.approve || canApprove);
-    if (!def || !may) return <td {...props}>{children}</td>;
+    const isDraft = r.id === 'draft';
+    const mayEdit = isDraft ? canWrite && !!def && !def.cm && (!def.approve || canApprove) : !!def && may(r, k);
+    if (!def || !mayEdit) return <td {...props}>{children}</td>;
     if (editing && editing.id === r.id && editing.k === k) {
       const initial = cellInitial(r, k);
       return (
-        <td className="editing" onClick={(e) => e.stopPropagation()}>
-          <InlineCell def={def} initial={initial} options={k === 'cm_status' ? CM_OPTIONS : k === 'program' ? withCurrent(lookups ? lookups.program : [], r.program) : withCurrent(lookups ? lookups.platform : [], r.platform)}
-            onSave={(value) => saveCell(r, k, value, initial)} onCancel={() => setEditing(null)} />
+        <td data-k={k} data-r={props['data-r']} data-c={props['data-c']} className="editing" onClick={(e) => e.stopPropagation()}>
+          <InlineCell memo={`${r.id}:${k}`} startText={editing.start} def={def} initial={initial} options={k === 'cm_status' ? CM_OPTIONS : withCurrent(lookups ? lookups.platform : [], r.platform)}
+            onSave={(value, move) => saveCell(r, k, value, initial, move)} onCancel={() => { setEditing(null); if (r.id !== 'draft') selectCell(r, k); }} onUndo={(sh) => { setEditing(null); if (sh) redo(); else undo(); }} />
         </td>
       );
     }
     const open = () => setEditing({ id: r.id, k });
     return (
-      <td {...props} className={`${props.className || ''} editable`.trim()} title="Click to edit" tabIndex={0}
-        onClick={(e) => { e.stopPropagation(); open(); }}
-        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); open(); } }}>{children}</td>
+      <td {...props} className={`${props.className || ''} editable`.trim()} title="Click to select, double-click or press Enter to edit" tabIndex={0}
+        onClick={(e) => {   // select only; Shift / Ctrl+click and drags are the block selection's (see cellDown)
+          e.stopPropagation();
+          if (isDraft || tapEdit()) { open(); return; }
+          if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+          if (r.__i !== undefined && ci >= 0) setCellSel({ r0: r.__i, c0: ci, r1: r.__i, c1: ci });
+        }}
+        onDoubleClick={(e) => { e.stopPropagation(); open(); }}>{children}</td>
     );
+  };
+
+  // ---- Add Row: an empty row at the top; fill the cells and Save (Program and Platform are required) or Discard ----
+  const addDraft = () => {
+    if (!canWrite) return;
+    if (draft) { setEditing({ id: 'draft', k: 'program' }); return; }
+    setDraft({ id: 'draft', program: '', platform: '', billable_party: '', episode_break_date_text: '', source: '', materials_count: '', destination_folder: '' });
+    setEditing({ id: 'draft', k: 'program' });
+    requestAnimationFrame(() => { const box = document.querySelector('.wl-card .wl-fit'); if (box) box.scrollTop = 0; });
+  };
+  const bodyOf = (o) => ({
+    program: o.program || '', platform: o.platform || '', billable_party: o.billable_party || '', episode_break_date_text: o.episode_break_date_text || '',
+    source: o.source || '', materials_count: o.materials_count === '' || o.materials_count == null ? null : Number(o.materials_count),
+    destination_folder: canApprove ? (o.destination_folder || '') : '', remarks: '',
+    row_pos: o.at === 'bottom' && o.slot ? o.slot : undefined,   // a row typed into a blank row keeps that row's number
+  });
+  const createRecs = async (list, label, partial = false) => {   // new records from { program, platform, … } objects; one undo step removes them again
+    let ids = [];
+    let failed = 0; let firstErr = '';
+    for (const o of list) {
+      try { const out = await post('/api/ingest', partial ? { ...bodyOf(o), partial: true } : bodyOf(o)); ids.push(out.id); } catch (e) { failed++; if (!firstErr) firstErr = e.message; }
+    }
+    if (ids.length) {
+      pushH({
+        label,
+        undo: async () => { if (ids.length) await post('/api/ingest/delete', { ids }); },
+        redo: async () => { const again = []; for (const o of list) { try { again.push((await post('/api/ingest', partial ? { ...bodyOf(o), partial: true } : bodyOf(o))).id); } catch (e) { /* skipped */ } } ids = again; },
+      });
+    }
+    return { added: ids.length, failed, firstErr, ids };
+  };
+  const SPARE_COLS = ['program', 'platform', 'billable_party', 'episode_break_date_text', 'source', 'materials_count', null, canApprove ? 'destination_folder' : null, null, null, null];
+  const selectSpare = (k, slot) => { setSpareSel({ slot, k }); setCellSel(null); clearPicks(); setEditing(null); };
+  const draftHasText = (d) => !!d && Object.keys(d).some((x) => !['id', 'at', 'slot'].includes(x) && String(d[x] == null ? '' : d[x]).trim());
+  const openSpare = (k, slot, start) => {   // a spare row was opened (double-click / Enter / typing): it becomes a new (unsaved) row right there
+    setSpareSel({ slot, k });
+    if (draft) {
+      if (draft.slot !== slot) {
+        if (draftHasText(draft)) { toast('Finish the new row above first (Program and Platform), or select one of its cells and press Delete to drop it', 'err'); return; }
+        setDraft({ ...draft, slot });
+      }
+      setEditing({ id: 'draft', k, start });
+      return;
+    }
+    setDraft({ id: 'draft', at: 'bottom', slot: slot || trailStart, program: '', platform: '', billable_party: '', episode_break_date_text: '', source: '', materials_count: '', destination_folder: '' });
+    setEditing({ id: 'draft', k, start });
+  };
+  const pendingSel = useRef(null);   // the cell to select once a row saved from a spare row is in the list
+  useEffect(() => {
+    const ps = pendingSel.current; if (!ps) return;
+    const ri = rows.findIndex((x) => x.id === ps.id); const ci = COLS.indexOf(ps.k);
+    if (ri >= 0 && ci >= 0) { pendingSel.current = null; setCellSel({ r0: ri, c0: ci, r1: ri, c1: ci }); }
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+  const saveDraft = async (given, partial = false, move = null, fromK = null) => {
+    const dr = given && given.program !== undefined ? given : draft;
+    if (!dr) return;
+    if (!partial && (!String(dr.program).trim() || !String(dr.platform).trim())) { toast('Program and Platform are required', 'err'); return; }
+    const out = await createRecs([dr], 'add row', partial);
+    if (!out.added) { toast(out.firstErr || 'Could not add the row', 'err'); return; }
+    setDraft(null); setEditing(null);
+    if (partial && dr.at === 'bottom' && out.ids && out.ids[0]) {
+      const nid = out.ids[0]; const snap = { ...dr, id: nid, at: undefined, updated_at: new Date().toISOString() };
+      setPinned({ id: nid, slot: dr.slot, row: snap });   // it stays where I was typing
+      setSpareSel(null);
+      let nextK = null;
+      if (move && move.dc && fromK) { let ci = COLS.indexOf(fromK); for (let n = 0; n < COLS.length; n++) { ci += move.dc; if (ci < 0 || ci >= COLS.length) break; const kk = COLS[ci]; if (WRITE.has(kk) && CELLS[kk] && !CELLS[kk].cm && (kk !== 'destination_folder' || canApprove)) { nextK = kk; break; } } }
+      if (nextK) setEditing({ id: nid, k: nextK }); else if (fromK) pendingSel.current = { id: nid, k: fromK };   // Tab goes on to the next cell of the same row
+    }
+    toast('Ingest request added');
+    load();
+  };
+
+  // ---- cells: apply a list of changes one cell at a time; one undo step covers them all ----
+  const applyOps = async (ops, label, skipped = 0) => {
+    const done = []; let failed = 0; let firstErr = '';
+    for (const o of ops) {
+      try { await patchCell(o.r.id, o.k, o.after); done.push(o); } catch (e) { failed++; if (!firstErr) firstErr = e.message; }
+    }
+    if (done.length) {
+      pushH({
+        label,
+        undo: async () => { for (const o of done) await patchCell(o.r.id, o.k, o.before); },
+        redo: async () => { for (const o of done) await patchCell(o.r.id, o.k, o.after); },
+      });
+    }
+    const bits = [];
+    if (done.length) bits.push(`${label.charAt(0).toUpperCase()}${label.slice(1)}: ${done.length} cell${done.length === 1 ? '' : 's'}`);
+    else bits.push('Nothing changed');
+    if (skipped) bits.push(`${skipped} cell${skipped === 1 ? '' : 's'} left as they are (read-only, locked or required)`);
+    if (failed) bits.push(`${failed} failed — ${firstErr}`);
+    toast(bits.join(' — '), failed || !done.length ? 'err' : undefined);
+    return done.length;
+  };
+  const blockOps = (n, valueAt) => {   // valueAt(rowOffset, colOffset, key) → new text, or undefined to leave the cell
+    const ops = []; let skipped = 0;
+    for (let ri = n.r0; ri <= n.r1; ri++) {
+      const r = rows[ri];
+      if (!r) continue;
+      for (let ci = n.c0; ci <= n.c1; ci++) {
+        const k = COLS[ci];
+        const raw = valueAt(ri - n.r0, ci - n.c0, k);
+        if (raw === undefined) continue;
+        if (!WRITE.has(k) || !may(r, k)) { skipped++; continue; }
+        const after = cleanVal(k, raw);
+        if (after === '' && REQUIRED.has(k)) { skipped++; continue; }
+        const before = cellInitial(r, k);
+        if (after !== before) ops.push({ r, k, before, after });
+      }
+    }
+    return { ops, skipped };
+  };
+  const cellAt = (el) => { const td = el && el.closest ? el.closest('.wl-card td[data-c]') : null; return td ? { r: Number(td.dataset.r), c: Number(td.dataset.c) } : null; };
+  const cellDown = (e) => {
+    if (e.button !== 0) return;
+    const t = e.target;
+    if (t.closest && t.closest('.rn, .chk, .editing, input, select, textarea, button, a')) return;
+    const at = cellAt(t);
+    if (!at) return;
+    if (e.shiftKey && cellSel) { e.preventDefault(); setCellSel((cur) => (cur ? { ...cur, r1: at.r, c1: at.c } : cur)); suppress.current = true; setTimeout(() => { suppress.current = false; }, 150); return; }
+    if (picked.size) clearPicks();
+    setCellSel(null); setSpareSel(null);
+    cellDrag.current = { r: at.r, c: at.c, moved: false };
+  };
+  const copyCells = async () => {
+    const n = normCells();
+    if (!n) return false;
+    const text = rows.slice(n.r0, n.r1 + 1).map((r) => COLS.slice(n.c0, n.c1 + 1).map((k) => tsvCell(textOf(r, k))).join('\t')).join('\n');
+    internalClip.current = text;
+    const ok = await writeClipboard(text);
+    const cnt = (n.r1 - n.r0 + 1) * (n.c1 - n.c0 + 1);
+    toast(ok ? `Copied ${cnt} cell${cnt === 1 ? '' : 's'}` : 'Could not reach the clipboard', ok ? undefined : 'err');
+    return ok;
+  };
+  const clearCells = async () => { const n = normCells(); if (!n) return; const { ops, skipped } = blockOps(n, () => ''); await applyOps(ops, 'cells cleared', skipped); };
+  const pasteCells = async (text, sel) => {
+    const n = sel || normCells();
+    if (!n) return;
+    const block = parseTsv(text);
+    if (!block.length) return;
+    const single = block.length === 1 && block[0].length === 1;
+    const big = { ...n };
+    if (!single) { big.r1 = Math.min(rows.length - 1, n.r0 + block.length - 1); big.c1 = Math.min(COLS.length - 1, n.c0 + Math.max(...block.map((x) => x.length)) - 1); }
+    const { ops, skipped } = blockOps(big, (ri, ci) => (single ? block[0][0] : (block[ri] && block[ri][ci] !== undefined ? block[ri][ci] : undefined)));
+    await applyOps(ops, 'cells pasted', skipped);
+  };
+
+  // ---- rows: picked with the row numbers (click, Shift+click a range, Ctrl+click to add, drag down) ----
+  const selectRange = (a, b) => setPicked(new Set(rows.slice(Math.min(a, b), Math.max(a, b) + 1).map((x) => x.id)));
+  const numDown = (e, r, idx) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (editing) setEditing(null);
+    setCellSel(null);
+    if (document.activeElement && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) document.activeElement.blur();
+    if (e.ctrlKey || e.metaKey) {
+      setPicked((cur) => { const n = new Set(cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; });
+      lastPick.current = r.id;
+      return;
+    }
+    if (e.shiftKey && lastPick.current != null) {
+      const from = rows.findIndex((x) => x.id === lastPick.current);
+      if (from >= 0) { selectRange(from, idx); return; }
+    }
+    setPicked(new Set([r.id]));
+    lastPick.current = r.id;
+    drag.current = { from: idx };
+  };
+  const rowMenu = (e, r) => {
+    if (e.target.closest && e.target.closest('.cell-editor, input, select, textarea')) return;
+    e.preventDefault();
+    if (editing) setEditing(null);
+    setSpareSel(null);
+    if (!picked.has(r.id)) { setPicked(new Set([r.id])); lastPick.current = r.id; setCellSel(null); }
+    setCtx({ x: e.clientX, y: e.clientY });
+  };
+  const copyChosen = async () => {
+    if (!chosen.length) return false;
+    const text = chosen.map((r) => COLS.map((k) => tsvCell(textOf(r, k))).join('\t')).join('\n');
+    internalClip.current = text;
+    const ok = await writeClipboard(text);
+    toast(ok ? `Copied ${chosen.length} row${chosen.length === 1 ? '' : 's'}` : 'Could not reach the clipboard', ok ? undefined : 'err');
+    return ok;
+  };
+  // 'replace' (rows picked): the pasted rows overwrite the picked rows' cells (one row picked: it and the rows below it); 'new': each pasted row becomes a new request
+  const pasteRows = async (text, how) => {
+    if (!canWrite) return;
+    const block = parseTsv(text).filter((cells) => cells.some((c) => String(c).trim() !== ''));
+    if (!block.length) return;
+    const mode = how || (chosen.length ? 'replace' : 'new');
+    if (mode === 'replace') {
+      let targets = chosen;
+      if (chosen.length === 1) { const i = rows.findIndex((x) => x.id === chosen[0].id); targets = rows.slice(i, i + block.length); }
+      const ops = []; let skipped = 0;
+      targets.forEach((r, i) => {
+        const cells = block[Math.min(i, block.length - 1)];
+        cells.forEach((raw, ci) => {
+          const k = COLS[ci];
+          if (!k) return;
+          if (!WRITE.has(k) || !may(r, k)) { skipped++; return; }
+          const after = cleanVal(k, raw);
+          if (after === '' && REQUIRED.has(k)) { skipped++; return; }
+          const before = cellInitial(r, k);
+          if (after !== before) ops.push({ r, k, before, after });
+        });
+      });
+      await applyOps(ops, `paste (${targets.length} row${targets.length === 1 ? '' : 's'} replaced)`, skipped);
+      clearPicks();
+      return;
+    }
+    const recs = block.slice(0, 200).map((cells) => { const o = {}; cells.forEach((raw, ci) => { const k = COLS[ci]; if (k && WRITE.has(k)) o[k] = cleanVal(k, raw); }); return o; });
+    const out = await createRecs(recs, `paste (${recs.length} new row${recs.length === 1 ? '' : 's'})`);
+    toast(out.added ? `Pasted: ${out.added} new request${out.added === 1 ? '' : 's'}${out.failed ? ` — ${out.failed} not added (${out.firstErr})` : ''}` : (out.firstErr || 'Nothing was added'), out.failed || !out.added ? 'err' : undefined);
+    clearPicks();
+    load();
+  };
+  const menuPaste = async (how) => {
+    setCtx(null);
+    let text = null;
+    try { if (navigator.clipboard && navigator.clipboard.readText && window.isSecureContext) text = await navigator.clipboard.readText(); } catch (err) { text = null; }
+    if (text == null || text === '') text = internalClip.current;   // plain-http addresses can't read the clipboard: use what was last copied here
+    if (text == null || text === '') { toast('Nothing to paste yet — copy some rows first, or press Ctrl+V', 'err'); return; }
+    pasteRows(text, how);
   };
 
   const setF = (k) => (e) => { setFilt((f) => ({ ...f, [k]: e.target.value })); setOffset(0); };
   const total = data ? data.total : 0;
 
-  const rows = data && data.rows ? data.rows : [];
+  useFitBox(`${rows.length}|${!!data}|${picked.size ? 1 : 0}|${full}|${!!draft}`);
+  // Google-Sheets style: spare blank rows under the last row (last page); more appear as you scroll down; clicking one makes it a new row
+  const spareOn = canWrite && !narrow && !!data && !!data.rows && offset + data.rows.length >= (data.total || 0);
+  useEffect(() => {   // a spare row opened but left empty goes back to being a blank spare row
+    if (!editing && draft && draft.at === 'bottom' && Object.keys(draft).every((k) => ['id', 'at', 'slot'].includes(k) || !String(draft[k] == null ? '' : draft[k]).trim())) setDraft(null);
+  }, [editing, draft]);
+  const spareN = useSpareRows('.wl-card .wl-fit', spareOn, `${offset}|${full}`);
+  // Every record has a fixed row number (like a sheet row). With no filter and no sort the table shows those numbers with blank rows in the gaps; with a filter or a sort
+  // it lists just the matching records (in row order unless sorted) and the blank rows start after the last number in use.
+  // Numbering: a sorted list is numbered 1, 2, 3… (no blank rows). With a date picked the rows (and the blank rows between them) are numbered 1, 2, 3… in the order they are drawn,
+  // and a row typed into a blank row stays on that row. With all dates the rows are listed in the order they were added (the newest at the bottom), numbered 1, 2, 3… with no blank rows. `_sort` / `_date` are what the list on screen was read with
+  // (a new filter / sort only shows once its rows arrive).
+  const sortNums = data && data._sort !== undefined ? data._sort : !!sort.k;
+  const keepView = data && data._keep !== undefined ? data._keep : keepNow();
+  const ordinal = !sortNums && keepView;
+  const flatNums = sortNums || !keepView;   // a sorted list, and all dates (in the order the rows were added, newest at the bottom): numbered 1, 2, 3… with no blank rows
+  const gapsOn = canWrite && !narrow && !!data && !!data.rows && ordinal;   // blank rows between records only with a date picked; all dates lists just the records (rows close up, each with its real row number)   // blank rows for the row numbers nobody uses (not when sorted: the order is then not the row order)
+  const lastPos = rows.length ? (rows[rows.length - 1].row_pos || 0) : 0;
+  const maxPos = data && data.maxPos ? data.maxPos : 0;
+  const usedSet = new Set(data && data.usedPos ? data.usedPos : rows.map((x) => x.row_pos));   // numbers in use, including by records the filter hides
+  const trailStart = maxPos + 1;
+  const tailLabel0 = offset + rows.length + 1;   // numbered lists: the blank rows at the end carry on from the last row shown
+  const slotLabel = (slot) => (flatNums ? tailLabel0 + (slot - trailStart) : slot);
+  const freeRuns = (from, to) => { const runs = []; let start = null; for (let p = from; p <= to && p - from < 2000; p++) { if (!usedSet.has(p)) { if (start === null) start = p; } else if (start !== null) { runs.push([start, p - start]); start = null; } } if (start !== null) runs.push([start, Math.min(to, from + 1999) - start + 1]); return runs; };
   const allOn = rows.length > 0 && rows.every((r) => picked.has(r.id));
   const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const removePicked = async () => {
-    const ids = [...picked];
-    if (!(await confirm('Delete ingest records', `Permanently delete ${ids.length} selected record${ids.length === 1 ? '' : 's'}? Records with a CM decision are kept (only an Admin can delete DONE ones).`, { okText: 'Delete', danger: true }))) return;
+    if (allMatching) { setDeletingAll(true); return; }
+    const ids = rows.filter((r) => picked.has(r.id) && mayDelete(r)).map((r) => r.id);
+    const skipped = picked.size - ids.length;
+    if (!ids.length) { toast(isAdminUser ? 'Nothing to delete' : 'You can delete only the requests you created, and not ones with a CM decision', 'err'); return; }
+    if (!(await confirm('Delete ingest records', `Permanently delete ${ids.length} selected record${ids.length === 1 ? '' : 's'}?${skipped ? ` ${skipped} other${skipped === 1 ? '' : 's'} selected cannot be deleted by you and will be kept.` : ''}${isAdminUser ? '' : ' Requests with a CM decision are kept; only an Admin can delete them.'}`, { okText: 'Delete', danger: true }))) return;
     try {
-      const r = await post('/api/ingest/delete', { ids });
-      toast(`${r.deleted} deleted${r.kept ? `, ${r.kept} kept (CM decided)` : ''}`, r.deleted ? undefined : 'err');
+      const r = { deleted: 0, kept: 0 };
+      for (let i = 0; i < ids.length; i += 500) {   // the server deletes at most 500 per request
+        const o = await post('/api/ingest/delete', { ids: ids.slice(i, i + 500) });
+        r.deleted += o.deleted || 0; r.kept += o.kept || 0;
+      }
+      toast(`${r.deleted} deleted${r.kept || skipped ? `, ${(r.kept || 0) + skipped} kept` : ''}`, r.deleted ? undefined : 'err');
       load();
     } catch (e) { toast(e.message, 'err'); }
   };
 
+  const cutChosen = async () => { if (allMatching) { toast('Cut works on the rows of one page. Use Delete for all matching requests', 'err'); return; } if (!canDelete) { toast('You do not have permission to delete ingest records', 'err'); return; } if (await copyChosen()) await removePicked(); };
+  const deletePicked = () => { if (!canDelete) { toast('You do not have permission to delete ingest records', 'err'); return; } removePicked(); };
+
+  // keyboard shortcuts, the same as the Workload Tracker's table (not while typing in a box, with a dialog open, or while a cell is being edited)
+  const keysOk = (e) => {
+    const el = e.target;
+    if (el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return false;
+    return !(document.querySelector('.modal-backdrop') || form || detail || reasonFor || editing);
+  };
+  keysRef.current = (e) => {
+    if (e.defaultPrevented || e.altKey || !keysOk(e)) return;
+    const key = e.key.toLowerCase();
+    if (spareSel && !picked.size && !cellSel) {   // a blank cell in a spare row is selected
+      const live = SPARE_COLS.map((c, i) => (c ? i : -1)).filter((i) => i >= 0);
+      const ci = SPARE_COLS.indexOf(spareSel.k); const move = (slot, c) => {
+        if (slot < 1 || c < 0 || c >= live.length) return;
+        const kk = SPARE_COLS[live[c]];
+        const rec = rows.find((x) => x.row_pos === slot);
+        if (rec) { setSpareSel(null); selectCell(rec, kk); return; }   // a saved record sits on that row number
+        const end = spareOn ? trailStart + spareN - 1 : (data && data.nextPos ? data.nextPos - 1 : lastPos);
+        if (slot > end || usedSet.has(slot)) return;   // a number a hidden record uses, or past the rows shown
+        setSpareSel({ slot, k: kk });
+        requestAnimationFrame(() => { const row = document.querySelector(`.wl-card tr[data-pos="${slot}"]`); if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' }); });
+      };
+      const li = live.indexOf(ci);
+      if (!e.ctrlKey && !e.metaKey && ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) { e.preventDefault(); move(spareSel.slot + (key === 'arrowdown' ? 1 : key === 'arrowup' ? -1 : 0), li + (key === 'arrowright' ? 1 : key === 'arrowleft' ? -1 : 0)); return; }
+      if (!e.ctrlKey && !e.metaKey && key === 'tab') { e.preventDefault(); const n = li + (e.shiftKey ? -1 : 1); if (n >= live.length) move(spareSel.slot + 1, 0); else if (n < 0) move(spareSel.slot - 1, live.length - 1); else move(spareSel.slot, n); return; }
+      if (!e.ctrlKey && !e.metaKey && key === 'escape') { setSpareSel(null); return; }
+      if (!e.ctrlKey && !e.metaKey && (key === 'delete' || key === 'backspace')) { if (draft && draft.at === 'bottom' && draft.slot === spareSel.slot) { e.preventDefault(); setDraft(null); } return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && !e.shiftKey && (key === 'enter' || key === 'f2')) { e.preventDefault(); openSpare(spareSel.k, spareSel.slot); return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && e.key.length === 1) { e.preventDefault(); openSpare(spareSel.k, spareSel.slot, e.key); return; }
+    }
+    if (cellSel && !picked.size) {   // a block of cells is picked
+      if ((e.ctrlKey || e.metaKey) && key === 'c') { if (!(window.getSelection && String(window.getSelection()))) { e.preventDefault(); copyCells(); } return; }
+      if ((e.ctrlKey || e.metaKey) && key === 'x') { if (canWrite) { e.preventDefault(); copyCells().then((ok) => { if (ok) clearCells(); }); } return; }
+      if (!e.ctrlKey && !e.metaKey && (key === 'delete' || key === 'backspace')) { if (canWrite) { e.preventDefault(); clearCells(); } return; }
+      if (!e.ctrlKey && !e.metaKey && key === 'escape') { setCellSel(null); return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && !e.shiftKey && (key === 'enter' || key === 'f2')) { if (openSelected()) e.preventDefault(); return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && e.key.length === 1) { if (openSelected(e.key)) e.preventDefault(); return; }   // just start typing: the cell opens with what was typed replacing its content
+      if (!e.ctrlKey && !e.metaKey && key === 'tab' && cellSel.r0 === cellSel.r1 && cellSel.c0 === cellSel.c1) {   // Tab / Shift+Tab: the next / previous cell
+        e.preventDefault();
+        const nC = COLS.length; let c = cellSel.c1 + (e.shiftKey ? -1 : 1); let r = cellSel.r1;
+        if (c >= nC) { c = 0; r += 1; } else if (c < 0) { c = nC - 1; r -= 1; }
+        if (r >= 0 && r < rows.length) setCellSel({ r0: r, c0: c, r1: r, c1: c });
+        return;
+      }
+      if (!e.ctrlKey && !e.metaKey && ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {   // Shift+arrows grow / shrink the block from the cell it started on; plain arrows move to a single cell
+        e.preventDefault();
+        const nR = rows.length; const nC = COLS.length;
+        const dr = key === 'arrowdown' ? 1 : key === 'arrowup' ? -1 : 0; const dc = key === 'arrowright' ? 1 : key === 'arrowleft' ? -1 : 0;
+        const r1 = Math.max(0, Math.min(nR - 1, cellSel.r1 + dr)); const c1 = Math.max(0, Math.min(nC - 1, cellSel.c1 + dc));
+        setCellSel(e.shiftKey ? { ...cellSel, r1, c1 } : { r0: r1, c0: c1, r1, c1 });
+        requestAnimationFrame(() => { const td = document.querySelector(`td[data-r="${r1}"][data-c="${c1}"]`); if (td && td.scrollIntoView) td.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
+        return;
+      }
+    }
+    if (e.ctrlKey || e.metaKey) {
+      if (key === 'a') { e.preventDefault(); if (rows.length && rows.every((r) => picked.has(r.id)) && total > rows.length) setAllMatching(true); else setPicked(new Set(rows.map((r) => r.id))); setCellSel(null); }   // again: every matching request, on every page
+      else if (key === 'c') { if (picked.size && !(window.getSelection && String(window.getSelection()))) { e.preventDefault(); copyChosen(); } }
+      else if (key === 'x') { if (picked.size) { e.preventDefault(); cutChosen(); } }
+      else if (key === 'z') { if (canWrite) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); } }
+      else if (key === 'y') { if (canWrite) { e.preventDefault(); redo(); } }
+      return;   // Ctrl+V arrives as a paste event
+    }
+    if (key === 'escape') clearPicks();
+    else if ((key === 'delete' || key === 'backspace') && picked.size) { e.preventDefault(); deletePicked(); }
+    else if (['arrowdown', 'arrowup', 'home', 'end'].includes(key) && picked.size && rows.length) {
+      e.preventDefault();
+      const anchorIdx = Math.max(0, rows.findIndex((r) => r.id === lastPick.current));
+      const sel = rows.map((r, i) => (picked.has(r.id) ? i : -1)).filter((i) => i >= 0);
+      const cur = sel.length ? (sel[sel.length - 1] === anchorIdx ? sel[0] : sel[sel.length - 1]) : anchorIdx;
+      const to = key === 'home' ? 0 : key === 'end' ? rows.length - 1 : Math.max(0, Math.min(rows.length - 1, cur + (key === 'arrowdown' ? 1 : -1)));
+      if (e.shiftKey) selectRange(anchorIdx, to); else { setPicked(new Set([rows[to].id])); lastPick.current = rows[to].id; }
+      requestAnimationFrame(() => { const tr = document.querySelector(`.wl-card tr[data-id="${rows[to].id}"]`); if (tr && tr.scrollIntoView) tr.scrollIntoView({ block: 'nearest' }); });
+    } else if ((key === 'enter' || key === 'f2') && picked.size === 1) {
+      e.preventDefault();
+      openDetail([...picked][0]);   // the details dialog
+    }
+  };
+  pasteRef.current = (e) => {
+    const text0 = e.clipboardData && e.clipboardData.getData('text/plain');
+    // several cells copied from a spreadsheet while one cell is open: they are pasted from that cell down and across, like in Excel
+    if (canWrite && editing && editing.id !== 'draft' && text0 && isBlockText(text0)) {
+      const r0 = rows.findIndex((x) => x.id === editing.id); const c0 = COLS.indexOf(editing.k);
+      if (r0 >= 0 && c0 >= 0) { e.preventDefault(); setEditing(null); pasteCells(text0, { r0, c0, r1: r0, c1: c0 }); return; }
+    }
+    if (!canWrite || !keysOk(e)) return;
+    const text = e.clipboardData && e.clipboardData.getData('text/plain');
+    if (!text || !text.trim()) return;
+    e.preventDefault();
+    if (cellSel && !picked.size) pasteCells(text); else pasteRows(text);
+  };
+  useEffect(() => {
+    const key = (e) => { if (keysRef.current) keysRef.current(e); };
+    const paste = (e) => { if (pasteRef.current) pasteRef.current(e); };
+    const move = (e) => {
+      const cd = cellDrag.current;
+      if (cd) {
+        if (!(e.buttons & 1)) { cellDrag.current = null; return; }
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        const td = el && el.closest ? el.closest('.wl-card td[data-c]') : null;
+        if (!td) return;
+        const at = { r: Number(td.dataset.r), c: Number(td.dataset.c) };
+        if (!cd.moved && (at.r !== cd.r || at.c !== cd.c)) { cd.moved = true; suppress.current = true; if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); setEditing(null); }
+        if (cd.moved) { if (window.getSelection) window.getSelection().removeAllRanges(); setCellSel({ r0: cd.r, c0: cd.c, r1: at.r, c1: at.c }); }
+        return;
+      }
+      const d = drag.current;
+      if (!d) return;
+      if (!(e.buttons & 1)) { drag.current = null; return; }
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const tr = el && el.closest ? el.closest('.wl-card tr[data-id]') : null;
+      if (!tr) return;
+      const idx = tr.parentElement ? [...tr.parentElement.querySelectorAll('tr[data-id]')].indexOf(tr) : -1;
+      if (idx >= 0 && rowsRef.current[idx]) setPicked(new Set(rowsRef.current.slice(Math.min(d.from, idx), Math.max(d.from, idx) + 1).map((x) => x.id)));
+    };
+    const up = () => { drag.current = null; if (cellDrag.current && cellDrag.current.moved) setTimeout(() => { suppress.current = false; }, 150); cellDrag.current = null; };
+    const down = (e) => {   // a click outside the table (and its bar, menus and dialogs) drops the selection
+      const t = e.target;
+      if (t && t.closest && !t.closest('.wl-card .table-wrap, .xl-menu, .modal-backdrop, .tpop, #del-sel, .sel-banner')) { clearPicksRef.current(); setCellSel(null); setSpareSel(null); }
+    };
+    window.addEventListener('keydown', key); window.addEventListener('paste', paste); window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up); window.addEventListener('mousedown', down);
+    return () => { window.removeEventListener('keydown', key); window.removeEventListener('paste', paste); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); window.removeEventListener('mousedown', down); };
+  }, []);
+
+  const renderRow = (r0, i, rnText, label) => { const r = { ...r0, __i: i }; return (
+<tr key={r.id} data-id={r.id} data-pinned={rnText ? '1' : undefined} className={`clickable${picked.has(r.id) ? ' picked' : ''}`} onMouseDown={cellDown} onContextMenu={(e) => rowMenu(e, r)}
+                          onClick={() => { if (suppress.current) { suppress.current = false; return; } openDetail(r.id); }}>
+                          {!narrow ? <td className={`rn${picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, i)} onClick={(e) => e.stopPropagation()} title="Click to select the row (Shift-click a range, Ctrl-click to add, drag down)">{rnText || label || (flatNums ? offset + i + 1 : r.row_pos || i + 1)}</td> : null}
+                          {narrow && canDelete ? <td className="chk" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={picked.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${r.program}`} /></td> : null}
+                          {cell(r, 'program', <strong>{r.program}</strong>)}
+                          {cell(r, 'platform', <PlatformCell value={r.platform} />)}
+                          {cell(r, 'billable_party', r.billable_party)}
+                          {cell(r, 'episode_break_date_text', <DateChip>{dayText(r.episode_break_date_text || r.episode_date)}</DateChip>, { className: 'nowrap' })}
+                          {cell(r, 'source', r.source, { className: 'cell-clip', title: r.source || '' })}
+                          {cell(r, 'materials_count', r.materials_count != null ? r.materials_count : '', { className: 'num' })}
+                          {cell(r, 'requested_by', r.requested_by_psd || r.requested_by_name || '', { title: 'Filled in automatically from the person who created the request' })}
+                          {cell(r, 'destination_folder', r.destination_folder, { className: 'cell-clip mono', title: r.destination_folder || '' })}
+                          {cell(r, 'approved_by', <ApprovedBy r={r} canApprove={canApprove} />)}
+                          {cell(r, 'cm_status', <CmStatus r={r} />)}
+                          <td data-k="updated" data-label="Updated" className="dim nowrap">{ago(r.updated_at)}</td>
+                        </tr>
+  ); };
+  const spareNode = (label) => {   // the row being typed into (or just saved, until the list has it), shown in place of its blank row
+    if (draft && draft.at === 'bottom') { const d = { ...draft, id: 'draft' }; return (
+      <tr key="spare-draft" className="draft-row spare-draft" data-draft="1">
+        <td className="rn">{label !== undefined ? label : slotLabel(d.slot)}</td>
+        {cell(d, 'program', <strong>{d.program}</strong>)}
+        {cell(d, 'platform', <PlatformCell value={d.platform} />)}
+        {cell(d, 'billable_party', d.billable_party)}
+        {cell(d, 'episode_break_date_text', d.episode_break_date_text ? <DateChip>{dayText(d.episode_break_date_text)}</DateChip> : '', { className: 'nowrap' })}
+        {cell(d, 'source', d.source, { className: 'cell-clip' })}
+        {cell(d, 'materials_count', d.materials_count, { className: 'num' })}
+        <td />
+        {cell(d, 'destination_folder', d.destination_folder, { className: 'cell-clip mono' })}
+        <td />
+        <td />
+        <td />
+      </tr>
+    ); }
+    if (pinned) { const pr = rows.find((x) => x.id === pinned.id) || pinned.row; const pi = rows.findIndex((x) => x.id === pinned.id); return renderRow(pr, pi >= 0 ? pi : undefined, label !== undefined ? label : flatNums ? (pi >= 0 ? offset + pi + 1 : slotLabel(pinned.slot)) : pinned.slot); }
+    return null;
+  };
+  const renderBodyRows = () => {   // the records and, between them, the blank rows of the numbers nobody has used
+    const spareProps = { cols: SPARE_COLS, lead: 'rn', onOpen: openSpare, onSelect: selectSpare, sel: spareSel, peerOf: (pos, k) => peers[`spare:${pos}:${k}`],
+      onMenu: (e) => setCtx({ x: e.clientX, y: e.clientY }), at: draft && draft.at === 'bottom' ? draft.slot : pinned ? pinned.slot : -1 };
+    const out = []; let prev = gapsOn && offset === 0 ? 0 : null;
+    let shown = false;   // the row being typed into / just saved is drawn once, in the first block that holds its number
+    let c = offset;   // with a date picked: the number of the last row drawn (records and blank rows count alike)
+    const block = (key, p0, n) => {
+      const here = !shown && spareProps.at >= p0 && spareProps.at < p0 + n; if (here) shown = true;
+      const l0 = ordinal ? c + 1 : flatNums && key === 'spare-tail' ? tailLabel0 : undefined;
+      if (ordinal) c += n;
+      return <SpareRows key={`${key}-${p0}`} count={n} pos0={p0} label0={l0} {...spareProps} at={here ? spareProps.at : -1} node={here ? spareNode(l0 !== undefined ? l0 + (spareProps.at - p0) : undefined) : null} />;
+    };
+    const done = new Set();   // a blank row is drawn once, however the records happen to be ordered
+    const gaps = (from, to, key) => { if (to >= from) freeRuns(from, to).forEach(([p0, n]) => { if (done.has(p0)) return; done.add(p0); out.push(block(key, p0, n)); }); };
+    data.rows.forEach((r0, i) => {
+      const pos = r0.row_pos || 0;
+      if (gapsOn && prev !== null && pos - prev - 1 > 0) gaps(prev + 1, pos - 1, 'gap');
+      out.push(renderRow(r0, i, undefined, ordinal ? ++c : undefined));
+      if (prev !== null) prev = Math.max(prev, pos);   // only ever moves forward
+    });
+    if (gapsOn && prev !== null && !spareOn && data.nextPos) gaps(prev + 1, data.nextPos - 1, 'gap-tail');   // up to the next page's first record
+    if (gapsOn && prev !== null && spareOn && maxPos > prev) gaps(prev + 1, maxPos, 'gap-end');   // free numbers between the last record shown and the highest in use
+    if (spareOn) out.push(block('spare-tail', trailStart, spareN));
+    return out;
+  };
   return (
     <main className="container wide wl-page">
-      <div className="page-head">
-        <div><h1>Ingest Tracker</h1><div className="sub">Log ingest requests, set their destination and approval, and track the CM status.</div></div>
-        <div className="actions">
-          {canDelete && picked.size ? <button type="button" className="btn danger" id="del-sel" onClick={removePicked}>Delete selected ({picked.size})</button> : null}
-          <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
-          {canWrite ? <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({})}><PlusIcon /> New Ingest</button> : null}
-        </div>
-      </div>
+      <h1 className="sr-only">Ingest</h1>
 
-      <div className="card wl-card">
-        <div className="wl-filters">
-          <label className="wl-search" style={{ minWidth: 'min(100%, 410px)' }}>
+      <div className={`card wl-card${full ? ' full' : ''}`}>
+        <div className="wl-tabbar one-row">
+          <div className="wl-filters">
+          <label className="wl-search short">
             <SearchIcon />
             <input type="search" placeholder="Search program, party, source, folder, remarks…" style={{ textOverflow: 'ellipsis' }} value={filt.q} onChange={setF('q')} />
           </label>
-          <FilterSelect label="Status" value={filt.status} onChange={setF('status')}><Options list={STATUS_FILTER} blank="All" /></FilterSelect>
-          <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All" /></FilterSelect>
-          <label className="wl-search" style={{ flex: '0 1 320px', minWidth: 'min(100%, 300px)' }}>   {/* wide enough for the whole hint, with room to spare for wider fonts (a Mac's system font is wider) */}
-            <input type="text" placeholder="PROG. NAME / PROJ. TITLE (exact match)" value={filt.program} onChange={setF('program')} style={{ textOverflow: 'ellipsis' }} />
-          </label>
+          <FiltersMenu count={[filt.status, filt.platform].filter(Boolean).length} onClear={() => { setFilt((f) => ({ ...f, status: '', platform: '' })); setOffset(0); }}>
+            <FilterSelect label="Status" value={filt.status} onChange={setF('status')}><Options list={STATUS_FILTER} blank="All" /></FilterSelect>
+            <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups ? lookups.platform : []} blank="All" /></FilterSelect>
+          </FiltersMenu>
           <DateRange title="Episode / Breakdate range" from={filt.from} to={filt.to} onChange={({ from, to }) => { setFilt((f) => ({ ...f, from, to })); setOffset(0); }} />
           {filt.approval ? (   // opened from the Dashboard's Pending Approval card: only requests nobody has approved yet; the chip clears it
             <button type="button" className="btn sm" title="Show every request again" onClick={() => { setFilt((f) => ({ ...f, approval: '' })); setOffset(0); }}>Awaiting approval ✕</button>
           ) : null}
+          </div>
+          <div className="wl-tabactions">
+            <div className="wl-presence"><PresenceAvatars path="/ingest" peers={peers} describe={describePeer} /></div>
+            {canWrite ? <button type="button" className="btn ibtn primary" id="new-btn" aria-label="New Ingest" title="New Ingest" onClick={() => setForm({})}><PlusIcon /></button> : null}
+            {canWrite ? <input ref={fileRef} type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
+            {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import from Excel" title={importing ? 'Importing…' : 'Import from Excel'} disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}><UploadIcon /></button> : null}
+            <ExportButton onExport={exportXlsx}><DownloadIcon /></ExportButton>
+            {canDelete && (picked.size || allMatching) ? <button type="button" className="btn ibtn danger" id="del-sel" onClick={removePicked} aria-label="Delete selected records" title={`Delete Selected (${allMatching ? total : picked.size})`}><TrashIcon /></button> : null}
+            <button type="button" className="btn ibtn" id="full-btn" aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen' : 'Full screen'} onClick={() => setFull((f) => !f)}>
+              {full ? <ExitFullscreenIcon /> : <FullscreenIcon />}
+            </button>
+            <ToolMenu items={[
+              canWrite && narrow && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
+              canDelete && { id: 'del-all-menu', label: 'Delete All', icon: <TrashIcon />, danger: true, disabled: !total, onClick: () => setDeletingAll(true) },   // everything matching the current search / filters, after typing DELETE
+            ]} />
+          </div>
         </div>
-        <div className="table-wrap" id="tbl">
+        {canDelete && !draft && ((allOn && total > rows.length) || allMatching) ? (
+          <div className="sel-banner" role="status">
+            {allMatching
+              ? <>All <strong>{total}</strong> request{total === 1 ? '' : 's'} matching these filters are selected. <button type="button" className="linklike" onClick={clearPicks}>Clear selection</button></>
+              : <>All <strong>{rows.length}</strong> on this page are selected. <button type="button" className="linklike" id="select-all-matching" onClick={() => setAllMatching(true)}>Select all {total} matching</button></>}
+          </div>
+        ) : null}
+        <div className={`table-wrap${narrow ? "" : " wl-fit"}`} id="tbl">
           {!data ? <Empty>Loading…</Empty>
             : data.error ? <Empty>{data.error}</Empty>
-              : !data.rows.length ? <Empty>No ingest records match these filters.</Empty>
+              : !data.rows.length && !draft && !spareOn ? <Empty>No ingest records match these filters.</Empty>
                 : (
                   <table className={`t wl ing${narrow ? ' cards' : ''}`}>
                     <thead><tr>
-                      {canDelete ? <th className="chk"><input type="checkbox" checked={allOn} onChange={() => setPicked(allOn ? new Set() : new Set(rows.map((r) => r.id)))} aria-label="Select all records on this page" /></th> : null}
+                      {!narrow ? <th className="rn" title={allOn ? 'Click to unselect all' : 'Select every row on this page (Ctrl+A)'} onClick={() => (allOn ? clearPicks() : setPicked(new Set(rows.map((r) => r.id))))} /> : null}
+                      {narrow && canDelete ? <th className="chk"><input type="checkbox" checked={allOn} onChange={() => setPicked(allOn ? new Set() : new Set(rows.map((r) => r.id)))} aria-label="Select all records on this page" /></th> : null}
                       <SortTh k="program" sort={sort} onSort={setSort}>PROG. NAME / PROJ. TITLE</SortTh>
                       <SortTh k="platform" sort={sort} onSort={setSort}>Platform</SortTh>
                       <SortTh k="billable_party" sort={sort} onSort={setSort}>Billable Party</SortTh>
@@ -319,31 +1108,53 @@ export default function Ingest() {
                       <SortTh k="updated" sort={sort} onSort={setSort}>Updated</SortTh>
                     </tr></thead>
                     <tbody>
-                      {data.rows.map((r) => (
-                        <tr key={r.id} className="clickable" onClick={() => openDetail(r.id)}>
-                          {canDelete ? <td className="chk" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={picked.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${r.program}`} /></td> : null}
-                          {cell(r, 'program', <strong>{r.program}</strong>)}
-                          {cell(r, 'platform', <PlatformCell value={r.platform} />)}
-                          {cell(r, 'billable_party', r.billable_party)}
-                          {cell(r, 'episode_break_date_text', <DateChip>{dayText(r.episode_break_date_text || r.episode_date)}</DateChip>, { className: 'nowrap' })}
-                          {cell(r, 'source', r.source, { className: 'cell-clip', title: r.source || '' })}
-                          {cell(r, 'materials_count', r.materials_count != null ? r.materials_count : '', { className: 'num' })}
-                          <td data-k="requested_by" data-label="Requested By" title="Filled in automatically from the person who created the request">{r.requested_by_psd || r.requested_by_name || ''}</td>
-                          {cell(r, 'destination_folder', r.destination_folder, { className: 'cell-clip mono', title: r.destination_folder || '' })}
-                          <td data-k="approved_by" data-label="Approved By"><ApprovedBy r={r} canApprove={canApprove} /></td>
-                          {cell(r, 'cm_status', <CmStatus r={r} />)}
-                          <td data-k="updated" data-label="Updated" className="dim nowrap">{ago(r.updated_at)}</td>
+                      {draft && draft.at !== 'bottom' ? (() => { const d = { ...draft, id: 'draft' }; return (
+                        <tr key="draft" className="draft-row" data-draft="1">
+                          {!narrow ? <td className="rn" title="New row — not saved yet">＋</td> : null}
+                          {cell(d, 'program', <strong>{d.program}</strong>)}
+                          {cell(d, 'platform', <PlatformCell value={d.platform} />)}
+                          {cell(d, 'billable_party', d.billable_party)}
+                          {cell(d, 'episode_break_date_text', d.episode_break_date_text ? <DateChip>{dayText(d.episode_break_date_text)}</DateChip> : '', { className: 'nowrap' })}
+                          {cell(d, 'source', d.source, { className: 'cell-clip' })}
+                          {cell(d, 'materials_count', d.materials_count, { className: 'num' })}
+                          <td />
+                          {cell(d, 'destination_folder', d.destination_folder, { className: 'cell-clip mono' })}
+                          <td />
+                          <td />
+                          <td className="nowrap" onClick={(e) => e.stopPropagation()}>
+                            <button type="button" className="btn primary" style={{ padding: '4px 10px' }} id="draft-save" onClick={() => saveDraft()}>Save</button>{' '}
+                            <button type="button" className="btn" style={{ padding: '4px 10px' }} id="draft-discard" onClick={() => { setDraft(null); setEditing(null); }}>Discard</button>
+                          </td>
                         </tr>
-                      ))}
+                      ); })() : null}
+                      {renderBodyRows()}
                     </tbody>
                   </table>
                 )}
         </div>
-        <Pager total={total} offset={offset} size={PAGE} onOffset={setOffset} />
+        {ctx ? (
+          <CellMenu x={ctx.x} y={ctx.y} onContextMenu={(e) => e.preventDefault()}>
+            {canWrite ? <><button type="button" disabled={!hist.current.past.length} onClick={() => { setCtx(null); undo(); }}>Undo<span>Ctrl+Z</span></button>
+              <button type="button" disabled={!hist.current.future.length} onClick={() => { setCtx(null); redo(); }}>Redo<span>Ctrl+Y</span></button>
+              <hr /></> : null}
+            {canDelete ? <button type="button" disabled={!picked.size} onClick={() => { setCtx(null); cutChosen(); }}>Cut<span>Ctrl+X</span></button> : null}
+            <button type="button" disabled={!picked.size} onClick={() => { setCtx(null); copyChosen(); }}>Copy<span>Ctrl+C</span></button>
+            {canWrite ? <><button type="button" onClick={() => menuPaste()}>{picked.size ? 'Paste (replace row)' : 'Paste'}<span>Ctrl+V</span></button>
+              <button type="button" onClick={() => menuPaste('new')}>Paste as new row</button></> : null}
+            <hr />
+            <button type="button" disabled={picked.size !== 1} onClick={() => { setCtx(null); openDetail([...picked][0]); }}>Open details<span>Enter</span></button>
+            {canDelete ? <button type="button" disabled={!picked.size} onClick={() => { setCtx(null); deletePicked(); }}>Delete {picked.size > 1 ? `${picked.size} rows` : 'row'}<span>Del</span></button> : null}
+          </CellMenu>
+        ) : null}
+        <Pager total={total} offset={offset} size={size} onOffset={setOffset} lead={(
+          <label className="rows-sel"><span>Rows</span>
+            <select value={size} onChange={changeSize} aria-label="Rows per page">{ROW_SIZES.map((n) => <option key={n} value={n}>{n === ALL_ROWS ? 'All' : n}</option>)}</select>
+          </label>
+        )} />
       </div>
 
       {form && lookups ? (
-        <IngestForm rec={form.id ? form : null} lookups={lookups} onClose={() => setForm(null)} onSaved={() => { setForm(null); load(); }} />
+        <IngestForm rec={form.id ? form : null} lookups={lookups} onClose={() => setForm(null)} onSaved={(sid) => { setForm(null); follow.current = sid || null; follow.since = Date.now(); jumped.current = 0; load(); }} />
       ) : null}
 
       {reasonFor ? (
@@ -351,11 +1162,22 @@ export default function Ingest() {
           onSave={async (reason) => { await decide(reasonFor, 'NON-COMPLIANT', reason); setReasonFor(null); toast('Saved'); }} />
       ) : null}
 
+      {deletingAll ? (
+        <DeleteAllIngest
+          total={total}
+          scope={[filt.status && `Status (CM): ${filt.status}`, filt.program && `Program: ${filt.program}`, filt.platform && `Platform: ${filt.platform}`, filt.approval && `Approval: ${filt.approval}`,
+            (filt.from || filt.to) && `Dates: ${filt.from || '…'} → ${filt.to || '…'}`, q && `Search: “${q}”`].filter(Boolean)}
+          admin={isAdminUser}
+          filters={{ status: filt.status || undefined, program: filt.program || undefined, platform: filt.platform || undefined, approval: filt.approval || undefined, from: filt.from || undefined, to: filt.to || undefined, q: q || undefined }}
+          onClose={() => setDeletingAll(false)}
+          onDone={(out) => { setDeletingAll(false); clearPicks(); toast(`${out.deleted} deleted${out.kept ? `, ${out.kept} kept` : ''}`, out.deleted ? undefined : 'err'); setOffset(0); load(); }} />
+      ) : null}
+
       {detail ? (
         <IngestDetail
           r={detail}
           canWrite={canWrite && (!detail.cm_status || s.can('ingest.cm_complete'))}
-          canDelete={canDelete && (!detail.cm_status || (detail.cm_status === 'DONE' && s.user.role === 'Admin'))}   // a CM-decided request is kept as history, except that an Admin can delete one that is DONE
+          canDelete={mayDelete(detail)}   // an Admin: any; others: not one with a CM decision, and an Editor only her own
           canApprove={canApprove && !detail.approved_by}
           approveReady={!!(detail.destination_folder && String(detail.destination_folder).trim())}
           canUnapprove={canApprove && !!detail.approved_by}
@@ -365,7 +1187,7 @@ export default function Ingest() {
           onEdit={() => { setForm(detail); setDetail(null); }}
           onDelete={async () => {
             const done = detail.cm_status === 'DONE';
-            if (!(await confirm('Delete ingest record', done ? `Ingest #${detail.no ?? detail.id} is already DONE in CM. Deleting it permanently removes this historical record.` : `Permanently delete ingest #${detail.no ?? detail.id}?`, { okText: 'Delete', danger: true }))) return;
+            if (!(await confirm('Delete ingest record', done ? 'This ingest is already DONE in CM. Deleting it permanently removes this historical record.' : 'Permanently delete this ingest?', { okText: 'Delete', danger: true }))) return;
             try { await del(`/api/ingest/${detail.id}`); toast('Deleted'); setDetail(null); load(); } catch (e) { toast(e.message, 'err'); }
           }}
         />
@@ -381,7 +1203,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
   const canApprove = s.can('ingest.approve');   // Destination Folder + Approved By (PCS / OCS)
   const canCm = s.can('ingest.cm_complete');    // Status (CM)
   const r = rec || {};
-  const initialEpisodeText = rec ? (RANGE.test(r.episode_break_date_text || '') ? r.episode_break_date_text : (isoDate(r.episode_break_date_text) || isoDate(r.episode_date))) : '';
+  const initialEpisodeText = rec ? (EPFMT.test(r.episode_break_date_text || '') ? r.episode_break_date_text : (isoDate(r.episode_break_date_text) || isoDate(r.episode_date))) : '';
   const requester = rec ? (r.requested_by_psd || r.requested_by_name || '') : (s.user.full_name || s.user.username);
   const initialForm = {
     program: r.program || '', platform: r.platform || '', billable_party: r.billable_party || '',
@@ -393,7 +1215,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
     cm_reason: r.cm_non_compliant_reason || '',
     remarks: r.remarks || '',
   };
-  const [f, set] = useForm(initialForm);
+  const [f, set] = useForm(initialForm, 'ingest');
   const [busy, setBusy] = useState(false);
   const dirty = JSON.stringify(f) !== JSON.stringify(initialForm);
 
@@ -429,13 +1251,13 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
       else id = (await post('/api/ingest', payload)).id;
       if (cmChanged) await post(`/api/ingest/${id}/cm-decision`, { decision: f.cm_status || 'Pending', reason: f.cm_status === 'NON-COMPLIANT' ? f.cm_reason : '' });
       toast('Saved');
-      onSaved();
+      onSaved(id);
     } catch (e) { toast(e.message, 'err'); setBusy(false); }
   };
 
   return (
     <Modal
-      title={rec ? `Edit Ingest #${rec.no ?? rec.id}` : 'New Ingest'}
+      title={rec ? 'Edit Ingest' : 'New Ingest'}
       onClose={requestClose}
       footer={(
         <>
@@ -446,7 +1268,7 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
     >
       <form id="ing-form" className="form-grid" noValidate onSubmit={(e) => e.preventDefault()}>
         <label className="f"><span>PROG. NAME / PROJ. TITLE <span className="req">*</span></span>
-          <select name="program" value={f.program} onChange={set('program')}><Options list={withCurrent(lookups.program, r.program)} blank="Select…" /></select></label>
+          <input name="program" maxLength={200} value={f.program} onChange={set('program')} /></label>
         <label className="f"><span>Platform <span className="req">*</span></span>
           <select name="platform" value={f.platform} onChange={set('platform')}><Options list={withCurrent(lookups.platform, r.platform)} blank="Select platform…" /></select></label>
         <label className="f"><span>Billable Party</span><input name="billable_party" maxLength={200} value={f.billable_party} onChange={set('billable_party')} /></label>
@@ -457,9 +1279,10 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
         <label className="f full"><span>Destination Folder <span className="dim">— PCS</span></span>
           <textarea name="destination_folder" className="mono" maxLength={1000} value={f.destination_folder} onChange={set('destination_folder')} disabled={!canApprove} /></label>
         <label className="f"><span>Status (CM)</span>
-          <select name="cm_status" value={f.cm_status} onChange={set('cm_status')} disabled={!canCm}>
+          <select name="cm_status" value={f.cm_status} onChange={set('cm_status')} disabled={!canCm || !isApprovedRow(rec)} title={isApprovedRow(rec) ? undefined : 'Available once the material is approved'}>
             <Options list={CM_OPTIONS} blank="PENDING" />
           </select></label>
+        {!isApprovedRow(rec) ? <div className="dim">Status (CM) can be set once the material is approved.</div> : null}
         {f.cm_status === 'NON-COMPLIANT' ? (
           <label className="f"><span>Reason <span className="req">*</span></span>
             <input name="cm_reason" maxLength={2000} value={f.cm_reason} onChange={set('cm_reason')} disabled={!canCm} /></label>
@@ -473,10 +1296,31 @@ function IngestForm({ rec, lookups, onClose, onSaved }) {
 
 const KV = ({ k, children }) => <><dt>{k}</dt><dd>{children || <span className="dim">—</span>}</dd></>;
 
+function DeleteAllIngest({ total, scope, filters, admin, onClose, onDone }) {
+  const toast = useToast();
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
+    try { onDone(await post('/api/ingest/delete', { all: true, filters })); } catch (e) { toast(e.message, 'err'); setBusy(false); }
+  };
+  return (
+    <Modal title="Delete all requests" onClose={() => { if (!busy) onClose(); }}
+      footer={(<><span className="grow" /><button type="button" className="btn" disabled={busy} onClick={onClose}>Cancel</button>
+        <button type="button" className="btn danger" disabled={busy || typed.trim() !== 'DELETE' || !total} onClick={go}>Delete {total} request{total === 1 ? '' : 's'}</button></>)}>
+      <p>This permanently deletes up to <strong>{total}</strong> Ingest request{total === 1 ? '' : 's'}: every one that matches what you are looking at now{scope.length ? ':' : ' (no filters, so the whole list).'}</p>
+      {scope.length ? <ul className="plug-warn" style={{ color: 'inherit' }}>{scope.map((x) => <li key={x}>{x}</li>)}</ul> : null}
+      <p>{admin ? 'As an Admin you can delete all of them, including ones marked DONE or NON-COMPLIANT in CM.' : 'Requests you did not create, and any with a CM decision, are kept.'} It cannot be undone — consider an Export first.</p>
+      <label className="f"><span>Type <strong>DELETE</strong> to confirm</span>
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" onKeyDown={(e) => { if (e.key === 'Enter' && typed.trim() === 'DELETE' && !busy) go(); }} /></label>
+    </Modal>
+  );
+}
+
 function IngestDetail({ r, canWrite, canDelete, canApprove, approveReady, canUnapprove, onClose, onEdit, onDelete, onApprove, onUnapprove }) {
   return (
     <Modal
-      title={`Ingest #${r.no ?? r.id}`}
+      title={canWrite ? 'Edit Ingest' : 'Ingest'}
       onClose={onClose}
       footer={(
         <>
@@ -485,7 +1329,7 @@ function IngestDetail({ r, canWrite, canDelete, canApprove, approveReady, canUna
           <button type="button" className="btn" onClick={onClose}>Close</button>
           {canUnapprove ? <button type="button" className="btn" id="unapprove" onClick={onUnapprove}>Undo approval</button> : null}
           {canApprove ? (
-            <button type="button" className="btn primary" id="approve" disabled={!approveReady} onClick={onApprove}
+            <button type="button" className="btn success" id="approve" disabled={!approveReady} onClick={onApprove}
               title={approveReady ? 'Approve this ingest — you will be recorded as the approver' : 'Fill in the Destination Folder first'}>Approve</button>
           ) : null}
           {canWrite ? <button type="button" className="btn primary" id="edit" onClick={onEdit}>Edit</button> : null}

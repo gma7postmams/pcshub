@@ -1,3 +1,5 @@
+import { TAB } from './live.js';
+
 // API client. Same contract as before: JSON, same-origin cookies, CSRF header on every call.
 export class ApiError extends Error {
   constructor(message, status, data) {
@@ -10,8 +12,12 @@ export class ApiError extends Error {
 /** `quiet: true` is for background, best-effort calls (the presence heartbeat): a "password change required" / "2FA required" / signed-out answer
     is just an error for that call and does NOT send the browser anywhere — otherwise such a call made from the very page that handles those
     states (Profile) would redirect to itself forever. */
-export async function api(method, url, body, { quiet = false } = {}) {
-  const opts = { method, headers: { 'X-Requested-With': 'PromoHub' }, credentials: 'same-origin' };
+let reauthHandler = null;
+/** The app registers one prompt for "confirm your password" (see components/GlobalReauth.jsx). */
+export const setReauthHandler = (fn) => { reauthHandler = fn; };
+
+export async function api(method, url, body, { quiet = false, noReauth = false } = {}) {
+  const opts = { method, headers: { 'X-Requested-With': 'PromoHub', 'X-Tab': TAB }, credentials: 'same-origin' };
   if (body instanceof FormData) opts.body = body;
   else if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
@@ -27,7 +33,7 @@ export async function api(method, url, body, { quiet = false } = {}) {
   if ((res.headers.get('content-type') || '').includes('application/json')) data = await res.json();
 
   if (res.status === 503 && data && data.maintenance) {
-    if (!window.__pcsRestoring) window.location.reload(); // shows the server's maintenance page
+    if (!window.__pcsRestoring && !url.startsWith('/api/auth/')) window.location.reload(); // shows the server's maintenance page (sign-in answers are shown on the sign-in page instead)
     throw new ApiError(data.error, 503, data);
   }
   if (res.status === 401 && !url.startsWith('/api/auth/') && !quiet) {
@@ -41,6 +47,10 @@ export async function api(method, url, body, { quiet = false } = {}) {
   if (res.status === 403 && data && data.mustChangePassword && !quiet) {
     window.location.href = '/profile?force=1';
     throw new ApiError('Password change required', 403, data);
+  }
+  // A sensitive action the server wants the password for: ask once, then repeat the same request with it.
+  if (res.status === 403 && data && data.reauth && data.auto && reauthHandler && !noReauth && !(body instanceof FormData) && !(body && body.reauth)) {
+    return reauthHandler((creds) => api(method, url, { ...(body || {}), reauth: creds }, { quiet, noReauth: true }), data);
   }
   if (!res.ok) throw new ApiError((data && data.error) || `Request failed (${res.status})`, res.status, data);
   return data;

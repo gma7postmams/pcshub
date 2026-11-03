@@ -1,19 +1,24 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { get, post } from '../lib/api.js';
 import { ago, initials, safeLocalLink } from '../lib/util.js';
+import { avatarUrl, colorFor } from '../lib/avatar.js';
 import { useBranding, useSession } from '../context.jsx';
+import { onLive } from '../lib/live.js';
 import { BellIcon, MenuIcon } from './Icons.jsx';
 import { RoleBadge, useToast } from './ui.jsx';
-import { BookIcon, CheckCircleIcon, ChevronDownSmall, CloudIcon, DocIcon, GearIcon, HomeIcon, ListIcon } from './DashIcons.jsx';
+import { BookIcon, PulseIcon, CheckCircleIcon, ChevronDownSmall, CloudIcon, DocIcon, GearIcon, HomeIcon, ListIcon } from './DashIcons.jsx';
 
-const NAV_ICON = { '/dashboard': HomeIcon, '/ingest': CloudIcon, '/workload': ListIcon, '/plug-list': DocIcon, '/knowledge': BookIcon, '/admin': GearIcon };
+const NAV_ICON = { '/dashboard': HomeIcon, '/ingest': CloudIcon, '/workload': ListIcon, '/plug-list': DocIcon, '/knowledge': BookIcon, '/admin': GearIcon, '/activity-history': PulseIcon };
 
 export function BrandMark({ branding }) {
   return (
     <>
       {branding.logo_url
-        ? <img src={branding.logo_url} alt="" />
+        ? <>
+            <img src={branding.logo_url} alt="" className="logo-l" />
+            <img src={branding.logo_dark_url || branding.logo_url} alt="" className="logo-d" />
+          </>
         : <span className="mark">{initials(branding.app_name).slice(0, 2) || 'P'}</span>}
       <span className="name">{branding.app_name}</span>
     </>
@@ -47,11 +52,24 @@ export default function TopNav() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(null); // 'nav' | 'notif' | 'user' | null
   const [notif, setNotif] = useState({ unread: 0, rows: null });
+  const [ring, setRing] = useState(false);
+  const lastUnread = useRef(null);
   const u = s.user;
 
   const loadNotif = useCallback(async () => {
-    try { setNotif(await get('/api/notifications')); } catch (_) { /* ignore */ }
+    try {
+      const d = await get('/api/notifications');
+      if (lastUnread.current !== null && d.unread > lastUnread.current) {   // something new arrived: ring the bell
+        setRing(true);
+        setTimeout(() => setRing(false), 3500);
+      }
+      lastUnread.current = d.unread;
+      setNotif(d);
+    } catch (_) { /* ignore */ }
   }, []);
+
+  // Real time: the server says "your notifications changed" and the bell re-reads at once (the 30 s poll stays as a safety net)
+  useEffect(() => onLive((m) => { if (m && (m.t === 'notif' || m.t === 'reconnect')) loadNotif(); }), [loadNotif]);
 
   useEffect(() => {
     loadNotif();
@@ -82,7 +100,7 @@ export default function TopNav() {
 
   const logout = async () => {
     try { await post('/api/auth/logout'); } catch (_) { /* ignore */ }
-    try { localStorage.removeItem('dash:range'); localStorage.removeItem('wl:mode'); } catch (_) { /* nothing stored */ }   // the Dashboard's period choice does not outlive the sign-in
+    try { localStorage.removeItem('dash:range'); localStorage.removeItem('wl:mode'); localStorage.removeItem('plugs:mode'); } catch (_) { /* nothing stored */ }   // the Dashboard's period choice does not outlive the sign-in
     window.location.href = '/login';
   };
 
@@ -99,12 +117,14 @@ export default function TopNav() {
         ))}
       </nav>
       <div className="nav-right">
-        <button type="button" className="iconbtn" id="notif-btn" aria-label="Notifications" onClick={toggle('notif')}>
+        {s.node && s.node.readOnly ? <span className="maint-pill" id="node-pill" role="status" aria-label="Backup server, read-only" title={`Backup server: read-only. Data copied from the main server${s.node.lastSyncAt ? ` on ${new Date(s.node.lastSyncAt).toLocaleString()}` : ''}. Changes cannot be made here.`}>Backup server: read-only</span> : null}
+        {s.maintenance && s.maintenance.on ? <span className="maint-pill" id="maint-pill" role="status" aria-label="Maintenance mode is ON" title={`Maintenance mode is ON: only site administrators can sign in. ${s.maintenance.message || ''}`.trim()}>Maintenance: ON</span> : null}
+        <button type="button" className={`iconbtn${ring ? ' ringing' : ''}`} id="notif-btn" aria-label="Notifications" onClick={toggle('notif')}>
           <BellIcon />
-          {notif.unread ? <span className="badge-count" id="notif-count">{notif.unread > 99 ? '99+' : notif.unread}</span> : null}
+          {notif.unread ? <span className={`badge-count${ring ? ' pulse' : ''}`} id="notif-count">{notif.unread > 99 ? '99+' : notif.unread}</span> : null}
         </button>
         <button type="button" className="usermenu-btn" id="user-btn" onClick={toggle('user')}>
-          <span className="avatar">{initials(u.full_name)}</span>
+          <span className={`avatar${u.avatar_v ? ' has-img' : ''}`} style={u.avatar_v ? { background: colorFor(u.id) } : undefined}>{u.avatar_v ? <img className="av-img" src={avatarUrl(u.id, u.avatar_v)} alt="" draggable="false" /> : initials(u.full_name)}</span>
           <span className="uinfo"><span className="uname">{u.full_name}</span><RoleBadge role={u.role} /></span>
           <span className="uchev"><ChevronDownSmall /></span>
         </button>
@@ -114,7 +134,7 @@ export default function TopNav() {
         <div className="dropdown" id="notif-dd" onClick={(e) => e.stopPropagation()}>
           <div className="dd-head">
             <strong className="grow">Notifications</strong>
-            <button type="button" className="btn sm ghost" onClick={async () => { await post('/api/notifications/read-all'); loadNotif(); }}>Mark all read</button>
+            <button type="button" className="btn sm ghost" onClick={async () => { await post('/api/notifications/read-all'); loadNotif(); }}>Mark all as read</button>
           </div>
           <div className="notif-list" id="notif-list">
             {!notif.rows ? <div className="empty">Loading…</div>
@@ -133,7 +153,7 @@ export default function TopNav() {
       {open === 'user' ? (
         <div className="dropdown" id="user-dd" onClick={(e) => e.stopPropagation()}>
           <div className="dd-head">
-            <span className="avatar">{initials(u.full_name)}</span>
+            <span className={`avatar${u.avatar_v ? ' has-img' : ''}`} style={u.avatar_v ? { background: colorFor(u.id) } : undefined}>{u.avatar_v ? <img className="av-img" src={avatarUrl(u.id, u.avatar_v)} alt="" draggable="false" /> : initials(u.full_name)}</span>
             <div className="grow"><div><strong>{u.full_name}</strong></div><div className="dim mono">@{u.username}</div></div>
             <RoleBadge role={u.role} />
           </div>

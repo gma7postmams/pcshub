@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const path = require('path');
 const express = require('express');
 const multer = require('multer');
+const virusScan = require('../virus-scan').guard;   // every upload is checked by ClamAV before the route sees it (src/virus-scan.js)
 const rateLimit = require('express-rate-limit');
 const v = require('../validate');
 const stepUp = require('../reauth');
@@ -16,7 +17,7 @@ const cfg = require('../backup/config');
 
 // Mounted behind requirePageAccess('/admin'); the role is re-checked here as defence in depth.
 const router = express.Router();
-router.use((req, res, next) => (req.user && req.user.role === 'Admin' ? next() : res.status(403).json({ error: 'Admin role required' })));
+router.use((req, res, next) => (req.user && req.user.role === 'System Admin' ? next() : res.status(403).json({ error: 'System Admin role required' })));
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 router.param('id', (req, res, next, id) => (UUID.test(id) ? next() : res.status(404).json({ error: 'Backup not found' })));
@@ -35,6 +36,25 @@ const analyzeLimiter = limiter(5);
 
 /** Password (plus the current 2FA code when enabled) must be re-entered every time for restore, delete and download. */
 const reauth = (req, action, id) => stepUp.verify(req, { action, entity: 'backup', id }, req.body);
+
+const scheduler = require('../backup/scheduler');
+
+// Last successful backup, whether it is stale, and the automatic schedule.
+router.get('/status', asyncH(async (req, res) => res.json(await scheduler.status())));
+
+router.put('/schedule', asyncH(async (req, res) => {
+  const b = req.body || {};
+  const mode = v.oneOf(b.mode, ['off', 'daily', 'weekly'], { field: 'Schedule' });
+  const time = typeof b.time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(b.time) ? b.time : null;
+  if (mode !== 'off' && !time) throw new HttpError(400, 'Enter a time like 02:00');
+  const keep = v.int(b.keep, { field: 'Keep', min: 1, max: cfg.MAX_BACKUPS });
+  const weekday = b.weekday == null ? 0 : v.int(b.weekday, { field: 'Day', min: 0, max: 6 });
+  const prev = await scheduler.getSchedule();
+  const next = { mode, time: time || prev.time, weekday, keep };
+  await scheduler.saveSchedule(next);
+  await audit(req, 'admin.backup_schedule', 'backup', null, { from: prev, to: next });
+  res.json(await scheduler.status());
+}));
 
 router.get('/preview', asyncH(async (req, res) => res.json(await svc.preview())));
 
@@ -92,7 +112,7 @@ const uploadZip = multer({
     filename: (req, file, cb) => cb(null, `${crypto.randomBytes(12).toString('hex')}.zip`),
   }),
   limits: { fileSize: cfg.MAX_ARCHIVE_BYTES, files: 1 },
-  fileFilter: (req, file, cb) => (path.extname(file.originalname).toLowerCase() === '.zip' ? cb(null, true) : cb(new HttpError(400, 'Choose a .zip backup file'))),
+  fileFilter: (req, file, cb) => (/\.zip(\.enc)?$/i.test(file.originalname) ? cb(null, true) : cb(new HttpError(400, 'Choose a backup file (.zip or .zip.enc)'))),
 });
 const receive = (req, res, next) => {
   if (svc.isBusy()) return next(new HttpError(409, 'Another backup operation is already running'));
@@ -103,7 +123,7 @@ const receive = (req, res, next) => {
   });
 };
 
-router.post('/analyze', analyzeLimiter, receive, asyncH(async (req, res) => {
+router.post('/analyze', analyzeLimiter, receive, virusScan, asyncH(async (req, res) => {
   if (!req.file) throw new HttpError(400, 'No file uploaded');
   try {
     res.status(202).json({ analysis: await analysis.start(req, req.file, req.file.originalname) });

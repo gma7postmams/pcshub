@@ -1,11 +1,11 @@
-// Step-up authentication ("confirm it's you") for the actions that could turn a borrowed session into a lasting
-// takeover: resetting someone's password or 2FA, granting the Admin role, and downloading / deleting / restoring backups.
+// Step-up authentication ("confirm it's you") for destructive actions: restoring, downloading and deleting backups, removing old records and clearing data.
 //
-// The caller re-enters their password, plus a fresh authenticator code when 2FA is on. Wrong answers are counted per
+// The caller re-enters their password (they already signed in with 2FA, so no code is asked unless a route opts in). Wrong answers are counted per
 // user, so a stolen session cannot be used to guess the password.
 const bcrypt = require('bcrypt');
 const db = require('./db');
 const totp = require('./totp');
+const emailCode = require('./email-code');
 const { HttpError } = require('./middleware');
 const { audit } = require('./audit');
 
@@ -48,17 +48,18 @@ const credsOf = (c) => (c && typeof c === 'object' && !Array.isArray(c) ? c : {}
  * mistaken for the confirmation. Throws 403 { reauth: true } when it is missing or wrong.
  * `log` = { action, entity, id, details? } writes an audit line for a wrong answer.
  */
-async function verify(req, log, creds) {
+async function verify(req, log, creds, { passwordOnly = true } = {}) {   // by default the password alone is enough: the Admin already signed in with 2FA. Pass { passwordOnly: false } to also ask for the code
   const c = credsOf(creds);
   const password = typeof c.password === 'string' && c.password.length <= 200 ? c.password : '';
-  const { rows } = await db.query('SELECT password_hash, totp_enabled, totp_secret FROM users WHERE id=$1', [req.user.id]);
+  const { rows } = await db.query('SELECT password_hash, totp_enabled, totp_secret, twofa_method FROM users WHERE id=$1', [req.user.id]);
   const u = rows[0];
-  const twofa = Boolean(u && u.totp_enabled);
-  if (!password) throw new HttpError(403, 'Confirm your password to continue', { reauth: true, twofa });   // nothing was guessed: just ask
+  const twofa = !passwordOnly && Boolean(u && u.totp_enabled);
+  if (!password) throw new HttpError(403, 'Confirm your password to continue', { reauth: true, twofa, method: u && u.twofa_method });   // nothing was guessed: just ask
   attempt(req.user.id);
   let ok = Boolean(u) && await bcrypt.compare(password, u.password_hash);
-  if (ok && twofa) ok = await totp.verifyAndConsume(db, req.user.id, u.totp_secret, c.code);
+  if (ok && twofa) ok = u.twofa_method === 'email' ? emailCode.check(req.session, req.user.id, 'reauth', c.code) : await totp.verifyAndConsume(db, req.user.id, u.totp_secret, c.code);
   if (!ok) {
+    require('./security-watch').failure(req);
     if (log) await audit(req, log.action, log.entity, log.id, log.details || { outcome: 'denied', reason: 'reauth_failed' });
     throw new HttpError(403, twofa ? 'Password or authentication code is incorrect' : 'Password is incorrect', { reauth: true, twofa });
   }
@@ -74,4 +75,16 @@ async function recentOrVerify(req, log, creds) {
   await verify(req, log, creds);
 }
 
-module.exports = { verify, recentOrVerify, attempt, succeed };
+/**
+ * "Confirm it's you" for a route that has no password field of its own. The page sends { ..., reauth: { password, code } } (the shared api client does this
+ * after it shows its prompt); a confirmation given in the last few minutes still counts. Throws 403 { reauth: true, auto: true, what } when it is missing or wrong.
+ *   key = the audit name of the action, what = the words for the prompt ("delete these users").
+ */
+async function confirm(req, key, what) {
+  try { await recentOrVerify(req, { action: 'auth.reauth_failed', entity: 'user', id: req.user.id, details: { for: key, outcome: 'denied', reason: 'reauth_failed' } }, req.body && req.body.reauth); } catch (e) {
+    if (e instanceof HttpError && e.extra && e.extra.reauth) e.extra = { ...e.extra, auto: true, what };
+    throw e;
+  }
+}
+
+module.exports = { verify, recentOrVerify, confirm, attempt, succeed };

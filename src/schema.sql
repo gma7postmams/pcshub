@@ -34,8 +34,12 @@ CREATE TABLE IF NOT EXISTS roles (
 );
 
 INSERT INTO roles (name, description, rank) VALUES
+  ('System Admin',
+   'Full access to everything, including users, groups, roles, security, branding, backup and restore, data retention, dropdowns and the audit log',
+   5),
+
   ('Admin',
-   'Full access to all modules including users, groups, permissions, branding, audit, backup and restore administration',
+   'Every page and action in the app; in Settings only the Audit Log, Dropdowns and Branding',
    4),
 
   ('Manager',
@@ -47,7 +51,7 @@ INSERT INTO roles (name, description, rank) VALUES
    2),
 
   ('Ingest',
-   'Ingest Tracker only: can set Status (CM) and its NON-COMPLIANT reason; nothing else',
+   'Ingest only: can set Status (CM) and its NON-COMPLIANT reason; nothing else',
    1),
 
   ('Viewer',
@@ -58,7 +62,7 @@ ON CONFLICT (name) DO NOTHING;
 -- Actions each role may perform (managed in Admin > Roles). Built-in roles are seeded from src/permissions.js once (see migrate.js).
 ALTER TABLE roles ADD COLUMN IF NOT EXISTS is_builtin BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE roles ADD COLUMN IF NOT EXISTS actions_seeded BOOLEAN NOT NULL DEFAULT false;
-UPDATE roles SET is_builtin = true WHERE name IN ('Admin','Manager','Editor','Ingest','Viewer');
+UPDATE roles SET is_builtin = true WHERE name IN ('System Admin','Admin','Manager','Editor','Ingest','Viewer');
 CREATE TABLE IF NOT EXISTS role_actions (
   role    TEXT NOT NULL REFERENCES roles(name) ON UPDATE CASCADE ON DELETE CASCADE,
   action  TEXT NOT NULL,
@@ -104,6 +108,8 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_step BIGINT;
 -- 2FA is off for everyone until an Admin turns it on for that user (the user then enrols from Profile)
 ALTER TABLE users ADD COLUMN IF NOT EXISTS twofa_required BOOLEAN NOT NULL DEFAULT FALSE;
+-- How the second step is done: 'app' (authenticator) or 'email' (a code mailed to the account's address, for shared accounts)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS twofa_method TEXT NOT NULL DEFAULT 'app';
 UPDATE users SET twofa_required = TRUE WHERE totp_enabled AND NOT twofa_required;
 -- per-user appearance: system | dark | light
 ALTER TABLE users ADD COLUMN IF NOT EXISTS appearance TEXT NOT NULL DEFAULT 'system' CHECK (appearance IN ('system','dark','light'));  -- last TOTP time-step used (replay protection)
@@ -189,6 +195,13 @@ CREATE TABLE IF NOT EXISTS ingest_records (
 );
 CREATE INDEX IF NOT EXISTS ingest_status_idx ON ingest_records (status);
 CREATE INDEX IF NOT EXISTS ingest_created_idx ON ingest_records (created_at DESC);
+-- ROW NUMBER: where the record sits in the Ingest table, like a spreadsheet row. It is fixed (a delete leaves a blank row, nothing renumbers); a record
+-- typed into a blank row keeps that row's number. Records from before this existed are numbered in the order they were entered.
+ALTER TABLE ingest_records ADD COLUMN IF NOT EXISTS row_pos INT;
+UPDATE ingest_records r SET row_pos = (SELECT COALESCE(MAX(x.row_pos), 0) FROM ingest_records x) + n.rn
+  FROM (SELECT id, row_number() OVER (ORDER BY created_at, id) AS rn FROM ingest_records WHERE row_pos IS NULL) n
+ WHERE r.id = n.id AND r.row_pos IS NULL;
+CREATE INDEX IF NOT EXISTS ingest_row_pos_idx ON ingest_records (row_pos);
 
 CREATE TABLE IF NOT EXISTS approval_requests (
   id                SERIAL PRIMARY KEY,
@@ -350,47 +363,72 @@ CREATE TABLE IF NOT EXISTS knowledge_docs (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS knowledge_docs_created_idx ON knowledge_docs (created_at DESC);
+-- Tags (a document can have several) and a Trash: a deleted document keeps its file for 30 days and can be restored.
+ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS deleted_by INT REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS deleted_name TEXT;
+-- An item can be created with just a name; its document (PDF, Word or PowerPoint) is attached later, so the file columns may be empty.
+ALTER TABLE knowledge_docs ALTER COLUMN filename DROP NOT NULL;
+ALTER TABLE knowledge_docs ALTER COLUMN stored_name DROP NOT NULL;
+ALTER TABLE knowledge_docs ALTER COLUMN size_bytes DROP NOT NULL;
+ALTER TABLE knowledge_docs ALTER COLUMN sha256 DROP NOT NULL;
+
+-- Editor can edit the PSD Daily Plug List. Existing databases get the action ONCE (flag in app_settings), so an Admin who later
+-- removes it from Editor in Admin > Access is not overruled on restart. New databases get it from the role defaults.
+INSERT INTO role_actions (role, action)
+SELECT 'Editor', 'plugs.write' FROM roles
+ WHERE name = 'Editor' AND actions_seeded
+   AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'editor_plugs_write_v1')
+ON CONFLICT DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('editor_plugs_write_v1', '1') ON CONFLICT (key) DO NOTHING;
+
+-- Knowledge Base: only Admin and System Admin upload, rename and delete documents now; Manager keeps open / download. Once, so an Admin who later
+-- gives Manager the action again in Administration > Roles is not overruled on restart.
+DELETE FROM role_actions
+ WHERE role = 'Manager' AND action = 'knowledge.write'
+   AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'knowledge_admin_only_v1');
+INSERT INTO app_settings (key, value) VALUES ('knowledge_admin_only_v1', '1') ON CONFLICT (key) DO NOTHING;
+
+-- Activity History became a per-role switch (Admin > Roles). Keep it for Manager and Editor, as before; Viewer and Ingest start without it. Once.
+INSERT INTO role_actions (role, action)
+SELECT name, 'activity.view' FROM roles
+ WHERE name IN ('Manager','Editor') AND actions_seeded
+   AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'activity_view_v1')
+ON CONFLICT DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('activity_view_v1', '1') ON CONFLICT (key) DO NOTHING;
 
 INSERT INTO app_settings (key, value) VALUES
-  ('app_name', 'Promotional Content Hub'),
+  ('app_name', 'PULSE'),
   ('tagline', 'Ingest · Approval · Workload · Backup and Restore'),
-  ('theme', 'midnight'),
+  ('theme', 'graphite'),
   ('accent_color', ''),
-  ('logo_path', '')
+  ('logo_path', ''),
+  ('logo_dark_path', '')
 ON CONFLICT (key) DO NOTHING;
 
--- Starter dropdown values (only inserted if the category is empty)
-INSERT INTO dropdown_options (category, value, sort_order)
-SELECT 'platform', v, o FROM (VALUES
-  ('TV',1),('YouTube',2),('Facebook',3),('TikTok',4),('Instagram',5),('Website',6),('X',7)
-) AS t(v,o)
-WHERE NOT EXISTS (SELECT 1 FROM dropdown_options WHERE category = 'platform');
+-- One time: an app name still set to the old built-in default becomes PULSE. A name an Admin chose themselves is left alone.
+UPDATE app_settings SET value = 'PULSE', updated_at = now()
+ WHERE key = 'app_name' AND value = 'Promotional Content Hub'
+   AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'app_name_pulse_v1');
+INSERT INTO app_settings (key, value) VALUES ('app_name_pulse_v1', '1') ON CONFLICT (key) DO NOTHING;
 
--- Workload Platform choices: the values the template's Platform formula produces, plus the older list.
--- Added once (flag in app_settings) so options an Admin later deletes are not brought back on restart.
-INSERT INTO dropdown_options (category, value, sort_order)
-SELECT 'workload_platform', v, o FROM (VALUES
-  ('GMA',1),('GTV',2),('HOA',3),('IHM',4),('DIGITAL',5),('GPTV',6),('GNTV',7),('GLTV',8),
-  ('INTL DIGITAL',9),('INTL MKTG',10),
-  ('REG/TDMD (SYNERGY)',11),('REG/TDMD (SPARKLE)',12),('REG/TDMD (GMA MUSIC)',13),('REG/TDMD (GMA PICTURES)',14),
-  ('REG/TDMD (RGMA)',15),('REG/TDMD (RTV LOCAL AIRING)',16),('REG/TDMD (PG_REGIONAL AIRING)',17),
-  ('REG/TDMD (PSD-DIGITAL)',18),
-  ('ALL 6 CHANNELS',19),('AFFORDABOX',20),('CORPORATE',21),('GMAI',22),('GMAIN',23),('GMA NOW',24),
-  ('HALLYPOP',25),('PINOY HITS',26),('PSD-DIGITAL',27),('RADIO',28)
-) AS t(v,o)
-WHERE NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'seed_workload_platform_v2')
-ON CONFLICT (category, value) DO NOTHING;
-INSERT INTO app_settings (key, value) VALUES ('seed_workload_platform_v2', '1') ON CONFLICT (key) DO NOTHING;
-
--- Plug Type choices (values seen in the Sept 2026 template); only inserted if the category is empty
-INSERT INTO dropdown_options (category, value, sort_order)
-SELECT 'plug_type', v, o FROM (VALUES
-  ('EPISODIC',1),('SEASONAL',2),('BUMPER',3),('POP-UP/POP LOGO',4),('RADIO',5)
-) AS t(v,o)
-WHERE NOT EXISTS (SELECT 1 FROM dropdown_options WHERE category = 'plug_type');
+-- Dropdown lists (Platform, Workload Platform, Plug Type) start EMPTY: an Admin fills them in under Settings / Administration > Dropdowns.
+-- Nothing is added here, so values an Admin deletes are never brought back on restart.
 
 -- Themes: older installs stored the Midnight accent as an explicit override; clear it so the theme's own accent applies
-INSERT INTO app_settings (key, value) VALUES ('theme', 'midnight') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('theme', 'graphite') ON CONFLICT (key) DO NOTHING;
+
+-- Graphite is the default theme. One time: an install still on the old built-in default (Midnight) moves to Graphite; after this an Admin's choice is never touched.
+UPDATE app_settings SET value = 'graphite', updated_at = now()
+ WHERE key = 'theme' AND value = 'midnight'
+   AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'theme_default_graphite_v1');
+INSERT INTO app_settings (key, value) VALUES ('theme_default_graphite_v1', '1') ON CONFLICT (key) DO NOTHING;
+
+-- Personal colour theme: NULL = follow the Admin default theme
+ALTER TABLE users ADD COLUMN IF NOT EXISTS theme TEXT;
+-- Profile picture: NULL = none (initials); otherwise the time it was set (the picture is uploads/avatars/<id>.jpg; the number is only used to refresh caches)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_v BIGINT;
 UPDATE app_settings SET value = '' WHERE key = 'accent_color' AND lower(value) = '#4f8cff';
 
 -- Custom Workload columns: admins can add extra columns beyond the template's fixed fields. Values live in
@@ -499,8 +537,18 @@ CREATE TABLE IF NOT EXISTS workload_plugs (
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Requested By: the name of the person who imported / added the plug, kept as text so it survives a renamed or removed account
+ALTER TABLE workload_plugs ADD COLUMN IF NOT EXISTS requested_by TEXT NOT NULL DEFAULT '';
+UPDATE workload_plugs p SET requested_by = COALESCE(NULLIF(btrim(u.full_name), ''), u.username)
+  FROM users u WHERE p.requested_by = '' AND p.created_by = u.id;
 CREATE UNIQUE INDEX IF NOT EXISTS workload_plugs_uniq ON workload_plugs (plug_date, plug_id, prog_name, psd);
 CREATE INDEX IF NOT EXISTS workload_plugs_date_idx ON workload_plugs (plug_date, seq);
+-- Every plug keeps the row (position within its day) it was entered in, like a sheet row: a plug typed into row 20 stays on row 20 and the free numbers show as blank rows.
+ALTER TABLE workload_plugs ADD COLUMN IF NOT EXISTS row_pos INT;
+UPDATE workload_plugs p SET row_pos = n.rn
+  FROM (SELECT id, row_number() OVER (PARTITION BY plug_date ORDER BY seq, id) AS rn FROM workload_plugs WHERE row_pos IS NULL) n
+ WHERE p.id = n.id AND p.row_pos IS NULL;
+CREATE INDEX IF NOT EXISTS workload_plugs_pos_idx ON workload_plugs (plug_date, row_pos);
 CREATE INDEX IF NOT EXISTS workload_plugs_lookup_idx ON workload_plugs (plug_date, upper(plug_id));
 
 -- The PSD Daily Plug List is now its own page ('plugs'). Once (flag in app_settings), every group that can open the Workload Tracker
@@ -536,6 +584,8 @@ CREATE TABLE IF NOT EXISTS user_presence (
   page            TEXT
 );
 CREATE INDEX IF NOT EXISTS user_presence_active_idx ON user_presence (last_active_at DESC);
+-- Set when the person closes the tab / signs out: they stop counting as active at once but stay in "Earlier today" (the row used to be deleted, which made them vanish from both).
+ALTER TABLE user_presence ADD COLUMN IF NOT EXISTS left_at TIMESTAMPTZ;
 
 -- Dashboard sections: "Active users" is new and "Recent ingest activity" is gone. Once (flag in app_settings) every group that can open
 -- the Dashboard gets Active users — an Admin can untick it per group afterwards without it coming back — and the retired key is removed.
@@ -548,3 +598,51 @@ DELETE FROM group_permissions WHERE perm_key = 'dashboard.recent';
 
 -- The Reports page (and its CSV export) was removed. Drop its retired permission keys from every group.
 DELETE FROM group_permissions WHERE perm_key IN ('reports', 'reports.ingest', 'reports.export');
+
+-- System Admin role. Existing Admin accounts become System Admin ONCE, so nobody loses the Admin area; Admin is then free to give to people
+-- who should only see the Audit Log and manage Dropdowns.
+UPDATE users SET role = 'System Admin'
+ WHERE role = 'Admin' AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'system_admin_v1');
+UPDATE roles SET description = 'Every page and action in the app; in the Admin area only the Audit Log and the Dropdowns'
+ WHERE name = 'Admin' AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'system_admin_v1');
+INSERT INTO app_settings (key, value) VALUES ('system_admin_v1', '1') ON CONFLICT (key) DO NOTHING;
+
+-- Admin can also manage Branding (its Admin-area page is named Settings). Only an untouched description is replaced; ONCE.
+UPDATE roles SET description = 'Every page and action in the app; in Settings only the Audit Log, Dropdowns and Branding'
+ WHERE name = 'Admin' AND description = 'Every page and action in the app; in the Admin area only the Audit Log and the Dropdowns' AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'admin_branding_v1');
+INSERT INTO app_settings (key, value) VALUES ('admin_branding_v1', '1') ON CONFLICT (key) DO NOTHING;
+
+-- Phone / browser push notifications: one row per device a user has switched them on for
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id         SERIAL PRIMARY KEY,
+  user_id    INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint   TEXT NOT NULL UNIQUE,
+  p256dh     TEXT NOT NULL,
+  auth       TEXT NOT NULL,
+  ua         TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions (user_id);
+
+-- Which activities notify a person (bell / phone): { kind: { bell: false, push: false } }; a kind that is missing is on
+ALTER TABLE users ADD COLUMN IF NOT EXISTS notif_prefs JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS view_prefs JSONB NOT NULL DEFAULT '{}'::jsonb;   -- each table's sort + filters, remembered per person
+
+-- IP access rules (Administration > IP Access). kind 'block': that address / range cannot reach the app at all.
+-- kind 'allow': that address / range is never shut out by wrong passwords or rate limits, and an allow rule wins over a block rule.
+-- cidr is one address ("203.0.113.7") or a range ("203.0.113.0/24", "2001:db8::/32"). expires_at NULL = until removed.
+CREATE TABLE IF NOT EXISTS ip_rules (
+  id               SERIAL PRIMARY KEY,
+  kind             TEXT NOT NULL CHECK (kind IN ('block', 'allow')),
+  cidr             TEXT NOT NULL,
+  note             TEXT,
+  expires_at       TIMESTAMPTZ,
+  created_by       INT REFERENCES users(id) ON DELETE SET NULL,
+  created_by_name  TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (kind, cidr)
+);
+
+-- Workload: entries of one project (the same plug on several platforms, e.g. PV_ / PN_ / PD_) are grouped automatically from the Plug ID. This lets
+-- people link entries by hand (or take one out of a group): '' = automatic, '-' = never group this row, anything else = a token shared by the linked rows.
+ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS project_group TEXT NOT NULL DEFAULT '';

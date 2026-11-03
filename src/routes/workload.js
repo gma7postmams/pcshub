@@ -1,11 +1,16 @@
+const crypto = require('crypto');
 const express = require('express');
 const validator = require('validator');
 const db = require('../db');
 const v = require('../validate');
+const { groupByDate, truthy, dateTag } = require('../export-sheets');
 const { asyncH, HttpError, requireAction } = require('../middleware');
 const { audit } = require('../audit');
+const { notifyPageUsers } = require('../notify');
+const { workloadTabs } = require('../permissions');
 
 const { logRun } = require('../transferlog');   // action logging (audit entry + server log line) for bulk delete
+const { readTeamWorkbook, plugKey, looseKey } = require('../workload-fill');   // the team's per-day workbook (Import hands it to Fill from team workbook)
 const { emitTransfer } = require('../transfer-hook');   // import / export events — the audit log subscribes to these (see src/transfer-hook.js)
 
 // Mounted behind requirePageAccess('/workload'); writes need requireAction('workload.write').
@@ -32,10 +37,10 @@ const unitKey = (t) => String(t ?? '').toLowerCase().replace(/[\u2013\u2014\u221
 const UNIT_BY_KEY = Object.assign(Object.create(null), Object.fromEntries(UNITS.map((u) => [unitKey(u), u])));
 const canonUnit = (raw) => { const t = String(raw ?? '').trim(); return UNIT_BY_KEY[unitKey(t)] || t; };
 const NOT_SET = '(Not set)';   // Units filter value for rows copied from the PSD Daily Plug List that haven't been assigned a team yet
-const TAB_LABEL = Object.assign(Object.create(null), { ALL: 'All', VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio' });
+const TAB_LABEL = Object.assign(Object.create(null), { ALL: 'All', VGFX: 'VGFX', VEDIT: 'VEDIT', AUDIO: 'Audio', PREP: 'Ongoing' });
 
 // Field kinds: date | select | text | audio_guide | date_or_text (a picked date OR typed text). `multiline` = textarea. `hint` = placeholder from the red notes.
-const OPEN = 'Type or paste anything';
+const OPEN = 'Type or paste anything…';
 const FROM_PSD = 'Filled from the PSD Daily Plug List';
 const FIELDS = {
   work_date:      { label: 'Work Date', kind: 'date', required: true },
@@ -53,7 +58,7 @@ const FIELDS = {
   audio_guide:    { label: 'Audio Guide', kind: 'audio_guide' },
   remarks:        { label: 'Remarks', kind: 'text', multiline: true, max: 4000, hint: OPEN },
   total_mats:     { label: 'Total Mats', kind: 'text', multiline: true, max: 500, hint: OPEN },
-  prog_name:      { label: 'PROG. NAME / PROJ. TITLE', kind: 'select', lookup: 'program', max: 300, hint: FROM_PSD },
+  prog_name:      { label: 'PROG. NAME / PROJ. TITLE', kind: 'text', max: 300, hint: FROM_PSD },
   plug_type:      { label: 'Plug Type', kind: 'select', lookup: 'plug_type', max: 100 },
   // Audio sheet's Assigned / Done / Resched-cancelled tables: open columns you can type or paste into
   length:         { label: 'Length', kind: 'text', max: 100, hint: OPEN },
@@ -75,7 +80,12 @@ const VIEWS = {
   VGFX: MAIN_COLS,
   VEDIT: MAIN_COLS,
   AUDIO: AUDIO_COLS,
+  // PREP (the Ongoing tab) = every row (like All) without the four prep fields, Total Mats and Prog. Name / Proj. Title; those four decide which part of the tab a row sits in (see PREP_FIELDS)
+  PREP: [...MAIN_COLS.slice(0, -1), 'length', 'others', 'audio_status', 'plug_type'].filter((k) => !['vo', 'script', 'art_stb', 'audio_guide', 'total_mats', 'prog_name'].includes(k)),
 };
+// A prep field is "available" once it has any value (a date, text, or N/A for "not needed"). A row is ready when all four are; otherwise it waits in the lower part, listing what is missing.
+const PREP_FIELDS = ['vo', 'script', 'art_stb', 'audio_guide'];
+const PREP_MISSING_SQL = `ARRAY_REMOVE(ARRAY[${PREP_FIELDS.map((f) => `CASE WHEN NULLIF(btrim(w.${f}), '') IS NULL THEN '${f}' END`).join(', ')}], NULL)`;
 // Default Units Concerned when adding a row from a team tab
 const TAB_DEFAULT_UNITS = { VGFX: 'VGFX Only', VEDIT: 'VEDIT Only', AUDIO: 'Audio - RADIO' };
 
@@ -110,6 +120,7 @@ function derivePlatform(plugId) {
 }
 
 const MAX_BATCH = 200;
+const LIST_MAX = 5000;   // most rows one list read returns (the page's "All" choice); saving is still MAX_BATCH rows at a time
 const SEARCH_COLS = ['plug_id', 'psd', 'prog_name', 'billable_party', 'remarks', 'vo', 'total_mats', 'audio_guide', 'length', 'others', 'audio_status'];
 
 // ---------- Custom columns ("Add Column"): stored in workload_custom_columns, values in workload_items.custom_fields ----------
@@ -157,7 +168,7 @@ router.get('/meta', asyncH(async (req, res) => {
   const customCols = await loadCustomCols(db);
   const locks = await loadLocks(db);
   res.json({
-    ready: true, units: UNITS, unitTeams: UNIT_TEAMS, tabs: ['ALL', ...TEAMS].map((key) => ({ key, label: TAB_LABEL[key] })),
+    ready: true, units: UNITS, unitTeams: UNIT_TEAMS, tabs: workloadTabs(req.user).map((key) => ({ key, label: TAB_LABEL[key] })),
     tabDefaultUnits: TAB_DEFAULT_UNITS, audioExtra: AUDIO_EXTRA, fields: extendFields(customCols), views: extendViews(customCols),
     notSet: NOT_SET, platformRules: PLATFORM_RULES, customColumns: customCols.map((c) => ({ id: c.id, key: c.col_key, label: c.label })),
     locks,
@@ -252,7 +263,7 @@ async function parseRow(client, body, current, customCols = [], opts = {}) {
 }
 
 const colList = COLS.map((c) => `"${c}"`);
-const CUR_COLS = 'platform, plug_type, prog_name, audio_guide, work_date, is_priority';
+const CUR_COLS = 'id, units_concerned, platform, plug_type, prog_name, vo, script, art_stb, audio_guide, work_date, is_priority';
 
 async function insertRow(client, rec, userId) {
   const params = [...COLS.map((c) => rec[c]), !!rec.is_priority, JSON.stringify(rec.custom_fields || {}), userId];
@@ -262,6 +273,32 @@ async function insertRow(client, rec, userId) {
     params
   );
   return rows[0].id;
+}
+
+// Tell everyone who can open the Workload Tracker (their group has the page) when VO, Script, Artwork / STB or Audio Guide is filled in or changed.
+// Units Concerned plays no part. Best effort: never fails the save. `items` = [{ plug_id, work_date, fields: ['vo', ...] }] (see fieldsSet).
+const NOTIFY_FIELDS = { vo: ['workload_vo', 'VO'], script: ['workload_script', 'Script'], art_stb: ['workload_art_stb', 'Artwork / STB'], audio_guide: ['workload_audio_guide', 'Audio Guide'] };
+/** Which of those four fields were given a value (or a different one) by this save. `prev` is the row before (null for a new row). */
+function fieldsSet(prev, rec) {
+  const val = (x) => (x == null ? '' : String(x).trim());
+  return Object.keys(NOTIFY_FIELDS).filter((f) => val(rec[f]) && val(rec[f]).toUpperCase() !== 'N/A' && val(rec[f]) !== val(prev && prev[f]));
+}
+async function notifyFieldsSet(req, items) {
+  try {
+    const first = (x) => String(x.plug_id || '').split('\n')[0].trim() || 'a row';
+    const day = (x) => (x.work_date instanceof Date ? x.work_date.toISOString().slice(0, 10) : String(x.work_date || '').slice(0, 10));
+    const by = new Map();   // field -> rows
+    for (const x of items) for (const f of (x && x.fields) || []) { if (!by.has(f)) by.set(f, []); by.get(f).push(x); }
+    for (const [f, xs] of by) {
+      const [kind, label] = NOTIFY_FIELDS[f];
+      const one = xs.length === 1;
+      await notifyPageUsers('workload', {
+        title: one ? `${label} updated: ${first(xs[0])}` : `${label} updated on ${xs.length} workload items`,
+        body: one ? `${req.user.full_name} set ${label} on ${first(xs[0])} (${day(xs[0])}).` : `${req.user.full_name} set ${label} on ${xs.length} workload rows.`,
+        link: '/workload', kind,
+      }, { excludeUserId: req.user.id });
+    }
+  } catch (e) { console.error('[workload] notification failed:', e.message); }
 }
 
 async function updateRow(client, id, rec, userId) {
@@ -276,20 +313,65 @@ const SELECT = `
   SELECT w.*, uu.full_name AS updated_by_name
     FROM workload_items w LEFT JOIN users uu ON uu.id = w.updated_by`;
 
-function buildFilter(query) {
+// ---- Plug groups: plug IDs that are the same except for the prefix before the first underscore belong together ----
+// PH_2323XX_232LAI_LN060, PD_2323XX_232LAI_LN060 and PV_2323XX_232LAI_LN060 are one group, on any Work Date (capitals, spaces and a trailing
+// " - 24p" note are ignored; only the first line of the Plug ID cell counts). A group needs at least two DIFFERENT prefixes, so the same plug
+// listed twice under one prefix (e.g. with two PSDs) is not tagged. Nothing is stored: the list asks the table each time, whatever the
+// date range, tab or filters on screen, so a plug is tagged even when the rest of its group is on another day.
+const PLUG_FIRST = "split_part(w.plug_id, E'\\n', 1)";
+const PLUG_PREFIX = `NULLIF(upper(btrim(substring(${PLUG_FIRST} from '^([^_]*)_'))), '')`;
+const AUTO_KEY = `(CASE WHEN ${PLUG_PREFIX} IS NOT NULL THEN NULLIF(upper(regexp_replace(regexp_replace(${PLUG_FIRST}, '\\s+-\\s+.*$', ''), '^[^_]*_|\\s', '', 'g')), '') END)`;
+// A row linked by hand (project_group = a token) is keyed 'P:<token>'; '-' = taken out of every group; '' = the automatic Plug-ID key above.
+// auto = false switches the Plug-ID match off (the "auto-detect similar projects" toggle): only rows linked by hand are grouped then
+const groupKeySql = (auto = true) => `(CASE WHEN w.project_group = '-' THEN NULL WHEN w.project_group <> '' THEN 'P:' || upper(w.project_group) ELSE ${auto ? AUTO_KEY : 'NULL'} END)`;
+const autoOn = (q) => String((q && q.auto) ?? '1') !== '0';
+const groupCols = (auto = true) => `, ${groupKeySql(auto)} AS group_key`;   // the row's key (null = no underscore prefix); attachGroups() keeps it only for real groups
+/** The text a ?group= filter is compared with: no prefix, no spaces, capitals. */
+const groupKeyOf = (raw) => String(raw || '').replace(/\s+/g, '').toUpperCase().slice(0, 200);
+/** Sets group_key / group_n on listed rows: group_n = every row of the table with that key; group_key is dropped unless 2+ different prefixes share it. */
+async function attachGroups(rows, auto = true) {
+  const keys = [...new Set(rows.map((r) => r.group_key).filter(Boolean))];
+  const found = new Map();
+  if (keys.length) {
+    const { rows: agg } = await db.query(
+      `SELECT k, count(*)::int AS n, (k LIKE 'P:%' AND count(*) >= 2) OR min(p) <> max(p) AS multi
+         FROM (SELECT ${groupKeySql(auto)} AS k, ${PLUG_PREFIX} AS p FROM workload_items w) x
+        WHERE k = ANY($1::text[]) GROUP BY k`, [keys]
+    );
+    agg.forEach((a) => found.set(a.k, a));
+  }
+  rows.forEach((r) => {
+    const g = r.group_key ? found.get(r.group_key) : null;
+    if (g && g.multi) r.group_n = g.n; else { r.group_key = null; r.group_n = 0; }
+  });
+  return rows;
+}
+
+function buildFilter(query, user) {
   const where = [];
   const params = [];
   const add = (sql, val) => { params.push(val); where.push(sql.replace('?', `$${params.length}`)); };
-  if (query.team) {
+  // The person's group decides which tabs they may open (Admin > Groups): without the All tab they only get rows of the teams they may see
+  const tabs = user ? workloadTabs(user) : ['ALL', ...TEAMS, 'PREP'];
+  const prep = query.team === 'PREP';   // the PREP tab lists every row, like All
+  if (!tabs.includes('ALL')) {
+    const mine = TEAMS.filter((t) => tabs.includes(t));
+    if (!mine.length && !tabs.includes('PREP')) throw new HttpError(403, 'Your group cannot open any tab of the Workload page');
+    if (query.team && !prep && !mine.includes(String(query.team))) throw new HttpError(403, 'Your group cannot open that tab of the Workload page');
+    if (prep && !tabs.includes('PREP')) throw new HttpError(403, 'Your group cannot open that tab of the Workload page');
+    if (!tabs.includes('PREP')) add('w.units_concerned = ANY(?::text[])', UNITS.filter((u) => UNIT_TEAMS[u].some((t) => mine.includes(t))));
+  }
+  if (query.team && !prep) {
     const team = v.oneOf(String(query.team), TEAMS, { field: 'team' });
     add('w.units_concerned = ANY(?::text[])', UNITS.filter((u) => UNIT_TEAMS[u].includes(team)));
   }
   if (query.units === NOT_SET) where.push('w.units_concerned IS NULL');
   else if (query.units) add('w.units_concerned = ?', v.oneOf(canonUnit(query.units), UNITS, { field: 'units' }));
   if (query.platform) add('w.platform = ?', String(query.platform));
+  if (query.group) add(`${groupKeySql(autoOn(query))} = ?`, groupKeyOf(query.group));   // one plug group: every row whose Plug ID is this key under some prefix, on any day (so the date range is not applied)
   if (query.plug_type) add('w.plug_type = ?', String(query.plug_type));
-  if (query.from) add('w.work_date >= ?', v.date(query.from, { field: 'from' }));
-  if (query.to) add('w.work_date <= ?', v.date(query.to, { field: 'to' }));
+  if (query.from && !query.group) add('w.work_date >= ?', v.date(query.from, { field: 'from' }));
+  if (query.to && !query.group) add('w.work_date <= ?', v.date(query.to, { field: 'to' }));
   if (query.q) {
     params.push(v.like(query.q, 100));
     const p = `$${params.length}`;
@@ -302,14 +384,15 @@ const whereSql = (where) => (where.length ? `WHERE ${where.join(' AND ')}` : '')
 // Counts for the summary cards and tab badges: follows every active filter except the team tab.
 // `today` comes from the browser so "Today" is the user's local date.
 router.get('/stats', asyncH(async (req, res) => {
-  const { where, params } = buildFilter({ ...req.query, team: undefined });
+  const { where, params } = buildFilter({ ...req.query, team: undefined }, req.user);
   const today = v.date(req.query.today, { field: 'today' }) || new Date().toISOString().slice(0, 10);
   const P = (val) => { params.push(val); return `$${params.length}`; };
   const team = (t) => `count(*) FILTER (WHERE w.units_concerned = ANY(${P(UNITS.filter((u) => UNIT_TEAMS[u].includes(t)))}::text[]))::int`;
   const { rows } = await db.query(
     `SELECT count(*)::int AS total,
             count(*) FILTER (WHERE w.work_date = ${P(today)})::int AS today,
-            ${team('VGFX')} AS vgfx, ${team('VEDIT')} AS vedit, ${team('AUDIO')} AS audio
+            ${team('VGFX')} AS vgfx, ${team('VEDIT')} AS vedit, ${team('AUDIO')} AS audio,
+            count(*) FILTER (WHERE cardinality(${PREP_MISSING_SQL}) > 0)::int AS prep_waiting
        FROM workload_items w ${whereSql(where)}`, params
   );
   res.json(rows[0]);
@@ -317,27 +400,60 @@ router.get('/stats', asyncH(async (req, res) => {
 
 // Sort by a clicked column (?sort=<column key>&dir=asc|desc). Dates sort as dates, text case-insensitively, empty values last;
 // a key that is not a built-in column is taken as a custom column.
+// A row's Breakdate / Time cell shows only the teams in its Units Concerned (VGFX / VEDIT; a unit with neither shows both), so the sort
+// must ignore a time stored for a team the cell does not show.
+const sqlList = (list) => `ARRAY[${list.map((u) => `'${String(u).replace(/'/g, "''")}'`).join(',')}]::text[]`;
+function shownBd(team) {
+  const hide = UNITS.filter((u) => { const t = (UNIT_TEAMS[u] || []).filter((x) => x === 'VGFX' || x === 'VEDIT'); return t.length && !t.includes(team); });
+  const col = team === 'VGFX' ? 'w.breakdate_vgfx' : 'w.breakdate_vedit';
+  return hide.length ? `(CASE WHEN w.units_concerned = ANY(${sqlList(hide)}) THEN NULL ELSE ${col} END)` : col;
+}
 function orderBy(q, params) {
   const k = String(q.sort || '');
   const dir = q.dir === 'desc' ? 'DESC' : 'ASC';
   let col = null;
-  if (k === 'breakdate_vgfx') col = 'w.breakdate_vgfx, w.breakdate_vedit';   // the merged "Breakdate / Time" column
+  if (k === 'breakdate_vgfx') col = [shownBd('VGFX'), shownBd('VEDIT')];   // the merged "Breakdate / Time" column
   else if (k === 'updated_at') col = 'w.updated_at';
   else if (COLS.includes(k)) col = ['date', 'datetime'].includes(FIELDS[k].kind) ? `w."${k}"` : `lower(w."${k}"::text)`;
   else if (/^[A-Za-z0-9_]{1,64}$/.test(k)) { params.push(k); col = `lower(w.custom_fields ->> $${params.length})`; }
-  if (!col) return 'w.work_date DESC NULLS LAST, w.id ASC';
-  return col.split(', ').map((c) => `${c} ${dir} NULLS LAST`).join(', ') + ', w.work_date DESC NULLS LAST, w.id ASC';
+  // newest saved first within a day: rows made together (one import / batch) share a created_at and keep their own order
+  if (!col) return 'w.work_date DESC NULLS LAST, w.created_at DESC, w.id ASC';
+  return [].concat(col).map((c) => `${c} ${dir} NULLS LAST`).join(', ') + ', w.work_date DESC NULLS LAST, w.created_at DESC, w.id ASC';
 }
 
 router.get('/', asyncH(async (req, res) => {
-  const { where, params } = buildFilter(req.query);
-  const { limit, offset } = v.paging(req.query, { def: 100, max: MAX_BATCH * 2 });
+  const { where, params } = buildFilter(req.query, req.user);
+  const { limit, offset } = v.paging(req.query, { def: 100, max: LIST_MAX });
   const total = await db.query(`SELECT count(*)::int AS n FROM workload_items w ${whereSql(where)}`, params);
+  const filterParams = params.slice();   // orderBy() may add a parameter after this
   const order = orderBy(req.query, params);   // may add a parameter (custom column key), so it runs after the count
+  const auto = autoOn(req.query);   // false = only rows linked by hand are grouped
+  if (req.query.team === 'PREP') {
+    // ready rows first (all four prep fields available), then the ones still waiting; each row says what is missing
+    const { rows } = await db.query(
+      `SELECT * FROM (SELECT w.*, uu.full_name AS updated_by_name, ${PREP_MISSING_SQL} AS prep_missing${groupCols(auto)}
+                        FROM workload_items w LEFT JOIN users uu ON uu.id = w.updated_by ${whereSql(where)}) w
+        ORDER BY (cardinality(prep_missing) > 0), ${order} LIMIT ${limit} OFFSET ${offset}`, params
+    );
+    const ready = await db.query(`SELECT count(*)::int AS n FROM (SELECT ${PREP_MISSING_SQL} AS m FROM workload_items w ${whereSql(where)}) x WHERE cardinality(m) = 0`, filterParams);
+    return res.json({ total: total.rows[0].n, prepReady: ready.rows[0].n, rows: (await attachGroups(rows, auto)).map(flattenCustom) });
+  }
+  if (req.query.together === '1') {
+    // Keep the rows of a plug group together in whatever order is asked for: the group sits where its first member would, its other
+    // members right under it (in the same order). Rows in no group keep their place. Works on the whole filtered list, so paging stays right.
+    const { rows } = await db.query(
+      `SELECT * FROM (SELECT w.*, uu.full_name AS updated_by_name${groupCols(auto)}, row_number() OVER (ORDER BY ${order}) AS _rn
+                        FROM workload_items w LEFT JOIN users uu ON uu.id = w.updated_by ${whereSql(where)}) q
+        ORDER BY min(_rn) OVER (PARTITION BY COALESCE(group_key, '#' || id::text)), _rn LIMIT ${limit} OFFSET ${offset}`, params
+    );
+    rows.forEach((r) => { delete r._rn; });
+    return res.json({ total: total.rows[0].n, rows: (await attachGroups(rows, auto)).map(flattenCustom) });
+  }
   const { rows } = await db.query(
-    `${SELECT} ${whereSql(where)} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params
+    `SELECT w.*, uu.full_name AS updated_by_name${groupCols(auto)}
+       FROM workload_items w LEFT JOIN users uu ON uu.id = w.updated_by ${whereSql(where)} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params
   );
-  res.json({ total: total.rows[0].n, rows: rows.map(flattenCustom) });
+  res.json({ total: total.rows[0].n, rows: (await attachGroups(rows, auto)).map(flattenCustom) });
 }));
 
 // Export (.xlsx) mirrors the template: sheet "MAIN" (rows that involve VGFX or VEDIT) and sheet "AUDIO"
@@ -384,13 +500,22 @@ const oneLineText = (t) => String(t ?? '').replace(/\s*\n+\s*/g, ' \u00b7 ');   
 
 async function exportPalette(db_) {
   const row = await db_.query("SELECT value FROM app_settings WHERE key='theme'");
-  const tint = THEME_TINT[(row.rows[0] || {}).value] || THEME_TINT.midnight;
+  const tint = THEME_TINT[(row.rows[0] || {}).value] || THEME_TINT.graphite;
   const border = mix(tint, 8, 'e1e4ea');    // grid lines
   const headerFill = mix(tint, 9, 'e7eaef'); // header background, tinted like the web table's header
   const pillFg = (hue) => argb(HUE_HEX[hue]);
   return { gridBorder: argb(border), headerFill: argb(headerFill), black: argb('000000'), pillFg };
 }
 
+// Script / Artwork-STB / Audio Guide dates are shown as MMDDYY (2026-10-10 -> 101026) in the web table and the Excel export; Import reads that back.
+const PRIORITY_FILL = 'FFF8B4B4';   // the light red on a prioritised row's Breakdate / Time cell in the export (and read back by Import)
+const mdy = (iso) => `${iso.slice(5, 7)}${iso.slice(8, 10)}${iso.slice(2, 4)}`;
+const fromMdy = (t) => {
+  const m = /^\s*(\d{2})(\d{2})(\d{2})\s*$/.exec(t);
+  if (!m) return t;
+  const iso = `20${m[3]}-${m[1]}-${m[2]}`;
+  return validator.isDate(iso, { format: 'YYYY-MM-DD', strictMode: true }) ? iso : t;
+};
 router.get('/export', asyncH(async (req, res) => {
   const t0 = Date.now();
   const exportInfo = { format: 'xlsx', team: req.query.team || 'ALL', filters: { ...req.query, team: undefined } };
@@ -402,15 +527,17 @@ router.get('/export', asyncH(async (req, res) => {
   const customCols = await loadCustomCols(db);
   const fieldsExt = extendFields(customCols);
   const customKeys = customCols.map((c) => c.col_key);
-  const { where, params } = buildFilter({ ...req.query, team: undefined });
+  const { where, params } = buildFilter({ ...req.query, team: undefined }, req.user);
+  // the same order as the table on screen: newest Work Date first (or the column header you sorted by), so the latest is at the top of each sheet
+  const order = orderBy(req.query, params);
   const { rows: rawRows } = await db.query(
-    `SELECT w.* FROM workload_items w ${whereSql(where)} ORDER BY w.work_date ASC, w.id ASC LIMIT 20000`, params
+    `SELECT w.* FROM workload_items w ${whereSql(where)} ORDER BY ${order} LIMIT 20000`, params
   );
   const rows = rawRows.map(flattenCustom);
   exportInfo.matched = rows.length;
   exportInfo.truncated = rawRows.length >= 20000;   // the export stops at 20,000 rows
   const involves = (r, teams) => teams.some((t) => (UNIT_TEAMS[r.units_concerned] || []).includes(t));
-  const team = req.query.team ? v.oneOf(String(req.query.team), TEAMS, { field: 'team' }) : null;
+  const team = req.query.team && req.query.team !== 'PREP' ? v.oneOf(String(req.query.team), TEAMS, { field: 'team' }) : null;
   // Breakdate / Time (VGFX) and (VEDIT) share ONE column, like the web table: 'breakdate_vgfx' keeps that column's
   // position and its cell holds one line per involved team (VGFX above VEDIT); 'breakdate_vedit' gets no column of its own.
   const oneBreakdate = (cols) => cols.filter((k) => k !== 'breakdate_vedit');
@@ -437,7 +564,15 @@ router.get('/export', asyncH(async (req, res) => {
     return String(v);
   };
   exportInfo.sheets = {};
-  for (const sh of sheets) {
+  // "Separate data by date into tabs": one sheet per Work Date holding only that date's rows, per sheet type, named like "Sep 1 - MAIN" / "Sep 1 - AUDIO" (a
+  // sheet type with no rows that date is left out).
+  let sheetList = sheets;
+  if (truthy(req.query.by_date) && rows.length) {
+    sheetList = groupByDate(rows, (r) => r.work_date).flatMap((g) => { const inG = new Set(g.rows); return sheets.map((sh) => ({
+      ...sh, name: `${g.name} - ${sh.name}`.slice(0, 31), pick: (r) => inG.has(r) && sh.pick(r),
+    })).filter((sh) => g.rows.some(sh.pick)); });
+  }
+  for (const sh of sheetList) {
     const ws = wb.addWorksheet(sh.name);
     ws.columns = sh.cols.map((k) => {
       const f = fieldsExt[k];
@@ -463,7 +598,7 @@ router.get('/export', asyncH(async (req, res) => {
         if (k === 'breakdate_vgfx') val = null;   // filled in below as two labelled lines (VGFX / VEDIT)
         else if (f.kind === 'date') val = asDate(val);
         else if (f.kind === 'datetime') { const t = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(val || ''); val = t ? new Date(Date.UTC(+t[1], +t[2] - 1, +t[3], +t[4], +t[5])) : null; }
-        else if ((k === 'audio_guide' || k === 'art_stb' || k === 'script') && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = asDate(val);   // a date becomes a real Excel date; text stays text
+        else if ((k === 'audio_guide' || k === 'art_stb' || k === 'script') && /^\d{4}-\d{2}-\d{2}$/.test(val || '')) val = mdy(val);   // a date is written MMDDYY (101026), the same as the web table; text stays text
         else if (k !== 'remarks' && k !== 'others' && k !== 'audio_status') val = oneLineText(val);   // every field except the Remarks columns and Audio Status is one line, like the web table
         return { ...o, [k]: val };
       }, {}));
@@ -472,12 +607,13 @@ router.get('/export', asyncH(async (req, res) => {
       sh.cols.forEach((k) => {
         const cell = row.getCell(k);
         const f = fieldsExt[k];
-        cell.border = { right: thinGrid };   // vertical grid line, matching the web table
+        cell.border = { right: thinGrid, bottom: thinGrid };   // grid lines, matching the web table (an explicit bottom line keeps consecutive filled priority cells separated)
         // Prioritised row: light-red fill on its Breakdate / Time cell(s), like the highlight in the web table
-        if (r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit')) {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8B4B4' } };
+        // (the AUDIO sheet has no Breakdate / Time column, so there the Units Concerned cell carries the highlight)
+        if (r.is_priority && (k === 'breakdate_vgfx' || k === 'breakdate_vedit' || (k === 'plug_id' && !sh.cols.includes('breakdate_vgfx')))) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PRIORITY_FILL } };
+          cell.border = { right: thinGrid, bottom: { style: 'thin', color: { argb: 'FFD98080' } } };   // darker line so two prioritised rows in a row stay visibly separate
         }
-        if ((k === 'audio_guide' || k === 'art_stb' || k === 'script') && r[k] && /^\d{4}-\d{2}-\d{2}$/.test(r[k])) cell.numFmt = 'mmm d, yyyy';
 
         if (k === 'breakdate_vgfx') {
           // Same as the web table: one labelled line per involved team, VGFX on top, VEDIT below (each only if it has a time)
@@ -547,7 +683,8 @@ router.get('/export', asyncH(async (req, res) => {
   // transfer encoding straight to res: some reverse proxies (this app is commonly deployed behind one) can
   // truncate or mishandle a chunked response, which shows up as "the file format is invalid" when opened.
   const buffer = await wb.xlsx.writeBuffer();
-  const filename = `Workload_${team || 'ALL'}_${stamp}.xlsx`;
+  const byDate = truthy(req.query.by_date) && rows.length;
+  const filename = `${['Workload', team || 'ALL', dateTag(req.query.from, req.query.to)].filter(Boolean).join('_')}${byDate ? '_tabs' : ''}.xlsx`;
   await emitTransfer(req, 'workload.export', { ...exportInfo, file: filename, bytes: buffer.length, ms: Date.now() - t0 });
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.set('Content-Disposition', `attachment; filename="${filename}"`);
@@ -562,13 +699,16 @@ router.get('/export', asyncH(async (req, res) => {
 router.post('/', requireAction('workload.write'), asyncH(async (req, res) => {
   const customCols = await loadCustomCols(db);
   const locks = await loadLocks(db);
+  let made;
   const id = await db.tx(async (c) => {
     const rec = await parseRow(c, req.body, null, customCols);
     assertNotLocked(locks, rec.work_date);
     const newId = await insertRow(c, rec, req.user.id);
     await audit(req, 'workload.create', 'workload_item', newId, rec, c);
+    made = rec;
     return newId;
   });
+  await notifyFieldsSet(req, [{ plug_id: made.plug_id, work_date: made.work_date, fields: fieldsSet(null, made) }]);
   res.status(201).json({ ok: true, id });
 }));
 
@@ -583,6 +723,8 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
     let created = 0;
     let updated = 0;
     const createdIds = [];
+    const fieldsChanged = [];   // rows where VO / Script / Artwork-STB / Audio Guide was filled in or changed — the teams involved are told
+    const results = [];   // what was stored for the auto-filled columns, so the table can tell a cleared PSD / Platform that was filled in again
     for (let i = 0; i < list.length; i++) {
       const row = list[i] || {};
       try {
@@ -595,6 +737,8 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           assertNotLocked(locks, rec.work_date);
           await updateRow(c, id, rec, req.user.id);
           await audit(req, 'workload.update', 'workload_item', id, rec, c);
+          fieldsChanged.push({ plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur.rows[0], rec) });
+          results.push({ id, psd: rec.psd || '', prog_name: rec.prog_name || '', platform: rec.platform || '' });
           updated++;
         } else {
           const rec = await parseRow(c, row, null, customCols);
@@ -602,6 +746,7 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
           const id = await insertRow(c, rec, req.user.id);
           await audit(req, 'workload.create', 'workload_item', id, rec, c);
           createdIds.push(id);
+          fieldsChanged.push({ plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(null, rec) });
           created++;
         }
       } catch (e) {
@@ -609,8 +754,149 @@ router.post('/batch', requireAction('workload.write'), asyncH(async (req, res) =
         throw e;
       }
     }
-    return { created, updated, createdIds };
+    return { created, updated, createdIds, results, fieldsChanged };
   });
+  await notifyFieldsSet(req, out.fieldsChanged);
+  const { fieldsChanged, ...shown } = out;
+  res.json({ ok: true, ...shown });
+}));
+
+// ---------- Plug groups by hand ----------
+// Link rows as one project (they share a token), take rows out of every group, or hand them back to the automatic Plug-ID match.
+// Rows in a locked period are left alone (counted as skipped).
+router.post('/link', requireAction('workload.write'), asyncH(async (req, res) => {
+  const mode = String((req.body && req.body.mode) || '');
+  if (!['link', 'unlink', 'auto', 'restore'].includes(mode)) throw new HttpError(400, 'Unknown action');
+  if (mode === 'restore') {
+    // Undo / redo of the actions below: put each row's setting back to the value it had ('' automatic, '-' never group, or a link token)
+    const list = Array.isArray(req.body.values) ? req.body.values.slice(0, 500) : [];
+    if (!list.length) throw new HttpError(400, 'Nothing to restore');
+    const byValue = new Map();
+    list.forEach((x) => {
+      const val = String((x && x.value) ?? '');
+      if (!/^[A-Za-z0-9-]{0,40}$/.test(val)) throw new HttpError(400, 'Invalid group value');
+      const id = v.id(x && x.id);
+      if (!byValue.has(val)) byValue.set(val, []);
+      byValue.get(val).push(id);
+    });
+    const locksR = await loadLocks(db);
+    let changed = 0;
+    for (const [val, ids] of byValue) {
+      const { rows: found } = await db.query('SELECT id, work_date FROM workload_items WHERE id = ANY($1::bigint[])', [ids]);
+      const open = found.filter((r) => { try { assertNotLocked(locksR, r.work_date); return true; } catch (e) { return false; } });
+      if (!open.length) continue;
+      await db.query('UPDATE workload_items SET project_group = $1, updated_by = $2, updated_at = now() WHERE id = ANY($3::bigint[])', [val, req.user.id, open.map((r) => r.id)]);
+      changed += open.length;
+    }
+    await audit(req, 'workload.group', 'workload_item', null, { mode, rows: changed });
+    return res.json({ ok: true, changed });
+  }
+  const ids = Array.isArray(req.body.ids) ? [...new Set(req.body.ids.map((n) => v.id(n)))].slice(0, 500) : [];
+  if (!ids.length) throw new HttpError(400, 'No rows selected');
+  if (mode === 'link' && ids.length < 2) throw new HttpError(400, 'Select at least two rows to link');
+  const locks = await loadLocks(db);
+  const { rows: found } = await db.query('SELECT id, work_date, plug_id FROM workload_items WHERE id = ANY($1::bigint[])', [ids]);
+  const open = found.filter((r) => { try { assertNotLocked(locks, r.work_date); return true; } catch (e) { return false; } });
+  if (mode === 'link' && open.length < 2) throw new HttpError(400, 'Fewer than two of those rows can be changed (the others are in a locked period)');
+  if (!open.length) throw new HttpError(400, 'Those rows are in a locked period');
+  const token = mode === 'link' ? crypto.randomBytes(5).toString('hex').toUpperCase() : (mode === 'unlink' ? '-' : '');
+  await db.query('UPDATE workload_items SET project_group = $1, updated_by = $2, updated_at = now() WHERE id = ANY($3::bigint[])', [token, req.user.id, open.map((r) => r.id)]);
+  await audit(req, 'workload.group', 'workload_item', null, { mode, rows: open.length, sample: open.slice(0, 20).map((r) => String(r.plug_id || '').split('\n')[0]) });
+  res.json({ ok: true, changed: open.length, skipped: found.length - open.length, token });
+}));
+
+// Copy chosen columns of one row to the other rows of its group (e.g. whoever it is assigned to), so a plug is handled by one person.
+// Never copies the columns that identify or place a row (Plug ID, Work Date, Platform, Units Concerned) or the Breakdate / Time pills.
+// Returns what changed on every row (before / after) so the page can undo and redo it.
+const GROUP_COPY_KINDS = ['text', 'select', 'date_or_text', 'audio_guide'];
+const copyableFields = (wanted, customCols) => [...new Set((Array.isArray(wanted) ? wanted : []).map((k) => String(k)))].slice(0, 40)
+  .filter((k) => (COLS.includes(k) && !['plug_id', 'platform', 'units_concerned'].includes(k) && GROUP_COPY_KINDS.includes(FIELDS[k].kind)) || customCols.some((c) => c.col_key === k));
+/** Sets the given columns of row `mid` (inside transaction c). Returns null when its date is locked, else { id, before, after } for the columns that really changed. */
+async function setCopyValues(c, req, locks, customCols, mid, values, fieldsChanged) {
+  const cur = (await c.query('SELECT * FROM workload_items WHERE id = $1 FOR UPDATE', [mid])).rows[0];
+  if (!cur) return undefined;
+  try { assertNotLocked(locks, cur.work_date); } catch (e) { return null; }
+  const before = {};
+  const after = {};
+  const regular = Object.keys(values).filter((k) => COLS.includes(k));
+  const custom = Object.keys(values).filter((k) => !COLS.includes(k));
+  if (regular.length) {
+    const merged = {};
+    COLS.forEach((k) => { merged[k] = cur[k]; });
+    regular.forEach((k) => { merged[k] = values[k]; });
+    const rec = await parseRow(c, merged, cur, customCols);
+    const changed = regular.filter((k) => String(rec[k] ?? '') !== String(cur[k] ?? ''));
+    if (changed.length) {
+      await c.query(`UPDATE workload_items SET ${changed.map((k, i) => `"${k}"=$${i + 2}`).join(', ')}, updated_by=$${changed.length + 2}, updated_at=now() WHERE id=$1`, [mid, ...changed.map((k) => rec[k]), req.user.id]);
+      changed.forEach((k) => { before[k] = cur[k] ?? ''; after[k] = rec[k] ?? ''; });
+      const notify = changed.filter((k) => NOTIFY_FIELDS[k]);
+      if (notify.length) fieldsChanged.push({ plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur, Object.fromEntries(notify.map((k) => [k, rec[k]]))) });
+    }
+  }
+  const customChanged = custom.filter((k) => String(values[k] ?? '') !== String((cur.custom_fields || {})[k] ?? ''));
+  if (customChanged.length) {
+    const patch = Object.fromEntries(customChanged.map((k) => [k, String(values[k] ?? '')]));
+    await c.query('UPDATE workload_items SET custom_fields = custom_fields || $2::jsonb, updated_by=$3, updated_at=now() WHERE id=$1', [mid, JSON.stringify(patch), req.user.id]);
+    customChanged.forEach((k) => { before[k] = String((cur.custom_fields || {})[k] ?? ''); after[k] = String(values[k] ?? ''); });
+  }
+  if (!Object.keys(after).length) return { id: mid, before: {}, after: {} };
+  return { id: mid, before, after };
+}
+
+router.post('/apply-group', requireAction('workload.write'), asyncH(async (req, res) => {
+  const id = v.id(req.body && req.body.id);
+  const customCols = await loadCustomCols(db);
+  const fields = copyableFields(req.body && req.body.fields, customCols);
+  if (!fields.length) throw new HttpError(400, 'Those columns cannot be copied to a group');
+  const locks = await loadLocks(db);
+  const fieldsChanged = [];
+  const out = await db.tx(async (c) => {
+    const auto = autoOn(req.body);
+    const src = (await c.query('SELECT w.*, ' + groupKeySql(auto) + ' AS gk FROM workload_items w WHERE w.id = $1', [id])).rows[0];
+    if (!src) throw new HttpError(404, 'Workload item not found');
+    if (!src.gk) throw new HttpError(400, 'This row is not in a group');
+    const members = (await c.query(`SELECT w.id FROM workload_items w WHERE ${groupKeySql(auto)} = $1 AND w.id <> $2 ORDER BY w.id`, [src.gk, id])).rows.map((r) => r.id);
+    if (!members.length) throw new HttpError(400, 'This row is not in a group');
+    const values = {};
+    fields.forEach((k) => { values[k] = COLS.includes(k) ? src[k] : String((src.custom_fields || {})[k] ?? ''); });
+    const changes = [];
+    let skipped = 0;
+    for (const mid of members) {
+      const r = await setCopyValues(c, req, locks, customCols, mid, values, fieldsChanged);
+      if (r === undefined) continue;
+      if (r === null) { skipped++; continue; }
+      await audit(req, 'workload.update', 'workload_item', mid, { via: 'apply-group', from: id, fields }, c);
+      if (Object.keys(r.after).length) changes.push(r);
+    }
+    return { updated: members.length - skipped, skipped, changes };
+  });
+  if (fieldsChanged.length) await notifyFieldsSet(req, fieldsChanged);
+  res.json({ ok: true, ...out, fields });
+}));
+
+// Undo / redo of Apply to whole group: put the given values back on the given rows (same columns, same checks, same locked-date rule)
+router.post('/set-values', requireAction('workload.write'), asyncH(async (req, res) => {
+  const list = Array.isArray(req.body && req.body.rows) ? req.body.rows.slice(0, 500) : [];
+  if (!list.length) throw new HttpError(400, 'Nothing to restore');
+  const customCols = await loadCustomCols(db);
+  const locks = await loadLocks(db);
+  const fieldsChanged = [];
+  const out = await db.tx(async (c) => {
+    let updated = 0;
+    let skipped = 0;
+    for (const item of list) {
+      const mid = v.id(item && item.id);
+      const keys = copyableFields(Object.keys((item && item.values) || {}), customCols);
+      if (!keys.length) continue;
+      const values = {};
+      keys.forEach((k) => { values[k] = item.values[k]; });
+      const r = await setCopyValues(c, req, locks, customCols, mid, values, fieldsChanged);
+      if (r === null) { skipped++; continue; }
+      if (r && Object.keys(r.after).length) { updated++; await audit(req, 'workload.update', 'workload_item', mid, { via: 'undo-apply-group', fields: keys }, c); }
+    }
+    return { updated, skipped };
+  });
+  if (fieldsChanged.length) await notifyFieldsSet(req, fieldsChanged);
   res.json({ ok: true, ...out });
 }));
 
@@ -639,6 +925,7 @@ router.patch('/:id', requireAction('workload.write'), asyncH(async (req, res) =>
     await audit(req, 'workload.update', 'workload_item', id, { field, value });
     return res.json({ ok: true, values: { [field]: value } });
   }
+  let fieldsChanged = null;
   const values = await db.tx(async (c) => {
     const found = await c.query('SELECT * FROM workload_items WHERE id=$1 FOR UPDATE', [id]);
     if (!found.rows.length) throw new HttpError(404, 'Workload item not found');
@@ -656,10 +943,12 @@ router.patch('/:id', requireAction('workload.write'), asyncH(async (req, res) =>
       [id, ...changed.map((k) => rec[k]), req.user.id]
     );
     await audit(req, 'workload.update', 'workload_item', id, { field, value: rec[field] }, c);
+    if (NOTIFY_FIELDS[field]) fieldsChanged = { plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur, { [field]: rec[field] }) };
     // hand back values in the same shape the list uses ('YYYY-MM-DDTHH:MM' for Breakdate/Time)
     const shape = (k) => (FIELDS[k].kind === 'datetime' && rec[k] ? rec[k].slice(0, 16).replace(' ', 'T') : rec[k]);
     return Object.fromEntries(changed.map((k) => [k, shape(k)]));
   });
+  if (fieldsChanged) await notifyFieldsSet(req, [fieldsChanged]);
   res.json({ ok: true, values });
 }));
 
@@ -667,6 +956,7 @@ router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const customCols = await loadCustomCols(db);
   const locks = await loadLocks(db);
+  let fieldsChanged = null;
   await db.tx(async (c) => {
     const cur = await c.query(`SELECT ${CUR_COLS} FROM workload_items WHERE id=$1 FOR UPDATE`, [id]);
     if (!cur.rows.length) throw new HttpError(404, 'Workload item not found');
@@ -675,7 +965,9 @@ router.put('/:id', requireAction('workload.write'), asyncH(async (req, res) => {
     assertNotLocked(locks, rec.work_date);
     await updateRow(c, id, rec, req.user.id);
     await audit(req, 'workload.update', 'workload_item', id, rec, c);
+    fieldsChanged = { plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur.rows[0], rec) };
   });
+  if (fieldsChanged) await notifyFieldsSet(req, [fieldsChanged]);
   res.json({ ok: true });
 }));
 
@@ -688,11 +980,11 @@ router.post('/bulk-delete', requireAction('workload.write'), asyncH(async (req, 
   let mode;
   let filters = null;
   if (body.all) {
-    if (!req.user || req.user.role !== 'Admin') throw new HttpError(403, 'Only an Admin can delete all rows');
+    if (!req.user || !['Admin', 'System Admin'].includes(req.user.role)) throw new HttpError(403, 'Only an Admin can delete all rows');
     mode = 'all matching';
     filters = {};
-    ['team', 'units', 'platform', 'plug_type', 'from', 'to', 'q'].forEach((k) => { if (body.filters && body.filters[k]) filters[k] = String(body.filters[k]).slice(0, 200); });
-    ({ where, params } = buildFilter(filters));
+    ['team', 'units', 'platform', 'plug_type', 'group', 'auto', 'from', 'to', 'q'].forEach((k) => { if (body.filters && body.filters[k]) filters[k] = String(body.filters[k]).slice(0, 200); });
+    ({ where, params } = buildFilter(filters, req.user));
   } else {
     mode = 'selected';
     const ids = Array.isArray(body.ids) ? [...new Set(body.ids.map((n) => v.id(n)))].slice(0, 1000) : [];
@@ -736,9 +1028,10 @@ router.delete('/:id', requireAction('workload.write'), asyncH(async (req, res) =
 // for it automatically, so nothing in the file is silently dropped.
 const multer = require('multer');
 const { assertSafeXlsx, oneImportAtATime } = require('../xlsx-guard');
+const virusScan = require('../virus-scan').guard;   // every upload is checked by ClamAV before the route sees it (src/virus-scan.js)
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
 
-router.post('/import', requireAction('workload.write'), upload.single('file'), oneImportAtATime, asyncH(async (req, res) => {
+router.post('/import', requireAction('workload.write'), upload.single('file'), virusScan, oneImportAtATime, asyncH(async (req, res) => {
   const t0 = Date.now();
   const importInfo = { file: req.file ? req.file.originalname : null, bytes: req.file ? req.file.size : 0, sheets: [] };
   try {
@@ -752,6 +1045,9 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
   try { await wb.xlsx.load(req.file.buffer); } catch (e) {
     throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)');
   }
+  // The team's own per-day workbook (not this app's Export): it does not create rows, it fills the blank cells of rows already in the tracker.
+  // Say so; the page then offers the preview-and-fill window (POST /fill) with this same file.
+  if (readTeamWorkbook(wb).sheets.length) return res.json({ ok: true, teamWorkbook: true });
   // Sheet NAMES vary (MAIN/AUDIO for a full export, or just VGFX/VEDIT/AUDIO for a single-team export) but
   // every recognized sheet has the SAME shape: a header row of column labels. readSheet() below works from
   // the headers, not the sheet name, so every worksheet in the file is given a chance.
@@ -812,10 +1108,11 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
   }
 
   // A row that appears on both sheets (a VGFX/VEDIT/Audio plug is exported to both) is one logical row, keyed
-  // by (Work Date, Plug ID) — merge instead of inserting it twice.
+  // by (Work Date, Plug ID, Units Concerned, nth repeat) — merge instead of inserting it twice.
   const merged = new Map();
   async function readSheet(ws) {
     const sheetInfo = { name: ws ? ws.name : null, rows: 0 };
+    const seenInSheet = new Map();
     importInfo.sheets.push(sheetInfo);
     if (!ws || ws.rowCount < 2) return;
     const headerRow = ws.getRow(1);
@@ -828,7 +1125,7 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
       const label = String(cellText(headerRow.getCell(Number(colNumber)).value) ?? '').trim();
       // this app's export puts VGFX + VEDIT times in one 'Breakdate / Time' column (one labelled line per team)
       colKeyAt[colNumber] = label.toLowerCase() === 'breakdate / time' ? '__breakdate'
-        : label.toLowerCase() === 'remarks' && ws.name && /^audio$/i.test(String(ws.name).trim()) ? 'others'   // on the AUDIO sheet, Remarks is the Audio Remarks column
+        : label.toLowerCase() === 'remarks' && ws.name && /(^|\s-\s)audio$/i.test(String(ws.name).trim()) ? 'others'   // on the AUDIO sheet, Remarks is the Audio Remarks column
         : await keyForHeader(label);
     }
     for (let r = 2; r <= ws.rowCount; r++) {
@@ -838,7 +1135,11 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
       let hasAny = false;
       let breakdateRaw = null;
       for (const [colNumber, key] of Object.entries(colKeyAt)) {
-        let val = row.getCell(Number(colNumber)).value;
+        const cellObj = row.getCell(Number(colNumber));
+        // A prioritised row is exported with the light-red fill on its Breakdate / Time cell (there is no Priority column): read that fill back, so a
+        // delete-everything-and-import round trip keeps the Priority flags (the Dashboard's Priority count and the red highlight).
+        if ((key === '__breakdate' || key === 'breakdate_vgfx' || key === 'breakdate_vedit' || key === 'plug_id') && cellObj.fill && cellObj.fill.fgColor && String(cellObj.fill.fgColor.argb || '').toUpperCase() === PRIORITY_FILL) { obj.is_priority = true; }
+        let val = cellObj.value;
         if (val == null || val === '') continue;
         hasAny = true;
         const f = fieldsExt[key];
@@ -847,7 +1148,7 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
         else { val = cellText(val);
           if (f.kind === 'date') obj[key] = val instanceof Date ? isoDate(val) : String(val);
           else if (f.kind === 'datetime') obj[key] = val instanceof Date ? isoDateTime(val) : String(val);
-          else if (key === 'audio_guide' || key === 'art_stb' || key === 'script') obj[key] = val instanceof Date ? isoDate(val) : String(val);   // an Excel date or text
+          else if (key === 'audio_guide' || key === 'art_stb' || key === 'script') obj[key] = val instanceof Date ? isoDate(val) : fromMdy(String(val));   // an Excel date, MMDDYY (as exported) or text
           else obj[key] = (key === 'remarks' || key === 'others') && obj[key] ? `${obj[key]}\n${String(val)}` : String(val); }   // an old file may have two columns for the same remarks: keep both texts
       }
       if (!hasAny) continue;
@@ -865,7 +1166,13 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
           if (team && iso) obj[team === 'VGFX' ? 'breakdate_vgfx' : 'breakdate_vedit'] = iso;
         }
       }
-      const rowKey = `${obj.work_date || ''}|||${String(obj.plug_id || '').split('\n')[0].trim()}`;
+      // Same Work Date + Plug ID + Units Concerned = the same logical row on the other sheet. Date + Plug ID alone is not enough: the same plug can
+      // legitimately have two rows on one day (e.g. an Audio Guide row and an Audio TV row), and those must both come in. A true repeat within one sheet
+      // is counted (1st, 2nd, ...) so the Nth copy here still lines up with the Nth copy on the other sheet.
+      const baseKey = `${obj.work_date || ''}|||${String(obj.plug_id || '').split('\n')[0].trim()}|||${obj.units_concerned || ''}`;
+      const nth = (seenInSheet.get(baseKey) || 0) + 1;
+      seenInSheet.set(baseKey, nth);
+      const rowKey = `${baseKey}|||${nth}`;
       merged.set(rowKey, { ...(merged.get(rowKey) || {}), ...obj });
     }
   }
@@ -904,6 +1211,154 @@ router.post('/import', requireAction('workload.write'), upload.single('file'), o
   }
 }));
 
+// ---------- Fill from team workbook: the team's original per-day workbook (merged cells, banners, extra columns) fills the BLANK cells of
+// rows that are already in the tracker (e.g. copied from the PSD Daily Plug List), matched by Work Date + Plug ID. Nothing typed is
+// overwritten and no row or column is created. POST ?apply=1 saves; without it, the same work is done and reported but nothing is written. ----------
+const FILL_FIELDS = ['units_concerned', 'psd', 'prog_name', 'breakdate_vgfx', 'breakdate_vedit', 'vo', 'script', 'art_stb', 'audio_guide', 'remarks', 'total_mats', 'length', 'others', 'audio_status'];
+const isBlank = (x) => x == null || String(x).trim() === '';
+
+// A Plug ID the plug list gives without its length ("PH_REDBAL_BALIMA_LNXX") matches the workbook's one with a length ("..._LN060") when that is the only plug of that name that day.
+const looseIndex = (map) => {
+  const m = new Map();
+  for (const k of map.keys()) { const lk = `${k.slice(0, 10)}|${looseKey(k.slice(11))}`; if (!m.has(lk)) m.set(lk, new Set()); m.get(lk).add(k); }
+  return m;
+};
+const resolveKey = (map, idx, k, claimed) => {
+  if (map.has(k)) return { list: map.get(k), loose: false, key: k };
+  const set = idx.get(`${k.slice(0, 10)}|${looseKey(k.slice(11))}`);
+  if (!set || set.size !== 1) return null;
+  const ck = [...set][0];
+  if (claimed.has(ck)) return null;   // that exact plug is another row's own: never borrow it
+  return { list: map.get(ck), loose: true, key: ck };
+};
+
+router.post('/fill', requireAction('workload.write'), upload.single('file'), virusScan, oneImportAtATime, asyncH(async (req, res) => {
+  const t0 = Date.now();
+  const apply = req.query.apply === '1';
+  const info = { file: req.file ? req.file.originalname : null, bytes: req.file ? req.file.size : 0 };
+  try {
+    if (!req.file) throw new HttpError(400, 'No file uploaded');
+    let ExcelJS;
+    try { ExcelJS = require('exceljs'); } catch (e) { throw new HttpError(501, 'This needs the "exceljs" package. Run "npm install" on the server, then restart.'); }
+    await assertSafeXlsx(req.file.buffer, req.file.originalname);
+    const wb = new ExcelJS.Workbook();
+    try { await wb.xlsx.load(req.file.buffer); } catch (e) { throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)'); }
+    const { entries, audio, byPlug, sheets, unitByPlug } = readTeamWorkbook(wb);
+    const otherDays = req.query.otherDays !== '0';   // a plug dated on a day its own sheet is missing may use the nearest day that lists it
+    const defUnits = ['VGFX Only', 'VEDIT Only', 'VGFX/VEDIT'].includes(String(req.query.units || '')) ? String(req.query.units) : null;   // optional: Units Concerned for a plug whose lines never name a team
+    if (!sheets.length) throw new HttpError(400, 'No daily sheets found. Expected sheets such as "SEP 10_main", each with a "DATE: SEP 10, Thursday" line and a PLUG ID header row.');
+
+    const dates = [...new Set(sheets.map((s) => s.date))];
+    const customCols = await loadCustomCols(db);
+    const locks = await loadLocks(db);
+    const { rows: dbRows } = await db.query('SELECT * FROM workload_items WHERE work_date = ANY($1::date[]) ORDER BY work_date, id', [dates]);
+    const groups = new Map();
+    for (const r of dbRows) {
+      const k = `${r.work_date}|${plugKey(r.plug_id)}`;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(r);
+    }
+
+    const summary = { matched: 0, updated: 0, unchanged: 0, locked: 0, noMatch: 0, cells: 0, byField: {}, unitsSet: 0, unitsFromOtherDays: 0, unitsDefaulted: 0, unitsFromAudio: 0, looseMatched: 0, otherDayMatched: 0, priorityOn: 0, errors: [], noMatchSample: [], days: dates.length, sheets: sheets.length };
+    const plan = [];   // { id, set: { col: value }, rec }
+    const mainIdx = looseIndex(entries);
+    const byLoose = new Map();
+    for (const pid of byPlug.keys()) { const lk = looseKey(pid); if (!byLoose.has(lk)) byLoose.set(lk, []); byLoose.get(lk).push(pid); }
+    const audioIdx = looseIndex(audio);
+    for (const [k, rows] of groups) {
+      let m = resolveKey(entries, mainIdx, k, groups);
+      const au = resolveKey(audio, audioIdx, k, groups);
+      let otherDay = false;
+      if (!m && !au && otherDays) {   // no sheet for that day lists it: the nearest day that does (its Breakdate and Priority belong to that day, so they are not copied)
+        const pid = k.slice(11);
+        const pids = byPlug.has(pid) ? [pid] : (byLoose.get(looseKey(pid)) || []);
+        const cand = pids.length === 1 && (pids[0] === pid || !groups.has(`${k.slice(0, 10)}|${pids[0]}`)) ? byPlug.get(pids[0]) : null;
+        if (cand) {
+          const t = Date.parse(k.slice(0, 10));
+          const best = cand.slice().sort((x, y) => Math.abs(Date.parse(x.date) - t) - Math.abs(Date.parse(y.date) - t) || x.date.localeCompare(y.date))[0];
+          const e0 = { ...best.list[0] };
+          delete e0.breakdate_vgfx; delete e0.breakdate_vedit; delete e0.is_priority; delete e0.note;
+          m = { list: [e0], loose: pids[0] !== pid, key: `${best.date}|${pids[0]}` };
+          otherDay = true;
+        }
+      }
+      if (!m && !au) {
+        summary.noMatch += rows.length;
+        if (summary.noMatchSample.length < 15) summary.noMatchSample.push(`${k.slice(0, 10)} ${rows[0].plug_id.split('\n')[0]}`);
+        continue;
+      }
+      for (let i = 0; i < rows.length; i++) {
+        const cur = rows[i];
+        const e = m ? m.list[Math.min(i, m.list.length - 1)] : {};
+        const a = au ? au.list[Math.min(i, au.list.length - 1)] : null;
+        summary.matched++;
+        if (otherDay) summary.otherDayMatched++; else if ((m && m.loose) || (!m && au && au.loose)) summary.looseMatched++;
+        if (locks.some((l) => cur.work_date >= l.from_date && cur.work_date <= l.to_date)) { summary.locked++; continue; }
+        const want = { ...e };
+        if (e.note) want.remarks = [e.remarks, e.note].filter(Boolean).join('\n');
+        let unitHow = null;
+        if (a) {   // the Audio sheet: Length, Remarks, Status, and (for a plug no main sheet lists) the unit
+          for (const f of ['length', 'others', 'audio_status']) if (a[f]) want[f] = a[f];
+          if (!want.psd && a.psd) want.psd = a.psd;
+          if (!m && a.units_concerned) { want.units_concerned = a.units_concerned; unitHow = 'audio'; }
+        }
+        if (m && !want.units_concerned) {
+          const other = unitByPlug.get(m.key.slice(11));
+          if (other) { want.units_concerned = other; unitHow = 'other'; } else if (defUnits) { want.units_concerned = defUnits; unitHow = 'default'; }
+        }
+        const body = {};
+        COLS.forEach((c) => { body[c] = cur[c]; });
+        const touched = [];
+        for (const c of FILL_FIELDS) {
+          if (!isBlank(cur[c]) || isBlank(want[c])) continue;
+          body[c] = FIELDS[c].max ? String(want[c]).slice(0, FIELDS[c].max) : want[c];
+          touched.push(c);
+        }
+        const prio = !!e.is_priority && !cur.is_priority;
+        if (prio) body.is_priority = true;
+        if (!touched.length && !prio) { summary.unchanged++; continue; }
+        let rec;
+        try { rec = await parseRow(db, body, cur, customCols); } catch (err) {
+          summary.errors.push(`${cur.work_date} ${String(cur.plug_id).split('\n')[0]}: ${err instanceof HttpError ? err.message : 'unexpected error'}`);
+          continue;
+        }
+        const set = {};
+        for (const c of COLS) if (isBlank(cur[c]) && !isBlank(rec[c])) set[c] = rec[c];   // only cells that were blank (this includes Platform when the Plug ID gives one)
+        if (prio) set.is_priority = true;
+        const cols = Object.keys(set);
+        if (!cols.length) { summary.unchanged++; continue; }
+        plan.push({ id: cur.id, set });
+        summary.updated++;
+        for (const c of cols) {
+          if (c === 'is_priority') { summary.priorityOn++; continue; }
+          summary.cells++;
+          summary.byField[c] = (summary.byField[c] || 0) + 1;
+          if (c === 'units_concerned') { summary.unitsSet++; if (unitHow === 'other') summary.unitsFromOtherDays++; else if (unitHow === 'default') summary.unitsDefaulted++; else if (unitHow === 'audio') summary.unitsFromAudio++; }
+        }
+      }
+    }
+    summary.errorCount = summary.errors.length;
+    summary.errors = summary.errors.slice(0, 20);
+
+    if (apply && plan.length) {
+      await db.tx(async (c) => {
+        for (const p of plan) {
+          const cols = Object.keys(p.set);
+          await c.query(
+            `UPDATE workload_items SET ${cols.map((k, i) => `"${k}"=$${i + 2}`).join(', ')}, updated_by=$${cols.length + 2}, updated_at=now() WHERE id=$1`,
+            [p.id, ...cols.map((k) => p.set[k]), req.user.id]
+          );
+        }
+      });
+    }
+    if (apply) await emitTransfer(req, 'workload.fill', { ...info, ...summary, ms: Date.now() - t0 });
+    res.json({ ok: true, applied: apply, ...summary });
+  } catch (e) {
+    if (req.query.apply === '1') await emitTransfer(req, 'workload.fill_failed', { ...info, error: e && e.message ? e.message : String(e), ms: Date.now() - t0 });
+    throw e;
+  }
+}));
+
 module.exports = router;
 // shared with the PSD Daily Plug List routes (src/routes/plugs.js), which make Workload rows from plugs
-module.exports.helpers = { UNITS, UNIT_TEAMS, canonUnit, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked };
+module.exports.helpers = { UNITS, UNIT_TEAMS, canonUnit, parseRow, insertRow, loadCustomCols, loadLocks, assertNotLocked, exportPalette, hueOf };

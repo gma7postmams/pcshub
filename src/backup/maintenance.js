@@ -13,7 +13,8 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 
 function status(req, res) {
   res.set('Cache-Control', 'no-store');
-  res.json({ active: state.active, stage: state.active ? state.stage : null });
+  const planned = require('../maintenance-mode').state();   // planned maintenance (MAINTENANCE_MODE / flag file): the sign-in page shows a notice
+  res.json({ active: state.active, stage: state.active ? state.stage : null, planned: planned.on ? { message: planned.message } : null });
 }
 
 /** Must run before sessions: nothing here may touch the database. */

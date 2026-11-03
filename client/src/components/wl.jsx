@@ -1,6 +1,8 @@
-import { Children, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Children, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { fmtDate, isoDate } from '../lib/util.js';
-import { CalendarIcon, ChevronDownIcon, CopyIcon, KebabIcon, PencilIcon, TrashIcon } from './Icons.jsx';
+import { peerStyle } from '../lib/live.js';
+import { CalendarIcon, ChevronDownIcon, CopyIcon, FilterIcon, KebabIcon, MoreHIcon, PencilIcon, TrashIcon } from './Icons.jsx';
 
 // Presentational pieces for the Workload Tracker (pills, summary cards, filters, row menu, pager).
 // Colours come from the app's theme variables (see .c-* in app.css), so they follow every theme and light/dark mode.
@@ -12,6 +14,21 @@ const hueOf = (s) => PALETTE[[...String(s)].reduce((a, c) => a + c.charCodeAt(0)
 export const Chip = ({ hue, dot, small, children }) => (
   <span className={`chip c-${hue}${small ? ' sm' : ''}`}>{dot ? <i className="dot" /> : null}{children}</span>
 );
+
+/** The tag beside a Plug ID that shares its group with other rows (same ID under another prefix, e.g. PH_ / PD_ / PV_). Click = show only that group. */
+export const GroupTag = ({ gkey, n, hue, onPick }) => (
+  <button type="button" className={`chip c-${hue || hueOf(gkey)} wl-group`}
+    title={String(gkey).startsWith('P:') ? `${n} entries linked as one project. Click to show only this group.` : `${n} plugs share ${gkey} under different prefixes (any day). Click to show only this group.`}
+    onMouseDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onPick(); }}>
+    <GroupIcon />×{n}
+  </button>
+);
+const ico = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true };
+/** Menu icons for the plug-group actions, one each: auto-detect (sparkles), ungroup (broken chain), apply to whole group (stacked pages) */
+export const AutoDetectIcon = () => (<svg {...ico}><path d="M9.5 4l1.6 4.4L15.5 10l-4.4 1.6L9.5 16l-1.6-4.4L3.5 10l4.4-1.6z" /><path d="M18 14l.8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8z" /></svg>);
+export const UngroupIcon = () => (<svg {...ico}><path d="M10 13a5 5 0 0 0 3 1.4" /><path d="M14 11a5 5 0 0 0-3-1.4" /><path d="M16.5 8.5l1.8-1.8a4 4 0 0 0-5.7-5.7l-1.1 1.1" /><path d="M7.5 15.5l-1.8 1.8a4 4 0 0 0 5.7 5.7l1.1-1.1" /><path d="M3 3l18 18" /></svg>);
+export const ApplyGroupIcon = () => (<svg {...ico}><rect x="8" y="8" width="13" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></svg>);
+export const GroupIcon = () => (<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.4" /><path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.33-1.33" /></svg>);
 
 const TYPE_HUE = { EPISODIC: 'blue', SEASONAL: 'pink', BUMPER: 'red', 'POP-UP/POP LOGO': 'blue', RADIO: 'green' };   // avoids purple/orange/teal (the team colours)
 export const TypePill = ({ value }) => (value ? <Chip hue={Object.prototype.hasOwnProperty.call(TYPE_HUE, value) ? TYPE_HUE[value] : hueOf(value)}>{value}</Chip> : null);
@@ -113,7 +130,7 @@ export function DateRange({ from, to, onChange, title = 'Work date range' }) {
   const ref = useRef(null);
   useEffect(() => {
     if (!open) return undefined;
-    const away = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const away = (e) => { if (ref.current && !ref.current.contains(e.target) && !pickerHeld(ref.current)) setOpen(false); };
     const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', away);
     document.addEventListener('keydown', esc);
@@ -124,11 +141,11 @@ export function DateRange({ from, to, onChange, title = 'Work date range' }) {
   const monthEnd = shift(`${shift(monthStart, 32).slice(0, 7)}-01`, -1);
   const presets = [
     ['Today', { from: today, to: today }],
-    ['Last 7 days', { from: shift(today, -6), to: today }],
-    ['This month', { from: monthStart, to: monthEnd }],
-    ['All dates', { from: '', to: '' }],
+    ['Last 7 Days', { from: shift(today, -6), to: today }],
+    ['This Month', { from: monthStart, to: monthEnd }],
+    ['All Dates', { from: '', to: '' }],
   ];
-  const label = from || to ? `${from ? fmtDate(from) : 'Any'} – ${to ? fmtDate(to) : 'Any'}` : 'All dates';
+  const label = from || to ? `${from ? fmtDate(from) : 'Any'} – ${to ? fmtDate(to) : 'Any'}` : 'All Dates';
   return (
     <div className="daterange" ref={ref}>
       <button type="button" className="daterange-btn" title={title} onClick={() => setOpen((o) => !o)}><CalendarIcon /><span>{label}</span></button>
@@ -174,20 +191,132 @@ export function RowMenu({ onEdit, onDuplicate, onDelete }) {
     if (pos) { close(); return; }
     openedAt.current = Date.now();
     const r = btn.current.getBoundingClientRect();
-    const up = r.bottom + 100 > window.innerHeight;
-    setPos({ right: Math.max(8, window.innerWidth - r.right), ...(up ? { bottom: window.innerHeight - r.top + 4 } : { top: r.bottom + 4 }) });
+    // the menu is about 46 px per item: open it below the button when it fits, else above, else pinned inside the window (a phone card near the bottom edge)
+    const h = (onDuplicate ? 3 : 2) * 46 + 16;
+    const vh = window.innerHeight;
+    const room = (px) => px >= 0;
+    let place;
+    if (room(vh - r.bottom - 4 - h)) place = { top: r.bottom + 4 };
+    else if (room(r.top - 4 - h)) place = { bottom: vh - r.top + 4 };
+    else place = { top: Math.max(8, vh - h - 8) };
+    setPos({ right: Math.max(8, window.innerWidth - r.right), ...place });
   };
   return (
     <>
       <button type="button" className="kebab" aria-label="Row actions" aria-haspopup="menu" aria-expanded={!!pos} ref={btn} onClick={toggle}><KebabIcon /></button>
-      {pos ? (
+      {pos ? createPortal(   // on <body>, so a later card / row can never paint over the menu
         <div className="rowmenu" role="menu" style={pos} ref={menu}>
           <button type="button" role="menuitem" onClick={() => { close(); onEdit(); }}><PencilIcon /> Edit</button>
-          <button type="button" role="menuitem" onClick={() => { close(); onDuplicate(); }}><CopyIcon /> Duplicate</button>
+          {onDuplicate ? <button type="button" role="menuitem" onClick={() => { close(); onDuplicate(); }}><CopyIcon /> Duplicate</button> : null}
           <button type="button" role="menuitem" className="danger row-del" onClick={() => { close(); onDelete(); }}><TrashIcon /> Delete</button>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </>
+  );
+}
+
+/** Table box that ends just above whatever sits under it (pager, footer), so the page itself has no scroll bar and the table's own scroll bars stay on screen.
+ *  Put className "wl-fit" on the table's wrapper; `dep` changes when the content does. */
+export function useFitBox(dep) {
+  useLayoutEffect(() => {
+    const fit = () => {
+      const el = document.querySelector('.wl-fit');
+      if (!el) return;
+      const keepTop = el.scrollTop, keepLeft = el.scrollLeft;   // un-capping the box below squashes its scroll position to 0: put it back afterwards
+      el.style.maxHeight = 'none';
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      let below = 0;
+      for (let n = el.nextElementSibling; n; n = n.nextElementSibling) if (getComputedStyle(n).position !== 'fixed') below += n.offsetHeight;
+      const main = el.closest('main');
+      const pad = main && !el.closest('.full') ? parseFloat(getComputedStyle(main).paddingBottom) || 0 : 0;
+      el.style.maxHeight = `${Math.max(240, Math.round(window.innerHeight - top - below - pad - 2))}px`;
+      const over = document.documentElement.scrollHeight - window.innerHeight;   // margins under the table that the sum above missed
+      if (over > 0 && el.scrollHeight > el.clientHeight) el.style.maxHeight = `${Math.max(240, el.clientHeight - over)}px`;
+      if (keepTop) el.scrollTop = keepTop;
+      if (keepLeft) el.scrollLeft = keepLeft;
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [dep]);
+}
+
+/** True while a date field inside `box` has focus: its browser date picker (Firefox's, in responsive design mode especially) is a layer of its own and a tap
+    inside it must not count as a click outside the popover, which would remove the field and close the picker under the finger. */
+export const pickerHeld = (box) => { const a = document.activeElement; return !!(box && a && box.contains(a) && a.tagName === 'INPUT' && /^(date|time|datetime-local|month|week)$/.test(a.type)); };
+
+/** Click-outside / Escape handling shared by the two toolbar popovers */
+function useDismiss(open, setOpen, ref) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const away = (e) => { if (ref.current && !ref.current.contains(e.target) && !pickerHeld(ref.current)) setOpen(false); };
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
+  }, [open, setOpen, ref]);
+}
+
+/** The Export button. Clicking it opens a small panel with "Separate data by date into tabs" (off = everything on one sheet, as usual) and an Export
+    button; onExport(byDate) does the download. */
+export function ExportButton({ onExport, id = 'export-btn', title = 'Export to Excel', className = 'btn ibtn', disabled, children }) {
+  const [open, setOpen] = useState(false);
+  const [byDate, setByDate] = useState(false);
+  const ref = useRef(null);
+  useDismiss(open, setOpen, ref);
+  return (
+    <div className="export-wrap" ref={ref}>
+      <button type="button" className={className} id={id} aria-label={title} title={title} aria-haspopup="dialog" aria-expanded={open} disabled={disabled} onClick={() => setOpen((o) => !o)}>{children}</button>
+      {open ? (
+        <div className="popover export-pop" role="dialog" aria-label="Export options">
+          <label className="export-opt"><input type="checkbox" id="export-by-date" checked={byDate} onChange={(e) => setByDate(e.target.checked)} /><span>Separate data by date into tabs</span></label>
+          <button type="button" className="btn primary" id="export-go" onClick={() => { setOpen(false); onExport(byDate); }}>Export</button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** "Filters" button: opens a small panel holding the filter dropdowns (children). `count` = how many filters are on; `onClear` resets them. */
+export function FiltersMenu({ count, onClear, children }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useDismiss(open, setOpen, ref);
+  return (
+    <div className="tpop" ref={ref}>
+      <button type="button" className={`btn${count ? ' on' : ''}`} id="filters-btn" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <FilterIcon /> Filters{count ? <span className="count-pill">{count}</span> : null}
+      </button>
+      {open ? (
+        <div className="tpop-panel tpop-filters" role="dialog" aria-label="Filters">
+          {children}
+          {count ? <button type="button" className="btn sm" onClick={onClear}>Clear filters</button> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** "…" button: the less-used toolbar actions. items = [{ label, icon, onClick, disabled, danger, keep, stay }] (stay = the menu stays open after the click, for switches) (falsy entries are skipped) */
+export function ToolMenu({ items }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useDismiss(open, setOpen, ref);
+  const list = items.filter(Boolean);
+  if (!list.length) return null;
+  return (
+    <div className="tpop" ref={ref}>
+      <button type="button" className="btn ibtn" id="more-btn" aria-label="More actions" title="More" aria-haspopup="menu" aria-expanded={open} data-keep-sel onClick={() => setOpen((o) => !o)}><MoreHIcon /></button>
+      {open ? (
+        <div className="tpop-panel tpop-menu" role="menu">
+          {list.map((it) => (
+            <button key={it.id || it.label} type="button" role="menuitem" id={it.id} className={it.danger ? 'danger' : ''} disabled={it.disabled} data-keep-sel={it.keep ? '' : undefined}
+              onClick={() => { if (!it.stay) setOpen(false); it.onClick(); }}>{it.icon}{it.label}</button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -203,13 +332,15 @@ function pageList(cur, pages) {
   return out;
 }
 /** "1–8 of 24" + Previous / 1 2 3 / Next */
-export function Pager({ total, offset, size, onOffset }) {
+export function Pager({ total, offset, size, onOffset, lead, head }) {
   const pages = Math.max(1, Math.ceil(total / size));
   const cur = Math.floor(offset / size) + 1;
   return (
-    <div className="pager">
+    <div className={`pager${head ? ' pager-sheet' : ''}`}>
+      {head ? <>{head}<span className="grow" /></> : null}
       <span>{total ? `${offset + 1}–${Math.min(offset + size, total)} of ${total}` : ''}</span>
-      <span className="grow" />
+      {lead || null}
+      {head ? null : <span className="grow" />}
       <button type="button" className="btn sm" disabled={cur <= 1} onClick={() => onOffset((cur - 2) * size)}>Previous</button>
       {pageList(cur, pages).map((n, i) => (n === '…'
         ? <span key={`gap${i}`} className="pg-gap">…</span>
@@ -241,4 +372,49 @@ export function useNarrow(px = 900) {
     return () => window.removeEventListener('resize', on);
   }, [px]);
   return narrow;
+}
+
+// ---- Google-Sheets style spare rows: blank rows sit under the last row of the table and more appear as you scroll down ----
+/** How many spare blank rows to show. Starts at 12, and 20 more are added each time the table box (`boxSelector`) is scrolled to its bottom. `resetKey` puts it back to 12. */
+export function useSpareRows(boxSelector, active, resetKey) {
+  const [count, setCount] = useState(12);
+  useEffect(() => { setCount(12); }, [resetKey]);
+  useEffect(() => {   // like Sheets, the blank rows always fill the box: while the table does not yet reach its bottom edge, add more
+    if (!active) return;
+    const el = document.querySelector(boxSelector);
+    if (el && el.scrollHeight <= el.clientHeight + 2 && count < 400) setCount((c) => Math.min(c + 10, 400));
+  });
+  useEffect(() => {
+    if (!active) return undefined;
+    const on = (e) => {
+      const el = e.target;
+      if (!el || !el.matches || !el.matches(boxSelector)) return;
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 160) setCount((c) => Math.min(c + 20, 400));
+    };
+    document.addEventListener('scroll', on, true);
+    return () => document.removeEventListener('scroll', on, true);
+  }, [boxSelector, active]);
+  return count;
+}
+/** The spare blank rows. `cols` = one entry per data column (a key, or null for a column nobody can type in); `onOpen(key, i)` is called when a cell of spare row `i` is clicked: the page then turns that row into a real new row IN PLACE.
+    `at` + `node`: the spare row at index `at` is shown as `node` (the row being typed into) instead of a blank one. */
+export function SpareRows({ count, start, pos0, label0, cols, lead, trail, onOpen, onSelect, onMenu, sel, peerOf, at, node }) {
+  // a click only SELECTS a blank cell (like a real one); typing / Enter / F2 / double-click opens its editor; right-click gives the menu.
+  // `pos0`: the row number of the first blank row (rows then have fixed numbers, and the callbacks / `sel` / `at` use that number instead of 0, 1, 2 …)
+  const slotOf = (i) => (pos0 !== undefined ? pos0 + i : i);
+  return Array.from({ length: count }, (_, i) => (at === slotOf(i) && node ? node : (
+    <tr key={`spare-${slotOf(i)}`} className="spare-row" data-pos={pos0 !== undefined ? slotOf(i) : undefined}>
+      {lead === 'rn' ? <td className="rn">{label0 !== undefined ? label0 + i : pos0 !== undefined ? slotOf(i) : start + i + 1}</td> : lead === 'chk' ? <td className="chk" /> : null}
+      {cols.map((k, ci) => (k ? (
+        <td key={ci} className={`spare editable${sel && sel.slot === slotOf(i) && sel.k === k ? ' sel' : ''}${peerOf && peerOf(slotOf(i), k) ? ' peer-on' : ''}`}
+          {...(peerOf && peerOf(slotOf(i), k) ? { 'data-peer': peerOf(slotOf(i), k).name, style: peerStyle(peerOf(slotOf(i), k)) } : {})}
+          onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); onSelect(k, slotOf(i)); } }}
+          onDoubleClick={() => onOpen(k, slotOf(i))}
+          onContextMenu={(e) => { e.preventDefault(); onSelect(k, slotOf(i)); if (onMenu) onMenu(e, k, slotOf(i)); }}>
+          {peerOf && peerOf(slotOf(i), k) && peerOf(slotOf(i), k).text != null ? <span className="peer-text">{peerOf(slotOf(i), k).text}</span> : null}
+        </td>
+      ) : <td key={ci} className="spare" />))}
+      {trail ? <td className="actions-cell" /> : null}
+    </tr>
+  )));
 }

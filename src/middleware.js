@@ -1,12 +1,13 @@
 const path = require('path');
 const db = require('./db');
 const { canPage, can, canSection } = require('./permissions');
-const { SESSION_MAX_MS, APP_ORIGINS, COOKIE_NAME, cookieSecure } = require('./config');
+const { APP_ORIGINS, COOKIE_NAME, cookieSecure } = require('./config');
 
 // React build output. Every page returns the same index.html, but only after the role/group check.
 const CLIENT_DIST = path.join(__dirname, '..', 'client', 'dist');
 const INDEX_HTML = path.join(CLIENT_DIST, 'index.html');
 
+const watch = () => require('./security-watch');   // loaded on first use (it needs the database)
 const asyncH = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 // Must repeat the attributes the cookie was set with, or browsers ignore the request to drop a __Host- cookie.
@@ -30,10 +31,10 @@ const loadUser = asyncH(async (req, res, next) => {
   if (!uid) return next();
   // Absolute lifetime: however active it is, a session ends SESSION_MAX_HOURS after sign-in.
   if (!req.session.createdAt) req.session.createdAt = Date.now();   // sessions from before this check existed start counting now
-  if (Date.now() - req.session.createdAt > SESSION_MAX_MS) return endSession(req, res, next);
+  if (Date.now() - req.session.createdAt > require('./security-settings').maxMs()) return endSession(req, res, next);
   const { rows } = await db.query(
     `SELECT u.id, u.username, u.full_name, u.email, u.role, u.group_id, g.name AS group_name,
-            u.is_active, u.must_change_password, u.totp_enabled, u.twofa_required, u.appearance,
+            u.is_active, u.must_change_password, u.totp_enabled, u.twofa_required, u.twofa_method, u.appearance, u.theme, u.avatar_v,
             COALESCE((SELECT array_agg(gp.perm_key) FROM group_permissions gp WHERE gp.group_id = u.group_id), '{}') AS perms
        FROM users u LEFT JOIN groups g ON g.id = u.group_id
       WHERE u.id=$1`,
@@ -41,9 +42,28 @@ const loadUser = asyncH(async (req, res, next) => {
   );
   const u = rows[0];
   if (!u || !u.is_active) return endSession(req, res, next);
+  // Admins and System Admins are signed out after a short spell without real activity (their sessions are the ones worth stealing). Quiet background
+  // calls (polling, live streams) do not count, so an unattended open tab cannot keep the session alive; the presence heartbeat does, because the page only
+  // sends it while the person is really using the app.
+  if (u.role === 'Admin' || u.role === 'System Admin') {
+    const now = Date.now();
+    const limit = require('./security-settings').adminIdleMs();
+    if (req.session.activeAt && now - req.session.activeAt > limit) {
+      require('./audit').audit(req, 'auth.idle_signout', 'user', u.id, { username: u.username, minutes: Math.round(limit / 60000) }).catch(() => {});
+      return endSession(req, res, next);
+    }
+    if (!req.session.activeAt || isRealActivity(req)) req.session.activeAt = now;
+  }
   req.user = u;
   next();
 });
+
+/** A click, a save or a page load: not a background poll. */
+function isRealActivity(req) {
+  const url = (req.originalUrl || '').split('?')[0];
+  if (req.method === 'GET' || req.method === 'HEAD') return !url.startsWith('/api/');   // opening a page
+  return url !== '/api/presence/leave';   // any change the person makes, and the heartbeat
+}
 
 function isApi(req) {
   return req.originalUrl.startsWith('/api/');
@@ -51,7 +71,11 @@ function isApi(req) {
 
 function requireAuth(req, res, next) {
   if (req.user) return next();
-  if (isApi(req)) return res.status(401).json({ error: 'Not authenticated' });
+  if (isApi(req)) {
+    // Not worth a line: /me is how every signed-out page load starts, and a tab left open after its session ended keeps polling / sending its leave beacon
+    if (!/^\/api\/(auth\/me|presence|live|notifications)(\/|$)/.test(req.originalUrl.split('?')[0])) watch().event(req, 'security.unauthenticated');
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
   return res.redirect('/login');
 }
 
@@ -63,10 +87,11 @@ function requirePageAccess(pagePath) {
   return (req, res, next) => {
     if (!req.user) return requireAuth(req, res, next);
     if (canPage(req.user, pagePath)) return next();
+    watch().event(req, 'security.denied', { need: `page ${pagePath}` });
     if (isApi(req)) return res.status(403).json({ error: `${who(req.user)} cannot access ${pagePath}` });
     // Same app shell with a 403 status; the React app renders the 'Access locked' screen
     res.set('Cache-Control', 'no-store');
-    return res.status(403).sendFile(INDEX_HTML);
+    return require('./app-shell').sendApp(403)(req, res, next);
   };
 }
 
@@ -75,6 +100,7 @@ function requireAnyPage(paths) {
   return (req, res, next) => {
     if (!req.user) return requireAuth(req, res, next);
     if (paths.some((p) => canPage(req.user, p))) return next();
+    watch().event(req, 'security.denied', { need: `page ${paths.join(' or ')}` });
     return res.status(403).json({ error: `${who(req.user)} cannot access ${paths[0]}` });
   };
 }
@@ -83,6 +109,7 @@ function requireAction(action) {
   return (req, res, next) => {
     if (!req.user) return requireAuth(req, res, next);
     if (can(req.user, action)) return next();
+    watch().event(req, 'security.denied', { need: action });
     return res.status(403).json({ error: `Your role (${req.user.role}) or group does not permit: ${action}` });
   };
 }
@@ -91,6 +118,7 @@ function requireSection(key) {
   return (req, res, next) => {
     if (!req.user) return requireAuth(req, res, next);
     if (canSection(req.user, key)) return next();
+    watch().event(req, 'security.denied', { need: `section ${key}` });
     return res.status(403).json({ error: `${who(req.user)} cannot access section ${key}` });
   };
 }
@@ -128,8 +156,8 @@ function fromThisSite(req) {
 
 function csrfGuard(req, res, next) {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
-  if (req.get('X-Requested-With') !== 'PromoHub') return res.status(403).json({ error: 'Missing request header' });
-  if (!fromThisSite(req)) return res.status(403).json({ error: 'Cross-site request blocked' });
+  if (req.get('X-Requested-With') !== 'PromoHub') { watch().event(req, 'security.csrf_blocked', { reason: 'missing_header', origin: req.get('Origin') || null }); return res.status(403).json({ error: 'Missing request header' }); }
+  if (!fromThisSite(req)) { watch().event(req, 'security.csrf_blocked', { reason: 'cross_site', origin: req.get('Origin') || null }); return res.status(403).json({ error: 'Cross-site request blocked' }); }
   return next();
 }
 
@@ -141,4 +169,4 @@ function errorHandler(err, req, res, _next) {
   res.status(status).send(message);
 }
 
-module.exports = { clearSessionCookie, asyncH, HttpError, loadUser, requireAuth, requirePageAccess, requireAnyPage, requireAction, requireSection, csrfGuard, errorHandler, CLIENT_DIST, INDEX_HTML };
+module.exports = { isRealActivity, clearSessionCookie, asyncH, HttpError, loadUser, requireAuth, requirePageAccess, requireAnyPage, requireAction, requireSection, csrfGuard, errorHandler, CLIENT_DIST, INDEX_HTML };

@@ -7,23 +7,37 @@ const { asyncH, HttpError, requireAuth, clearSessionCookie } = require('../middl
 const { audit } = require('../audit');
 const { allowedPages, allowedActions, allowedSections, landingPath } = require('../permissions');
 const totp = require('../totp');
+const emailCode = require('../email-code');
+const maintenanceMode = require('../maintenance-mode');
+const mailer = require('../mailer');
+const v = require('../validate');
 const { twofaRequired } = require('../config');
 
 const router = express.Router();
 
-const MAX_FAILED = 5;
-const LOCK_MINUTES = 15;
+const settings = require('../security-settings');   // lock after N wrong passwords, for M minutes: set in Admin > Security
+const guard = require('../login-guard');            // ...per account AND per IP, so a stranger cannot lock the real user out
 // Dummy hash so timing is similar when the username does not exist
 const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', 12);
 // One message for every failure so responses never reveal whether a username exists, is locked or disabled
-const GENERIC_FAIL = 'Invalid username or password, or the account is temporarily locked.';
+const GENERIC_FAIL = 'Incorrect username or password.';
+// Said when the account exists and is locked (a different answer from a wrong password, so people know to wait or ask an Admin to unlock it)
+const lockedMessage = (until) => {
+  const mins = Math.max(1, Math.ceil((new Date(until) - Date.now()) / 60000));
+  return `Too many wrong passwords for this account from this address. Try again in ${mins} ${mins === 1 ? 'minute' : 'minutes'}, or ask an Administrator to unlock it.`;
+};
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: parseInt(process.env.LOGIN_RATE_LIMIT, 10) || 20, // attempts per IP per 15 min
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  skip: (req) => require('../ip-rules').isAllowed(req.ip),   // trusted addresses (IP Access > Allowed)
   message: { error: 'Too many login attempts. Try again later.' },
+  handler: (req, res, _next, options) => {
+    require('../security-watch').event(req, 'security.rate_limited', { limiter: 'login', route: `${req.method} ${req.baseUrl}${req.path}` });
+    res.status(options.statusCode).json(options.message);
+  },
 });
 
 function regenerate(req) {
@@ -33,15 +47,16 @@ function save(req) {
   return new Promise((resolve, reject) => req.session.save((e) => (e ? reject(e) : resolve())));
 }
 
-async function recordFailure(user) {
-  const attempts = user.failed_attempts + 1;
-  const lock = attempts >= MAX_FAILED;
-  await db.query(
-    `UPDATE users SET failed_attempts=$2, locked_until=CASE WHEN $3 THEN now() + ($4 || ' minutes')::interval ELSE locked_until END
-     WHERE id=$1`,
-    [user.id, lock ? 0 : attempts, lock, String(LOCK_MINUTES)]
-  );
-  return lock;
+// A wrong password. Counted per account AND per IP: reaching the limit shuts this address out of this account only. The account is NOT
+// locked for everybody, so nobody can keep a known user out just by typing wrong passwords. users.failed_attempts is a running count for display.
+async function recordFailure(user, req) {
+  const watch = require('../security-watch');
+  watch.failure(req);
+  const r = guard.fail(user.username, req.ip);
+  await db.query('UPDATE users SET failed_attempts = failed_attempts + 1 WHERE id=$1', [user.id]);
+  if (r.locked) watch.ipLocked(req, user.username, r.minutes);
+  if (r.distributed) watch.distributed(user.username, r.distributed.ips, r.distributed.failures);
+  return r;
 }
 
 async function completeLogin(req, user) {
@@ -49,9 +64,22 @@ async function completeLogin(req, user) {
   req.session.userId = user.id;
   req.session.createdAt = Date.now();   // start of the absolute session lifetime (SESSION_MAX_HOURS)
   await db.query('UPDATE users SET failed_attempts=0, locked_until=NULL, last_login_at=now() WHERE id=$1', [user.id]);
+  guard.clear(user.username, req.ip);
   req.user = { id: user.id, username: user.username };
   await audit(req, 'auth.login', 'user', user.id);
   await save(req);
+}
+
+
+// While planned maintenance is on only a System Admin may sign in. Checked once the password is right (so nobody learns anything about an
+// account from the answer) and again before the 2FA step completes, in case maintenance started in between.
+const sentence = (t) => (/[.!?]$/.test(t) ? t : `${t}.`);
+const MAINTENANCE_NOTE = ' Only site administrators can sign in right now.';
+async function refuseDuringMaintenance(req, res, user) {
+  if (!maintenanceMode.enabled() || maintenanceMode.mayUse(user)) return false;
+  await audit(req, 'auth.login_blocked_maintenance', 'user', user.id, { username: user.username });
+  res.status(503).set({ 'Cache-Control': 'no-store', 'Retry-After': '300' }).json({ error: sentence(maintenanceMode.state().message) + MAINTENANCE_NOTE, maintenance: true });
+  return true;
 }
 
 router.post('/login', loginLimiter, asyncH(async (req, res) => {
@@ -63,20 +91,33 @@ router.post('/login', loginLimiter, asyncH(async (req, res) => {
 
   const { rows } = await db.query('SELECT * FROM users WHERE lower(username)=lower($1)', [username]);
   const user = rows[0];
+  // Is THIS address shut out of this account? Asked the same way for a name that does not exist, so the answer reveals nothing about accounts.
+  const blocked = guard.blockedUntil(username, req.ip);
 
   if (!user) {
     await bcrypt.compare(password, DUMMY_HASH);
+    if (blocked) { await audit(req, 'auth.login_blocked_locked', 'user', null, { username }); throw new HttpError(401, lockedMessage(blocked), { locked: true }); }
+    require('../security-watch').failure(req);
+    const r = guard.fail(username, req.ip);
     await audit(req, 'auth.login_failed', 'user', null, { username, reason: 'unknown_user' });
+    if (r.locked) throw new HttpError(401, lockedMessage(r.until), { locked: true });
     throw new HttpError(401, GENERIC_FAIL);
   }
   const ok = await bcrypt.compare(password, user.password_hash); // always run: same timing for locked accounts
+  // An Admin-set / older whole-account lock still applies to everybody
   if (user.locked_until && new Date(user.locked_until) > new Date()) {
     await audit(req, 'auth.login_blocked_locked', 'user', user.id, { username });
-    throw new HttpError(401, GENERIC_FAIL);
+    throw new HttpError(401, lockedMessage(user.locked_until), { locked: true });
+  }
+  // This address guessed too often: refused even with the right password, until the lock time is over
+  if (blocked) {
+    await audit(req, 'auth.login_blocked_locked', 'user', user.id, { username });
+    throw new HttpError(401, lockedMessage(blocked), { locked: true });
   }
   if (!ok) {
-    const locked = await recordFailure(user);
-    await audit(req, locked ? 'auth.locked' : 'auth.login_failed', 'user', user.id, { username });
+    const r = await recordFailure(user, req);
+    await audit(req, r.locked ? 'auth.locked' : 'auth.login_failed', 'user', user.id, { username, ...(r.locked ? { scope: 'ip' } : {}) });
+    if (r.locked) throw new HttpError(401, lockedMessage(r.until), { locked: true });   // this wrong password was the one that shut this address out
     throw new HttpError(401, GENERIC_FAIL);
   }
   if (!user.is_active) {
@@ -84,15 +125,65 @@ router.post('/login', loginLimiter, asyncH(async (req, res) => {
     throw new HttpError(401, GENERIC_FAIL);
   }
 
+  if (await refuseDuringMaintenance(req, res, user)) return;
+
   if (user.totp_enabled) {
     await regenerate(req);
     req.session.pending2fa = { userId: user.id, at: Date.now(), tries: 0 };
+    if (user.twofa_method === 'email') {
+      try { await emailCode.issue(req.session, user, 'login'); } catch (e) {
+        await audit(req, 'auth.2fa_email_failed', 'user', user.id, { username: user.username, error: e.message });
+        delete req.session.pending2fa; await save(req);
+        throw e;
+      }
+      await save(req);
+      return res.json({ twofa: true, method: 'email', sentTo: mailer.mask(user.email) });
+    }
     await save(req);
-    return res.json({ twofa: true });
+    return res.json({ twofa: true, method: 'app' });
   }
 
   await completeLogin(req, user);
   res.json({ ok: true, mustChangePassword: user.must_change_password });
+}));
+
+// Forgot password, by email code (no link, so no address has to be trusted): 1) the person gives their username or email and a 6-digit code is emailed
+// (the answer is the same whether or not such an account exists); 2) they enter the code with a new password. The code lives in their session, works
+// once for 10 minutes and allows 5 tries. Nothing changes until the code is right.
+router.post('/forgot', loginLimiter, asyncH(async (req, res) => {
+  if (!mailer.configured()) throw new HttpError(503, 'Resetting a password by email is not set up. Ask an Administrator to reset your password.');
+  const who = typeof req.body.username === 'string' ? req.body.username.trim() : '';
+  if (!who || who.length > 120) throw new HttpError(400, 'Enter your username or email address');
+  const { rows } = await db.query('SELECT * FROM users WHERE lower(username)=lower($1) OR lower(email)=lower($1) LIMIT 2', [who]);
+  const user = rows.length === 1 ? rows[0] : null;   // two accounts on one address: nothing is sent, ask an Admin
+  if (user && user.is_active && user.email) {
+    try {
+      await emailCode.issue(req.session, user, 'reset');
+      req.session.pwReset = { uid: user.id, at: Date.now() };
+      await save(req);
+      await audit(req, 'auth.password_forgot', 'user', user.id, { username: user.username });
+    } catch (e) { console.error('[forgot] could not send the code:', e.message); }   // never tells the caller (it would show the account exists)
+  }
+  res.json({ ok: true });
+}));
+
+router.post('/forgot/verify', loginLimiter, asyncH(async (req, res) => {
+  const p = req.session.pwReset;
+  if (!p || Date.now() - p.at > 15 * 60 * 1000) { delete req.session.pwReset; throw new HttpError(401, 'That reset has expired. Start again with Forgot password.'); }
+  const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [p.uid]);
+  const user = rows[0];
+  if (!user || !user.is_active) throw new HttpError(401, 'That reset has expired. Start again with Forgot password.');
+  const pw = v.password(req.body.password, { username: user.username, fullName: user.full_name });   // checked first, so a weak password does not use up the code
+  if (!emailCode.check(req.session, user.id, 'reset', req.body.code)) { await save(req); throw new HttpError(401, 'That code is not right, or it has expired.'); }
+  const hash = await bcrypt.hash(pw, 12);
+  await db.query('UPDATE users SET password_hash=$2, must_change_password=FALSE, failed_attempts=0, locked_until=NULL, updated_at=now() WHERE id=$1', [user.id, hash]);
+  await db.query(`DELETE FROM user_sessions WHERE (sess->>'userId')::int = $1`, [user.id]);
+  guard.clearUser(user.username);
+  delete req.session.pwReset;
+  await save(req);
+  req.user = { id: user.id, username: user.username };
+  await audit(req, 'auth.password_reset_self', 'user', user.id, { username: user.username });
+  res.json({ ok: true });
 }));
 
 router.post('/2fa', loginLimiter, asyncH(async (req, res) => {
@@ -104,16 +195,20 @@ router.post('/2fa', loginLimiter, asyncH(async (req, res) => {
   const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [p.userId]);
   const user = rows[0];
   if (!user || !user.is_active || !user.totp_enabled) throw new HttpError(401, 'Please sign in again.');
+  if (await refuseDuringMaintenance(req, res, user)) { delete req.session.pending2fa; await save(req); return; }
 
   // Valid AND not previously used (replay-protected)
-  const valid = await totp.verifyAndConsume(db, user.id, user.totp_secret, req.body.token);
+  const valid = user.twofa_method === 'email'
+    ? emailCode.check(req.session, user.id, 'login', req.body.token)
+    : await totp.verifyAndConsume(db, user.id, user.totp_secret, req.body.token);
   if (!valid) {
     p.tries += 1;
     if (p.tries >= 5) {
       delete req.session.pending2fa;
-      await recordFailure(user);
+      await recordFailure(user, req);
     }
     await save(req);
+    require('../security-watch').failure(req);
     await audit(req, 'auth.2fa_failed', 'user', user.id, { username: user.username });
     throw new HttpError(401, 'Invalid authentication code');
   }
@@ -121,32 +216,58 @@ router.post('/2fa', loginLimiter, asyncH(async (req, res) => {
   res.json({ ok: true, mustChangePassword: user.must_change_password });
 }));
 
+// Send the sign-in code again (email method only). Needs the first step of this sign-in to be done.
+router.post('/2fa/resend', loginLimiter, asyncH(async (req, res) => {
+  const p = req.session.pending2fa;
+  if (!p || Date.now() - p.at > 5 * 60 * 1000) throw new HttpError(401, '2FA session expired. Please sign in again.');
+  const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [p.userId]);
+  const user = rows[0];
+  if (!user || !user.is_active || user.twofa_method !== 'email') throw new HttpError(400, 'Not available');
+  await emailCode.issue(req.session, user, 'login');
+  p.at = Date.now();
+  await save(req);
+  res.json({ ok: true, sentTo: mailer.mask(user.email) });
+}));
+
+// "Confirm it's you" prompts for email-method accounts: mail the code, then it is sent back with the password.
+router.post('/reauth-code', requireAuth, asyncH(async (req, res) => {
+  if (!req.user.totp_enabled || req.user.twofa_method !== 'email') throw new HttpError(400, 'Not available');
+  await emailCode.issue(req.session, req.user, 'reauth');
+  res.json({ ok: true, sentTo: mailer.mask(req.user.email) });
+}));
+
 router.post('/logout', asyncH(async (req, res) => {
   if (req.user) await audit(req, 'auth.logout', 'user', req.user.id);
-  if (req.user) await db.query('DELETE FROM user_presence WHERE user_id = $1', [req.user.id]).then(() => require('./presence').presenceChanged()).catch(() => { /* presence is best-effort */ });   // signed out = no longer "active"
+  if (req.user) await db.query('UPDATE user_presence SET left_at = now(), last_active_at = now() WHERE user_id = $1', [req.user.id]).then(() => require('./presence').presenceChanged()).catch(() => { /* presence is best-effort */ });   // signed out = no longer "active"
   req.session.destroy(() => {
     clearSessionCookie(res);
     res.json({ ok: true });
   });
 }));
 
-router.get('/me', requireAuth, (req, res) => {
+router.get('/me', requireAuth, asyncH(async (req, res) => {
   const u = req.user;
+  const vp = await db.query('SELECT view_prefs FROM users WHERE id=$1', [u.id]).then((r) => (r.rows[0] && r.rows[0].view_prefs) || {}).catch(() => ({}));
   res.json({
+    view_prefs: vp,
     user: {
       id: u.id, username: u.username, full_name: u.full_name, email: u.email,
-      role: u.role, group: u.group_name || null, totp_enabled: u.totp_enabled, must_change_password: u.must_change_password,
+      role: u.role, group: u.group_name || null, totp_enabled: u.totp_enabled, twofa_method: u.twofa_method, email_2fa_available: require('../security-settings').get().allowEmail2fa && mailer.configured(), must_change_password: u.must_change_password,
       totp_required: twofaRequired(u),
       appearance: u.appearance || 'system',
+      avatar_v: u.avatar_v ? Number(u.avatar_v) : null,
+      theme: u.theme || null,   // personal colour theme; null = follow the Admin default
     },
     pages: allowedPages(u),
     sections: allowedSections(u),
     actions: allowedActions(u),
     landing: landingPath(u),
+    node: require('../node').publicInfo(),   // { role, readOnly, lastSyncAt }: a backup server shows a read-only badge
+    maintenance: maintenanceMode.state(),   // { on, message }: only a System Admin gets this far while it is on — the page shows a banner
     // A fingerprint of THIS sign-in (a one-way hash of the session id — the id itself is never sent to the page). It changes every time someone
     // signs in, so the page can keep a per-sign-in preference (the Dashboard's period menu) and forget it at sign-out.
     session_key: crypto.createHash('sha256').update(String(req.sessionID || '')).digest('hex').slice(0, 20),
   });
-});
+}));
 
 module.exports = router;

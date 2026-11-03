@@ -1,3 +1,5 @@
+import { createPortal } from 'react-dom';
+import { loadDialogValues, saveDialogValues } from '../lib/viewstate.js';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { CloseIcon } from './Icons.jsx';
 
@@ -10,15 +12,43 @@ const PILL = {
 };
 export const Pill = ({ s, children }) => <span className={`pill ${PILL[s] || 's-normal'}`}>{children || s}</span>;
 
-// Admin / Manager / Editor / Viewer / Ingest have their own colours (app.css, .r-<name>); a role created later in Admin → Roles gets a colour of its own
+// Admin / Manager / Editor / Viewer / Ingest have their own colours (app.css, .r-<name>); a role created later in Administration → Roles gets a colour of its own
 // from this palette, always the same one for the same name, so no role ever shows as a plain, colourless label.
 const ROLE_PALETTE = ['#0ea5e9', '#ec4899', '#f59e0b', '#6366f1', '#84cc16', '#14b8a6', '#f97316', '#a855f7'];
-const BUILT_IN_ROLES = ['Admin', 'Manager', 'Editor', 'Viewer', 'Ingest'];
+const BUILT_IN_ROLES = ['System Admin', 'Admin', 'Manager', 'Editor', 'Viewer', 'Ingest'];
 export const RoleBadge = ({ role }) => {
-  if (BUILT_IN_ROLES.includes(role)) return <span className={`role-badge r-${role}`}>{role}</span>;
+  if (BUILT_IN_ROLES.includes(role)) return <span className={`role-badge r-${String(role).replace(/\s+/g, '-')}`}>{role}</span>;
   const hue = ROLE_PALETTE[[...String(role)].reduce((a, c) => a + c.charCodeAt(0), 0) % ROLE_PALETTE.length];
   return <span className="role-badge r-custom" style={{ '--rc': hue }}>{role}</span>;
 };
+
+/** Previous / Next with a "rows per page" choice (25, 50 or 100; 25 unless the person picked another). The choice is remembered per list (`name`). */
+export const PAGE_SIZES = [25, 50, 100];
+export function usePageSize(name, def = 25) {
+  const key = `pagesize:${name}`;
+  const [size, setSizeRaw] = useState(() => {
+    try { const n = Number(window.localStorage.getItem(key)); return PAGE_SIZES.includes(n) ? n : def; } catch { return def; }
+  });
+  const setSize = (n) => { setSizeRaw(n); try { window.localStorage.setItem(key, String(n)); } catch { /* remembering is optional */ } };
+  return [size, setSize];
+}
+export function Pager({ total, offset, size, onOffset, onSize, label = 'Rows per page' }) {
+  const from = total ? offset + 1 : 0;
+  const to = Math.min(offset + size, total);
+  return (
+    <div className="pager">
+      <span>{total ? `${from}–${to} of ${total}` : ''}</span>
+      <span className="grow" />
+      <label className="pager-size">{label}{' '}
+        <select aria-label={label} value={size} onChange={(e) => { onSize(Number(e.target.value)); onOffset(0); }}>
+          {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </label>
+      <button type="button" className="btn" disabled={offset === 0} onClick={() => onOffset(Math.max(0, offset - size))}>Previous</button>
+      <button type="button" className="btn" disabled={offset + size >= total} onClick={() => onOffset(offset + size)}>Next</button>
+    </div>
+  );
+}
 
 export const Empty = ({ children }) => <div className="empty">{children}</div>;
 
@@ -48,6 +78,8 @@ export function Options({ list, blank }) {
 }
 
 // ---------- Toasts ----------
+/** Every prompt ends with a full stop (unless it already ends with . ! ? or similar). */
+const withStop = (m) => { const t = String(m ?? '').trimEnd(); return t && !/[.!?…:;)\]]$/.test(t) ? `${t}.` : t; };
 const ToastCtx = createContext(() => {});
 export const useToast = () => useContext(ToastCtx);
 
@@ -62,7 +94,7 @@ export function ToastProvider({ children }) {
   return (
     <ToastCtx.Provider value={toast}>
       {children}
-      <div id="toasts">{items.map((t) => <div key={t.id} className={`toast ${t.type}`}>{t.msg}</div>)}</div>
+      <div id="toasts">{items.map((t) => <div key={t.id} className={`toast ${t.type}`}>{withStop(t.msg)}</div>)}</div>
     </ToastCtx.Provider>
   );
 }
@@ -111,7 +143,7 @@ export function Modal({ title, size, onClose, footer, children }) {
     if (isTopModal(id.current)) onCloseRef.current();
   };
 
-  return (
+  return createPortal(   // on <body>, so no page container (a transformed / clipped one) can shrink or crop the dialog
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
       <div className={`modal ${size || ''}`} role="dialog" aria-modal="true" ref={ref}>
         <div className="modal-head">
@@ -121,7 +153,8 @@ export function Modal({ title, size, onClose, footer, children }) {
         <div className="modal-body">{children}</div>
         {footer ? <div className="modal-foot">{footer}</div> : null}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -173,8 +206,13 @@ export function ConfirmProvider({ children }) {
 
 // ---------- Small hooks ----------
 /** Controlled form state: const [f, set, setAll] = useForm({...}); <input value={f.x} onChange={set('x')}> */
-export function useForm(initial) {
-  const [f, setF] = useState(initial);
+/** `draftPage`: also keep what is typed (see lib/viewstate.js), so a refresh brings the dialog back with its text. */
+export function useForm(initial, draftPage) {
+  const [f, setF] = useState(() => {
+    const kept = draftPage ? loadDialogValues(draftPage) : null;
+    return kept && typeof kept === 'object' ? { ...initial, ...kept } : initial;
+  });
+  useEffect(() => { if (draftPage) saveDialogValues(draftPage, f); }, [f]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (k) => (e) => {
     const v = e && e.target ? (e.target.type === 'checkbox' ? e.target.checked : e.target.value) : e;
     setF((prev) => ({ ...prev, [k]: v }));

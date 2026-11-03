@@ -1,4 +1,21 @@
+const { EventEmitter } = require('events');
 const db = require('./db');
+
+// Sign-ins, security blocks and admin actions are the trail an intruder would want gone. They are:
+//  - kept for AUDIT_PROTECT_DAYS (default 365) even when an Admin runs Clear Data or the retention clean-up (PROTECTED_SQL), and
+//  - also written to the server log (journalctl -u pcshub), which nobody can delete from inside the app, and
+//  - sent to a syslog server on another machine when AUDIT_SYSLOG is set (src/audit-forward.js).
+const PROTECTED_RE = /^(auth|security|admin)\./;
+const protectDays = () => {
+  const n = parseInt(process.env.AUDIT_PROTECT_DAYS, 10);
+  return Number.isFinite(n) && n >= 30 && n <= 3650 ? n : 365;
+};
+/** SQL condition (for audit_logs) that is true for lines that may be deleted. */
+const deletableSql = () => `NOT (action ~ '^(auth|security|admin)\\.' AND created_at > now() - interval '${protectDays()} days')`;
+
+// "A new audit line was written" signal; the Dashboard's Recent Activity stream listens to it. (Single Node process.)
+const auditBus = new EventEmitter();
+auditBus.setMaxListeners(0);
 
 async function audit(req, action, entity, entityId, details, client) {
   const runner = client || db;
@@ -16,10 +33,18 @@ async function audit(req, action, entity, entityId, details, client) {
         req.ip,
       ]
     );
+    const protectedLine = PROTECTED_RE.test(action);
+    const forward = require('./audit-forward');
+    if (protectedLine || (forward.configured() && forward.all())) {
+      const line = { at: new Date().toISOString(), action, user: req.user ? req.user.username : (details && details.username) || null, ip: req.ip || null, entity: entity || null, id: entityId != null ? String(entityId) : null, details: details || null };
+      if (protectedLine) console.log(`[audit] ${JSON.stringify(line)}`.slice(0, 4000));
+      forward.send(line);   // a copy to the syslog server on another machine (AUDIT_SYSLOG), when set up
+    }
+    setTimeout(() => auditBus.emit('change'), 400);   // a little later, so a line written inside a transaction has been committed
   } catch (e) {
     console.error('[audit] failed', e.message);
     if (client) throw e;
   }
 }
 
-module.exports = { audit };
+module.exports = { audit, auditBus, deletableSql, protectDays, PROTECTED_RE };

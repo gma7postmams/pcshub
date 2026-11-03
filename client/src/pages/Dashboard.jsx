@@ -1,3 +1,4 @@
+import { avatarUrl, colorFor } from '../lib/avatar.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { get, post } from '../lib/api.js';
@@ -18,8 +19,6 @@ const TEAMS = [
   { key: 'VEDIT', label: 'VEDIT', color: '#f0883e' },
   { key: 'AUDIO', label: 'Audio', color: '#26b5ad' },
 ];
-const HUES = ['#4f8cff', '#a78bfa', '#34c38f', '#f0883e', '#e5568f', '#26b5ad', '#f1b44c'];
-const hueFor = (name) => HUES[[...String(name)].reduce((a, c) => a + c.charCodeAt(0), 0) % HUES.length];
 const pct = (n, of) => (of ? Math.round((n / of) * 100) : 0);
 const monthOf = (iso) => new Date(`${String(iso).slice(0, 10)}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', timeZone: 'UTC' });
 const dayParts = (iso) => {
@@ -37,6 +36,20 @@ const readRange = (sessionKey) => {
 const saveRange = (sessionKey, r) => { if (!sessionKey) return; try { localStorage.setItem(RANGE_KEY, JSON.stringify({ k: sessionKey, r })); } catch (e) { /* storage unavailable */ } };
 
 /** A card's heading: a tinted icon chip, the title, a little grey hint and an optional control at the right. */
+// the time of day beside the date, kept current (changes the moment the second changes)
+function ClockText() {
+  const [t, setT] = useState(() => new Date());
+  useEffect(() => {   // wake exactly when the second changes (and again when the tab comes back into view)
+    let id;
+    const tick = () => { const n = new Date(); setT(n); id = setTimeout(tick, 1000 - n.getMilliseconds() + 20); };
+    const back = () => { if (document.visibilityState === 'visible') { clearTimeout(id); tick(); } };
+    tick();
+    document.addEventListener('visibilitychange', back);
+    return () => { clearTimeout(id); document.removeEventListener('visibilitychange', back); };
+  }, []);
+  return <span>{t.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</span>;
+}
+
 function CardHead({ icon: Icon, hue, dot, plain, title, hint, sub, right }) {
   return (
     <div className="dsh-head">
@@ -103,7 +116,7 @@ function EarlierPill({ people }) {
     <span className="dsh-earlier" tabIndex={0} aria-label={`Earlier today: ${people.map((p) => p.name).join(', ')}`}>
       Earlier today<b>{people.length}</b>
       <span className="dsh-earlier-pop" role="tooltip">
-        {people.map((p) => <span key={p.id}><i style={{ background: hueFor(p.name) }} />{p.name}<em>{ago(p.lastActiveAt)}</em></span>)}
+        {people.map((p) => <span key={p.id}><i style={{ background: colorFor(p.id) }} />{p.name}<em title="Last active">{ago(p.lastActiveAt)}</em></span>)}
       </span>
     </span>
   );
@@ -282,10 +295,34 @@ export default function Dashboard() {
     return () => { live = false; close(); clearInterval(t); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible); };
   }, [showUsers]);
 
+  // Recent Activity is live too: a stream pushes the list when a new line is written to the audit log; a poll covers a stream that can't stay open.
+  const showAct = !!(d && d.activity);
+  useEffect(() => {
+    if (!showAct) return undefined;
+    let es = null;
+    let live = true;
+    const apply = (activity) => setD((cur) => (cur ? { ...cur, activity } : cur));
+    const poll = () => { if (document.visibilityState === 'visible') get('/api/dashboard/activity', { quiet: true }).then((r) => { if (live && r.activity) apply(r.activity); }).catch(() => { /* next time */ }); };
+    const close = () => { if (es) { es.close(); es = null; } };
+    const open = () => {
+      if (es || typeof EventSource === 'undefined') return;
+      es = new EventSource('/api/dashboard/activity/stream');
+      es.onmessage = (e) => { try { const m = JSON.parse(e.data); if (live && m.activity) apply(m.activity); } catch (err) { /* ignore */ } };
+      es.onerror = () => { if (es && es.readyState === 2) close(); };
+    };
+    open();
+    // always poll too (every 10 s): a proxy that holds event-stream data back leaves the stream "open" but silent, and the list must still move
+    const t = setInterval(poll, 10000);
+    const onVisible = () => { if (document.visibilityState === 'visible') { poll(); open(); } else close(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => { live = false; close(); clearInterval(t); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible); };
+  }, [showAct]);
+
   const changeRange = (key) => {
     setRangeState(key);
     saveRange(s.session_key, key);
-    get(`/api/dashboard/days?range=${key}`).then((r) => setD((cur) => (cur && cur.workload ? { ...cur, workload: { ...cur.workload, byDay: r.days, bucket: r.bucket, range: r.range, rangeLabel: r.label, rangeSub: r.sub } } : cur))).catch(() => { /* keep the old chart */ });
+    get(`/api/dashboard/days?range=${key}`).then((r) => setD((cur) => (cur && cur.workload ? { ...cur, workload: { ...cur.workload, byDay: r.days, priority: r.priority, bucket: r.bucket, range: r.range, rangeLabel: r.label, rangeSub: r.sub } } : cur))).catch(() => { /* keep the old chart */ });
   };
 
   if (!d) return <main className="container wide dsh"><Empty>Loading…</Empty></main>;
@@ -310,7 +347,7 @@ export default function Dashboard() {
         {night ? <MoonArt /> : <SunArt />}
         <div className="dsh-hero-text">
           <h1>{greet}, {s.user.full_name.split(' ')[0]}!</h1>
-          <div className="dsh-date">{now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>
+          <div className="dsh-date">{now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} · <ClockText /></div>
         </div>
         <HeroArt />
       </section>
@@ -329,7 +366,7 @@ export default function Dashboard() {
                     return (
                       <Tag key={p.id} type={target ? 'button' : undefined} className={`dsh-user${target ? ' link' : ''}`} onClick={target ? () => navigate(target) : undefined}
                         title={`${p.name} · ${p.role}${where ? ` · on ${where}` : ''} · ${p.you ? 'just now' : ago(p.lastActiveAt)}`}>
-                        <span className="dsh-avatar" style={{ background: hueFor(p.name) }}>{initials(p.name).slice(0, 2)}<i className="dsh-status" /></span>
+                        <span className={`dsh-avatar${p.av ? ' has-img' : ''}`} style={{ background: colorFor(p.id) }}>{p.av ? <img className="av-img" src={avatarUrl(p.id, p.av)} alt="" draggable="false" /> : initials(p.name).slice(0, 2)}<i className="dsh-status" /></span>
                         <span className="dsh-user-info">
                           <span className="dsh-user-name"><span className="dsh-user-nm">{p.name}</span>{p.you ? <span className="dsh-you">You</span> : null}</span>
                           <span className="dsh-user-meta"><RoleBadge role={p.role} />{where ? <span className="dim">on {where}</span> : null}</span>
@@ -346,13 +383,13 @@ export default function Dashboard() {
           {act ? (
             <section className="dsh-card dsh-activity-card" ref={actRef}>
               <CardHead icon={ClockIcon} hue="blue" title="Recent Activity" sub="Latest updates across the hub"
-                right={<Link to={s.canPage('/admin') ? '/admin#audit' : '/activity-history'} className="dsh-viewall">View all<ChevronRightIcon /></Link>} />   {/* Admins have no Activity History page — their full log is Admin → Audit Log; everyone else sees their own history */}
+                right={s.canPage('/admin') || s.canPage('/activity-history') ? <Link to={s.canPage('/admin') ? '/admin#audit' : '/activity-history'} className="dsh-viewall">View all<ChevronRightIcon /></Link> : null} />   {/* Admins have no Activity History page — their full log is Administration → Audit Log; everyone else sees their own history */}
               {act.length ? (
                 <ul className="dsh-activity">
                   {act.map((a) => (
                     <li key={a.id}>
                       <Link to={a.path} className="dsh-act">
-                        <span className="dsh-act-av" style={{ background: hueFor(a.name) }}>{initials(a.name).slice(0, 2)}</span>
+                        <span className={`dsh-act-av${a.av ? ' has-img' : ''}`} style={{ background: colorFor(a.uid ?? a.name) }}>{a.av ? <img className="av-img" src={avatarUrl(a.uid, a.av)} alt="" draggable="false" /> : initials(a.name).slice(0, 2)}</span>
                         <span className="dsh-act-name">{a.you ? 'You' : a.name}</span>
                         <span className="dsh-act-text">{a.verb}{a.label ? <> <b>{a.label}</b></> : null}</span>
                         <span className="dsh-act-time">{ago(a.at)}</span>
@@ -369,12 +406,12 @@ export default function Dashboard() {
 
       {w ? (
         <section className="dsh-card">
-          <CardHead icon={PulseIcon} hue="blue" title="Workload Tracker" hint={`${w.total} item${w.total === 1 ? '' : 's'} in total`} right={<RangeMenu ranges={w.ranges} value={w.range} onChange={changeRange} />} />
+          <CardHead icon={PulseIcon} hue="blue" title="Workload" hint={`${w.total} item${w.total === 1 ? '' : 's'} in total`} right={<RangeMenu ranges={w.ranges} value={w.range} onChange={changeRange} />} />
           <div className="dsh-stats">
             <StatCard icon={CalendarGridIcon} hue="blue" label="Today" value={w.today} foot={w.today === 1 ? 'item to work on' : 'items to work on'} onClick={go('/workload')} />
             <StatCard icon={CalendarGridIcon} hue="purple" label="This week" value={w.thisWeek} foot="Monday to Sunday" onClick={go('/workload')} />
             <StatCard icon={ClockIcon} hue="teal" label="Breakdates, next 7 days" value={w.breakdatesNext7Days} foot="VGFX and VEDIT times coming up" onClick={go('/workload')} />
-            <StatCard icon={FlagIcon} hue="rose" label="Priority" value={w.priority} foot={w.priority === 1 ? 'item flagged priority' : 'items flagged priority'} onClick={go('/workload')} />
+            <StatCard icon={FlagIcon} hue="rose" label="Priority" value={w.priority} foot={`${w.priority === 1 ? 'item' : 'items'} flagged priority · ${w.rangeLabel.toLowerCase()}`} onClick={go('/workload')} />
           </div>
         </section>
       ) : null}
@@ -411,7 +448,7 @@ export default function Dashboard() {
 
       {d.kpis ? (
         <section className="dsh-card">
-          <CardHead icon={DocIcon} hue="blue" plain title="Ingest Tracker" hint={`${d.kpis.total} record${d.kpis.total === 1 ? '' : 's'}`} />
+          <CardHead icon={DocIcon} hue="blue" title="Ingest" hint={`${d.kpis.total} record${d.kpis.total === 1 ? '' : 's'}`} />
           <div className="dsh-stats compact five">
             <StatCard icon={CalendarCheckIcon} hue="blue" soft label="Total Ingest Records" value={d.kpis.total} foot={`${d.kpis.thisMonth.created} created this month`} onClick={go(d.canOpen.ingest ? '/ingest' : null)} />
             <StatCard icon={ClockIcon} hue="purple" soft label="Pending Approval" value={d.kpis.pendingApproval ?? 0} foot="Waiting for an approver" onClick={go(d.canOpen.ingest ? '/ingest?approval=pending' : null)} />

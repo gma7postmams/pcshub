@@ -1,4 +1,5 @@
 const express = require('express');
+const { groupByDate, truthy, dateTag } = require('../export-sheets');
 const db = require('../db');
 const v = require('../validate');
 const { asyncH, HttpError, requireAction } = require('../middleware');
@@ -23,9 +24,20 @@ const SELECT = `
     LEFT JOIN users uu ON uu.id = i.updated_by
     LEFT JOIN users cmu ON cmu.id = i.cm_decided_by`;
 
-// Episode / Breakdate: one date (YYYY-MM-DD) or a range (YYYY-MM-DD/YYYY-MM-DD, start first). Returns the text as stored and its first day.
+// Episode / Breakdate: one date (YYYY-MM-DD), a range (YYYY-MM-DD/YYYY-MM-DD, start first) or several dates / ranges joined by commas, oldest first
+// ("2026-09-14/2026-09-18,2026-09-21/2026-09-25"). Returns the text as stored and its first day. Several that end up as one are stored as that one.
+const { parseEpisodeText } = require('../episode');
+const MULTI_RE = /^\d{4}-\d{2}-\d{2}(?:\/\d{4}-\d{2}-\d{2})?(?:,\d{4}-\d{2}-\d{2}(?:\/\d{4}-\d{2}-\d{2})?)+$/;
+const segStart = (seg) => seg.slice(0, 10);
+const segEnd = (seg) => seg.slice(-10);
 function episodeRange(x) {
   const raw = x == null ? '' : String(x).trim();
+  if (raw.includes(',')) {
+    const text = parseEpisodeText(raw);
+    if (!text) throw new HttpError(400, 'Episode / Breakdate must be dates or date ranges (e.g. Sep 14-18, 21-25)');
+    if (text.split(',').length > 60) throw new HttpError(400, 'Episode / Breakdate: at most 60 dates or ranges');
+    return { text, start: text.slice(0, 10) };
+  }
   const m = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/.exec(raw);
   if (!m) { const d = v.date(raw, { field: 'Episode / Breakdate' }); return { text: d, start: d }; }
   const a = v.date(m[1], { field: 'Episode / Breakdate (from)' });
@@ -62,10 +74,12 @@ async function parseBody(client, body, user, current = null) {
       episode_break_date_text = legacyDate;
     }
   }
+  // A row started in a blank spare row may be saved with just one cell filled in (body.partial); a row that is still missing its Program or Platform stays editable the same way
+  const relax = (f) => (current ? !String(current[f] || '').trim() : body.partial === true);
   const rec = {
-    program: v.str(body.program, { field: 'Program', max: 200, required: true }),
+    program: v.str(body.program, { field: 'Program', max: 200, required: !relax('program') }) || '',
     billable_party: v.str(body.billable_party, { field: 'Billable Party', max: 200 }),
-    platform: v.str(body.platform, { field: 'Platform', max: 100, required: true }),
+    platform: v.str(body.platform, { field: 'Platform', max: 100, required: !relax('platform') }) || '',
     episode_date,
     episode_break_date_text,
     materials_count: v.int(body.materials_count, { field: 'Materials count', min: 0 }),
@@ -82,8 +96,7 @@ async function parseBody(client, body, user, current = null) {
     requested_by_psd: current && (current.requested_by_user_id || current.requested_by_psd) ? current.requested_by_psd : user.full_name,
     remarks: v.str(body.remarks, { field: 'Remarks', max: 4000 }),
   };
-  await assertDropdown(client, 'platform', rec.platform, 'Platform');
-  if (!current || current.program !== rec.program) await assertDropdown(client, 'program', rec.program, 'PROG. NAME / PROJ. TITLE');
+  if (rec.platform) await assertDropdown(client, 'platform', rec.platform, 'Platform');
   return rec;
 }
 
@@ -96,8 +109,10 @@ const SORTS = {
 };
 function orderBy(q) {
   const col = Object.prototype.hasOwnProperty.call(SORTS, q.sort) ? SORTS[q.sort] : null;
-  if (!col) return 'i.created_at DESC, i.id DESC';
-  return `${col} ${q.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, i.created_at DESC, i.id DESC`;
+  if (!col && q.newest === '1') return 'i.id DESC';   // the phone list: the newest entry first
+  if (!col && q.keep !== '1') return 'i.id ASC';   // every view except today's: the order the rows were added, the newest at the bottom
+  if (!col) return 'i.row_pos ASC NULLS LAST, i.id ASC';   // like a sheet: every record keeps the row it was typed into
+  return `${col} ${q.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, i.row_pos ASC NULLS LAST, i.id ASC`;
 }
 
 // ---- audit helpers ----
@@ -129,8 +144,21 @@ function ingestFilter(q) {
   if (req.query.platform) add('i.platform = ?', String(req.query.platform));
   // a range counts when it overlaps the filter: it ends on/after "from" and starts on/before "to"
   const epEnd = `COALESCE(CASE WHEN i.episode_break_date_text ~ '^\\d{4}-\\d{2}-\\d{2}/\\d{4}-\\d{2}-\\d{2}$' THEN split_part(i.episode_break_date_text, '/', 2)::date END, i.episode_date)`;
-  if (req.query.from) add(`${epEnd} >= ?`, v.date(req.query.from, { field: 'from' }));
-  if (req.query.to) add('i.episode_date <= ?', v.date(req.query.to, { field: 'to' }));
+  const fromD = req.query.from ? v.date(req.query.from, { field: 'from' }) : null;
+  const toD = req.query.to ? v.date(req.query.to, { field: 'to' }) : null;
+  if (fromD || toD) {
+    // several dates / ranges count when ANY of them overlaps the filter; a single date or a range keeps its old overlap test
+    const lc = [];
+    const bare = [];
+    if (fromD) { params.push(fromD); lc.push(`COALESCE(NULLIF(split_part(d, '/', 2), ''), d)::date >= $${params.length}`); bare.push(`${epEnd} >= $${params.length}`); }
+    if (toD) { params.push(toD); lc.push(`split_part(d, '/', 1)::date <= $${params.length}`); bare.push(`i.episode_date <= $${params.length}`); }
+    where.push(`(CASE WHEN i.episode_break_date_text ~ '^\\d{4}-\\d{2}-\\d{2}(/\\d{4}-\\d{2}-\\d{2})?(,\\d{4}-\\d{2}-\\d{2}(/\\d{4}-\\d{2}-\\d{2})?)+$'
+                      THEN EXISTS (SELECT 1 FROM unnest(string_to_array(i.episode_break_date_text, ',')) d WHERE ${lc.join(' AND ')})
+                      ELSE (${bare.join(' AND ')}) END
+                OR (i.episode_date IS NULL AND COALESCE(i.episode_break_date_text, '') = ''   -- no Episode / Breakdate yet (a row still being filled in): shown on the days it was added, so it does not vanish
+                    ${fromD ? `AND (i.created_at AT TIME ZONE 'Asia/Manila')::date >= $${params.length - (toD ? 1 : 0)}` : ''}
+                    ${toD ? `AND (i.created_at AT TIME ZONE 'Asia/Manila')::date <= $${params.length}` : ''}))`);
+  }
   if (req.query.q) {
     params.push(v.like(req.query.q, 100));
     const p = `$${params.length}`;
@@ -143,14 +171,32 @@ function ingestFilter(q) {
 
 router.get('/', asyncH(async (req, res) => {
   const { params, whereSql } = ingestFilter(req.query);
-  const { limit, offset } = v.paging(req.query, { def: 50, max: 200 });
+  const { limit, offset } = v.paging(req.query, { def: 25, max: 5000 })   // 5000 = the page's "All" choice;
   const countQ = await db.query(
     `SELECT count(*)::int AS n FROM ingest_records i LEFT JOIN users ru ON ru.id=i.requested_by_user_id ${whereSql}`, params
   );
   const { rows } = await db.query(
     `${SELECT} ${whereSql} ORDER BY ${orderBy(req.query)} LIMIT ${limit} OFFSET ${offset}`, params
   );
-  res.json({ total: countQ.rows[0].n, rows });
+  // for the table's blank rows: the highest row number in use, and (when more records follow this page) the row number of the next one
+  const maxQ = await db.query('SELECT COALESCE(MAX(row_pos), 0)::int AS m FROM ingest_records');
+  const usedQ = await db.query('SELECT row_pos FROM ingest_records WHERE row_pos IS NOT NULL ORDER BY row_pos LIMIT 100000');   // every row number in use (also by records this filter hides), so only the really blank rows are shown
+  let nextPos = null;
+  if (rows.length === limit) {
+    const nx = await db.query(`SELECT i.row_pos FROM ingest_records i LEFT JOIN users ru ON ru.id=i.requested_by_user_id ${whereSql} ORDER BY ${orderBy(req.query)} LIMIT 1 OFFSET ${offset + limit}`, params);
+    nextPos = nx.rows.length ? nx.rows[0].row_pos : null;
+  }
+  // ?locate=<id>: where that record sits in this list (0 = first), so the screen can go to the page it is on after a save
+  let at = null;
+  const loc = Number(req.query.locate);
+  if (Number.isInteger(loc) && loc > 0) {
+    const lq = await db.query(
+      `SELECT pos FROM (SELECT i.id, (row_number() OVER (ORDER BY ${orderBy(req.query)}) - 1)::int AS pos FROM ingest_records i LEFT JOIN users ru ON ru.id=i.requested_by_user_id ${whereSql}) t WHERE t.id = $${params.length + 1}`,
+      [...params, loc]
+    );
+    at = lq.rows.length ? lq.rows[0].pos : null;
+  }
+  res.json({ total: countQ.rows[0].n, rows, maxPos: maxQ.rows[0].m, nextPos, usedPos: usedQ.rows.map((x) => x.row_pos), at });
 }));
 
 // Excel export of what the list shows: same filters, search and sort. Logged in the audit trail.
@@ -161,36 +207,209 @@ router.get('/export', asyncH(async (req, res) => {
   const dayText = (r) => {
     const t = r.episode_break_date_text || (r.episode_date ? new Date(r.episode_date).toISOString().slice(0, 10) : '');
     const m = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/.exec(t || '');
-    return m ? `${m[1]} to ${m[2]}` : (t || '');
+    return m ? `${m[1]} to ${m[2]}` : (t || '').split(',').map((g) => g.replace('/', ' to ')).join('; ');
   };
+  // Styled like the Workload export (and like the web table): tinted header, vertical grid lines, centred cells, bold names, coloured Platform and
+  // Status (CM) text (Excel can't give a cell a pill background), the decision / approval time on a second line, nothing cropped.
+  const { exportPalette, hueOf } = require('./workload').helpers;
+  const pal = await exportPalette(db);
+  const grid = { style: 'thin', color: { argb: pal.gridBorder } };
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const nice = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); return m ? `${MON[+m[2] - 1]} ${+m[3]}, ${m[1]}` : String(iso || ''); };
+  const niceDay = (r) => {
+    if (r._on) return `${r._text}\n(also ${r._also.join('; ')})`;
+    const t = r.episode_break_date_text || (r.episode_date ? new Date(r.episode_date).toISOString().slice(0, 10) : '');
+    const m = /^(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/.exec(t || '');
+    if (MULTI_RE.test(t || '')) return t.split(',').map((g) => (g.includes('/') ? `${nice(segStart(g))} – ${nice(segEnd(g))}` : nice(g))).join('; ');   // several: "Sep 1, 2026; Sep 14, 2026 – Sep 18, 2026" (the import reads this back)
+    return m ? `${nice(m[1])} – ${nice(m[2])}` : (/^\d{4}-\d{2}-\d{2}/.test(t || '') ? nice(t) : (t || ''));
+  };
+  const niceTime = (ts) => { if (!ts) return ''; const d = new Date(ts); const h = d.getHours(); return `${nice(d.toISOString())} ${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`; };
+  const CM_HUE = { DONE: 'green', 'NON-COMPLIANT': 'red', PENDING: 'amber' };
+  const grey = { color: { argb: pal.pillFg('gray') }, size: 9 };
   const wb = new ExcelJS.Workbook();
   wb.creator = 'PromoHub';
-  const ws = wb.addWorksheet('Ingest');
-  ws.columns = [
-    { header: 'PROG. NAME / PROJ. TITLE', key: 'program', width: 34 }, { header: 'Platform', key: 'platform', width: 16 },
-    { header: 'Billable Party', key: 'billable_party', width: 22 }, { header: 'Episode / Breakdate', key: 'ep', width: 24 },
-    { header: 'Source', key: 'source', width: 28 }, { header: 'No. of Materials', key: 'materials_count', width: 12 },
-    { header: 'Requested By', key: 'req', width: 22 }, { header: 'Destination Folder', key: 'destination_folder', width: 36 },
-    { header: 'Approved By', key: 'approved_by', width: 22 }, { header: 'Status (CM)', key: 'cm', width: 16 },
-    { header: 'Non-compliant reason', key: 'reason', width: 30 }, { header: 'Remarks', key: 'remarks', width: 36 },
-    { header: 'Updated', key: 'updated', width: 20 },
+  const fill = (ws, rows) => {
+  const COLS = [
+    { header: 'PROG. NAME / PROJ. TITLE', key: 'program' }, { header: 'Platform', key: 'platform' },
+    { header: 'Billable Party', key: 'billable_party' }, { header: 'Episode / Breakdate', key: 'ep', wrap: true },
+    { header: 'Source', key: 'source', wrap: true }, { header: 'No. of Materials', key: 'materials_count' },
+    { header: 'Requested By', key: 'req' }, { header: 'Destination Folder', key: 'destination_folder', wrap: true },
+    { header: 'Approved By', key: 'approved_by' }, { header: 'Status (CM)', key: 'cm' }, { header: 'Updated', key: 'updated' },
   ];
-  for (const r of rows) {
-    ws.addRow({
-      program: r.program, platform: r.platform, billable_party: r.billable_party, ep: dayText(r), source: r.source,
-      materials_count: r.materials_count, req: r.requested_by_psd || r.requested_by_name || '', destination_folder: r.destination_folder,
-      approved_by: r.approved_by, cm: r.cm_status || 'PENDING', reason: r.cm_non_compliant_reason || '', remarks: r.remarks,
-      updated: r.updated_at ? new Date(r.updated_at).toISOString().replace('T', ' ').slice(0, 16) : '',
-    });
-  }
-  ws.getRow(1).font = { bold: true };
+  ws.columns = COLS.map((c) => ({ header: c.header, key: c.key, width: 20 }));
+  ws.getRow(1).eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: pal.black }, size: 11 };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pal.headerFill } };
+    cell.border = { bottom: grid, right: grid };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  });
   ws.views = [{ state: 'frozen', ySplit: 1 }];
+  const lens = COLS.map((c) => c.header.length);
+  const seen = (key, text) => { const i = COLS.findIndex((c) => c.key === key); String(text || '').split('\n').forEach((t) => { lens[i] = Math.max(lens[i], t.length); }); };
+  for (const r of rows) {
+    const status = r.cm_status || 'PENDING';
+    const row = ws.addRow({
+      program: r.program, platform: r.platform, billable_party: r.billable_party, ep: niceDay(r), source: r.source,
+      materials_count: r.materials_count, req: r.requested_by_psd || r.requested_by_name || '', destination_folder: r.destination_folder,
+      approved_by: r.approved_by, cm: status, updated: r.updated_at ? new Date(r.updated_at).toISOString().replace('T', ' ').slice(0, 16) : '',
+    });
+    row.alignment = { wrapText: false, vertical: 'middle', horizontal: 'center' };
+    COLS.forEach((c) => { row.getCell(c.key).border = { right: grid }; if (c.wrap) row.getCell(c.key).alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' }; });
+    row.getCell('program').font = { bold: true };
+    if (r.platform) { const fam = r.platform.replace(/\s*\(.*\)\s*$/, '') || r.platform; row.getCell('platform').font = { bold: true, color: { argb: pal.pillFg(hueOf(fam)) } }; }
+    if (r.destination_folder) row.getCell('destination_folder').font = { name: 'Consolas' };
+    // Status (CM): the decision in its colour, then when / by whom it was decided, then the non-compliant reason (like the web cell)
+    const lines = [{ text: status, font: { bold: true, color: { argb: pal.pillFg(CM_HUE[status] || 'amber') } } }];
+    if (r.cm_status) {
+      const when = `${niceTime(r.cm_decided_at)}${r.cm_decided_by_name ? ` · ${r.cm_decided_by_name}` : ''}`;
+      if (when.trim()) lines.push({ text: `\n${when}`, font: grey });
+      if (r.cm_status === 'NON-COMPLIANT' && r.cm_non_compliant_reason) lines.push({ text: `\n${r.cm_non_compliant_reason}`, font: grey });
+    }
+    row.getCell('cm').value = { richText: lines };
+    row.getCell('cm').alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+    if (r.approved_by) {
+      const t = niceTime(r.approved_at);
+      row.getCell('approved_by').value = { richText: [{ text: r.approved_by, font: { color: { argb: pal.black } } }, ...(t ? [{ text: `\n${t}`, font: grey }] : [])] };
+      row.getCell('approved_by').alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+    }
+    row.getCell('updated').font = { color: { argb: pal.pillFg('gray') } };
+    seen('program', r.program); seen('platform', r.platform); seen('billable_party', r.billable_party); seen('ep', niceDay(r));
+    seen('source', r.source && r.source.length > 45 ? 'x'.repeat(45) : r.source); seen('materials_count', r.materials_count);
+    seen('req', r.requested_by_psd || r.requested_by_name || ''); seen('destination_folder', r.destination_folder && r.destination_folder.length > 45 ? 'x'.repeat(45) : r.destination_folder);
+    seen('approved_by', `${r.approved_by || ''}\n${r.approved_by ? niceTime(r.approved_at) : ''}`);
+    seen('cm', `${status}\n${r.cm_status ? `${niceTime(r.cm_decided_at)}${r.cm_decided_by_name ? ` · ${r.cm_decided_by_name}` : ''}` : ''}`);
+    seen('updated', 'YYYY-MM-DD HH:MM');
+  }
+  ws.columns.forEach((column, i) => { column.width = Math.ceil(lens[i] * 1.15) + 3; });   // wide enough that nothing is cropped (long Source / Folder text wraps)
   ws.autoFilter = { from: 'A1', to: { row: 1, column: ws.columns.length } };
+  };
+  if (truthy(req.query.by_date) && rows.length) {
+    // a record with separate days goes on the tab of EACH of those days (only days inside the date filter), the others listed in the Episode cell
+    const lo = req.query.from ? String(req.query.from).slice(0, 10) : '';
+    const hi = req.query.to ? String(req.query.to).slice(0, 10) : '';
+    const short = (g) => (g.includes('/') ? `${nice(segStart(g)).replace(/, \d{4}$/, '')} – ${nice(segEnd(g)).replace(/, \d{4}$/, '')}` : nice(g).replace(/, \d{4}$/, ''));
+    const full = (g) => (g.includes('/') ? `${nice(segStart(g))} – ${nice(segEnd(g))}` : nice(g));
+    const spread = [];
+    for (const r of rows) {
+      if (!MULTI_RE.test(r.episode_break_date_text || '')) { spread.push(r); continue; }
+      const all = r.episode_break_date_text.split(',');
+      for (const g of all) {
+        if ((lo && segEnd(g) < lo) || (hi && segStart(g) > hi)) continue;
+        const tab = lo && segStart(g) < lo ? lo : segStart(g);   // each date / range goes on the tab of its first day (a range that began before the filter: the first filtered day)
+        spread.push({ ...r, episode_date: tab, _on: tab, _text: full(g), _also: all.filter((x) => x !== g).map(short) });
+      }
+    }
+    groupByDate(spread, (r) => r.episode_date).forEach((g) => fill(wb.addWorksheet(g.name), g.rows));
+  }
+  else fill(wb.addWorksheet('Ingest'), rows);
   const buffer = await wb.xlsx.writeBuffer();
-  const filename = `Ingest_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  const filename = `${['Ingest', dateTag(req.query.from, req.query.to)].filter(Boolean).join('_')}${truthy(req.query.by_date) && rows.length ? '_tabs' : ''}.xlsx`;
   await audit(req, 'ingest.export', 'ingest_record', null, { rows: rows.length, truncated: rows.length >= 20000, filters: { ...req.query, sort: undefined, dir: undefined }, file: filename });
   res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="${filename}"` });
   res.send(Buffer.from(buffer));
+}));
+
+// ---- Import from Excel: reads a file shaped like this page's own Export (header row; the same column names). Every row becomes a NEW request from the person
+// importing (Requested By is always them, Approved By and Status (CM) start empty, exactly as for a request added in the table). Columns this page
+// doesn't take from a file (Requested By, Approved By, Status (CM), Updated) are ignored. A row that is already in the list (same program, platform,
+// Billable Party, Source and Episode / Breakdate) is left out, so importing the same file twice doesn't double the list. Destination Folder is
+// only read for PCS / OCS, like everywhere else.
+const multer = require('multer');
+const { assertSafeXlsx, oneImportAtATime } = require('../xlsx-guard');
+const virusScan = require('../virus-scan').guard;   // every upload is checked by ClamAV before the route sees it (src/virus-scan.js)
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
+const IMPORT_HEADERS = {
+  'prog. name / proj. title': 'program', 'program': 'program', 'prog name/proj title': 'program',
+  'platform': 'platform', 'billable party': 'billable_party', 'episode / breakdate': 'episode_break_date_text',
+  'source': 'source', 'no. of materials': 'materials_count', 'destination folder': 'destination_folder', 'remarks': 'remarks',
+};
+const MON_NUM = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+const iso3 = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+function oneDay(part) {   // "2026-10-10", "Oct 10, 2026", "10/10/2026" or an Excel date
+  if (part instanceof Date) return part.toISOString().slice(0, 10);
+  const t = String(part).trim();
+  let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t);
+  if (m) return iso3(m[1], m[2], m[3]);
+  m = /^([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})$/.exec(t);
+  const mon = m && (MON_NUM[m[1].slice(0, 4).toLowerCase()] || MON_NUM[m[1].slice(0, 3).toLowerCase()]);
+  if (m && mon) return iso3(m[3], mon, m[2]);
+  m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(t);
+  if (m) return iso3(m[3], m[1], m[2]);
+  throw new HttpError(400, `Episode / Breakdate "${t}" is not a date`);
+}
+function episodeFromCell(val) {   // one date, or "start – end" / "start to end" / "start/end" → what the table stores
+  if (val == null || val === '') return '';
+  if (val instanceof Date) return val.toISOString().slice(0, 10);
+  { const many = parseEpisodeText(String(val)); if (many && (many.includes(',') || many.includes('/'))) return many; }   // several dates / ranges, or a range in words ("Sep 14-18")
+  const parts = String(val).split(/\s+(?:–|—|-|to)\s+|\//).map((x) => x.trim()).filter(Boolean);
+  if (parts.length === 1) return oneDay(parts[0]);
+  if (parts.length === 2) return `${oneDay(parts[0])}/${oneDay(parts[1])}`;
+  throw new HttpError(400, `Episode / Breakdate "${String(val).trim()}" is not a date or a date range`);
+}
+router.post('/import', requireAction('ingest.write'), upload.single('file'), virusScan, oneImportAtATime, asyncH(async (req, res) => {
+  if (!req.file) throw new HttpError(400, 'No file uploaded');
+  await assertSafeXlsx(req.file.buffer, req.file.originalname);
+  const ExcelJS = require('exceljs');
+  const wb = new ExcelJS.Workbook();
+  try { await wb.xlsx.load(req.file.buffer); } catch (e) { throw new HttpError(400, 'Could not read that file as an Excel workbook (.xlsx)'); }
+  const text = (c) => { const x = c && c.value; if (x == null) return ''; if (x instanceof Date) return x; if (x.richText) return x.richText.map((t) => t.text).join(''); if (typeof x === 'object' && x.text != null) return String(x.text); return typeof x === 'number' ? x : String(x); };
+  const recs = [];
+  for (const ws of wb.worksheets) {
+    if (!ws || ws.rowCount < 2) continue;
+    const colKey = {};
+    ws.getRow(1).eachCell((cell, n) => { const k = IMPORT_HEADERS[String(text(cell)).trim().toLowerCase()]; if (k) colKey[n] = k; });
+    if (!Object.values(colKey).includes('program')) continue;   // not an ingest sheet
+    for (let r = 2; r <= ws.rowCount && recs.length < 2000; r++) {
+      const row = ws.getRow(r);
+      const o = { __row: r, __sheet: ws.name };
+      let any = false;
+      for (const [n, k] of Object.entries(colKey)) { const val = text(row.getCell(Number(n))); if (val !== '' && val != null) { o[k] = val; any = true; } }
+      if (any) recs.push(o);
+    }
+  }
+  if (!recs.length) throw new HttpError(400, 'Nothing recognisable to import — expected the column headings this page\'s own Export has (PROG. NAME / PROJ. TITLE, Platform, Billable Party, Episode / Breakdate, …).');
+  let created = 0; let existing = 0;
+  const errors = [];
+  await db.tx(async (c) => {
+    const have = new Set((await c.query(`SELECT program, platform, COALESCE(billable_party, '') AS bp, COALESCE(source, '') AS src, COALESCE(episode_break_date_text, '') AS ep FROM ingest_records`)).rows
+      .map((x) => [x.program, x.platform, x.bp, x.src, x.ep].join('\u0001')));
+    for (const o of recs) {
+      try {
+        const body = {
+          program: String(o.program ?? ''), platform: String(o.platform ?? ''), billable_party: String(o.billable_party ?? ''), source: String(o.source ?? ''),
+          episode_break_date_text: episodeFromCell(o.episode_break_date_text),
+          materials_count: o.materials_count === undefined || o.materials_count === '' ? null : o.materials_count,
+          destination_folder: String(o.destination_folder ?? ''), remarks: String(o.remarks ?? ''),
+        };
+        const r = await parseBody(c, body, req.user);
+        const key = [r.program, r.platform, r.billable_party || '', r.source || '', r.episode_break_date_text || ''].join('\u0001');
+        if (have.has(key)) { existing++; continue; }   // compared with what was already there, not with earlier rows of this file
+        const { rows } = await c.query(
+          `INSERT INTO ingest_records (program, billable_party, platform, episode_date, episode_break_date_text, materials_count, source, destination_folder,
+             approved_by, requested_by_user_id, requested_by_psd, remarks, created_by, updated_by, row_pos)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13, (SELECT COALESCE(MAX(row_pos), 0) + 1 FROM ingest_records)) RETURNING id`,
+          [r.program, r.billable_party, r.platform, r.episode_date, r.episode_break_date_text, r.materials_count, r.source, r.destination_folder,
+            r.approved_by, r.requested_by_user_id, r.requested_by_psd, r.remarks, req.user.id]
+        );
+        await audit(req, 'ingest.create', 'ingest_record', rows[0].id, { ...r, imported: true }, c);
+        created++;
+      } catch (e) {
+        if (!(e instanceof HttpError)) throw e;
+        errors.push(`Row ${o.__row}${o.program ? ` (${String(o.program).slice(0, 40)})` : ''}: ${e.message}`);
+      }
+    }
+  });
+  if (created) {
+    try {
+      await notifyCapable('ingest.approve', {
+        title: `${created} new ingest request${created === 1 ? '' : 's'} imported`,
+        body: `${req.user.full_name} imported ${created} ingest request${created === 1 ? '' : 's'} from ${req.file.originalname}. They are waiting for approval.`,
+        link: '/ingest?approval=1', kind: 'ingest_new',
+      }, { excludeUserId: req.user.id });
+    } catch (e) { console.error('[ingest] import notification failed:', e.message); }
+  }
+  await audit(req, 'ingest.import', 'ingest_record', null, { file: req.file.originalname, rows: recs.length, created, existing, skipped: errors.length });
+  res.json({ ok: true, created, existing, skipped: errors.length, errors: errors.slice(0, 20) });
 }));
 
 router.get('/:id', asyncH(async (req, res) => {
@@ -199,25 +418,35 @@ router.get('/:id', asyncH(async (req, res) => {
   res.json(rows[0]);
 }));
 
+/** Tell the approvers a new request exists (sent when it first has both a Program and a Platform). */
+async function notifyNewIngest(c, actor, id, r) {
+  await notifyCapable('ingest.approve', {
+      title: `New ingest: ${r.program}`,
+      body: `${actor.full_name} added a new ingest request (${r.platform}). ${filled(r.destination_folder) ? 'It is waiting for your approval.' : 'Destination Folder and Approved By are waiting.'}`,
+      link: `/ingest?id=${id}`, kind: 'ingest_new',
+    }, { excludeUserId: actor.id }, c);
+}
+
 // Create — Requested By is always the signed-in user
 router.post('/', requireAction('ingest.write'), asyncH(async (req, res) => {
   const created = await db.tx(async (c) => {
     const r = await parseBody(c, req.body, req.user);
+    // the row it was typed into (a blank row of the table keeps its number); if that number is taken or none was given, the next free one at the bottom
+    await c.query('LOCK TABLE ingest_records IN SHARE ROW EXCLUSIVE MODE');
+    const want = Number.isInteger(req.body && req.body.row_pos) && req.body.row_pos >= 1 && req.body.row_pos <= 1000000 ? req.body.row_pos : null;
+    const taken = want ? (await c.query('SELECT 1 FROM ingest_records WHERE row_pos = $1', [want])).rowCount > 0 : true;
+    const pos = want && !taken ? want : (await c.query('SELECT COALESCE(MAX(row_pos), 0) + 1 AS p FROM ingest_records')).rows[0].p;
     const { rows } = await c.query(
       `INSERT INTO ingest_records (program, billable_party, platform, episode_date, episode_break_date_text,
          materials_count, source, destination_folder, approved_by, requested_by_user_id, requested_by_psd, remarks,
-         created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13) RETURNING id`,
+         created_by, updated_by, row_pos)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13, $14) RETURNING id`,
       [r.program, r.billable_party, r.platform, r.episode_date, r.episode_break_date_text,
         r.materials_count, r.source, r.destination_folder, r.approved_by, r.requested_by_user_id,
-        r.requested_by_psd, r.remarks, req.user.id]
+        r.requested_by_psd, r.remarks, req.user.id, pos]
     );
     await audit(req, 'ingest.create', 'ingest_record', rows[0].id, r, c);
-    await notifyCapable('ingest.approve', {
-      title: `New ingest: ${r.program}`,
-      body: `${req.user.full_name} added a new ingest request (${r.platform}). Destination Folder and Approved By are waiting.`,
-      link: `/ingest?id=${rows[0].id}`,
-    }, { excludeUserId: req.user.id }, c);
+    if (filled(r.program) && filled(r.platform)) await notifyNewIngest(c, req.user, rows[0].id, r);   // a half-filled row is announced once it has a Program and a Platform
     return rows[0];
   });
   res.status(201).json({ ok: true, id: created.id });
@@ -228,6 +457,18 @@ function interested(r, actorId) {
   return [r.created_by, r.requested_by_user_id, r.approved_by_user_id].filter((uid) => uid && uid !== actorId);
 }
 
+const isApproved = (r) => Boolean(r && (r.approved_at || (r.approved_by && String(r.approved_by).trim())));
+const filled = (x) => Boolean(x && String(x).trim());
+
+/** Tell the approvers a request is ready for them (Destination Folder filled in, not yet approved). */
+async function notifyReady(c, actor, id, r) {
+  await notifyCapable('ingest.approve', {
+    title: `For approval: ${r.program}`,
+    body: `${actor.full_name} filled in the Destination Folder${r.platform ? ` (${r.platform})` : ''}. This ingest request is waiting for your approval.`,
+    link: `/ingest?id=${id}`, kind: 'ingest_for_approval',
+  }, { excludeUserId: actor.id }, c);
+}
+
 router.put('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   let blocked = null;
@@ -235,7 +476,7 @@ router.put('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
   await db.tx(async (c) => {
     const cur = await c.query(
       `SELECT cm_status, episode_date, to_char(episode_date, 'YYYY-MM-DD') AS episode_date_iso,
-              episode_break_date_text, destination_folder, approved_by, requested_by_user_id, requested_by_psd,
+              episode_break_date_text, destination_folder, approved_by, approved_at, requested_by_user_id, requested_by_psd,
               program, billable_party, platform, materials_count, source, remarks
          FROM ingest_records WHERE id=$1 FOR UPDATE`, [id]
     );
@@ -256,6 +497,8 @@ router.put('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
     );
     const changes = changesOf(cur.rows[0], r);
     if (Object.keys(changes).length) await audit(req, 'ingest.update', 'ingest_record', id, { program: r.program, changes }, c);
+    if (!filled(cur.rows[0].destination_folder) && filled(r.destination_folder) && !isApproved(cur.rows[0]) && !filled(r.approved_by)) await notifyReady(c, req.user, id, r);
+    if ((!filled(cur.rows[0].program) || !filled(cur.rows[0].platform)) && filled(r.program) && filled(r.platform)) await notifyNewIngest(c, req.user, id, r);   // the half-filled row is now a complete request
   });
   } catch (e) {
     if (blocked) await auditBlocked(req, 'ingest.edit_blocked', id, { ...blocked, reason: e.message });
@@ -289,17 +532,13 @@ router.patch('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
   let row;
   try {
   row = await db.tx(async (c) => {
-    const cur = await c.query('SELECT cm_status, program, billable_party, platform, episode_break_date_text, materials_count, source, destination_folder, remarks FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
+    const cur = await c.query('SELECT cm_status, program, billable_party, platform, episode_break_date_text, materials_count, source, destination_folder, approved_by, approved_at, remarks FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
     if (!cur.rows.length) throw new HttpError(404, 'Ingest record not found');
     if (cur.rows[0].cm_status && !can(req.user, 'ingest.cm_complete')) {
       blocked = { cm_status: cur.rows[0].cm_status, program: cur.rows[0].program, field };
       throw new HttpError(409, `Record is marked ${cur.rows[0].cm_status} and can no longer be edited`);
     }
     if (field === 'platform') await assertDropdown(c, 'platform', value, 'Platform');
-    if (field === 'program') {
-      const old = await c.query('SELECT program FROM ingest_records WHERE id=$1', [id]);
-      if (old.rows[0].program !== value) await assertDropdown(c, 'program', value, 'PROG. NAME / PROJ. TITLE');
-    }
     // `field` is one of the fixed keys above (never user text), so it is safe to name the column here
     if (field === 'episode_break_date_text') {
       await c.query('UPDATE ingest_records SET episode_date=$2, episode_break_date_text=$3, updated_by=$4, updated_at=now() WHERE id=$1', [id, value.start, value.text, req.user.id]);   // separate params: one column is a date, the other text
@@ -311,6 +550,11 @@ router.patch('/:id', requireAction('ingest.write'), asyncH(async (req, res) => {
     delete changes.__none;
     const only = {}; if (changes[field]) only[field] = changes[field];
     if (Object.keys(only).length) await audit(req, 'ingest.update', 'ingest_record', id, { program: cur.rows[0].program, changes: only, via: 'table cell' }, c);
+    if (field === 'destination_folder' && !filled(cur.rows[0].destination_folder) && filled(value) && !isApproved(cur.rows[0])) await notifyReady(c, req.user, id, cur.rows[0]);
+    if ((field === 'program' || field === 'platform') && (!filled(cur.rows[0].program) || !filled(cur.rows[0].platform))) {   // the half-filled row is now a complete request
+      const after = { ...cur.rows[0], [field]: value };
+      if (filled(after.program) && filled(after.platform)) await notifyNewIngest(c, req.user, id, after);
+    }
     const out = await c.query(`${SELECT} WHERE i.id=$1`, [id]);
     return out.rows[0];
   });
@@ -342,13 +586,13 @@ router.post('/:id/approve', requireAction('ingest.approve'), asyncH(async (req, 
     await notifyUsers(interested(r, req.user.id), {
       title: `Ingest approved: ${r.program}`,
       body: `${req.user.full_name} approved this ingest request`,
-      link: `/ingest?id=${id}`,
+      link: `/ingest?id=${id}`, kind: 'ingest_approval',
     }, c);
     // Approval is what puts the request in front of CM, so the people who set the CM Status need to know it is ready.
     await notifyCapable('ingest.cm_complete', {
       title: `Ready for CM: ${r.program}`,
       body: `${req.user.full_name} approved an ingest request${r.platform ? ` (${r.platform})` : ''}. It is waiting for the CM Status.`,
-      link: `/ingest?id=${id}`,
+      link: `/ingest?id=${id}`, kind: 'ingest_ready_cm',
     }, { excludeUserId: req.user.id }, c);
   });
   res.json({ ok: true });
@@ -367,7 +611,7 @@ router.post('/:id/unapprove', requireAction('ingest.approve'), asyncH(async (req
     await notifyUsers(interested(r, req.user.id), {
       title: `Approval withdrawn: ${r.program}`,
       body: `${req.user.full_name} withdrew the approval of this ingest request`,
-      link: `/ingest?id=${id}`,
+      link: `/ingest?id=${id}`, kind: 'ingest_approval',
     }, c);
   });
   res.json({ ok: true });
@@ -393,7 +637,7 @@ router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(asyn
       await notifyUsers(interested(cur.rows[0], req.user.id), {
         title: `Ingest back to Pending: ${cur.rows[0].program}`,
         body: `${req.user.full_name} cleared the CM Status (was ${cur.rows[0].cm_status})`,
-        link: `/ingest?id=${id}`,
+        link: `/ingest?id=${id}`, kind: 'ingest_cm',
       }, c);
     });
     return res.json({ ok: true, status: 'Pending' });
@@ -401,11 +645,12 @@ router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(asyn
 
   await db.tx(async (c) => {
     const cur = await c.query(
-      `SELECT id, cm_status, cm_non_compliant_reason, program, created_by, requested_by_user_id, approved_by_user_id
+      `SELECT id, cm_status, cm_non_compliant_reason, program, created_by, requested_by_user_id, approved_by_user_id, approved_by, approved_at
          FROM ingest_records WHERE id=$1 FOR UPDATE`, [id]
     );
     const r = cur.rows[0];
     if (!r) throw new HttpError(404, 'Ingest record not found');
+    if (!isApproved(r)) throw new HttpError(409, 'The Status (CM) can only be set after the material has been approved');
     const newReason = decision === 'NON-COMPLIANT' ? reason : null;
     if (r.cm_status === decision && r.cm_non_compliant_reason === newReason) return;   // nothing changed: no new timestamp
 
@@ -435,29 +680,39 @@ router.post('/:id/cm-decision', requireAction('ingest.cm_complete'), asyncH(asyn
     await notifyUsers(interested(r, req.user.id), {
       title: `Ingest ${decision}: ${r.program}`,
       body: `${req.user.full_name} marked this ingest request ${decision}${reasonSuffix}`,
-      link: `/ingest?id=${id}`,
+      link: `/ingest?id=${id}`, kind: 'ingest_cm',
     }, c);
   });
   res.json({ ok: true, status: decision });
 }));
 
-// A request with a CM decision is kept as a historical record — except that an Admin may delete one that is DONE (NON-COMPLIANT ones stay).
-function deleteBlock(cm, user) {
-  if (!cm || (cm === 'DONE' && user && user.role === 'Admin')) return null;
-  return cm === 'DONE' ? 'Only an Admin can delete a request that is DONE in CM' : 'CM-completed requests are preserved as historical records';
+// Who may delete which request:
+//  - an Admin / System Admin may delete any request, including one marked DONE or NON-COMPLIANT in CM;
+//  - anyone else with the delete action may delete any request that has no CM decision yet (a CM decision is kept as a historical record);
+//  - anyone else who can add requests (an Editor) may delete only the requests they created themselves, and only while there is no CM decision.
+// Returns null when allowed, else the reason it is not.
+const isAdminRole = (user) => !!user && ['Admin', 'System Admin'].includes(user.role);
+function deleteBlock(rec, user) {
+  if (isAdminRole(user)) return null;
+  if (rec.cm_status) return 'CM-completed requests are preserved as historical records. Only an Admin can delete one';
+  if (!can(user, 'ingest.delete') && rec.created_by !== user.id) return 'You can delete only the requests you created';
+  return null;
 }
+const mayDeleteSome = (req, res, next) => (can(req.user, 'ingest.delete') || can(req.user, 'ingest.write')
+  ? next()
+  : res.status(403).json({ error: `Your role (${req.user && req.user.role}) or group does not permit: ingest.delete` }));
 
-router.delete('/:id', requireAction('ingest.delete'), asyncH(async (req, res) => {
+router.delete('/:id', mayDeleteSome, asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   let blocked = null;
   try {
   await db.tx(async (c) => {
-    const cur = await c.query('SELECT program, cm_status FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
+    const cur = await c.query('SELECT program, cm_status, created_by FROM ingest_records WHERE id=$1 FOR UPDATE', [id]);
     if (!cur.rows.length) throw new HttpError(404, 'Ingest record not found');
-    const block = deleteBlock(cur.rows[0].cm_status, req.user);
-    if (block) { blocked = { ...cur.rows[0], reason: block }; throw new HttpError(409, block); }
+    const block = deleteBlock(cur.rows[0], req.user);
+    if (block) { blocked = { program: cur.rows[0].program, cm_status: cur.rows[0].cm_status, reason: block }; throw new HttpError(409, block); }
     await c.query('DELETE FROM ingest_records WHERE id=$1', [id]);
-    await audit(req, 'ingest.delete', 'ingest_record', id, cur.rows[0], c);
+    await audit(req, 'ingest.delete', 'ingest_record', id, { program: cur.rows[0].program, cm_status: cur.rows[0].cm_status }, c);
   });
   } catch (e) {
     if (blocked) await auditBlocked(req, 'ingest.delete_blocked', id, blocked);
@@ -467,21 +722,37 @@ router.delete('/:id', requireAction('ingest.delete'), asyncH(async (req, res) =>
 }));
 
 // Batch delete: removes every selected record that may be deleted and reports the ones that were kept (same rules as above).
-router.post('/delete', requireAction('ingest.delete'), asyncH(async (req, res) => {
-  const raw = req.body && req.body.ids;
+router.post('/delete', mayDeleteSome, asyncH(async (req, res) => {
+  const body = req.body || {};
+  if (body.all) {
+    // "select all" across every page: every request matching the same filters as the list, minus the ones this person may not delete
+    const f = {};
+    ['status', 'program', 'platform', 'from', 'to', 'approval', 'q'].forEach((k) => { if (body.filters && body.filters[k]) f[k] = String(body.filters[k]).slice(0, 200); });
+    const { params, whereSql } = ingestFilter(f);
+    const out = await db.tx(async (c) => {
+      const { rows } = await c.query(
+        `SELECT i.id, i.program, i.cm_status, i.created_by FROM ingest_records i LEFT JOIN users ru ON ru.id=i.requested_by_user_id ${whereSql} ORDER BY i.id FOR UPDATE OF i`, params);
+      const ok = rows.filter((r) => !deleteBlock(r, req.user));
+      if (ok.length) await c.query('DELETE FROM ingest_records WHERE id = ANY($1::int[])', [ok.map((r) => r.id)]);
+      await audit(req, 'ingest.delete_all', 'ingest_record', null, { deleted: ok.length, kept: rows.length - ok.length, filters: f }, c);
+      return { deleted: ok.length, kept: rows.length - ok.length, missing: 0 };
+    });
+    return res.json({ ok: true, ...out });
+  }
+  const raw = body.ids;
   if (!Array.isArray(raw) || !raw.length) throw new HttpError(400, 'Choose at least one record');
   if (raw.length > 500) throw new HttpError(400, 'Delete at most 500 records at a time');
   const ids = [...new Set(raw.map((x) => v.id(x)))];
   const out = await db.tx(async (c) => {
-    const { rows } = await c.query('SELECT id, program, cm_status FROM ingest_records WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE', [ids]);
-    const ok = rows.filter((r) => !deleteBlock(r.cm_status, req.user));
+    const { rows } = await c.query('SELECT id, program, cm_status, created_by FROM ingest_records WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE', [ids]);
+    const ok = rows.filter((r) => !deleteBlock(r, req.user));
     const kept = rows.length - ok.length;
     if (ok.length) {
       await c.query('DELETE FROM ingest_records WHERE id = ANY($1::int[])', [ok.map((r) => r.id)]);
       for (const r of ok) await audit(req, 'ingest.delete', 'ingest_record', r.id, { program: r.program, cm_status: r.cm_status, batch: true }, c);
     }
-    for (const r of rows.filter((x) => deleteBlock(x.cm_status, req.user))) {
-      await audit(req, 'ingest.delete_blocked', 'ingest_record', r.id, { program: r.program, cm_status: r.cm_status, reason: deleteBlock(r.cm_status, req.user), batch: true }, c);
+    for (const r of rows.filter((x) => deleteBlock(x, req.user))) {
+      await audit(req, 'ingest.delete_blocked', 'ingest_record', r.id, { program: r.program, cm_status: r.cm_status, reason: deleteBlock(r, req.user), batch: true }, c);
     }
     return { deleted: ok.length, kept, missing: ids.length - rows.length };
   });

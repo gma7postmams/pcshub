@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { del, get, post, put } from '../../lib/api.js';
 import { PlusIcon } from '../../components/Icons.jsx';
-import { Empty, Modal, useConfirm, useToast } from '../../components/ui.jsx';
+import { Empty, Modal, Pager, useConfirm, usePageSize, useToast } from '../../components/ui.jsx';
+import JsonTools from './JsonTools.jsx';
 
 function PermChips({ perms, catalog }) {
   const pages = catalog.filter((p) => perms.includes(p.key));
@@ -21,6 +22,8 @@ export default function Groups({ model }) {
   const confirm = useConfirm();
   const [list, setList] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [size, setSize] = usePageSize('groups');
+  const [offset, setOffset] = useState(0);
 
   const load = useCallback(async () => setList(await get('/api/admin/groups')), []);
   useEffect(() => { load(); }, [load]);
@@ -31,13 +34,14 @@ export default function Groups({ model }) {
   };
 
   if (!list) return <Empty>Loading…</Empty>;
+  const start = Math.min(offset, Math.max(0, (Math.ceil(list.length / size) - 1) * size));
   return (
     <>
-      <div className="alert info mb-12">Users are enrolled in one group. The group decides which pages and sections they can open; their <strong>role</strong> decides what they can do there. Admin role opens everything.</div>
       <div className="card">
         <div className="card-head">
-          <h2>Groups <span className="dim">{list.length}</span></h2>
-          <button type="button" className="btn primary sm" id="add" onClick={() => setEditing({})}><PlusIcon /> Add group</button>
+          <h2 className="sr-only">Groups</h2>
+          <JsonTools path="/api/admin/groups" onDone={load} summary={(r) => `Imported: ${r.added} added, ${r.existing} already there`} />
+          <button type="button" className="btn primary" id="add" onClick={() => setEditing({})}><PlusIcon /> Add group</button>
         </div>
         <div className="table-wrap">
           {!list.length ? <Empty>No groups yet. Add one, tick the pages it can open, then enroll users in it.</Empty> : (
@@ -51,7 +55,7 @@ export default function Groups({ model }) {
                 </tr>
               </thead>
               <tbody>
-                {list.map((g) => (
+                {list.slice(start, start + size).map((g) => (
                   <tr key={g.id}>
                     <td className="group-col">
                       <strong>{g.name}</strong>
@@ -72,6 +76,8 @@ export default function Groups({ model }) {
           )}
         </div>
       </div>
+      <Pager total={list.length} offset={start} size={size} onOffset={setOffset} onSize={setSize} label="Groups per page" />
+      <div className="admin-note">Users are enrolled in one group. The group decides which pages and sections they can open; their <strong>role</strong> decides what they can do there. Admin role opens everything.</div>
       {editing ? <GroupForm g={editing.id ? editing : null} catalog={model.catalog} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} /> : null}
     </>
   );
@@ -81,7 +87,12 @@ function GroupForm({ g, catalog, onClose, onSaved }) {
   const toast = useToast();
   const [name, setName] = useState(g ? g.name : '');
   const [description, setDescription] = useState(g ? g.description || '' : '');
-  const [perms, setPerms] = useState(() => new Set(g ? g.perms : []));
+  const [perms, setPerms] = useState(() => {
+    const set = new Set(g ? g.perms : []);
+    const tabs = ['workload.all', 'workload.vgfx', 'workload.vedit', 'workload.audio', 'workload.prep'];
+    if (set.has('workload') && !tabs.some((k) => set.has(k))) tabs.forEach((k) => set.add(k));   // an older group with the page and no tab ticked sees every tab
+    return set;
+  });
 
   const togglePage = (p) => {
     setPerms((prev) => {
@@ -116,8 +127,8 @@ function GroupForm({ g, catalog, onClose, onSaved }) {
         <div>
           <div className="row mb-12">
             <strong className="grow">Pages &amp; sections this group can open</strong>
-            <button type="button" className="btn sm ghost" id="all" onClick={all}>Select all</button>
-            <button type="button" className="btn sm ghost" id="none" onClick={() => setPerms(new Set())}>Clear</button>
+            <button type="button" className="btn ghost" id="all" onClick={all}>Select all</button>
+            <button type="button" className="btn ghost" id="none" onClick={() => setPerms(new Set())}>Clear</button>
           </div>
           <div className="perm-tree">
             {catalog.map((p) => (
@@ -128,12 +139,13 @@ function GroupForm({ g, catalog, onClose, onSaved }) {
                     {p.sections.map((x) => (
                       <label className="check" key={x.key}><input type="checkbox" data-kind="section" checked={perms.has(x.key)} onChange={() => toggleKey(x.key)} /> {x.label}</label>
                     ))}
+                    {p.key === 'workload' ? <div className="dim" style={{ fontSize: 12 }}>Only the ticked tabs are shown to this group. With none ticked, every tab is shown.</div> : null}
                   </div>
                 ) : null}
               </div>
             ))}
           </div>
-          <div className="dim mt-12">Profile is always available. The Admin page is limited to the Admin role.</div>
+          <div className="dim mt-12">Profile is always available. Administration (Settings for the Admin role) follows the user's role, not the group.</div>
         </div>
       </form>
     </Modal>

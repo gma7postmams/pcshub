@@ -9,9 +9,17 @@ test.beforeEach(() => {
   P.applyRoles(Object.entries(P.DEFAULT_ROLE_ACTIONS).map(([name, actions]) => ({ name, actions })));
 });
 
-test('Admin holds every action and every page', () => {
-  for (const a of P.ALL_ACTIONS) assert.ok(P.can({ role: 'Admin', perms: [] }, a), a);
-  assert.ok(P.canPage({ role: 'Admin', perms: [] }, '/admin'));
+test('System Admin holds every action and every page', () => {
+  for (const a of P.ALL_ACTIONS) assert.ok(P.can({ role: 'System Admin', perms: [] }, a), a);
+  assert.ok(P.canPage({ role: 'System Admin', perms: [] }, '/admin'));
+});
+
+test('Admin holds every action except the Admin-area one, and every page', () => {
+  const admin = { role: 'Admin', perms: [] };
+  for (const a of P.ALL_ACTIONS.filter((x) => x !== 'admin')) assert.ok(P.can(admin, a), a);
+  assert.equal(P.can(admin, 'admin'), false);
+  assert.ok(P.canPage(admin, '/admin'));                 // the page opens; the server limits it to Audit Log and Dropdowns
+  assert.ok(P.canPage(admin, '/ingest'));
 });
 
 test('Ingest role can only set CM status', () => {
@@ -49,15 +57,23 @@ test('applyRoles: custom role, in-place update, Admin always full, unknown actio
   P.applyRoles([{ name: 'Manager', actions: ['ingest.write'] }, { name: 'QA', actions: ['workload.write', 'bogus.action'] }]);
   assert.strictEqual(P.ROLES, rolesRef);            // the same array / object other modules already hold
   assert.strictEqual(P.ROLE_ACTIONS, actionsRef);
-  assert.deepEqual(P.ROLES, ['Admin', 'Manager', 'QA']);
+  assert.deepEqual(P.ROLES, ['System Admin', 'Admin', 'Manager', 'QA']);
   assert.deepEqual(P.ROLE_ACTIONS.QA, ['workload.write']);
   assert.ok(P.can(user('QA'), 'workload.write'));
   assert.equal(P.can(user('QA'), 'ingest.write'), false);
-  assert.deepEqual(P.ROLE_ACTIONS.Admin, P.ALL_ACTIONS);
+  assert.deepEqual(P.ROLE_ACTIONS['System Admin'], P.ALL_ACTIONS);
+  assert.deepEqual(P.ROLE_ACTIONS.Admin, P.DEFAULT_ROLE_ACTIONS.Admin);   // no row for Admin: its defaults
   assert.equal(P.can(user('Ingest'), 'ingest.cm_complete'), false);   // a role that no longer exists has no actions
 });
 
 test('prototype-ish names are not roles or actions', () => {
   assert.equal(P.can(user('__proto__'), 'ingest.write'), false);
   assert.equal(P.can(user('Editor'), 'constructor'), false);
+});
+
+test('Admin is editable but can never hold the Admin-area action; System Admin is fixed', () => {
+  P.applyRoles([{ name: 'System Admin', actions: [] }, { name: 'Admin', actions: ['ingest.write', 'admin'] }]);
+  assert.deepEqual(P.ROLE_ACTIONS.Admin, ['ingest.write']);
+  assert.deepEqual(P.ROLE_ACTIONS['System Admin'], P.ALL_ACTIONS);
+  assert.ok(P.canPage({ role: 'Admin', perms: [] }, '/workload'));   // pages still all
 });

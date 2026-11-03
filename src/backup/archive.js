@@ -17,6 +17,57 @@ function isSafeUploadName(name) {
 }
 const isAllowedEntry = (name) => FIXED_ENTRIES.has(name) || isSafeUploadName(name);
 
+// ---------- Encryption at rest ----------
+// File layout: "PCHBENC1" | 12-byte IV | AES-256-GCM ciphertext of the whole .zip | 16-byte auth tag.
+// A file is only used after the tag checks out, so a wrong key or a single changed byte is refused, never half-read.
+const MAGIC = Buffer.from('PCHBENC1');
+const IV_LEN = 12;
+const TAG_LEN = 16;
+const encKey = () => (cfg.ENC_KEY ? crypto.createHash('sha256').update(`pcshub-backup-v1:${cfg.ENC_KEY}`).digest() : null);
+const encryptionOn = () => Boolean(encKey());
+
+async function isEncrypted(file) {
+  const fh = await fsp.open(file, 'r');
+  try {
+    const b = Buffer.alloc(MAGIC.length);
+    const { bytesRead } = await fh.read(b, 0, b.length, 0);
+    return bytesRead === MAGIC.length && b.equals(MAGIC);
+  } finally { await fh.close(); }
+}
+
+async function encryptFile(src, dst) {
+  const key = encKey();
+  if (!key) throw new Error('BACKUP_ENC_KEY is not set');
+  const iv = crypto.randomBytes(IV_LEN);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const out = fs.createWriteStream(dst, { mode: 0o600 });
+  out.write(Buffer.concat([MAGIC, iv]));
+  await pipeline(fs.createReadStream(src), cipher, out, { end: false });
+  await new Promise((resolve, reject) => out.end(cipher.getAuthTag(), (e) => (e ? reject(e) : resolve())));
+}
+
+async function decryptFile(src, dst) {
+  const key = encKey();
+  if (!key) throw new Error('This backup is encrypted, and BACKUP_ENC_KEY is not set on this server');
+  const { size } = await fsp.stat(src);
+  if (size < MAGIC.length + IV_LEN + TAG_LEN) throw new Error('Encrypted backup is truncated');
+  const fh = await fsp.open(src, 'r');
+  const iv = Buffer.alloc(IV_LEN);
+  const tag = Buffer.alloc(TAG_LEN);
+  try {
+    await fh.read(iv, 0, IV_LEN, MAGIC.length);
+    await fh.read(tag, 0, TAG_LEN, size - TAG_LEN);
+  } finally { await fh.close(); }
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  try {
+    await pipeline(fs.createReadStream(src, { start: MAGIC.length + IV_LEN, end: size - TAG_LEN - 1 }), decipher, fs.createWriteStream(dst, { mode: 0o600 }));
+  } catch (e) {
+    await fsp.unlink(dst).catch(() => {});
+    throw new Error(/auth/i.test(e.message) ? 'Cannot decrypt this backup: wrong BACKUP_ENC_KEY, or the file was changed' : e.message);
+  }
+}
+
 async function sha256File(file) {
   const h = crypto.createHash('sha256');
   await pipeline(fs.createReadStream(file), h);
@@ -67,7 +118,28 @@ const openStream = (zip, entry) => new Promise((resolve, reject) => {
  * read: entry names to return as text; extract: { entryName: destinationPath } for entries needed on disk.
  * @returns {{entries: {name,size,sha256}[], texts: object, problems: string[]}}
  */
-async function scanZip(file, { read = [], extract = {} } = {}) {
+async function scanZip(file, opts = {}) {
+  // An encrypted backup is decrypted to a private temporary file for the scan, which is removed straight after
+  let plain = file;
+  try {
+    if (await isEncrypted(file)) {
+      const tmpDir = path.join(cfg.BACKUP_DIR, '.tmp');
+      await fsp.mkdir(tmpDir, { recursive: true, mode: 0o700 });
+      plain = path.join(tmpDir, `dec-${crypto.randomBytes(8).toString('hex')}.zip`);
+      await decryptFile(file, plain);
+    }
+  } catch (e) {
+    return { entries: [], texts: {}, problems: [e.message], encrypted: true };
+  }
+  try {
+    const r = await scanPlainZip(plain, opts);
+    return { ...r, encrypted: plain !== file };
+  } finally {
+    if (plain !== file) await fsp.unlink(plain).catch(() => {});
+  }
+}
+
+async function scanPlainZip(file, { read = [], extract = {} } = {}) {
   const entries = [];
   const texts = {};
   const problems = [];
@@ -142,4 +214,4 @@ async function hashEntry(zip, entry, { text, dest, texts }) {
   return { name: entry.fileName, size, sha256: hash.digest('hex') };
 }
 
-module.exports = { sha256File, walk, writeZip, scanZip, isAllowedEntry };
+module.exports = { sha256File, walk, writeZip, scanZip, isAllowedEntry, encryptFile, decryptFile, isEncrypted, encryptionOn };

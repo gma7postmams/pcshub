@@ -10,7 +10,12 @@
 //    (e.g. filling Destination Folder / Approved by requires Manager role + a group with the Ingest Tracker page).
 //  - Profile is always available. Admin page is Admin-role only (not group-assignable).
 
-const ROLES = ['Admin', 'Manager', 'Editor', 'Ingest', 'Viewer'];
+// System Admin: everything, including the whole Admin area. Admin: every page and action in the app, but in the Admin area only
+// the Audit Log, Dropdowns and Branding (the page is called Settings for Admin, Administration for System Admin). Everyone else: what their role and group allow.
+const SYSADMIN = 'System Admin';
+const ROLES = [SYSADMIN, 'Admin', 'Manager', 'Editor', 'Ingest', 'Viewer'];
+const isSysAdmin = (u) => Boolean(u && u.role === SYSADMIN);
+const isAdminish = (u) => Boolean(u && (u.role === 'Admin' || u.role === SYSADMIN));   // may delete whole lists, delete DONE ingest rows, opens every page
 
 // Pages (and their sections) that a group can be granted. Keys are stored in group_permissions.
 // A section is only effective if its page is also granted.
@@ -25,9 +30,21 @@ const CATALOG = [
     ],
   },
 
-  { key: 'ingest', label: 'Ingest Tracker', path: '/ingest', sections: [] },
-  { key: 'workload', label: 'Workload Tracker', path: '/workload', sections: [] },
+  { key: 'ingest', label: 'Ingest', path: '/ingest', sections: [] },
   { key: 'plugs', label: 'PSD Daily Plug List', path: '/plug-list', sections: [] },
+  {
+    key: 'workload',
+    label: 'Workload',
+    path: '/workload',
+    // Which tabs of the Workload Tracker the group sees. A group with the page but none of these ticked sees every tab (as before this existed).
+    sections: [
+      { key: 'workload.all', label: 'All Tab' },
+      { key: 'workload.vgfx', label: 'VGFX Tab' },
+      { key: 'workload.vedit', label: 'VEDIT Tab' },
+      { key: 'workload.audio', label: 'Audio Tab' },
+      { key: 'workload.prep', label: 'Ongoing Tab' },
+    ],
+  },
 
   {
     key: 'knowledge',
@@ -38,8 +55,8 @@ const CATALOG = [
 ];
 
 const FIXED_PAGES = [
-  { key: 'admin', label: 'Admin', path: '/admin', roleOnly: 'Admin' },
-  { key: 'activity-history', label: 'Activity History', path: '/activity-history', always: true },
+  { key: 'admin', label: 'Admin', path: '/admin', roleOnly: ['Admin', 'System Admin'] },
+  { key: 'activity-history', label: 'Activity History', path: '/activity-history', action: 'activity.view' },
   { key: 'profile', label: 'Profile', path: '/profile', always: true, inNav: false },
 ];
 
@@ -52,6 +69,17 @@ const SECTION_PAGE = dict(CATALOG.flatMap((p) => p.sections.map((s) => [s.key, p
 
 // Role -> actions
 const DEFAULT_ROLE_ACTIONS = Object.assign(Object.create(null), {
+  'System Admin': [
+    'ingest.write',
+    'ingest.delete',
+    'ingest.approve',
+    'ingest.cm_complete',
+    'workload.write',
+    'knowledge.write',
+    'plugs.write',
+    'activity.view',
+    'admin'
+  ],
   Admin: [
     'ingest.write',
     'ingest.delete',
@@ -60,7 +88,7 @@ const DEFAULT_ROLE_ACTIONS = Object.assign(Object.create(null), {
     'workload.write',
     'knowledge.write',
     'plugs.write',
-    'admin'
+    'activity.view'
   ],
 
   Manager: [
@@ -68,11 +96,11 @@ const DEFAULT_ROLE_ACTIONS = Object.assign(Object.create(null), {
     'ingest.approve',
     'ingest.cm_complete',
     'workload.write',
-    'knowledge.write',
-    'plugs.write'
-  ],
-  Editor:  ['ingest.write'],
-  Ingest:  ['ingest.cm_complete'],   // Ingest Tracker only: Status (CM) and its NON-COMPLIANT reason, nothing else
+    'plugs.write',
+    'activity.view'
+  ],   // no knowledge.write: only Admin / System Admin add, change or delete Knowledge Base documents; everyone with the page can open and download them
+  Editor:  ['ingest.write', 'plugs.write', 'activity.view'],   // plugs.write: edit the PSD Daily Plug List (page access still comes from the group)
+  Ingest:  ['ingest.cm_complete'],   // Ingest only: Status (CM) and its NON-COMPLIANT reason, nothing else
   Viewer:  [],
 });
 // The live role -> actions map. It starts from the built-in defaults and is replaced from the database (roles / role_actions,
@@ -88,20 +116,24 @@ const ACTION_PAGE = Object.assign(Object.create(null), {
   'workload.write': 'workload',
   'knowledge.write': 'knowledge',
   'plugs.write': 'plugs',
+  'activity.view': null,
   'admin': null,
 });
 
 const ALL_ACTIONS = Object.keys(ACTION_PAGE);
-const BUILTIN_ROLES = ['Admin', 'Manager', 'Editor', 'Ingest', 'Viewer'];
+const BUILTIN_ROLES = ['System Admin', 'Admin', 'Manager', 'Editor', 'Ingest', 'Viewer'];
+const ADMIN_ONLY_ACTIONS = ['admin'];   // held by System Admin alone
 
 /** rows: [{ name, actions: string[] }]. Admin always holds every action; unknown actions are dropped. */
 function applyRoles(rows) {
   const names = rows.map((r) => r.name);
-  if (!names.includes('Admin')) names.unshift('Admin');
+  for (const n of ['Admin', SYSADMIN]) if (!names.includes(n)) names.unshift(n);
   ROLES.splice(0, ROLES.length, ...names);
   for (const k of Object.keys(ROLE_ACTIONS)) delete ROLE_ACTIONS[k];
-  for (const r of rows) ROLE_ACTIONS[r.name] = r.name === 'Admin' ? [...ALL_ACTIONS] : (r.actions || []).filter((a) => ALL_ACTIONS.includes(a));
-  if (!ROLE_ACTIONS.Admin) ROLE_ACTIONS.Admin = [...ALL_ACTIONS];
+  for (const r of rows) ROLE_ACTIONS[r.name] = (r.actions || []).filter((a) => ALL_ACTIONS.includes(a));
+  ROLE_ACTIONS[SYSADMIN] = [...ALL_ACTIONS];                       // System Admin is fixed: always everything
+  const adminRow = rows.find((r) => r.name === 'Admin');          // Admin is editable (Admin > Roles), but never holds the Admin-area action
+  ROLE_ACTIONS.Admin = adminRow ? ROLE_ACTIONS.Admin.filter((a) => !ADMIN_ONLY_ACTIONS.includes(a)) : DEFAULT_ROLE_ACTIONS.Admin.filter((a) => !ADMIN_ONLY_ACTIONS.includes(a));
 }
 
 function isValidKey(k) { return ALL_KEYS.includes(k); }
@@ -116,15 +148,26 @@ function normalizeKeys(keys) {
 /** user: { role, perms: string[] } */
 function effectiveKeys(user) {
   if (!user) return new Set();
-  if (user.role === 'Admin') return new Set(ALL_KEYS);
-  return new Set(normalizeKeys(user.perms));
+  if (isAdminish(user)) return new Set(ALL_KEYS);
+  const set = new Set(normalizeKeys(user.perms));
+  if (set.has('workload') && !WORKLOAD_TAB_KEYS.some((k) => set.has(k))) WORKLOAD_TAB_KEYS.forEach((k) => set.add(k));   // no tab ticked = every tab
+  return set;
+}
+
+const WORKLOAD_TAB_KEYS = ['workload.all', 'workload.vgfx', 'workload.vedit', 'workload.audio', 'workload.prep'];
+const WORKLOAD_TAB_BY_KEY = { 'workload.all': 'ALL', 'workload.vgfx': 'VGFX', 'workload.vedit': 'VEDIT', 'workload.audio': 'AUDIO', 'workload.prep': 'PREP' };
+/** The Workload Tracker tabs this person may open, in tab order: ['ALL', 'VGFX', 'VEDIT', 'AUDIO'] or fewer. */
+function workloadTabs(user) {
+  const eff = effectiveKeys(user);
+  return WORKLOAD_TAB_KEYS.filter((k) => eff.has(k)).map((k) => WORKLOAD_TAB_BY_KEY[k]);
 }
 
 function canPage(user, path) {
   const page = PAGE_BY_PATH[path];
   if (!page || !user) return false;
   if (page.always) return true;
-  if (page.roleOnly) return user.role === page.roleOnly;
+  if (page.action) return !!user && !isAdminish(user) && can(user, page.action);   // Admins read the Audit Log instead
+  if (page.roleOnly) return [].concat(page.roleOnly).includes(user.role);
   return effectiveKeys(user).has(page.key);
 }
 
@@ -145,9 +188,9 @@ function allowedPages(user) {
     .filter((p) => eff.has(p.key))
     .map(({ key, label, path }) => ({ key, label, path }));
 
-  if (user && user.role === 'Admin') {
-    pages.push({ key: 'admin', label: 'Admin', path: '/admin' });
-  } else {
+  if (isAdminish(user)) {
+    pages.push({ key: 'admin', label: user.role === SYSADMIN ? 'Administration' : 'Settings', path: '/admin' });   // the same page, named for what the role can do there
+  } else if (can(user, 'activity.view')) {
     pages.push({
       key: 'activity-history',
       label: 'Activity History',
@@ -180,6 +223,6 @@ function landingPath(user) {
 }
 
 module.exports = {
-  ROLES, CATALOG, FIXED_PAGES, ROLE_ACTIONS, DEFAULT_ROLE_ACTIONS, ALL_ACTIONS, BUILTIN_ROLES, applyRoles, ACTION_PAGE, PAGE_BY_PATH,
-  normalizeKeys, canPage, canSection, can, allowedPages, allowedSections, allowedActions, landingPath,
+  ROLES, SYSADMIN, isSysAdmin, isAdminish, CATALOG, FIXED_PAGES, ROLE_ACTIONS, DEFAULT_ROLE_ACTIONS, ALL_ACTIONS, BUILTIN_ROLES, applyRoles, ACTION_PAGE, PAGE_BY_PATH,
+  normalizeKeys, effectiveKeys, workloadTabs, canPage, canSection, can, allowedPages, allowedSections, allowedActions, landingPath,
 };

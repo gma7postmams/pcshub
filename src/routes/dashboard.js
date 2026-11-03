@@ -10,6 +10,7 @@ const router = express.Router();
 //   kpis               -> the Dashboard section "Ingest KPIs" granted to their group
 //   users              -> the Dashboard section "Active users" granted to their group
 //   workload           -> they can open the Workload Tracker
+const { auditBus } = require('../audit');
 const { ACTIVE_MINUTES, presenceBus } = require('./presence');   // "active now" = used the app within this many minutes
 // The window the "Workload by day" chart covers (the dropdown at the top right of the Workload Tracker block).
 const RANGES = Object.assign(Object.create(null), {   // the order here is the order of the menu (All time first); the default is DEFAULT_RANGE below
@@ -21,6 +22,18 @@ const RANGES = Object.assign(Object.create(null), {   // the order here is the o
 });
 const DEFAULT_RANGE = 'week';   // what people see until they choose something else
 const rangeKey = (q) => (RANGES[q] ? q : DEFAULT_RANGE);
+// The first and last day (SQL) of each fixed window: the chart's bars and the Priority card both use them, so they always cover the same days.
+const RANGE_SQL = {
+  week: { start: 'CURRENT_DATE - 6', end: 'CURRENT_DATE + 7' },
+  month: { start: `date_trunc('month', CURRENT_DATE)::date`, end: `(date_trunc('month', CURRENT_DATE) + interval '1 month - 1 day')::date` },
+  last30: { start: 'CURRENT_DATE - 29', end: 'CURRENT_DATE' },
+  next30: { start: 'CURRENT_DATE', end: 'CURRENT_DATE + 29' },
+};
+// Items flagged Priority whose Work Date is inside the chosen window (All time = every flagged item)
+async function priorityIn(range) {
+  const w = range === 'all' ? '' : `AND work_date BETWEEN ${RANGE_SQL[range].start} AND ${RANGE_SQL[range].end}`;
+  return (await db.query(`SELECT count(*)::int AS n FROM workload_items WHERE is_priority ${w}`)).rows[0].n;
+}
 const BUCKET_NAME = { day: 'day', week: 'week', month: 'month', year: 'year' };
 
 /**
@@ -30,8 +43,7 @@ const BUCKET_NAME = { day: 'day', week: 'week', month: 'month', year: 'year' };
  */
 async function workloadDays(range) {
   if (range !== 'all') {
-    const start = { week: 'CURRENT_DATE - 6', month: `date_trunc('month', CURRENT_DATE)::date`, last30: 'CURRENT_DATE - 29', next30: 'CURRENT_DATE' }[range];
-    const end = { week: 'CURRENT_DATE + 7', month: `(date_trunc('month', CURRENT_DATE) + interval '1 month - 1 day')::date`, last30: 'CURRENT_DATE', next30: 'CURRENT_DATE + 29' }[range];
+    const { start, end } = RANGE_SQL[range];
     const { rows } = await db.query(
       `SELECT d::date AS day, d::date AS last, count(w.id)::int AS n
          FROM generate_series(${start}, ${end}, interval '1 day') d
@@ -64,15 +76,17 @@ const unitsFor = (team) => Object.entries(UNIT_TEAMS).filter(([, teams]) => team
 
 // Who is working in the app right now, and who was earlier in the last 24 hours. Used by the full dashboard and, on its own, by the
 // light GET /api/dashboard/users the page polls every few seconds so people's locations stay current.
+// A person only sees the people in their own group (and themselves); a System Admin sees everybody.
 async function activeUsers(u) {
   const { rows } = await db.query(
-    `SELECT p.user_id AS id, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name, u.role, p.page, p.last_active_at,
-            (p.last_active_at >= now() - ($1 || ' minutes')::interval) AS active
+    `SELECT p.user_id AS id, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name, u.role, u.avatar_v AS av, p.page, p.last_active_at,
+            (p.left_at IS NULL AND p.last_active_at >= now() - ($1 || ' minutes')::interval) AS active
        FROM user_presence p JOIN users u ON u.id = p.user_id
       WHERE u.is_active AND p.last_active_at >= now() - interval '24 hours'
-      ORDER BY p.last_active_at DESC LIMIT 60`, [String(ACTIVE_MINUTES)]
+        AND ($2::boolean OR u.id = $3 OR (u.group_id IS NOT NULL AND u.group_id = $4))
+      ORDER BY p.last_active_at DESC LIMIT 60`, [String(ACTIVE_MINUTES), u.role === 'System Admin', u.id, u.group_id || null]
   );
-  const row = (r) => ({ id: r.id, name: r.name, role: r.role, page: r.page && PAGE_BY_PATH[r.page] ? PAGE_BY_PATH[r.page].label : null, path: r.page && PAGE_BY_PATH[r.page] ? r.page : null, lastActiveAt: r.last_active_at, you: r.id === u.id });
+  const row = (r) => ({ id: r.id, name: r.name, role: r.role, av: r.av ? Number(r.av) : null, page: r.page && PAGE_BY_PATH[r.page] ? PAGE_BY_PATH[r.page].label : null, path: r.page && PAGE_BY_PATH[r.page] ? r.page : null, lastActiveAt: r.last_active_at, you: r.id === u.id });
   return { windowMinutes: ACTIVE_MINUTES, active: rows.filter((r) => r.active).map(row), earlier: rows.filter((r) => !r.active).slice(0, 12).map(row) };
 }
 
@@ -106,7 +120,7 @@ async function recentActivity(u) {
   // join keys are compared as text, so a non-numeric entity_id on some other kind of row can never make the cast fail
   const { rows } = await db.query(
     `SELECT x.id, x.user_id, x.action, x.entity_id, x.details, x.created_at,
-            COALESCE(NULLIF(btrim(u.full_name), ''), x.username, 'Someone') AS name,
+            COALESCE(NULLIF(btrim(u.full_name), ''), x.username, 'Someone') AS name, u.avatar_v AS av,
             COALESCE(i.program, w.prog_name, x.details->>'program', x.details->>'prog_name', x.details->>'title', x.details->>'filename') AS label
        FROM (SELECT a.*, CASE WHEN a.entity = 'approval_request' THEN a.details->>'ingest_record_id'
                               WHEN a.entity = 'ingest_record' THEN a.entity_id END AS ingest_key
@@ -124,19 +138,57 @@ async function recentActivity(u) {
     if (seen.has(k)) continue;
     seen.add(k);
     const a = ACTIVITY[r.action];
-    items.push({ id: r.id, name: r.name, verb: a.verb, label: r.label || null, hue: a.hue, path: a.page, at: r.created_at, you: r.user_id === u.id });
+    items.push({ id: r.id, uid: r.user_id, av: r.av ? Number(r.av) : null, name: r.name, verb: a.verb, label: r.label || null, hue: a.hue, path: a.page, at: r.created_at, you: r.user_id === u.id });
     if (items.length >= ACTIVITY_SHOWN) break;
   }
   return items;
 }
 
+// Recent Activity on its own, and as a live stream: a new line is pushed within a moment of it being written to the audit log.
+router.get('/activity', asyncH(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ activity: await recentActivity(req.user) });
+}));
+router.get('/activity/stream', (req, res) => {
+  res.status(200).set({
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-store, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders();
+  res.write('retry: 3000\n\n');
+  let last = '';
+  let closed = false;
+  let busy = false;
+  let again = false;
+  const push = async () => {
+    if (closed) return;
+    if (busy) { again = true; return; }
+    busy = true;
+    try {
+      const activity = await recentActivity(req.user);
+      const key = JSON.stringify((activity || []).map((a) => a.id));
+      if (!closed && key !== last) { last = key; res.write(`data: ${JSON.stringify({ activity })}\n\n`); } else if (!closed) res.write(': ping\n\n');
+    } catch (e) { /* the next change or tick tries again */ }
+    busy = false;
+    if (again) { again = false; push(); }
+  };
+  let timer = null;
+  const onChange = () => { clearTimeout(timer); timer = setTimeout(push, 150); };
+  auditBus.on('change', onChange);
+  const tick = setInterval(push, 20000);
+  req.on('close', () => { closed = true; clearTimeout(timer); clearInterval(tick); auditBus.off('change', onChange); });
+  push();
+});
+
 // Just the chart's days for another range (the dropdown), without recomputing the whole dashboard.
 router.get('/days', asyncH(async (req, res) => {
-  if (!canPage(req.user, '/workload')) return res.status(403).json({ error: 'No access to the Workload Tracker' });
+  if (!canPage(req.user, '/workload')) return res.status(403).json({ error: 'No access to the Workload page' });
   const range = rangeKey(req.query.range);
   res.set('Cache-Control', 'no-store');
   const { rows, bucket } = await workloadDays(range);
-  res.json({ range, label: RANGES[range].label, sub: rangeSub(range, bucket), bucket, days: rows });
+  res.json({ range, label: RANGES[range].label, sub: rangeSub(range, bucket), bucket, days: rows, priority: await priorityIn(range) });
 }));
 
 router.get('/users', asyncH(async (req, res) => {
@@ -170,7 +222,7 @@ router.get('/users/stream', (req, res) => {
     try {
       const users = await activeUsers(req.user);
       // only what the cards show decides whether there is something new to send (a heartbeat alone changes nothing visible)
-      const key = JSON.stringify([users.active.map((p) => [p.id, p.page, p.role, p.name]), users.earlier.map((p) => [p.id, p.page])]);
+      const key = JSON.stringify([users.active.map((p) => [p.id, p.page, p.role, p.name]), users.earlier.map((p) => [p.id, p.page, p.lastActiveAt])]);
       if (!closed && key !== last) { last = key; res.write(`data: ${JSON.stringify({ users })}\n\n`); } else if (!closed) res.write(': ping\n\n');
     } catch (e) { /* the next change or tick tries again */ }
     busy = false;
@@ -229,7 +281,7 @@ router.get('/', asyncH(async (req, res) => {
                        count(*) FILTER (WHERE work_date = CURRENT_DATE)::int AS today,
                        count(*) FILTER (WHERE work_date >= date_trunc('week', CURRENT_DATE)::date
                                           AND work_date <  date_trunc('week', CURRENT_DATE)::date + 7)::int AS this_week,
-                       count(*) FILTER (WHERE is_priority)::int AS priority
+                       0::int AS priority
                   FROM workload_items`),
       db.query(`SELECT units_concerned AS u, count(*)::int AS n FROM workload_items WHERE units_concerned IS NOT NULL GROUP BY 1`),
       workloadDays(range),
@@ -245,7 +297,7 @@ router.get('/', asyncH(async (req, res) => {
        ) x`, [unitsFor('VGFX'), unitsFor('VEDIT')])).rows[0].n;
     const t = totals.rows[0];
     out.workload = {
-      total: t.total, today: t.today, thisWeek: t.this_week, priority: t.priority, breakdatesNext7Days: nextWeek,
+      total: t.total, today: t.today, thisWeek: t.this_week, priority: await priorityIn(range), breakdatesNext7Days: nextWeek,
       byTeam, byDay: byDay.rows, bucket: byDay.bucket, range, rangeLabel: RANGES[range].label, rangeSub: rangeSub(range, byDay.bucket), ranges: Object.entries(RANGES).map(([k, v]) => ({ key: k, label: v.label })),
     };
   }

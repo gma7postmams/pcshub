@@ -1,18 +1,24 @@
-import { cloneElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { cloneElement, Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { isBlockText, pasteFallback } from '../lib/pasteFallback.js';
+import { normDate, parseLooseDate } from '../components/PlugGrid.jsx';
+import { loadView as loadViewState, saveView as saveViewState, loadDialog, syncDialog, loadEdit, syncEdit, loadCellText, saveCellText } from '../lib/viewstate.js';
 import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
-import { ColumnIcon, DownloadIcon, LockIcon, PlusIcon, SearchIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, FilterSelect, PlatformCell, Pager, RowMenu, SortTh, TypePill, UnitsPills, WorkDate } from '../components/wl.jsx';
+import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FlagIcon, FullscreenIcon, LockIcon, PlusIcon, SaveIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
+import { DateChip, DateRange, ExportButton, ApplyGroupIcon, AutoDetectIcon, FilterSelect, GroupIcon, PlatformCell, UngroupIcon, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useNarrow, useSpareRows } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
+import { useLive, useCellPresence, rangeCells, peerStyle } from '../lib/live.js';
 
 // Workload Tracker — ONE table. "Units Concerned" says which team(s) a plug is for; the tabs
 // (All / VGFX / VEDIT / Audio) are filters over it. Fields, per-tab columns and the Platform rules come
 // from /api/workload/meta (field types follow the red notes in the Sept 2026 template:
 // dropdown / Date / Open). Table mode = read + add/edit form; Excel mode = editable grid with batch save.
-const PAGE = 50;
+const PAGE = 25;
+const ALL_ROWS = 5000;   // the "All" choice in Rows: up to this many on one page (more are reached with the page buttons)
+const ROW_SIZES = [25, 50, 100, 200, ALL_ROWS];   // rows per page (the server saves at most 200 changed rows at once; Save sends a long page in several goes)
 const GRID_LIMIT = 200;
 const CARDS_BELOW = 900;   // window width under which table rows become cards
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
@@ -35,6 +41,10 @@ function toBreakdateIso(t) {
   if (m) { const mon = MON3.indexOf(m[1].toLowerCase()); return mon < 0 ? null : `${m[3]}-${pad(mon + 1)}-${pad(Number(m[2]))}T${clock(m[4], m[5], m[6])}`; }
   m = /^(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\.?,?\s+(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*(AM|PM)?)?$/i.exec(s);
   if (m) { const mon = MON3.indexOf(m[2].toLowerCase()); return mon < 0 ? null : `${m[3]}-${pad(mon + 1)}-${pad(Number(m[1]))}T${clock(m[4], m[5], m[6])}`; }
+  // a plain date with no year ("SEP 3", "Mon, Oct 12, 2026") and an optional time ("4pm", "4:30 PM"); no time = midnight
+  m = /^(.*?)(?:[ ,]+(\d{1,2})(?::(\d{2}))?\s*(am|pm))?$/i.exec(s);
+  const d = m && parseLooseDate(m[1]);
+  if (d) return `${d}T${clock(m[2], m[3], m[4])}`;
   return null;
 }
 // Both teams' times in one pasted cell ('VGFX  Sep 28, 2026 4:00 PM' / 'VEDIT  Sep 28, 2026 10:00 PM', on separate lines, with
@@ -111,6 +121,14 @@ function bdApply(row, text, unitTeams, replace) {
   });
   return patch;
 }
+/** A VGFX time pasted onto a VEDIT-only row (or the other way round) is refused: returns the message, or '' when the text fits the row. */
+function bdMismatch(row, text, unitTeams) {
+  if (!row.units_concerned) return '';
+  const teams = bdTeams(unitTeams, row.units_concerned);
+  const raw = normBreakdate(text, /^\d{4}/.test(row.work_date || '') ? row.work_date.slice(0, 4) : new Date().getFullYear());
+  const bad = Object.keys(parseBreakdatePairs(raw)).map((k) => (k === 'breakdate_vgfx' ? 'VGFX' : 'VEDIT')).filter((t) => !teams.includes(t));
+  return bad.length ? `Can't paste a ${bad.join(' / ')} time into a "${row.units_concerned}" row — it has no ${bad.join(' / ')} Breakdate / Time. Change its Units Concerned first.` : '';
+}
 const BD_DEF = { multiline: true, max: 300, hint: 'VGFX  Sep 28, 2026 4:00 PM' };
 /** The merged Breakdate / Time grid cell. While it is being edited it shows exactly what was typed; when it loses focus (or a paste /
     undo changes it) it shows the times as the row now holds them. */
@@ -179,8 +197,10 @@ function canonUnit(meta, text) {
 }
 // Table / Excel AND the tab (All, VGFX, VEDIT, Audio) are remembered across a refresh, for the current sign-in only (they start as Table / All again after signing out and
 // in) — the same rule as the Dashboard's period menu. Stored together with that sign-in's key (session_key from /api/auth/me).
+const fmtMDY = (iso) => `${iso.slice(5, 7)}${iso.slice(8, 10)}${iso.slice(2, 4)}`;   // 2026-10-10 -> 101026 (Script, Artwork / STB, Audio Guide dates)
 const VIEW_KEY = 'wl:mode';
-const TAB_KEYS = ['ALL', 'VGFX', 'VEDIT', 'AUDIO'];
+const TAB_KEYS = ['ALL', 'VGFX', 'VEDIT', 'AUDIO', 'PREP'];
+// PREP tab: VO, Script, Artwork / STB and Audio Guide are not shown there; they decide whether a row sits in the upper part (all four available) or the lower part (waiting for the ones listed).
 const readView = (sessionKey) => {
   const fresh = { mode: 'table', tab: 'ALL' };
   if (!sessionKey) return fresh;
@@ -253,6 +273,7 @@ function AutoTextarea({ value, ...props }) {
   const fit = useCallback(() => {
     const el = ref.current;
     if (!el) return;
+    if (!el.value) { el.style.height = '32px'; return; }   // empty: one line, so the centred placeholder sits in the middle of the cell (height:auto would give two rows)
     el.style.height = 'auto';
     el.style.height = `${Math.max(el.scrollHeight + 2, 32)}px`;
   }, []);
@@ -312,25 +333,35 @@ function GridCellInput({ def, value, onChange, disabled, ...rest }) {
 
 // One table cell turned into its own editor. Enter or clicking away saves, Esc cancels; dropdowns save as soon as you pick.
 // A failed save (e.g. an invalid value) keeps the editor open with the message shown.
-function CellEditor({ def, initial, lookups, onSave, onCancel }) {
-  const [val, setVal] = useState(initial ?? '');
+function CellEditor({ def, initial, lookups, onSave, onCancel, onUndo, copyText, memo, startText }) {
+  const toast = useToast();
+  const [val, setValRaw] = useState(() => (startText !== undefined ? startText : memo ? loadCellText('workload', memo, initial ?? '') : initial ?? ''));   // startText: the key pressed on a selected cell, which replaces what was there
+  const setVal = (v) => { setValRaw(v); if (memo) saveCellText('workload', memo, v); };
   const [busy, setBusy] = useState(false);
   const box = useRef(null);
   const finished = useRef(false);
+  const latest = useRef({});
+  latest.current = { val, initial, onSave };
+  // the cell is closed by something else (a click on another cell or a row number): what was typed / pasted is still saved, like clicking away
+  useEffect(() => () => {
+    const L = latest.current;
+    if (finished.current || String(L.val ?? '') === String(L.initial ?? '')) return;
+    finished.current = true;
+    Promise.resolve(L.onSave(L.val)).catch(() => { /* the message was already shown */ });
+  }, []);
   const field = () => box.current && box.current.querySelector('input, select, textarea');
   useEffect(() => {
     const el = def.kind === 'date_or_text' && box.current ? box.current.querySelector('input') : field();   // Artwork / STB: the date / text box, not its format dropdown
     if (!el) return;
     el.focus();
     if (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type === 'text')) el.setSelectionRange(el.value.length, el.value.length);
-    // dropdowns open straight away; date fields open focused (the browser's own picker would swallow Enter while it is open)
-    try { if (el.tagName === 'SELECT') el.showPicker(); } catch (e) { /* needs a user gesture; the field is focused anyway */ }
+    // a dropdown stays closed (so Ctrl+V can paste into it); click it again, or Alt+Down, to open the list
   }, []);
-  const save = async (value) => {
+  const save = async (value, move) => {
     if (finished.current) return;
     finished.current = true;
     setBusy(true);
-    try { await onSave(value); } catch (e) {
+    try { await onSave(value, move); } catch (e) {
       finished.current = false;
       setBusy(false);
       setTimeout(() => { const el = field(); if (el) el.focus(); }, 0);
@@ -341,14 +372,64 @@ function CellEditor({ def, initial, lookups, onSave, onCancel }) {
     setVal(nv);
     if (def.kind === 'select') save(nv);
   };
+  // Ctrl+C in an open editor with nothing selected copies the whole cell (a date / time box or a dropdown has no text to select)
+  const copy = (e) => {
+    const el = field();
+    if (!el) return;
+    let sel = '';
+    try { sel = el.selectionStart != null && el.selectionEnd != null ? el.value.slice(el.selectionStart, el.selectionEnd) : ''; } catch (err) { sel = ''; }
+    if (sel) return;
+    const text = copyText != null ? copyText : el.tagName === 'SELECT' ? ((el.selectedOptions && el.selectedOptions[0]) || {}).text || '' : el.value;
+    e.clipboardData.setData('text/plain', text || '');
+    e.preventDefault();
+  };
+  // Ctrl+V while a dropdown or date box is open: the copied text picks the matching option / sets the date (these boxes can't take pasted text themselves)
+  const applyText = (raw, el) => {
+    const text = String(raw || '').replace(/\s*\n\s*/g, ' ').trim();
+    if (!text || !el) return false;
+    if (el.tagName === 'SELECT') {
+      const opt = [...el.options].find((o) => o.value && (o.value.toLowerCase() === text.toLowerCase() || o.text.trim().toLowerCase() === text.toLowerCase()));
+      if (opt) change({ target: { value: opt.value } });
+      return true;
+    }
+    if (el.tagName === 'INPUT' && el.type === 'date') {
+      const d = normDate(text);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) { change({ target: { value: d } }); return true; }
+    }
+    if (el.tagName === 'INPUT' && el.type === 'datetime-local') {   // a Breakdate / Time: "Sep 28, 2026 4:00 PM", "VGFX  Sep 28, 2026 4:00 PM", "VGFX: Sep 1, 10am" or ISO
+      const mine = memo ? memo.split(':')[1] : '';
+      const pairs = parseBreakdatePairs(normBreakdate(text, new Date().getFullYear()));
+      const keys = Object.keys(pairs);
+      if (keys.length && !pairs[mine]) { toast(`That time is for ${keys[0] === 'breakdate_vgfx' ? 'VGFX' : 'VEDIT'}, not this cell`, 'err'); return true; }
+      const iso = pairs[mine] || toBreakdateIso(text);
+      if (iso) { change({ target: { value: iso } }); return true; }
+    }
+    return false;
+  };
+  const paste = (e) => { const t = e.clipboardData ? e.clipboardData.getData('text/plain') : ''; if (applyText(t, e.target)) e.preventDefault(); };
   const blur = (e) => { if (box.current && !box.current.contains(e.relatedTarget)) save(val); };
   const key = (e) => {
+    // Ctrl+Z in a cell you have not changed undoes the last table edit (inside a box with typing in it, it undoes the typing)
+    if (onUndo && (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'z' && String(val ?? '') === String(initial ?? '')) { e.preventDefault(); finished.current = true; onUndo(e.shiftKey); return; }
+    pasteFallback(e, applyText);
     if (e.key === 'Escape') { finished.current = true; onCancel(); return; }
     const tag = e.target.tagName;
-    if (e.key === 'Enter' && tag !== 'SELECT' && (tag !== 'TEXTAREA' || e.ctrlKey || e.metaKey)) { e.preventDefault(); save(val); }
+    // Like the grid in Excel mode: Alt+Enter is a line break inside a multi-line cell; Enter saves and moves to the cell below (Shift+Enter: above);
+    // Tab / Shift+Tab save and move to the next / previous cell. (Ctrl+Enter in a multi-line cell saves and moves down too.)
+    if (e.key === 'Enter' && e.altKey && tag === 'TEXTAREA') {
+      e.preventDefault();
+      const t = e.target;
+      const a = t.selectionStart; const z = t.selectionEnd;
+      const nv = `${t.value.slice(0, a)}\n${t.value.slice(z)}`;
+      setVal(nv);
+      requestAnimationFrame(() => { try { t.setSelectionRange(a + 1, a + 1); } catch (err) { /* not a text box */ } });
+      return;
+    }
+    if (e.key === 'Enter' && tag !== 'SELECT' && (tag !== 'TEXTAREA' || e.ctrlKey || e.metaKey)) { e.preventDefault(); save(val, { dr: e.shiftKey ? -1 : 1, dc: 0 }); }
+    else if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); save(val, { dr: 0, dc: e.shiftKey ? -1 : 1 }); }
   };
   return (
-    <div className={`cell-editor${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key}>
+    <div className={`cell-editor${busy ? ' busy' : ''}`} ref={box} onBlur={blur} onKeyDown={key} onCopy={copy} onPaste={paste}>
       <FieldInput auto def={def} value={val} lookups={lookups} disabled={busy} onChange={change} />
     </div>
   );
@@ -361,20 +442,47 @@ export default function Workload() {
   const canWrite = s.can('workload.write');
 
   const [meta, setMeta] = useState(null);
-  const [lookups, setLookups] = useState({ workload_platform: [], plug_type: [], program: [] });
+  const [lookups, setLookups] = useState({ workload_platform: [], plug_type: [] });
   const [tab, setTab] = useState(() => readView(s.session_key).tab);   // kept across a refresh while you stay signed in
-  const [mode, setMode] = useState(() => readView(s.session_key).mode);   // Table or Excel: kept across a refresh while you stay signed in
-  const [filt, setFilt] = useState({ q: '', units: '', platform: '', plug_type: '', from: '', to: '' });
+  // ONE editable grid (typing, drag-select, copy / cut / paste, undo, batch save) on every screen wide enough for it; phones and small tablets keep the card list.
+  const [winW, setWinW] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const on = () => setWinW(window.innerWidth);
+    window.addEventListener('resize', on);
+    return () => window.removeEventListener('resize', on);
+  }, []);
+  const cards = winW < CARDS_BELOW;
+  // Full screen: the card covers the app's page (the app header is hidden) but the browser itself stays as it is — its tabs and address / search bar remain visible. Esc leaves it.
+  const [full, setFull] = useState(false);
+  const toggleFull = () => setFull((f) => !f);
+  useEffect(() => {
+    const esc = (e) => { if (e.key === 'Escape' && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || '')) setFull(false); };
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, []);
+  const mode = 'table';   // Excel mode was removed: the Workload page is the Table only (the grid code below is no longer reachable)
+  const setMode = () => {};
+  const isGrid = false;   // Excel mode = the editable grid; Table mode = rows with the New / Edit form (the layout around both is the same)
+  const [size, setSizeState] = useState(() => { try { const n = Number(localStorage.getItem('wl:rows3')); return ROW_SIZES.includes(n) ? n : PAGE; } catch (_) { return PAGE; } });   // rows per page, remembered
+  const [filt, setFilt] = useState(() => ({ q: '', units: '', platform: '', plug_type: '', group: '', auto: '1', from: isoDate(), to: isoDate(), ...(loadViewState('workload', {}).filt || {}) }));   // a fresh tab starts on today   // kept across a refresh
   const [stats, setStats] = useState(null);   // summary cards + tab badges
-  const [offset, setOffset] = useState(0);
-  const [sort, setSortState] = useState({ k: '', dir: 'asc' });   // clicked column header (Table mode)
+  const [offset, setOffset] = useState(() => loadViewState('workload', {}).offset || 0);   // the page you were on is kept across a refresh
+  const [sort, setSortState] = useState(() => loadViewState('workload', {}).sort || { k: '', dir: 'asc' });   // clicked column header (Table mode)
+  useEffect(() => { saveViewState('workload', { filt, sort, offset }); }, [filt, sort, offset]);
   const setSort = (s2) => { setSortState(s2); setOffset(0); };
   const [data, setData] = useState(null);   // table mode: { total, rows } | { error }
   const [grid, setGrid] = useState(null);   // excel mode: { total, rows } | { error }
   const [gridSel, setGridSel] = useState(null);   // { r0, c0, r1, c1 } — row/col INDICES into (grid.rows, cols); null = nothing selected
-  const [form, setForm] = useState(null);   // null | { rec } (rec null = new)
+  const [form, setForm] = useState(() => { const d = loadDialog('workload'); return d ? d.rec : null; });   // null | { rec } (rec null = new); an open one comes back after a refresh
+  useEffect(() => { syncDialog('workload', form); }, [form]);
   const [saving, setSaving] = useState(false);
-  const [editing, setEditing] = useState(null);   // { id, k } while one table cell is open for editing
+  const [draft, setDraft] = useState(() => loadEdit('workload').draft || null);   // Table mode: the empty row Add Row put at the top, not saved yet (kept across a refresh)
+  const [editing, setEditing] = useState(() => loadEdit('workload').cell || null);   // an open cell editor comes back after a refresh
+  const prevEd = useRef(editing ? `${editing.id}:${editing.k}` : null);
+  useEffect(() => { prevEd.current = syncEdit('workload', editing, draft, prevEd.current); }, [editing, draft]);
+  useEffect(() => { if (editing && editing.id !== 'draft' && data && data.rows && !data.rows.some((r) => r.id === editing.id)) setEditing(null); }, [data]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const curCell = useRef(null);   // the cell I have open or selected, kept up to date every render (announced to the others by useCellPresence)
+  const peers = useCellPresence('workload', curCell);   // cells other people have open or selected   // { id, k } while one table cell is open for editing
   const [addingColumn, setAddingColumn] = useState(false);
   const [managingLocks, setManagingLocks] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -382,10 +490,14 @@ export default function Workload() {
   const [picked, setPicked] = useState(() => new Set());
   const [allMatching, setAllMatching] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false);
+  const [filling, setFilling] = useState(false);
   const lastPick = useRef(null);
+  const tblCursor = useRef(null);   // Table mode keyboard: the row (index on this page) the arrow keys move from
   const keysRef = useRef(null);
   const pasteRef = useRef(null);
   const tblMouse = useRef({});         // latest mouse handlers for dragging across rows (assigned every render)
+  const [cellSel, setCellSel] = useState(null);   // Table mode: a block of cells { r0, c0, r1, c1 } picked by dragging across them (Shift+click extends)
+  const cellDrag = useRef(null);
   const tblDrag = useRef(null);        // { idx, x, y, moved } while the mouse is down on a row
   const tblSuppress = useRef(false);   // swallow the click that ends a drag / Shift / Ctrl+click, so it doesn't open a cell editor
   const [tctx, setTctx] = useState(null);   // Table mode: right-click menu position { x, y } | null
@@ -399,7 +511,8 @@ export default function Workload() {
   const hist = useRef({ past: [], future: [], tag: null });   // Excel mode: undo / redo snapshots of the grid rows
   const [epoch, setEpoch] = useState(0);   // bumped whenever the grid is changed from outside a cell's own typing (paste, undo, clear …)
   const [ctx, setCtx] = useState(null);   // Excel mode: right-click menu position { x, y } | null
-  useEffect(() => { setEditing(null); setGridSel(null); }, [tab, mode, offset]);
+  const firstTab = useRef(true);
+  useEffect(() => { if (firstTab.current) { firstTab.current = false; return; } setEditing(null); setGridSel(null); }, [tab, mode, offset]);   // not on first load: a restored cell editor stays open
   useEffect(() => {
     if (!tctx) return undefined;
     const close = () => setTctx(null);
@@ -455,7 +568,7 @@ export default function Workload() {
   }, []);
   const q = useDebounced(filt.q, 300);
   // a different tab / filter / search is a different set of rows: drop the selection
-  useEffect(() => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; }, [tab, mode, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q]);
+  useEffect(() => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; }, [tab, mode, filt.units, filt.platform, filt.plug_type, filt.group, filt.from, filt.to, q]);
   // Table-mode keyboard + mouse (one set of window listeners that always call the latest handlers, assigned further down every render)
   useEffect(() => {
     const key = (e) => { if (keysRef.current) keysRef.current(e); };
@@ -474,21 +587,13 @@ export default function Workload() {
     };
   }, []);
   const viewKey = meta && tab === 'ALL' ? viewForUnits(meta, filt.units) : tab;   // which column set to show (see viewForUnits)
-  const isGrid = mode === 'excel';   // on the All tab the Excel grid holds the rows still waiting for a team (see load below); on a team tab, that team's rows
 
   // Rows are one line each (Remarks wraps), so a wide table scrolls sideways inside the card, like Excel.
   // Phones and small tablets show each row as a card instead.
-  const [winW, setWinW] = useState(() => window.innerWidth);
-  useEffect(() => {
-    const on = () => setWinW(window.innerWidth);
-    window.addEventListener('resize', on);
-    return () => window.removeEventListener('resize', on);
-  }, []);
-  const cards = mode === 'table' && winW < CARDS_BELOW;
 
   const loadMeta = useCallback(() => {
-    Promise.all([get('/api/workload/meta'), get('/api/dropdowns?categories=workload_platform,plug_type,program')])
-      .then(([m, dd]) => { setMeta(m); setLookups(dd); })
+    Promise.all([get('/api/workload/meta'), get('/api/dropdowns?categories=workload_platform,plug_type')])
+      .then(([m, dd]) => { setMeta(m); setLookups(dd); if (m.tabs.length && !m.tabs.some((t) => t.key === tab)) setTab(m.tabs[0].key); })   // a group may see only some tabs
       .catch((e) => toast(e.message, 'err'));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(loadMeta, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -496,11 +601,13 @@ export default function Workload() {
   const query = useCallback((extra = {}) => {
     const p = new URLSearchParams(extra);
     if (tab !== 'ALL') p.set('team', tab);
-    ['units', 'platform', 'plug_type', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
-    if (!isGrid && q) p.set('q', q);
-    if (!isGrid && sort.k && extra.limit !== undefined) { p.set('sort', sort.k); p.set('dir', sort.dir); }   // only the table's own list; counts and exports ignore it
+    ['units', 'platform', 'plug_type', 'group', 'from', 'to'].forEach((k) => { if (filt[k]) p.set(k, filt[k]); });
+    if (q) p.set('q', q);
+    if (filt.auto === '0') p.set('auto', '0');   // auto-detect similar projects is off: only entries linked by hand are grouped
+    if (extra.limit !== undefined && tab !== 'PREP') p.set('together', '1');   // the list keeps the rows of a plug group together (counts and export do not need it)
+    if (sort.k && extra.limit !== undefined) { p.set('sort', sort.k); p.set('dir', sort.dir); }   // only the table's own list and the export follow it; counts ignore it
     return p;
-  }, [tab, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, q, isGrid, sort.k, sort.dir]);
+  }, [tab, filt.units, filt.platform, filt.plug_type, filt.group, filt.auto, filt.from, filt.to, q, sort.k, sort.dir]);
 
   // Tab badges (the counts next to All / VGFX / VEDIT / Audio) follow every filter except the team tab
   const loadStats = useCallback(async () => {
@@ -511,27 +618,33 @@ export default function Workload() {
     try { setStats(await get(`/api/workload/stats?${p}`)); } catch (e) { /* cards just stay as they were */ }
   }, [meta, query]);
 
-  const load = useCallback(async () => {
+  // quiet = a re-read because somebody else changed the list: if it fails the table stays as it is
+  const fetchRows = useCallback(async (quiet) => {
     if (!meta) return;
     loadStats();
     try {
       if (isGrid) {
-        // All tab: the rows nobody has given a team yet — e.g. plugs just copied from the PSD Daily Plug List. A Units filter you choose still wins.
-        const d = await get(`/api/workload?${query({ limit: GRID_LIMIT, ...(tab === 'ALL' ? { units: meta.notSet } : {}) })}`);
+        const d = await get(`/api/workload?${query({ limit: size, offset })}`);
         hist.current = { past: [], future: [], tag: null };
         setGrid({ total: d.total, rows: d.rows.map((r) => ({ ...r, _key: `r${r.id}`, _dirty: false })) });
       } else {
-        setData(await get(`/api/workload?${query({ limit: PAGE, offset })}`));
+        setData(await get(`/api/workload?${query({ limit: size, offset })}`));
       }
     } catch (e) {
-      (isGrid ? setGrid : setData)({ error: e.message, rows: [], total: 0 });
+      if (!quiet) (isGrid ? setGrid : setData)({ error: e.message, rows: [], total: 0 });
     }
-  }, [meta, isGrid, tab, query, offset, loadStats]);
+  }, [meta, isGrid, tab, query, offset, size, loadStats]);
+  const load = useCallback(() => fetchRows(false), [fetchRows]);
 
   useEffect(() => { load(); }, [load]);
 
   // ---- unsaved-change protection (Excel mode) ----
   const dirtyCount = isGrid && grid && grid.rows ? grid.rows.filter((r) => r._dirty).length : 0;
+  // other people's changes appear by themselves — but never while a cell, form or dialog is open here, a cell box has the cursor, or Excel-mode rows are unsaved
+  useLive(['workload'], () => fetchRows(true), () => {
+    const a = document.activeElement;
+    return !!(editing || form || draft || addingColumn || managingLocks || deletingAll || dirtyCount > 0 || document.querySelector('.modal-backdrop') || (a && a.closest && a.closest('td') && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)));
+  });
   useEffect(() => {
     if (!dirtyCount) return undefined;
     const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
@@ -543,6 +656,60 @@ export default function Workload() {
 
   const changeTab = async (t) => { if (t === tab || !(await okToLeave())) return; setTab(t); saveView(s.session_key, { t }); setOffset(0); };
   const changeMode = async (m) => { if (m === mode || !(await okToLeave())) return; setMode(m); saveView(s.session_key, { m }); setOffset(0); };
+  // Ongoing tab: the "For Follow-up" jump line opens the page where that part starts, scrolled so its band sits at the TOP of the table (not wherever the old scroll position was)
+  const jumpWait = useRef(false);
+  useEffect(() => {
+    const box = document.getElementById('tbl');
+    if (box) box.querySelectorAll('.prep-spacer').forEach((x) => x.remove());   // blank space added below by an earlier jump
+    if (!jumpWait.current || !data || !data.rows || !box) return;
+    const band = box.querySelector('.prep-divider.waiting:not(.jump)');
+    if (!band) return;   // still the old page
+    jumpWait.current = false;
+    requestAnimationFrame(() => {
+      const head = box.querySelector('thead');
+      const want = band.getBoundingClientRect().top - box.getBoundingClientRect().top - (head ? head.offsetHeight : 0);   // how far the band is below the header
+      const room = box.scrollHeight - box.clientHeight - box.scrollTop;   // how much further the box can scroll
+      if (want > room) { const sp = document.createElement('div'); sp.className = 'prep-spacer'; sp.style.height = `${Math.ceil(want - room)}px`; box.appendChild(sp); }   // a short last page: leave room (like a spreadsheet) so the band can reach the top
+      box.scrollTop += want;
+    });
+  }, [data]);
+  const goOffset = async (o) => { if (o === offset || !(await okToLeave())) return; setOffset(o); };
+  const changeSize = async (e) => { const n = Number(e.target.value); if (n === size || !(await okToLeave())) return; try { localStorage.setItem('wl:rows3', String(n)); } catch (_) { /* not remembered */ } setSizeState(n); setOffset(0); };
+  const sortBy = async (s2) => { if (!(await okToLeave())) return; setSort(s2); };
+  const clearGroup = () => { setFilt((f) => ({ ...f, group: '' })); setOffset(0); };
+  // "Auto-detect similar projects": off = only the entries linked by hand are grouped. A switch in the ⋮ menu, kept per person with the other view settings.
+  const toggleAuto = async () => {
+    if (!(await okToLeave())) return;
+    setFilt((f) => ({ ...f, auto: f.auto === '0' ? '1' : '0', group: '' }));
+    setOffset(0);
+  };
+  // Toolbar buttons beside the date range, only while entries are selected: Group (2+ entries that are not already one group) and Ungroup (some selected entry is in a group)
+  const groupBtn = () => {
+    if (!canWrite || isGrid || !scopeRows.length) return null;
+    const canGroup = scopeRows.length >= 2 && !inOneGroup;
+    const canUngroup = scopeRows.some((r) => r.group_key);
+    return (
+      <>
+        {canGroup ? (
+          <button type="button" className="chip wl-groupbtn" data-keep-sel title="Treat the selected entries as one project, so they sit together and can be given to one person" onClick={() => linkSel('link')}>
+            <GroupIcon /> Group same plugs ({scopeRows.length})
+          </button>
+        ) : null}
+        {canUngroup ? (
+          <button type="button" className="chip wl-groupbtn" data-keep-sel title="Take the selected entries out of their group (they stay out until you group them again)" onClick={() => linkSel('unlink')}>
+            <UngroupIcon /> Ungroup ({scopeRows.length})
+          </button>
+        ) : null}
+      </>
+    );
+  };
+  const groupChip = () => (
+    <>
+      {groupBtn()}
+      {filt.group ? <button type="button" className="chip c-blue wl-group-on" title="Show every row again" onClick={clearGroup}>{filt.group.startsWith('P:') ? 'Linked project' : `Group: ${filt.group}`} ✕</button> : null}
+    </>
+  );
+
   const setF = (k) => async (e) => {
     const val = e.target.value;
     if (k !== 'q' && !(await okToLeave())) return;
@@ -557,8 +724,55 @@ export default function Workload() {
   };
 
   // ---- click-to-edit: save ONE cell (PATCH writes only that column, so other people's edits to the row are kept) ----
-  const saveCell = async (r, k, value) => {
-    if (String(value ?? '') === String(r[k] ?? '')) { setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur)); return; }
+  // Table mode: which key a cell of this column edits in this row (the merged Breakdate / Time column edits VGFX or VEDIT; Plug ID uses the form)
+  const editKeyFor = (r, colKey) => {
+    if (colKey !== 'breakdate_vgfx') return colKey;
+    const teams = meta.unitTeams[r.units_concerned] || [];
+    return teams.includes('VGFX') ? 'breakdate_vgfx' : teams.includes('VEDIT') ? 'breakdate_vedit' : null;
+  };
+  // Google-Sheets style: a click only SELECTS a cell (the blue outline); typing, Enter, F2 or a double-click opens its editor
+  const selectCell = (r, k) => {
+    const ri = pageRows.findIndex((x) => x.id === r.id);
+    const ci = tableCols.findIndex((c) => c === k || (c === 'breakdate_vgfx' && k === 'breakdate_vedit'));
+    if (ri >= 0 && ci >= 0) setCellSel({ r0: ri, c0: ci, r1: ri, c1: ci });
+  };
+  const tapEdit = () => cards || (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches);   // a phone / tablet has no double-click or keyboard focus: a tap opens the editor as before
+  const textStart = (k) => ['text', 'date_or_text', 'audio_guide'].includes((meta.fields[k] || {}).kind);   // a typed key can start these off; a dropdown / date box only opens
+  const openSelected = (start) => {
+    const n = normCells();
+    if (!n || n.r0 !== n.r1 || n.c0 !== n.c1) return false;
+    const row = pageRows[n.r0];
+    if (!row || rowLocked(row)) return false;
+    const ek = editKeyFor(row, tableCols[n.c0]);
+    if (!ek) return false;
+    setEditing({ id: row.id, k: ek, start: start !== undefined && textStart(ek) ? start : undefined });
+    return true;
+  };
+  // After Enter / Tab in a cell editor: select the next cell — below / above (Enter, Shift+Enter) or beside it (Tab, Shift+Tab, wrapping to the next row)
+  const moveEdit = (r, k, dr, dc) => {
+    const rows = [...(draft && draft.at !== 'bottom' ? [draft] : []), ...(data && data.rows ? data.rows : []), ...(draft && draft.at === 'bottom' ? [draft] : [])];
+    let ri = rows.findIndex((x) => x.id === r.id);
+    let ci = tableCols.findIndex((c) => c === k || (c === 'breakdate_vgfx' && k === 'breakdate_vedit'));
+    if (ri < 0 || ci < 0) return;
+    for (let n = 0; n < rows.length * tableCols.length + 2; n++) {
+      if (dc) { ci += dc; if (ci >= tableCols.length) { ci = 0; ri += 1; } else if (ci < 0) { ci = tableCols.length - 1; ri -= 1; } } else ri += dr;
+      if (ri < 0 || ri >= rows.length) return;
+      const row = rows[ri];
+      if (rowLocked(row)) continue;
+      const ek = editKeyFor(row, tableCols[ci]);
+      if (ek) { if (row.id === 'draft') setEditing({ id: row.id, k: ek }); else selectCell(row, ek); return; }   // the unsaved new row keeps opening editors (it has no row number to select)
+    }
+  };
+  const saveCell = async (r, k, value, move) => {
+    if (r.id === 'draft') {   // the new row only changes on screen until its Save button is pressed (a row started in a spare row saves itself once it has a Plug ID, Work Date and Units)
+      const merged = draft ? setCellValue(draft, k, value, false) : null;
+      setDraft((d) => (d ? setCellValue(d, k, value, false) : d));
+      setEditing((cur) => (cur && cur.id === 'draft' && cur.k === k ? null : cur));
+      if (merged && merged.at === 'bottom' && String(merged.plug_id || '').trim() && merged.work_date && merged.units_concerned) { saveDraft(merged); return; }
+      if (move) moveEdit(r, k, move.dr, move.dc);
+      return;
+    }
+    if (String(value ?? '') === String(r[k] ?? '')) { setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur)); if (move) moveEdit(r, k, move.dr, move.dc); else selectCell(r, k); return; }
     try {
       const out = await patch(`/api/workload/${r.id}`, { field: k, value });
       const before = r[k] ?? '';
@@ -567,13 +781,65 @@ export default function Workload() {
       // close only THIS cell's editor: the person may already have opened another cell while this one was saving
       setEditing((cur) => (cur && cur.id === r.id && cur.k === k ? null : cur));
       if (['work_date', 'units_concerned', 'platform', 'plug_type'].includes(k)) load();   // may change the row's place, filters or the counts
+      if (move) moveEdit(r, k, move.dr, move.dc); else selectCell(r, k);
     } catch (e) { toast(e.message, 'err'); throw e; }
   };
 
-  // ---- Excel export (sheets mirror the template: MAIN + AUDIO, or just the open team tab) ----
-  const exportXlsx = async () => {
+  // Table mode: Set / Remove Priority on the selected rows (the ⋮ menu); one batch save, undoable
+  const toggleTablePriority = async () => {
+    const list = prioRows.slice(0, 200);
+    if (!list.length) return;
+    const to = !pickedAllPrio;
+    const mk = (flag) => list.map((r) => ({ id: r.id, ...toPayload(r), is_priority: flag }));
+    const olds = list.map((r) => ({ id: r.id, ...toPayload(r) }));
     try {
-      const res = await fetch(`/api/workload/export?${query()}`, { credentials: 'same-origin', headers: { 'X-Requested-With': 'PromoHub' } });
+      await post('/api/workload/batch', { rows: mk(to) });
+      pushTbl({ label: to ? 'set priority' : 'remove priority', undo: async () => { await post('/api/workload/batch', { rows: olds }); }, redo: async () => { await post('/api/workload/batch', { rows: mk(to) }); } });
+      toast(`${to ? 'Priority set on' : 'Priority removed from'} ${list.length} row${list.length === 1 ? '' : 's'}`);
+      load();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+
+  // Add Row: an empty row at the top of the table (same start as Excel mode's: the top row's date, the tab's units); Save creates it
+  const addDraft = () => {
+    if (!canWrite) return;
+    if (draft) { setEditing({ id: 'draft', k: 'plug_id' }); return; }
+    const top = data && data.rows && data.rows.length ? data.rows[0].work_date : '';
+    setDraft({ id: 'draft', work_date: top || filt.from || isoDate(), units_concerned: filt.units || meta.tabDefaultUnits[tab] || '' });
+    setEditing({ id: 'draft', k: 'plug_id' });
+    requestAnimationFrame(() => { const box = document.getElementById('tbl'); if (box) box.scrollTop = 0; });
+  };
+  const openSpare = (k, slot) => {   // a spare row was clicked: it becomes a new (unsaved) row at the bottom, opened on the clicked cell
+    if (draft) { setEditing({ id: 'draft', k: editKeyFor(draft, k) || 'plug_id' }); return; }
+    const last = data && data.rows && data.rows.length ? data.rows[data.rows.length - 1] : null;
+    const units = filt.units || meta.tabDefaultUnits[tab] || '';
+    const d = { id: 'draft', at: 'bottom', slot: slot || 0, work_date: (last && last.work_date) || filt.from || isoDate(), units_concerned: units };
+    setDraft(d);
+    setEditing({ id: 'draft', k: editKeyFor(d, k) || 'plug_id' });
+  };
+  const saveDraft = async (given) => {
+    const dr = given && given.id === 'draft' ? given : draft;
+    if (!dr) return;
+    try {
+      const ids = (await post('/api/workload/batch', { rows: [toPayload(dr)] })).createdIds || [];
+      const row = toPayload(dr);
+      let cid = ids;
+      pushTbl({ label: 'add row', undo: async () => { await post('/api/workload/bulk-delete', { ids: cid }); }, redo: async () => { cid = (await post('/api/workload/batch', { rows: [row] })).createdIds || []; } });
+      setDraft(null);
+      setEditing(null);
+      toast('Row added');
+      load();
+      loadStats();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+
+  // ---- Excel export (sheets mirror the template: MAIN + AUDIO, or just the open team tab) ----
+  const exportXlsx = async (byDate) => {
+    try {
+      const qs = query();
+      if (byDate) qs.set('by_date', '1');
+      if (sort.k) { qs.set('sort', sort.k); qs.set('dir', sort.dir); }   // the export follows the order on screen
+      const res = await fetch(`/api/workload/export?${qs}`, { credentials: 'same-origin', headers: { 'X-Requested-With': 'PromoHub' } });
       if (!res.ok) {
         let msg = `Export failed (${res.status})`;
         try { msg = (await res.json()).error || msg; } catch (e) { /* not JSON */ }
@@ -583,7 +849,8 @@ export default function Workload() {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       const now = new Date();
-      a.download = `Workload_${tab}_${MONTH_ABBR[now.getMonth()]}_${now.getFullYear()}.xlsx`;   // tab is already 'ALL' or a team key like 'VGFX', both already upper case
+      const named = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '');
+      a.download = named ? named[1] : `Workload_${tab}_${MONTH_ABBR[now.getMonth()]}_${now.getFullYear()}${byDate ? '_tabs' : ''}.xlsx`;   // the server names it after the dates exported   // tab is already 'ALL' or a team key like 'VGFX', both already upper case
       document.body.appendChild(a);
       a.click();
       setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
@@ -598,6 +865,7 @@ export default function Workload() {
     setImporting(true);
     try {
       const out = await post('/api/workload/import', form2);
+      if (out.teamWorkbook) { setFilling({ file }); return; }   // the team's per-day workbook: check it, then fill the blanks of the rows already here
       const bits = [`${out.created} row${out.created === 1 ? '' : 's'} imported`];
       if (out.skipped) bits.push(`${out.skipped} skipped`);
       if (out.newColumns && out.newColumns.length) bits.push(`new column${out.newColumns.length === 1 ? '' : 's'}: ${out.newColumns.join(', ')}`);
@@ -643,9 +911,14 @@ export default function Workload() {
     return id ? (plugCache.current.get(date) || []).find((p) => p.plug_id.toUpperCase() === id) || null : null;
   };
   // one place that knows how to put a value into a grid cell (the merged Breakdate / Time cell is text for both teams' times)
+  const bdErrs = useRef(new Set());   // refused Breakdate / Time pastes, shown once the paste is done
+  const flushBdErrs = () => setTimeout(() => { const m = [...bdErrs.current]; bdErrs.current.clear(); if (m.length) toast(m[0], 'err'); }, 0);
   const setCellValue = (row, k, val, replace) => {
     if (xlLocked(row)) return row;   // a locked row never changes
-    if (k === 'breakdate_vgfx') return { ...row, ...bdApply(row, val, meta.unitTeams, replace) };
+    if (k === 'breakdate_vgfx') {
+      if (replace) { const bad = bdMismatch(row, val, meta.unitTeams); if (bad) { bdErrs.current.add(bad); return row; } }
+      return { ...row, ...bdApply(row, val, meta.unitTeams, replace) };
+    }
     if (replace && k === 'units_concerned') val = canonUnit(meta, val);
     const next = withAutoPlatform(meta.platformRules, row, k, val);
     return k === 'plug_id' || k === 'work_date' ? fillFromPlug(next, row, findPlug) : next;
@@ -675,6 +948,13 @@ export default function Workload() {
   const startSel = (kind, r, c, e) => {
     const nR = grid.rows.length; const nC = xlKeys().length;
     if (!nR || !nC) return;
+    // Like Table mode, a row in a locked period can't be selected: say why and leave the selection as it was
+    if ((kind === 'row' || kind === 'cell') && xlLocked(grid.rows[r])) {
+      drag.current = null;
+      e.preventDefault();
+      if (e.button !== 2) toast(`Locked: ${lockNote(grid.rows[r].work_date, meta.locks)}. An Admin must unlock it first.`, 'err');
+      return;
+    }
     if (e.button === 2) {
       // right-click: keep a selection that already covers this spot, otherwise select just this cell / row / column
       const n = normSel();
@@ -697,6 +977,7 @@ export default function Workload() {
   };
   const extendSel = (kind, r, c) => {
     if (drag.current !== kind || !gridSel) return;
+    if ((kind === 'row' || kind === 'cell') && xlLocked(grid.rows[r])) return;   // a drag stops at a locked row
     const nR = grid.rows.length; const nC = xlKeys().length;
     const next = kind === 'row' ? { ...gridSel, r1: r, c0: 0, c1: nC - 1 }
       : kind === 'col' ? { ...gridSel, r0: 0, r1: nR - 1, c1: c }
@@ -722,6 +1003,7 @@ export default function Workload() {
   // Mouse down anywhere in a cell (its padding included, not just the text box) selects it and puts the cursor in it
   const cellMouseDown = (ri, ci) => (e) => {
     startSel('cell', ri, ci, e);
+    if (xlLocked(grid.rows[ri])) return;
     if (e.button === 2 || e.shiftKey || isTextTarget(e.target)) return;
     e.preventDefault();
     const f = e.currentTarget.querySelector('input, textarea');
@@ -750,15 +1032,28 @@ export default function Workload() {
   // 'xl-sel' plus which edges of the range this cell sits on (so only the OUTLINE of a range is drawn, like Excel)
   const selClass = (r, c) => {
     const n = normSel();
-    if (!n || r < n.rLo || r > n.rHi || c < n.cLo || c > n.cHi) return '';
+    if (!n || r < n.rLo || r > n.rHi || c < n.cLo || c > n.cHi || xlLocked(grid && grid.rows[r])) return '';
     const single = n.rLo === n.rHi && n.cLo === n.cHi;
     return `xl-sel${single ? ' xl-single' : ''}${gridSel && r === gridSel.r0 && c === gridSel.c0 ? ' xl-active' : ''}${r === n.rLo ? ' xl-t' : ''}${r === n.rHi ? ' xl-b' : ''}${c === n.cLo ? ' xl-l' : ''}${c === n.cHi ? ' xl-r' : ''}`;
   };
-  const rowInSel = (r) => { const n = normSel(); return !!n && r >= n.rLo && r <= n.rHi; };
+  const rowInSel = (r) => { const n = normSel(); return !!n && r >= n.rLo && r <= n.rHi && !xlLocked(grid && grid.rows[r]); };
   const colInSel = (c) => { const n = normSel(); return !!n && c >= n.cLo && c <= n.cHi; };
+  // Rows in a locked period are never changed; say so instead of silently doing nothing. Returns true when every row in the range is locked.
+  const lockNotice = (lo, hi, doing) => {
+    const rows = grid ? grid.rows.slice(lo, hi + 1) : [];
+    const lockedN = rows.filter(xlLocked).length;
+    if (!lockedN) return false;
+    if (lockedN === rows.length) {
+      toast(`Locked: ${lockNote(rows[0].work_date, meta.locks)}. An Admin must unlock ${rows.length === 1 ? 'it' : 'them'} first.`, 'err');
+      return true;
+    }
+    toast(`${doing} — ${lockedN} locked row${lockedN === 1 ? '' : 's'} skipped`, 'err');
+    return false;
+  };
   const clearSel = () => {
     const n = normSel();
     if (!n || !canWrite) return;
+    if (lockNotice(n.rLo, n.rHi, 'Cleared')) return;
     const keys = xlKeys();
     pushHistory(null);
     setEpoch((v) => v + 1);
@@ -793,7 +1088,12 @@ export default function Workload() {
   const gridCopy = (cols, cut) => (e) => {
     const n = normSel();
     if (!n) return;
-    if (n.rLo === n.rHi && n.cLo === n.cHi && isTextTarget(e.target)) return;
+    if (n.rLo === n.rHi && n.cLo === n.cHi && isTextTarget(e.target)) {   // one cell open for typing: the browser copies the text selected in it; with nothing selected the whole cell is copied
+      const t = e.target;
+      let sel = '';
+      try { sel = t.selectionStart != null && t.selectionEnd != null ? t.value.slice(t.selectionStart, t.selectionEnd) : ''; } catch (err) { sel = ''; }
+      if (sel) return;
+    }
     const text = selectionTsv(cols);
     e.clipboardData.setData('text/plain', text);
     internalClip.current = text;
@@ -836,9 +1136,11 @@ export default function Workload() {
     const bdText0 = normBreakdate(rawText, new Date().getFullYear());
     if (sel0 && Object.keys(parseBreakdatePairs(bdText0)).length && bdText0.replace(BD_PAIR, '').replace(/["\s]+/g, '') === '') {
       if (!canWrite) return true;
+      if (lockNotice(sel0.rLo, sel0.rHi, 'Pasted')) return true;
       pushHistory(null);
       setEpoch((v) => v + 1);
-      setGrid((g) => ({ ...g, rows: g.rows.map((row, ri) => (ri >= sel0.rLo && ri <= sel0.rHi && !xlLocked(row) ? { ...row, ...bdApply(row, rawText, meta.unitTeams, true), _dirty: true } : row)) }));
+      setGrid((g) => ({ ...g, rows: g.rows.map((row, ri) => (ri >= sel0.rLo && ri <= sel0.rHi && !xlLocked(row) ? { ...setCellValue(row, 'breakdate_vgfx', rawText, true), _dirty: true } : row)) }));
+      flushBdErrs();
       return true;
     }
     const block = parseTsvBlock(rawText);
@@ -859,6 +1161,7 @@ export default function Workload() {
     if (n && bC === 1 && cols[c0] && ((bR > 1 && !inGrid) || (!multi && bR === 1 && !plain))) {
       if (!multi && plain && el && el.tagName === 'TEXTAREA') return false;   // one multi-line cell with the cursor in it: the browser inserts the whole text at the cursor
       if (!canWrite) return true;
+      if (lockNotice(n.rLo, n.rHi, 'Pasted')) return true;
       const textFor = (col) => block.map((row) => row[0]).join(meta.fields[col] && meta.fields[col].multiline ? '\n' : ' ');
       pushHistory(null);
       setEpoch((v) => v + 1);
@@ -873,6 +1176,7 @@ export default function Workload() {
       }));
       setGridSel({ r0: n.rLo, c0: n.cLo, r1: n.rHi, c1: n.cHi });
       focusBox();
+      flushBdErrs();
       return true;
     }
     if (!canWrite) return true;
@@ -882,6 +1186,7 @@ export default function Workload() {
     const tileC = multi && selC > bC && selC % bC === 0 ? selC : bC;
     const roomLeft = Math.max(1, GRID_LIMIT - r0);   // the server saves at most 200 changed rows at a time
     if (tileR > roomLeft) { toast(`Only the first ${roomLeft} rows were pasted (200 rows per save)`, 'err'); tileR = roomLeft; }
+    if (lockNotice(r0, Math.min(r0 + tileR - 1, grid.rows.length - 1), 'Pasted')) return true;
     pushHistory(null);
     setEpoch((v) => v + 1);
     setGrid((g) => {
@@ -904,6 +1209,7 @@ export default function Workload() {
     });
     setGridSel({ r0, c0, r1: r0 + tileR - 1, c1: Math.min(c0 + tileC - 1, cols.length - 1) });
     focusBox();
+    flushBdErrs();
     return true;
   };
   // Right-click on a row number: put the copied rows in ABOVE this row as new rows (nothing is overwritten)
@@ -936,8 +1242,9 @@ export default function Workload() {
   const togglePriority = () => {
     const n = normSel();
     if (!n || !canWrite || !grid) return;
-    const make = !grid.rows.slice(n.rLo, n.rHi + 1).every((r) => r.is_priority);
     setCtx(null);
+    if (lockNotice(n.rLo, n.rHi, 'Priority updated')) return;
+    const make = !grid.rows.slice(n.rLo, n.rHi + 1).filter((r) => !xlLocked(r)).every((r) => r.is_priority);
     pushHistory(null);
     setGrid((g) => ({ ...g, rows: g.rows.map((r, i) => (i >= n.rLo && i <= n.rHi && !xlLocked(r) ? { ...r, is_priority: make, _dirty: true } : r)) }));
   };
@@ -1062,19 +1369,85 @@ export default function Workload() {
     try {
       await del(`/api/workload/${r.id}`);
       toast('Deleted');
-      if (data && data.rows.length === 1 && offset > 0) setOffset(Math.max(0, offset - PAGE)); // last row on this page
+      if (data && data.rows.length === 1 && offset > 0) setOffset(Math.max(0, offset - size)); // last row on this page
       else load();
     } catch (e) { toast(e.message, 'err'); }
   };
   // ---- Table mode: select rows by dragging across them (or Shift / Ctrl+click), with the same shortcuts as Excel mode ----
   const total = data && data.total ? data.total : 0;
-  const isAdminUser = !!(s.user && s.user.role === 'Admin');
+  const isAdminUser = !!(s.user && ['Admin', 'System Admin'].includes(s.user.role));
   const pageRows = data && data.rows ? data.rows : [];
-  const pickable = pageRows.filter((r) => !isLocked(r.work_date, meta.locks));   // a row in a locked period can't be deleted, so it can't be selected
+  // Plug groups on this page: each gets a colour (neighbouring groups differ) and its rows know if they are the first / middle / last of the run
+  const groupPos = (() => {
+    const hues = ['blue', 'pink', 'green', 'amber', 'red'];
+    const byKey = new Map();
+    const pos = pageRows.map((r, i) => {
+      const k = r.group_key;
+      if (!k) return null;
+      if (!byKey.has(k)) byKey.set(k, hues[byKey.size % hues.length]);
+      const prev = i > 0 && pageRows[i - 1].group_key === k;
+      const next = i < pageRows.length - 1 && pageRows[i + 1].group_key === k;
+      return { hue: byKey.get(k), cls: !prev && next ? 'grp-first' : prev && next ? 'grp-mid' : prev ? 'grp-last' : 'grp-only' };
+    });
+    return { pos, byKey };
+  })();
+  const pickedRowsList = pageRows.filter((r) => (allMatching || picked.has(r.id)) && !isLocked(r.work_date, meta.locks));
+  // Table mode Set / Remove Priority: the ticked rows, else the row(s) of a selected Breakdate / Time cell
+  const bdColIdx = meta && meta.views && meta.views[viewKey] ? meta.views[viewKey].filter((k) => k !== 'breakdate_vedit').indexOf('breakdate_vgfx') : -1;
+  const cellPrioRows = !picked.size && !allMatching && cellSel && bdColIdx >= 0 && Math.min(cellSel.c0, cellSel.c1) <= bdColIdx && Math.max(cellSel.c0, cellSel.c1) >= bdColIdx
+    ? pageRows.slice(Math.min(cellSel.r0, cellSel.r1), Math.max(cellSel.r0, cellSel.r1) + 1).filter((r) => !isLocked(r.work_date, meta && meta.locks)) : [];
+  const prioRows = pickedRowsList.length ? pickedRowsList : cellPrioRows;
+  const pickedAllPrio = prioRows.length > 0 && prioRows.every((r) => r.is_priority);
+  const lockedForPick = (r) => canWrite && isLocked(r.work_date, meta.locks);   // a row in a locked period can't be deleted, so it can't be selected (a Viewer only copies, so for them nothing is locked)
+  const pickable = pageRows.filter((r) => !lockedForPick(r));
   const pickedCount = allMatching ? total : picked.size;
   const pageAllPicked = !!pickable.length && pickable.every((r) => allMatching || picked.has(r.id));
+  // Plug groups by hand: the ticked rows, else the rows of the selected cells
+  const cellRowsSel = !picked.size && !allMatching && cellSel ? pageRows.slice(Math.min(cellSel.r0, cellSel.r1), Math.max(cellSel.r0, cellSel.r1) + 1).filter((r) => !isLocked(r.work_date, meta && meta.locks)) : [];
+  const linkRows = pickedRowsList.length ? pickedRowsList : cellRowsSel;
+  const NO_COPY = ['plug_id', 'work_date', 'platform', 'units_concerned', 'breakdate_vgfx', 'breakdate_vedit'];
+  const applySrc = !picked.size && !allMatching && cellSel && cellSel.r0 === cellSel.r1 ? pageRows[cellSel.r0] : null;
+  // the columns of the selected cell(s) that can be copied to the rest of the group (a function: tableCols is only known further down)
+  const applyKeysOf = () => (applySrc && applySrc.group_key
+    ? tableCols.slice(Math.min(cellSel.c0, cellSel.c1), Math.max(cellSel.c0, cellSel.c1) + 1)
+        .filter((k) => !NO_COPY.includes(k) && (k.startsWith('custom_') || (meta.fields[k] && ['text', 'select', 'date_or_text', 'audio_guide'].includes(meta.fields[k].kind)))) : []);
+  const linkSel = async (mode, keepSel = false) => {
+    const rowsNow = linkRows.slice(0, 500);
+    const before = rowsNow.map((r) => ({ id: r.id, value: r.project_group || '' }));   // for undo
+    try {
+      const out = await post('/api/workload/link', { ids: rowsNow.map((r) => r.id), mode });
+      const nv = mode === 'link' ? (out.token || '') : mode === 'unlink' ? '-' : '';
+      const after = rowsNow.map((r) => ({ id: r.id, value: nv }));
+      const restore = (values) => async () => { await post('/api/workload/link', { mode: 'restore', values }); };
+      pushTbl({ label: mode === 'link' ? 'group selected' : mode === 'unlink' ? 'ungroup selected' : 'automatic grouping', undo: restore(before), redo: restore(after) });
+      toast(mode === 'link' ? `${out.changed} entries linked as one project` : mode === 'unlink' ? `${out.changed} entr${out.changed === 1 ? 'y' : 'ies'} taken out of its group` : `${out.changed} entr${out.changed === 1 ? 'y' : 'ies'} back to automatic grouping`);
+      if (!keepSel) clearPicks();
+      load();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  // The selection the group actions work on: ticked rows, or cells dragged across 2+ rows
+  const scopeRows = linkRows.length >= 2 || pickedRowsList.length ? linkRows : [];
+  const selMode = canWrite && scopeRows.length > 0;   // entries are selected: the menu offers group actions for them instead of the view-wide switch
+  const inOneGroup = scopeRows.length >= 2 && scopeRows.every((r) => r.group_key && r.group_key === scopeRows[0].group_key);
+  const applyToGroup = async () => {
+    const applyKeys = applyKeysOf();
+    if (!applySrc || !applyKeys.length) return;
+    const labels = applyKeys.map((k) => (meta.fields[k] ? meta.fields[k].label : (meta.customColumns || []).find((c) => c.col_key === k)?.label || k));
+    const others = Math.max(0, (applySrc.group_n || 1) - 1);
+    if (!(await confirm('Apply to the whole group?', `${labels.join(', ')} of this entry will be copied to the other ${others} entr${others === 1 ? 'y' : 'ies'} of its group, replacing what is there now.`))) return;
+    try {
+      const out = await post('/api/workload/apply-group', { id: applySrc.id, fields: applyKeys, auto: filt.auto === '0' ? '0' : '1' });
+      const changes = (out.changes || []).filter((c) => Object.keys(c.after || {}).length);
+      if (changes.length) {   // undo / redo: the server says what each row had before and after
+        const put = (which) => async () => { await post('/api/workload/set-values', { rows: changes.map((c) => ({ id: c.id, values: c[which] })) }); };
+        pushTbl({ label: 'apply to whole group', undo: put('before'), redo: put('after') });
+      }
+      toast(`Copied to ${out.updated} entr${out.updated === 1 ? 'y' : 'ies'}${out.skipped ? ` (${out.skipped} in a locked period skipped)` : ''}`);
+      load();
+    } catch (e) { toast(e.message, 'err'); }
+  };
   const clearPicks = () => { setPicked(new Set()); setAllMatching(false); lastPick.current = null; };
-  const rangeIds = (a, b) => pageRows.slice(Math.min(a, b), Math.max(a, b) + 1).filter((r) => !isLocked(r.work_date, meta.locks)).map((r) => r.id);
+  const rangeIds = (a, b) => pageRows.slice(Math.min(a, b), Math.max(a, b) + 1).filter((r) => !lockedForPick(r)).map((r) => r.id);
   const selectPage = () => { setAllMatching(false); setPicked(new Set(pickable.map((r) => r.id))); };
   const selectAllMatching = () => { setPicked(new Set(pickable.map((r) => r.id))); setAllMatching(true); };
   const toPayload = (r) => [...Object.keys(meta.fields), 'is_priority'].reduce((o, k) => ({ ...o, [k]: r[k] }), {});   // a row as the batch endpoint takes it (no id)
@@ -1097,8 +1470,17 @@ export default function Workload() {
     if (out.skipped) bits.push(`${out.skipped} skipped — in a locked period`);
     toast(bits.join(' — '), out.skipped ? 'err' : undefined);
     clearPicks();
-    if (offset > 0 && out.deleted >= pageRows.length) setOffset(Math.max(0, offset - PAGE)); else load();
+    if (offset > 0 && out.deleted >= pageRows.length) setOffset(Math.max(0, offset - size)); else load();
     loadStats();
+  };
+  // the server deletes at most 500 ticked rows per request, so a long selection (the "All" page) goes in several requests
+  const bulkDeleteIds = async (ids) => {
+    const sum = { deleted: 0, skipped: 0 };
+    for (let i = 0; i < ids.length; i += 500) {
+      const o = await post('/api/workload/bulk-delete', { ids: ids.slice(i, i + 500) });
+      sum.deleted += o.deleted || 0; sum.skipped += o.skipped || 0;
+    }
+    return sum;
   };
   const deleteSelected = async (verb = 'Delete') => {
     if (allMatching) { setDeletingAll(true); return; }
@@ -1111,13 +1493,13 @@ export default function Workload() {
       : `Permanently delete the ${what} you selected? Ctrl+Z can undo it.`, { okText: verb, danger: true }))) return;
     const snapshot = pageRows.filter((r) => picked.has(r.id)).map(toPayload);
     try {
-      const out = await post('/api/workload/bulk-delete', { ids });
+      const out = await bulkDeleteIds(ids);
       if (out.deleted && !out.skipped) {
         let current = ids;
         pushTbl({
           label: `${verb.toLowerCase()} ${what}`,
           undo: async () => { current = (await post('/api/workload/batch', { rows: snapshot })).createdIds || []; },
-          redo: async () => { await post('/api/workload/bulk-delete', { ids: current }); },
+          redo: async () => { await bulkDeleteIds(current); },
         });
       }
       afterBulk(out);
@@ -1135,29 +1517,58 @@ export default function Workload() {
     return ok;
   };
   const cutPicked = async () => { if (await copyPicked()) await deleteSelected('Cut'); };
-  // Paste rows (copied from here, Excel mode or a spreadsheet) as NEW Workload rows
-  const pasteRows = async (text) => {
+  // Paste rows (copied from here, Excel mode or a spreadsheet).
+  //  'replace' (rows selected): the pasted rows overwrite the selected rows (one row selected: it and the rows below it, as in Excel); extra pasted rows are added as new
+  //  'above' / 'below': new rows that take the date and units of the selected row;  'new' (nothing selected): new rows
+  const pasteRows = async (text, how) => {
     if (!canWrite) return;
     const block = parseTsvBlock(text).filter((cells) => cells.some((c) => String(c).trim() !== ''));
     if (!block.length) return;
     if (block.length > 200) toast('Only the first 200 rows are pasted at a time', 'err');
-    const rows = block.slice(0, 200).map((cells) => {
-      let row = {};
+    const sel = pageRows.filter((r) => (allMatching || picked.has(r.id)) && !rowLocked(r));
+    const mode = how || (sel.length ? 'replace' : 'new');
+    const anchor = mode === 'above' ? sel[0] : mode === 'below' ? sel[sel.length - 1] : null;
+    let targets = [];
+    if (mode === 'replace') {
+      if (sel.length === 1) {
+        const i = pageRows.findIndex((x) => x.id === sel[0].id);
+        targets = pageRows.slice(i, i + block.length).filter((r) => !rowLocked(r));
+      } else targets = sel;
+    }
+    const cellsOf = (base, cells) => {
+      let row = base;
       cells.forEach((raw, ci) => { if (tableCols[ci]) row = setCellValue(row, tableCols[ci], raw, true); });
-      if (!row.work_date) row.work_date = filt.from || isoDate();
-      if (!row.units_concerned && tab !== 'ALL') row.units_concerned = meta.tabDefaultUnits[tab];
       return row;
+    };
+    const fill = (row) => {
+      if (!row.work_date) row.work_date = (anchor && anchor.work_date) || filt.from || isoDate();
+      if (!row.units_concerned) { if (anchor && anchor.units_concerned) row.units_concerned = anchor.units_concerned; else if (tab !== 'ALL') row.units_concerned = meta.tabDefaultUnits[tab]; }
+      return row;
+    };
+    const cut = block.slice(0, 200);
+    const olds = [];
+    const rows = cut.map((cells, i) => {
+      if (mode === 'replace' && i < targets.length) {
+        olds.push({ id: targets[i].id, ...toPayload(targets[i]) });
+        return { id: targets[i].id, ...cellsOf(toPayload(targets[i]), cells) };
+      }
+      return fill(cellsOf({}, cells));
     });
-    const what = `${rows.length} row${rows.length === 1 ? '' : 's'}`;
-    if (!(await confirm(`Paste ${what}`, `Add ${what} from the clipboard to the Workload Tracker as new items?`, { okText: 'Paste' }))) return;
+    const nRep = olds.length;
+    const nNew = rows.length - nRep;
+    const what = [nRep ? `replace ${nRep} row${nRep === 1 ? '' : 's'}` : '', nNew ? `add ${nNew} new row${nNew === 1 ? '' : 's'}${mode === 'above' ? ' above' : mode === 'below' ? ' below' : ''}` : ''].filter(Boolean).join(' and ');
     try {
       let ids = (await post('/api/workload/batch', { rows })).createdIds || [];
       pushTbl({
-        label: `paste ${what}`,
-        undo: async () => { await post('/api/workload/bulk-delete', { ids }); },
+        label: `paste (${what})`,
+        undo: async () => {
+          if (ids.length) await post('/api/workload/bulk-delete', { ids });
+          if (olds.length) await post('/api/workload/batch', { rows: olds });
+        },
         redo: async () => { ids = (await post('/api/workload/batch', { rows })).createdIds || []; },
       });
-      toast(`${what} pasted`);
+      toast(`Pasted: ${what}`);
+      clearPicks();
       load();
       loadStats();
     } catch (e) { toast(e.message, 'err'); }
@@ -1168,16 +1579,17 @@ export default function Workload() {
     const t = e.target;
     if (t.closest && t.closest('.editing, .cell-editor-inline, input, select, textarea')) return;   // inside an open editor keep the browser's own menu
     e.preventDefault();
-    if (!rowLocked(r) && !(allMatching || picked.has(r.id))) { setAllMatching(false); setPicked(new Set([r.id])); lastPick.current = r.id; }
-    setTctx({ x: e.clientX, y: e.clientY });
+    if (editing) setEditing(null);
+    if (!lockedForPick(r) && !(allMatching || picked.has(r.id))) { setAllMatching(false); setPicked(new Set([r.id])); lastPick.current = r.id; }
+    setTctx({ x: e.clientX, y: e.clientY, bd: Boolean(t.closest && t.closest('td[data-k="breakdate_vgfx"]')), rid: r.id });
   };
-  const menuPasteRows = async () => {
+  const menuPasteRows = async (how) => {
     setTctx(null);
     let text = null;
     try { if (navigator.clipboard && navigator.clipboard.readText && window.isSecureContext) text = await navigator.clipboard.readText(); } catch (err) { text = null; }
     if (text == null || text === '') text = internalClip.current;   // plain-http addresses can't read the clipboard: use what was last copied here
     if (text == null || text === '') { toast('Nothing to paste yet — copy some rows first, or press Ctrl+V', 'err'); return; }
-    pasteRows(text);
+    pasteRows(text, how);
   };
 
   // mouse: press on a row and drag over others to select them; Shift+click extends, Ctrl/Cmd+click adds or removes one row
@@ -1185,11 +1597,12 @@ export default function Workload() {
     if (e.button !== 0) return;
     const t = e.target;
     if (t.closest && t.closest('.actions-cell, .editing, .cell-editor-inline, input, select, textarea, button, a')) return;
+    if (editing) setEditing(null);   // clicking another row closes an open cell editor
     const holdClick = () => { tblSuppress.current = true; setTimeout(() => { tblSuppress.current = false; }, 150); };
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       holdClick();
-      if (!rowLocked(r)) {
+      if (!lockedForPick(r)) {
         setAllMatching(false);
         setPicked((cur) => { const n = new Set(cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; });
         lastPick.current = r.id;
@@ -1202,7 +1615,26 @@ export default function Workload() {
     }
     tblDrag.current = { idx, x: e.clientX, y: e.clientY, moved: false, last: idx, id: r.id };
   };
+  // the row number on the left selects the row, like the row numbers in Excel mode; dragging down over more numbers extends it
+  const numDown = (e, r, idx) => {
+    e.stopPropagation();
+    // an open cell editor (a dropdown, say) must not keep the keyboard: close it so Delete / arrows act on the rows
+    if (editing) setEditing(null);
+    setCellSel(null);
+    if (document.activeElement && document.activeElement !== document.body && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) document.activeElement.blur();
+    rowDown(e, r, idx);
+    if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !lockedForPick(r)) { e.preventDefault(); setAllMatching(false); setPicked(new Set([r.id])); lastPick.current = r.id; }
+  };
   tblMouse.current.move = (e) => {
+    const cd = cellDrag.current;
+    if (cd) {
+      if (!(e.buttons & 1)) { cellDrag.current = null; return; }
+      const at = cellAt(document.elementFromPoint(e.clientX, e.clientY));
+      if (!at) return;
+      if (!cd.moved && (at.r !== cd.r || at.c !== cd.c)) { cd.moved = true; tblSuppress.current = true; if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); setEditing(null); }
+      if (cd.moved) { if (window.getSelection) window.getSelection().removeAllRanges(); setCellSel({ r0: cd.r, c0: cd.c, r1: at.r, c1: at.c }); }
+      return;
+    }
     const d = tblDrag.current;
     if (!d) return;
     if (!(e.buttons & 1)) { tblDrag.current = null; return; }
@@ -1217,16 +1649,132 @@ export default function Workload() {
     setPicked(new Set(rangeIds(d.idx, now)));
   };
   tblMouse.current.up = () => {
+    const cd = cellDrag.current;
+    cellDrag.current = null;
+    if (cd && cd.moved) setTimeout(() => { tblSuppress.current = false; }, 150);
     const d = tblDrag.current;
     tblDrag.current = null;
     const box = document.getElementById('tbl');
     if (box) box.classList.remove('selecting');
     if (d && d.moved) setTimeout(() => { tblSuppress.current = false; }, 150);
   };
-  tblMouse.current.down = (e) => {   // a click anywhere outside the table (and its bar / dialogs) drops the selection
-    if (!(picked.size || allMatching)) return;
+  // ---- cell blocks: drag across cells (or Shift+click) to pick a block; Ctrl+C copies it, Delete clears it, Ctrl+V pastes from its top-left cell ----
+  const cellAt = (el) => {
+    const td = el && el.closest ? el.closest('#tbl td[data-c]') : null;
+    return td ? { r: Number(td.dataset.r), c: Number(td.dataset.c) } : null;
+  };
+  const cellDown = (e) => {
+    if (e.button !== 0) return;
     const t = e.target;
-    if (t && t.closest && !t.closest('#tbl, .sel-bar, .modal-backdrop, .xl-menu')) clearPicks();
+    if (t.closest && t.closest('.actions-cell, .rn, .chk, .editing, .cell-editor-inline, input, select, textarea, button, a')) return;
+    const at = cellAt(t);
+    if (!at) return;
+    if (e.shiftKey && cellSel) {
+      e.preventDefault();
+      tblSuppress.current = true; setTimeout(() => { tblSuppress.current = false; }, 150);
+      setCellSel((cur) => (cur ? { ...cur, r1: at.r, c1: at.c } : cur));
+      return;
+    }
+    if (picked.size || allMatching) clearPicks();
+    setCellSel(null);
+    cellDrag.current = { r: at.r, c: at.c, x: e.clientX, y: e.clientY, moved: false };
+  };
+  const normCells = () => (cellSel ? { r0: Math.min(cellSel.r0, cellSel.r1), r1: Math.max(cellSel.r0, cellSel.r1), c0: Math.min(cellSel.c0, cellSel.c1), c1: Math.max(cellSel.c0, cellSel.c1) } : null);
+  const cellText = (r, k) => (k === 'breakdate_vgfx' ? bdText(r, meta.unitTeams) : r[k]);
+  const copyCells = async () => {
+    const n = normCells();
+    if (!n) return false;
+    const text = pageRows.slice(n.r0, n.r1 + 1).map((r) => tableCols.slice(n.c0, n.c1 + 1).map((k) => tsvCell(cellText(r, k))).join('\t')).join('\n');
+    internalClip.current = text;
+    const ok = await writeClipboard(text);
+    toast(ok ? `Copied ${(n.r1 - n.r0 + 1) * (n.c1 - n.c0 + 1)} cell${(n.r1 - n.r0 + 1) * (n.c1 - n.c0 + 1) === 1 ? '' : 's'}` : 'Could not reach the clipboard', ok ? undefined : 'err');
+    return ok;
+  };
+  // write values into the picked block (clear: blank, but never the required Work Date / Plug ID / Units); undoable
+  const writeCells = async (n, valueAt, label, note) => {
+    const olds = [];
+    const list = [];
+    let cellCount = 0;
+    for (let ri = n.r0; ri <= n.r1; ri++) {
+      const r = pageRows[ri];
+      if (!r || rowLocked(r)) continue;
+      let row = { id: r.id, ...toPayload(r) };
+      let changed = false;
+      for (let ci = n.c0; ci <= n.c1; ci++) {
+        const k = tableCols[ci];
+        let val = valueAt(ri - n.r0, ci - n.c0, k);
+        if (val === undefined) continue;
+        if (k === 'work_date' && label === 'pasted') val = normDate(String(val).replace(/\s*\n\s*/g, ' '));   // "SEP 3", "Mon, Oct 12, 2026", "10/12/2026" → 2026-...
+        if (k === 'breakdate_vgfx' && label === 'pasted') { const bad = bdMismatch(r, val, meta.unitTeams); if (bad) { bdErrs.current.add(bad); continue; } }
+        if (String(cellText(r, k) ?? '') === String(val ?? '')) continue;   // already that value
+        row = setCellValue(row, k, val, true);
+        changed = true;
+        cellCount++;
+      }
+      if (changed) { olds.push({ id: r.id, ...toPayload(r) }); list.push(row); }
+    }
+    const refused = [...bdErrs.current]; bdErrs.current.clear();
+    if (refused.length) note = [note, refused[0]].filter(Boolean).join('; ');
+    if (!list.length) { toast(refused.length ? refused[0] : note ? `Nothing changed. ${note}` : 'Nothing changed (the cells already hold that, or the rows are locked)', 'err'); return; }
+    try {
+      const out = await post('/api/workload/batch', { rows: list });
+      // PSD / Prog. Name / Platform are filled in again by the server when the plug is on the PSD Daily Plug List (or the Plug ID gives the Platform): say so
+      const refilled = new Set();
+      if (label === 'cleared') {
+        const byId = new Map((out.results || []).map((x) => [x.id, x]));
+        for (let ri = n.r0; ri <= n.r1; ri++) {
+          const r = pageRows[ri];
+          const got = r && byId.get(r.id);
+          if (!got) continue;
+          for (let ci = n.c0; ci <= n.c1; ci++) {
+            const k = tableCols[ci];
+            if (['psd', 'prog_name', 'platform'].includes(k) && got[k] && String(cellText(r, k) ?? '') !== '' ) { refilled.add(k); cellCount--; }
+          }
+        }
+      }
+      const why = refilled.size ? `${[...refilled].map((k) => meta.fields[k].label).join(', ')} came back — filled in again from the PSD Daily Plug List / Plug ID, so it can't be left blank` : '';
+      const extra = [note, why].filter(Boolean).join('; ');
+      if (cellCount <= 0) { toast(`Nothing was cleared. ${extra}`.trim(), 'err'); load(); return; }
+      pushTbl({ label, undo: async () => { await post('/api/workload/batch', { rows: olds }); }, redo: async () => { await post('/api/workload/batch', { rows: list }); } });
+      toast(`${cellCount} cell${cellCount === 1 ? '' : 's'} ${label}${extra ? ` — ${extra}` : ''}`);
+      load();
+      loadStats();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const REQUIRED_KEYS = ['work_date', 'plug_id', 'units_concerned'];
+  const clearCells = async () => {
+    const n = normCells();
+    if (!n) return;
+    const skipped = tableCols.slice(n.c0, n.c1 + 1).filter((k) => REQUIRED_KEYS.includes(k)).map((k) => head(k));
+    await writeCells(n, (ri, ci, k) => (REQUIRED_KEYS.includes(k) ? undefined : ''), 'cleared', skipped.length ? `${skipped.join(', ')} can't be blank` : '');
+  };
+  const pasteCells = async (text, sel) => {
+    const n = sel || normCells();
+    if (!n) return;
+    let block = parseTsvBlock(text);
+    if (!block.length) return;
+    // A Breakdate / Time cell holds BOTH teams' times (a VGFX line + a VEDIT line): pasting that into a Breakdate cell is ONE value, never dealt out to the rows below
+    if (tableCols[n.c0] === 'breakdate_vgfx' && block.every((x) => x.length === 1) && block.length > 1) {
+      const joined = normBreakdate(block.map((x) => x[0]).join('\n'), new Date().getFullYear());
+      if (Object.keys(parseBreakdatePairs(joined)).length && joined.replace(BD_PAIR, '').replace(/["\s]+/g, '') === '') block = [[block.map((x) => x[0]).join('\n')]];
+    }
+    // Text from OUTSIDE the table that is one column with line breaks (a 2-line remark, a pasted paragraph) is ONE value for the cell — never dealt out one line per row.
+    // (Text copied inside the table, and anything with tabs, still goes cell by cell.)
+    const inGrid = internalClip.current != null && String(internalClip.current).replace(/\r\n?/g, '\n') === String(text).replace(/\r\n?/g, '\n');
+    if (!inGrid && block.length > 1 && block.every((x) => x.length === 1) && n.r0 === n.r1 && n.c0 === n.c1) {
+      const f = meta.fields[tableCols[n.c0]];
+      block = [[block.map((x) => x[0]).join(f && f.multiline ? '\n' : ' ')]];
+    }
+    const single = block.length === 1 && block[0].length === 1;
+    const bigger = { ...n };
+    if (!single) { bigger.r1 = Math.min(pageRows.length - 1, n.r0 + block.length - 1); bigger.c1 = Math.min(tableCols.length - 1, n.c0 + Math.max(...block.map((x) => x.length)) - 1); }
+    await writeCells(bigger, (ri, ci) => (single ? block[0][0] : (block[ri] && block[ri][ci] !== undefined ? block[ri][ci] : undefined)), 'pasted');
+  };
+  tblMouse.current.down = (e) => {   // a click anywhere outside the table (and its bar / dialogs) drops the selection
+    const t = e.target;
+    if (cellSel && t && t.closest && !t.closest('#tbl, .modal-backdrop, .xl-menu, .tpop, [data-keep-sel]')) setCellSel(null);
+    if (!(picked.size || allMatching)) return;
+    if (t && t.closest && !t.closest('#tbl, #delete-selected-btn, .modal-backdrop, .xl-menu, .tpop, [data-keep-sel]')) clearPicks();
   };
   const saveGrid = async () => {
     const idx = [];
@@ -1240,38 +1788,56 @@ export default function Workload() {
     });
     if (!rows.length) { toast('Nothing to save'); return; }
     setSaving(true);
+    let created = 0; let updated = 0; let from = 0;
     try {
-      const out = await post('/api/workload/batch', { rows });
-      toast(`Saved — ${out.created} added, ${out.updated} updated`);
+      // the server takes at most 200 rows per save: a long page ("All") goes in several goes, each all-or-nothing
+      for (; from < rows.length; from += 200) {
+        const out = await post('/api/workload/batch', { rows: rows.slice(from, from + 200) });
+        created += out.created; updated += out.updated;
+      }
+      toast(`Saved — ${created} added, ${updated} updated`);
       await load();
     } catch (e) {
       // Server numbers rows within the changed set; show the grid row number instead
-      toast(String(e.message).replace(/^Row (\d+):/, (_, n) => `Grid row ${idx[+n - 1] + 1}:`), 'err');
+      toast(String(e.message).replace(/^Row (\d+):/, (_, n) => `Grid row ${idx[from + (+n) - 1] + 1}:`) + (created + updated ? ` (${created + updated} rows were already saved)` : ''), 'err');
+      if (created + updated) await load();
     } finally { setSaving(false); }
   };
 
   // The table (Table and Excel mode) scrolls inside its own box that ends near the bottom of the window — a tall table used to put its sideways scroll
   // bar below the last row, out of sight until you scrolled the whole page down. Measured again when the window, the mode, the tab or a filter changes.
   const hasMeta = !!meta;
+  // Google-Sheets style: spare blank rows under the last row (last page, table view); more appear as you scroll down; clicking one makes it a new row
+  const narrowUi = useNarrow();
+  const spareOn = false;   // spare rows are off on Workload
+  useEffect(() => {   // a spare row opened but left empty goes back to being a blank spare row
+    if (!editing && draft && draft.at === 'bottom' && Object.keys(draft).every((k) => ['id', 'at', 'slot', 'work_date', 'units_concerned'].includes(k) || !String(draft[k] == null ? '' : draft[k]).trim())) setDraft(null);
+  }, [editing, draft]);
+  const spareN = useSpareRows('#tbl', spareOn, `${tab}|${offset}|${size}|${filt.from}|${filt.to}`);
   useLayoutEffect(() => {
     const fit = () => {
       const el = document.querySelector('.wl-fit');
       if (!el) return;
       el.style.maxHeight = 'none';
       const top = el.getBoundingClientRect().top + window.scrollY;
-      el.style.maxHeight = `${Math.max(240, Math.round(window.innerHeight - top - 80))}px`;
+      // leave room for what sits under the table (the pager, the card's edge, the page's bottom padding) so the page itself never needs a scroll bar
+      const pager = el.parentElement && el.parentElement.querySelector('.pager');
+      const main = el.closest('main');
+      const pad = el.closest('.wl-card.full') ? 0 : main ? parseFloat(getComputedStyle(main).paddingBottom) || 0 : 0;
+      const below = el.id === 'tbl' || el.id === 'grid' ? (pager ? pager.offsetHeight : 0) + pad + 2 : 80;
+      el.style.maxHeight = `${Math.max(240, Math.round(window.innerHeight - top - below))}px`;
     };
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
-  }, [hasMeta, mode, tab, cards, winW, filt.units, filt.platform, filt.plug_type, filt.from, filt.to, !!data, !!grid]);
+  }, [hasMeta, mode, tab, cards, winW, filt.units, filt.platform, filt.plug_type, filt.group, filt.from, filt.to, !!data, !!grid, full]);
 
   if (!meta) return <main className="container wide"><Empty>Loading…</Empty></main>;
 
   // Table-mode shortcuts — the same ones Excel mode has: Ctrl/Cmd+A select all, +C copy, +X cut, +V paste, +Z undo, +Y redo, Delete, Esc
   // (ignored while typing in a field, with a cell editor or dialog open, and in Excel mode / the plug list, which have their own)
   const tableKeysOk = (e) => {
-    if (isGrid || !canWrite) return false;
+    if (isGrid) return false;   // a Viewer gets the copy / select shortcuts only (see below)
     const el = e.target;
     if (el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return false;
     return !(document.querySelector('.modal-backdrop') || form || addingColumn || managingLocks || deletingAll || editing);
@@ -1279,6 +1845,30 @@ export default function Workload() {
   keysRef.current = (e) => {
     if (e.defaultPrevented || e.altKey || !tableKeysOk(e)) return;
     const key = e.key.toLowerCase();
+    if (cellSel && !picked.size) {   // a block of cells is picked
+      if ((e.ctrlKey || e.metaKey) && key === 'c') { if (!(window.getSelection && String(window.getSelection()))) { e.preventDefault(); copyCells(); } return; }
+      if (canWrite && (e.ctrlKey || e.metaKey) && key === 'x') { e.preventDefault(); copyCells().then((ok) => { if (ok) clearCells(); }); return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && (key === 'delete' || key === 'backspace')) { e.preventDefault(); clearCells(); return; }
+      if (!e.ctrlKey && !e.metaKey && key === 'escape') { setCellSel(null); return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && !e.shiftKey && (key === 'enter' || key === 'f2')) { if (openSelected()) e.preventDefault(); return; }
+      if (canWrite && !e.ctrlKey && !e.metaKey && e.key.length === 1) { if (openSelected(e.key)) e.preventDefault(); return; }   // just start typing: the cell opens with what was typed replacing its content
+      if (!e.ctrlKey && !e.metaKey && key === 'tab' && cellSel.r0 === cellSel.r1 && cellSel.c0 === cellSel.c1) {   // Tab / Shift+Tab: the next / previous cell
+        e.preventDefault();
+        const nC = tableCols.length; let c = cellSel.c1 + (e.shiftKey ? -1 : 1); let r = cellSel.r1;
+        if (c >= nC) { c = 0; r += 1; } else if (c < 0) { c = nC - 1; r -= 1; }
+        if (r >= 0 && r < pageRows.length) setCellSel({ r0: r, c0: c, r1: r, c1: c });
+        return;
+      }
+      if (!e.ctrlKey && !e.metaKey && ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {   // Shift+arrows grow / shrink the block from the cell it started on; plain arrows move to a single cell
+        e.preventDefault();
+        const nR = pageRows.length; const nC = tableCols.length;
+        const dr = key === 'arrowdown' ? 1 : key === 'arrowup' ? -1 : 0; const dc = key === 'arrowright' ? 1 : key === 'arrowleft' ? -1 : 0;
+        const r1 = Math.max(0, Math.min(nR - 1, cellSel.r1 + dr)); const c1 = Math.max(0, Math.min(nC - 1, cellSel.c1 + dc));
+        setCellSel(e.shiftKey ? { ...cellSel, r1, c1 } : { r0: r1, c0: c1, r1, c1 });
+        requestAnimationFrame(() => { const td = document.querySelector(`td[data-r="${r1}"][data-c="${c1}"]`); if (td && td.scrollIntoView) td.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
+        return;
+      }
+    }
     if (e.ctrlKey || e.metaKey) {
       if (key === 'a') {
         e.preventDefault();
@@ -1286,27 +1876,81 @@ export default function Workload() {
       } else if (key === 'c') {
         if (picked.size && !(window.getSelection && String(window.getSelection()))) { e.preventDefault(); copyPicked(); }
       } else if (key === 'x') {
-        if (picked.size) { e.preventDefault(); cutPicked(); }
-      } else if (key === 'z') { e.preventDefault(); if (e.shiftKey) redoTbl(); else undoTbl(); }
-      else if (key === 'y') { e.preventDefault(); redoTbl(); }
+        if (canWrite && picked.size) { e.preventDefault(); cutPicked(); }
+      } else if (key === 'z') { if (canWrite) { e.preventDefault(); if (e.shiftKey) redoTbl(); else undoTbl(); } }
+      else if (key === 'y') { if (canWrite) { e.preventDefault(); redoTbl(); } }
       return;   // Ctrl+V arrives as a paste event (below)
     }
     if (key === 'escape') clearPicks();
-    else if ((key === 'delete' || key === 'backspace') && pickedCount) { e.preventDefault(); deleteSelected(); }
+    else if (canWrite && (key === 'delete' || key === 'backspace') && pickedCount) { e.preventDefault(); deleteSelected(); }
+    else if (['arrowdown', 'arrowup', 'home', 'end'].includes(key) && picked.size && pageRows.length) {
+      // like the arrow keys in Excel mode: move the selection one row (Shift extends it from where it started); Home / End jump to the first / last row
+      e.preventDefault();
+      const anchor = Math.max(0, pageRows.findIndex((r) => r.id === lastPick.current));
+      const cur = tblCursor.current != null && picked.has((pageRows[tblCursor.current] || {}).id) ? tblCursor.current : anchor;
+      const to = key === 'home' ? 0 : key === 'end' ? pageRows.length - 1 : Math.max(0, Math.min(pageRows.length - 1, cur + (key === 'arrowdown' ? 1 : -1)));
+      tblCursor.current = to;
+      setAllMatching(false);
+      if (e.shiftKey) setPicked(new Set(rangeIds(anchor, to)));
+      else { setPicked(new Set(rangeIds(to, to))); lastPick.current = pageRows[to].id; }
+      requestAnimationFrame(() => { const tr = document.querySelector(`#tbl tr[data-id="${pageRows[to].id}"]`); if (tr && tr.scrollIntoView) tr.scrollIntoView({ block: 'nearest' }); });
+    } else if ((key === 'enter' || key === 'f2') && picked.size === 1) {
+      e.preventDefault();
+      const r = pageRows.find((x) => picked.has(x.id));
+      if (r) setForm({ rec: r });   // the same Edit form the row menu opens (a locked period is refused by the server)
+    }
   };
   pasteRef.current = (e) => {
-    if (!tableKeysOk(e)) return;
+    const text0 = e.clipboardData && e.clipboardData.getData('text/plain');
+    // several cells copied from a spreadsheet while one cell is open: they are pasted from that cell down and across, like in Excel
+    if (canWrite && editing && editing.id !== 'draft' && text0 && isBlockText(text0)) {
+      const r0 = pageRows.findIndex((x) => x.id === editing.id);
+      const c0 = tableCols.findIndex((c) => c === editing.k || (c === 'breakdate_vgfx' && editing.k === 'breakdate_vedit'));
+      if (r0 >= 0 && c0 >= 0) { e.preventDefault(); setEditing(null); pasteCells(text0, { r0, c0, r1: r0, c1: c0 }); return; }
+    }
+    if (!canWrite || !tableKeysOk(e)) return;   // pasting is for people who can edit
     const text = e.clipboardData && e.clipboardData.getData('text/plain');
     if (!text || !text.trim()) return;
     e.preventDefault();
-    pasteRows(text);
+    if (cellSel && !picked.size) pasteCells(text); else pasteRows(text);
   };
 
   const isAll = tab === 'ALL';
-  const cols = meta.views[viewKey];   // raw column list (Table mode's tableCols below merges the two Breakdate / Time columns; Excel mode does the same)
+  const isPrep = tab === 'PREP';
+  const cols = meta.views[viewKey];
+  { // which cell(s) am I on? (the open cell, else the whole picked block)
+    const n = !editing && cellSel && !picked.size ? normCells() : null;
+    const tc = cols.filter((k) => k !== 'breakdate_vedit');
+    const cells = n ? rangeCells(pageRows, tc, n.r0, n.r1, n.c0, n.c1) : [];
+    curCell.current = editing && editing.id !== 'draft' ? { cells: [`${editing.id}:${editing.k}|tblr`], kind: 'edit' } : cells.length ? { cells, kind: 'select' } : null;
+  }
+  const describePeer = (key) => { const [id, k] = key.split(':'); const r = pageRows.find((x) => String(x.id) === id); const f = meta.fields[k]; return `${f ? f.label : k}${r ? ` · ${r.plug_id || `row ${id}`}` : ''}`; };   // raw column list (Table mode's tableCols below merges the two Breakdate / Time columns; Excel mode does the same)
   // Table mode only: Breakdate/Time (VGFX) and (VEDIT) merge into ONE column/cell, holding one or two pills —
   // 'breakdate_vgfx' is kept as that column's position; breakdateCell() below decides what actually shows in it.
   const tableCols = cols.filter((k) => k !== 'breakdate_vedit');
+  // PREP: a band across the table where the upper part (all four available) and the lower part (still waiting) begin
+  const prepDivider = (r, prev, first) => {
+    const ready = !(r.prep_missing || []).length;
+    const wasReady = prev ? !(prev.prep_missing || []).length : null;
+    const nReady = (data && data.prepReady) || 0;
+    const nWait = Math.max(0, ((data && data.total) || 0) - nReady);
+    const band = (key, cls, title, n, note) => (
+      <tr key={key} className={`prep-divider ${cls}`}><td colSpan={tableCols.length + 4}><strong>{title}</strong> <span className="dim">({n}): {note}.</span></td></tr>
+    );
+    const up = band('up', 'ready', 'Ready', nReady, 'VO, Script, Artwork / STB and Audio Guide are all available');
+    const low = band('low', 'waiting', 'For Follow-up', nWait, 'at least one of the four is not available yet');
+    if (ready && (first || wasReady === null)) return up;
+    if (!ready && (first || wasReady === true || wasReady === null)) return <>{first && wasReady === null && !ready ? up : null}{low}</>;
+    return null;
+  };
+  // PREP: rows For Follow-up sort after every ready row, so with many ready rows they start on a later page. Say so at the foot of this page.
+  const prepNextWait = (() => {
+    if (!isPrep || !data || !data.rows.length) return null;
+    const nReady = data.prepReady || 0; const nWait = (data.total || 0) - nReady;
+    if (nWait <= 0 || offset + data.rows.length > nReady) return null;   // none, or this page already shows some
+    const o = Math.floor(nReady / size) * size;
+    return { n: nWait, offset: o, page: Math.floor(o / size) + 1 };
+  })();
   const selNow = isGrid ? normSel() : null;                                   // Excel mode: what is selected right now
   const selRows = selNow && grid && grid.rows ? grid.rows.slice(selNow.rLo, selNow.rHi + 1) : [];
   const allPrio = selRows.length > 0 && selRows.every((r) => r.is_priority);
@@ -1328,7 +1972,7 @@ export default function Workload() {
       case 'plug_id': {
         const [first, ...rest] = firstLineOf(val);
         return (
-          <td {...common}>
+          <td {...common} className={r.is_priority && !cols.includes('breakdate_vgfx') ? 'prio' : undefined}>
             <span className="strong">{first}</span>
             {rest.length ? <span className="dim-inline"> · {rest.join(' · ')}</span> : null}
           </td>
@@ -1340,9 +1984,9 @@ export default function Workload() {
             {val ? <span className="strong">{oneLine(val)}</span> : null}
           </td>
         );
-      case 'script': return <td {...common}>{val ? (ISO.test(val) ? <DateChip>{fmtDate(val)}</DateChip> : <div className="rem">{oneLine(val)}</div>) : null}</td>;   // a date is a chip; text wraps in a box no wider than 300 px, like VO
-      case 'art_stb': return <td {...common}>{val ? (ISO.test(val) ? <DateChip>{fmtDate(val)}</DateChip> : oneLine(val)) : null}</td>;   // a date shows as a chip, text as text
-      case 'audio_guide': return <td {...common}><DateChip hue="fuchsia">{val ? (ISO.test(val) ? fmtDate(val) : oneLine(val)) : null}</DateChip></td>;
+      case 'script': return <td {...common}>{val ? (ISO.test(val) ? <DateChip>{fmtMDY(val)}</DateChip> : <div className="rem">{oneLine(val)}</div>) : null}</td>;   // a date is a chip; text wraps in a box no wider than 300 px, like VO
+      case 'art_stb': return <td {...common}>{val ? (ISO.test(val) ? <DateChip>{fmtMDY(val)}</DateChip> : oneLine(val)) : null}</td>;   // a date shows as a chip, text as text
+      case 'audio_guide': return <td {...common}><DateChip hue="fuchsia">{val ? (ISO.test(val) ? fmtMDY(val) : oneLine(val)) : null}</DateChip></td>;
       case 'breakdate_vgfx': return <td {...common}><DateChip hue="purple">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VGFX in Units Concerned
       case 'breakdate_vedit': return <td {...common}><DateChip hue="orange">{fmtBreakdate(val)}</DateChip></td>;   // same colour as VEDIT in Units Concerned
       case 'vo': return <td {...common}>{val ? <div className="rem">{oneLine(val)}</div> : null}</td>;   // wraps in the same box as Remarks, so the column is no wider than Remarks
@@ -1356,31 +2000,39 @@ export default function Workload() {
 
   // Managers click a cell to edit just that cell (nothing else opens); viewers just read.
   const rowLocked = (r) => isLocked(r.work_date, meta.locks);
-  const cell = (r, k) => {
+  const cellInner = (r, k) => {
     const td = cellView(r, k);
     if (!canWrite) return td;
     if (rowLocked(r)) return cloneElement(td, { title: `Locked: ${lockNote(r.work_date, meta.locks)}` });
     if (editing && editing.id === r.id && editing.k === k) {
       return (
         <td key={k} data-k={k} data-label={head(k)} className="editing" onClick={(e) => e.stopPropagation()}>
-          <CellEditor def={meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value) => saveCell(r, k, value)} onCancel={() => setEditing(null)} />
+          <CellEditor memo={`${r.id}:${k}`} startText={editing.start} def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => { setEditing(null); selectCell(r, k); }} onUndo={(sh) => { setEditing(null); if (sh) redoTbl(); else undoTbl(); }} />
         </td>
       );
     }
-    if (k === 'plug_id') {   // no free-text Plug ID: choose it from the PSD Daily Plug List in the edit form
-      const openForm = () => setForm({ rec: r });
-      return cloneElement(td, {
-        className: 'editable', title: 'Click to choose the plug from the PSD Daily Plug List', tabIndex: 0,
-        onClick: (e) => { e.stopPropagation(); openForm(); },
-        onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); openForm(); } },
-      });
-    }
     const open = () => setEditing({ id: r.id, k });
     return cloneElement(td, {
-      className: 'editable', title: 'Click to edit', tabIndex: 0,
-      onClick: (e) => { e.stopPropagation(); open(); },
-      onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); open(); } },
+      className: ['editable', td.props.className].filter(Boolean).join(' '), title: 'Click to select, double-click or press Enter to edit', tabIndex: 0,
+      onClick: (e) => {   // select only; Shift / Ctrl+click and drags are the block selection's (see cellDown)
+        e.stopPropagation();
+        if (r.id === 'draft' || tapEdit()) { open(); return; }
+        if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+        const rr = Number(e.currentTarget.dataset.r); const cc = Number(e.currentTarget.dataset.c);
+        if (Number.isFinite(rr) && Number.isFinite(cc)) setCellSel({ r0: rr, c0: cc, r1: rr, c1: cc });
+      },
+      onDoubleClick: (e) => { e.stopPropagation(); open(); },
     });
+  };
+
+  // Somebody else has this cell open: it lights up in their colour with their name (Google-Sheets style)
+  const cell = (r, k) => {
+    const el = cellInner(r, k);
+    const p = peers[`${r.id}:${k}`];
+    if (!p) return el;
+    const props = { className: [el.props.className, 'peer-on'].filter(Boolean).join(' '), 'data-peer': p.name, 'data-peer-uid': p.first ? p.uid : undefined, style: { ...(el.props.style || {}), ...peerStyle(p) } };
+    if (p.text != null && !/\bediting\b/.test(el.props.className || '')) return cloneElement(el, props, <span className="peer-text">{p.text}</span>);   // somebody is typing in this cell: show it as they type
+    return cloneElement(el, props);
   };
 
   // The merged Breakdate/Time column/cell: one or two pills (VGFX purple, VEDIT orange) depending on which
@@ -1393,23 +2045,37 @@ export default function Workload() {
     if (teams.includes('VEDIT')) parts.push({ k: 'breakdate_vedit', hue: 'orange', tag: 'VEDIT' });
     const locked = canWrite && rowLocked(r);
     return (
-      <td key="breakdate_vgfx" data-k="breakdate_vgfx" className={r.is_priority ? 'prio' : undefined} title={locked ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}>
+      <td key="breakdate_vgfx" data-k="breakdate_vgfx" className={[r.is_priority ? 'prio' : '', canWrite && !locked ? 'editable' : ''].filter(Boolean).join(' ') || undefined} title={locked ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}
+        onClick={canWrite && !locked ? (e) => {   // the whole cell is a click target (not just the pills): it selects, so keyboard shortcuts and paste work
+          if (e.target.closest && e.target.closest('.cell-editor-inline')) return;
+          if (r.id === 'draft' || tapEdit()) { const ek = editKeyFor(r, 'breakdate_vgfx'); if (ek) setEditing({ id: r.id, k: ek }); return; }
+          if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+          const rr = Number(e.currentTarget.dataset.r); const cc = Number(e.currentTarget.dataset.c);
+          if (Number.isFinite(rr) && Number.isFinite(cc)) setCellSel({ r0: rr, c0: cc, r1: rr, c1: cc });
+        } : undefined}
+        onDoubleClick={canWrite && !locked ? (e) => { if (e.target.closest && e.target.closest('.cell-editor-inline')) return; const ek = editKeyFor(r, 'breakdate_vgfx'); if (ek) setEditing({ id: r.id, k: ek }); } : undefined}>
         <span className="chips bd-chips">
           {!parts.length && !r.units_concerned ? <DateChip hue="gray">PENDING</DateChip> : null}
           {parts.map(({ k, hue, tag }) => {
             if (editing && editing.id === r.id && editing.k === k) {
               return (
                 <span key={k} className="cell-editor-inline" onClick={(e) => e.stopPropagation()}>
-                  <CellEditor def={meta.fields[k]} initial={r[k]} lookups={lookups} onSave={(value) => saveCell(r, k, value)} onCancel={() => setEditing(null)} />
+                  <CellEditor memo={`${r.id}:${k}`} startText={editing.start} def={k === 'plug_id' ? { ...meta.fields[k], multiline: false } : meta.fields[k]} initial={r[k]} lookups={lookups} copyText={k === 'breakdate_vgfx' || k === 'breakdate_vedit' ? `${k === 'breakdate_vgfx' ? 'VGFX' : 'VEDIT'}  ${fmtBdText(r[k])}` : undefined} onSave={(value, move) => saveCell(r, k, value, move)} onCancel={() => { setEditing(null); selectCell(r, k); }} onUndo={(sh) => { setEditing(null); if (sh) redoTbl(); else undoTbl(); }} />
                 </span>
               );
             }
             const clickable = canWrite && !locked;
             return (
               <span
-                key={k} className={clickable ? 'wl-pill-edit' : ''} tabIndex={clickable ? 0 : undefined} title={clickable ? 'Click to edit' : undefined}
-                onClick={clickable ? (e) => { e.stopPropagation(); setEditing({ id: r.id, k }); } : undefined}
-                onKeyDown={clickable ? (e) => { if (e.key === 'Enter') { e.preventDefault(); setEditing({ id: r.id, k }); } } : undefined}
+                key={k} className={clickable ? 'wl-pill-edit' : ''} tabIndex={clickable ? 0 : undefined} title={clickable ? 'Click to select, double-click or press Enter to edit' : undefined}
+                onClick={clickable ? (e) => {
+                  e.stopPropagation();
+                  if (r.id === 'draft' || tapEdit()) { setEditing({ id: r.id, k }); return; }
+                  if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+                  const td = e.currentTarget.closest('td'); const rr = td ? Number(td.dataset.r) : NaN; const cc = td ? Number(td.dataset.c) : NaN;
+                  if (Number.isFinite(rr) && Number.isFinite(cc)) setCellSel({ r0: rr, c0: cc, r1: rr, c1: cc });
+                } : undefined}
+                onDoubleClick={clickable ? (e) => { e.stopPropagation(); setEditing({ id: r.id, k }); } : undefined}
               >
                 {r[k]
                   ? <DateChip hue={hue}><span className="chip-tag">{tag}</span>{fmtBreakdate(r[k])}</DateChip>
@@ -1422,57 +2088,122 @@ export default function Workload() {
     );
   };
 
-  const tabCount = { ALL: stats && stats.total, VGFX: stats && stats.vgfx, VEDIT: stats && stats.vedit, AUDIO: stats && stats.audio };
+  const tabCount = { ALL: stats && stats.total, VGFX: stats && stats.vgfx, VEDIT: stats && stats.vedit, AUDIO: stats && stats.audio, PREP: stats && stats.prep_waiting };   // PREP: the rows still waiting for one of the four fields
+  // Bottom bar, like a spreadsheet: the All / VGFX / VEDIT / Audio tabs at the left, the count, Rows picker and page buttons at the right
+  const sheetTabs = (
+    <div className="tabs sheet-tabs" id="section-tabs">
+      {meta.tabs.map((t) => (
+        <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => changeTab(t.key)}>
+          {t.label}<span className="count">{tabCount[t.key] ?? '–'}</span>
+        </button>
+      ))}
+    </div>
+  );
+  const rowsPicker = (
+    <label className="rows-sel"><span>Rows</span>
+      <select value={size} onChange={changeSize} aria-label="Rows per page">{ROW_SIZES.map((n) => <option key={n} value={n}>{n === ALL_ROWS ? 'All' : n}</option>)}</select>
+    </label>
+  );
 
   return (
     <main className="container wide wl-page">
-      <div className="page-head">
-        <div><h1>Workload Tracker</h1><div className="sub">Track and monitor promotional plug workloads across VGFX, VEDIT and Audio.</div></div>
-        <div className="actions"><PresenceAvatars path="/workload" /></div>
-      </div>
+      <h1 className="sr-only">Workload</h1>
 
       {!lookups.workload_platform.length || !lookups.plug_type.length ? (
         <div className="alert warn mb-12">
           {!lookups.workload_platform.length ? 'No Workload Platform options exist yet. ' : ''}
           {!lookups.plug_type.length ? 'No Plug Type options exist yet. ' : ''}
-          {s.canPage('/admin') ? <>Add them in <Link to="/admin#dropdowns">Admin → Dropdowns</Link>.</> : 'Ask an Admin to add them.'}
+          {s.canPage('/admin') ? <>Add them in <Link to="/admin#dropdowns">{((s.pages || []).find((p) => p.path === '/admin') || {}).label || 'Administration'} → Dropdowns</Link>.</> : 'Ask an Admin to add them.'}
         </div>
       ) : null}
 
-      <div className="card wl-card">
-        <div className="wl-tabbar">
-          <div className="tabs" id="section-tabs">
-            {meta.tabs.map((t) => (
-              <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => changeTab(t.key)}>
-                {t.label}<span className="count">{tabCount[t.key] ?? '–'}</span>
+      <div className={`card wl-card${full ? ' full' : ' '}`.trim()}>
+        {!cards ? (
+          <div className="wl-filters wl-toolbar">
+            <label className="wl-search short">
+              <SearchIcon />
+              <input type="search" placeholder="Search plug ID, PSD, program, billable party, remarks…" value={filt.q} onChange={setF('q')} />
+            </label>
+            <FiltersMenu count={[filt.units, filt.platform, filt.plug_type].filter(Boolean).length} onClear={() => { setFilt((f) => ({ ...f, units: '', platform: '', plug_type: '' })); setOffset(0); }}>
+              <FilterSelect label="Units" value={filt.units} onChange={setF('units')}><Options list={[...meta.units, meta.notSet]} blank="All" /></FilterSelect>
+              <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
+              <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
+            </FiltersMenu>
+            <DateRange from={filt.from} to={filt.to} onChange={setRange} />
+            {groupChip()}
+            <span className="grow" />
+            <div className="wl-presence"><PresenceAvatars path="/workload" peers={peers} describe={describePeer} /></div>
+            <div className="wl-iconbar">
+              {canWrite ? <input ref={fileRef} type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} /> : null}
+              {canWrite && isGrid ? <button type="button" className="btn ibtn" id="add-row" aria-label="Add row" title="Add row" onClick={addRow}><PlusIcon /></button> : null}
+              {canWrite ? <button type="button" className="btn ibtn" id="import-btn" aria-label="Import from Excel" title="Import from Excel" disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}><UploadIcon /></button> : null}
+              <ExportButton onExport={exportXlsx}><DownloadIcon /></ExportButton>
+              {canWrite && !isGrid && pickedCount ? (
+                <button type="button" className="btn ibtn danger" id="delete-selected-btn" onClick={() => deleteSelected()}
+                  aria-label="Delete selected rows" title={`Delete Selected (${pickedCount})`}><TrashIcon /></button>
+              ) : null}
+              {canWrite && isGrid && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? (
+                <button type="button" className="btn ibtn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}
+                  aria-label="Delete selected rows" title={`Delete ${selRows.filter((r) => !xlLocked(r)).length > 1 ? `${selRows.filter((r) => !xlLocked(r)).length} rows` : 'row'}`}><TrashIcon /></button>
+              ) : null}
+              {canWrite && isGrid ? (
+                <button type="button" className="btn ibtn primary" id="save-grid" disabled={saving || !dirtyCount} onClick={saveGrid}
+                  aria-label="Save changes" title={saving ? 'Saving…' : `Save changes${dirtyCount ? ` (${dirtyCount})` : ''}`}>
+                  <SaveIcon />{dirtyCount ? <i className="ib-badge">{dirtyCount}</i> : null}
+                </button>
+              ) : null}
+              <button type="button" className="btn ibtn" id="full-btn" aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen' : 'Full screen'} onClick={toggleFull}>
+                {full ? <ExitFullscreenIcon /> : <FullscreenIcon />}
               </button>
-            ))}
-          </div>
-          <div className="wl-tabactions">
-            <div className="segmented" id="mode-seg">
-              <button type="button" className={mode === 'table' ? 'on' : ''} onClick={() => changeMode('table')}>Table</button>
-              <button type="button" className={mode === 'excel' ? 'on' : ''} onClick={() => changeMode('excel')}>Excel</button>
+              <ToolMenu items={[
+                canWrite && narrowUi && { id: 'add-row-menu', label: 'Add Row', icon: <PlusIcon />, onClick: addDraft },
+                s.canPage('/admin') && { id: 'add-column-btn', label: 'Add Column', icon: <ColumnIcon />, onClick: () => setAddingColumn(true) },
+                s.canPage('/admin') && { id: 'lock-dates-btn', label: 'Lock Dates', icon: <LockIcon />, onClick: () => setManagingLocks(true) },
+                canWrite && isAdminUser && { id: 'delete-all-menu', label: 'Delete All…', icon: <TrashIcon />, onClick: () => setDeletingAll(true) },
+                !isGrid && tab !== 'PREP' && !selMode && { id: 'auto-detect-btn', icon: <AutoDetectIcon />, stay: true, onClick: toggleAuto,
+                  label: <>Auto-detect similar projects<span className={`wl-switch${filt.auto !== '0' ? ' on' : ''}`} role="switch" aria-checked={filt.auto !== '0'} aria-label="Auto-detect similar projects"><i /></span></> },
+                !isGrid && selMode && scopeRows.length >= 2 && !inOneGroup && { id: 'group-selected-btn', label: `Group selected (${scopeRows.length})`, icon: <GroupIcon />, onClick: () => linkSel('link') },
+                canWrite && !isGrid && applyKeysOf().length > 0 && { id: 'apply-group-btn', label: 'Apply to whole group', icon: <ApplyGroupIcon />, onClick: applyToGroup },
+                canWrite && !isGrid && prioRows.length > 0 && { id: 'priority-btn', label: pickedAllPrio ? 'Remove Priority' : 'Set Priority', icon: <FlagIcon />, onClick: toggleTablePriority },
+              ]} />
             </div>
+          </div>
+        ) : (
+          <>
+        <div className={`wl-tabbar${isGrid ? ' acts-only' : ''}`}>
+          {cards ? (
+            <div className="tabs" id="section-tabs">
+              {meta.tabs.map((t) => (
+                <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => changeTab(t.key)}>
+                  {t.label}<span className="count">{tabCount[t.key] ?? '–'}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <div className="wl-tabactions">
             {canWrite ? (
               <>
-                <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} />
+                <input ref={fileRef} type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style={{ display: 'none' }} onChange={(e) => importFile(e.target.files[0])} />
                 <button type="button" className="btn" id="import-btn" disabled={importing} onClick={() => fileRef.current.click()}>
                   <UploadIcon /> {importing ? 'Importing…' : 'Import'}
                 </button>
               </>
             ) : null}
-            <button type="button" className="btn" id="export-btn" onClick={exportXlsx}><DownloadIcon /> Export</button>
+            <ExportButton onExport={exportXlsx} className="btn"><DownloadIcon /> Export</ExportButton>
             {s.canPage('/admin') ? (
               <>
                 <button type="button" className="btn" id="add-column-btn" onClick={() => setAddingColumn(true)}><ColumnIcon /> Add Column</button>
               </>
             ) : null}
-            {canWrite && isGrid && !isAll ? <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add Row</button> : null}
+            {canWrite && isGrid && narrowUi ? <button type="button" className="btn" id="add-row" onClick={addRow}><PlusIcon /> Add Row</button> : null}
             {canWrite && isGrid && selRows.length ? <button type="button" className="btn" id="priority-btn" data-keep-sel onClick={togglePriority} title="Highlights the Breakdate / Time of the selected row(s)">{allPrio ? 'Remove Priority' : 'Set Priority'}</button> : null}
             {canWrite && isGrid && wholeRowsSel && selRows.some((r) => !xlLocked(r)) ? <button type="button" className="btn danger" id="delete-rows-btn" data-keep-sel onClick={deleteSelectedRows}>Delete {selRows.filter((r) => !xlLocked(r)).length > 1 ? `${selRows.filter((r) => !xlLocked(r)).length} Rows` : 'Row'}</button> : null}
             {s.canPage('/admin') ? <button type="button" className="btn" id="lock-dates-btn" onClick={() => setManagingLocks(true)}><LockIcon /> Lock Dates</button> : null}
-            {canWrite && !isGrid ? (
-              <button type="button" className="btn primary" id="new-btn" onClick={() => setForm({ rec: null })}><PlusIcon /> New Workload</button>
+            {canWrite && isAdminUser ? <button type="button" className="btn danger" id="delete-all-btn" onClick={() => setDeletingAll(true)} title="Delete every row that matches the filters you have on now (Admin)"><TrashIcon /> Delete All</button> : null}
+            {canWrite && !isGrid && pickedCount ? (
+              <button type="button" className="btn danger" id="delete-selected-btn" onClick={() => deleteSelected()} title="Delete the rows ticked in the table">
+                Delete Selected ({pickedCount})
+              </button>
             ) : null}
             {canWrite && isGrid ? (
               <button type="button" className="btn primary" id="save-grid" disabled={saving || !dirtyCount} onClick={saveGrid}>
@@ -1483,17 +2214,20 @@ export default function Workload() {
         </div>
 
         <div className="wl-filters">
-          {!isGrid ? (
-            <label className="wl-search">
-              <SearchIcon />
-              <input type="search" placeholder="Search plug ID, PSD, program, billable party, remarks…" value={filt.q} onChange={setF('q')} />
-            </label>
-          ) : null}
+          <label className="wl-search short">
+            <SearchIcon />
+            <input type="search" placeholder="Search plug ID, PSD, program, billable party, remarks…" value={filt.q} onChange={setF('q')} />
+          </label>
           <FilterSelect label="Units" value={filt.units} onChange={setF('units')}><Options list={[...meta.units, meta.notSet]} blank="All" /></FilterSelect>
           <FilterSelect label="Platform" value={filt.platform} onChange={setF('platform')}><Options list={lookups.workload_platform} blank="All" /></FilterSelect>
           <FilterSelect label="Plug Type" value={filt.plug_type} onChange={setF('plug_type')}><Options list={lookups.plug_type} blank="All" /></FilterSelect>
           <DateRange from={filt.from} to={filt.to} onChange={setRange} />
+          {groupChip()}
+          <div className="wl-presence"><PresenceAvatars path="/workload" peers={peers} describe={describePeer} /></div>
         </div>
+
+          </>
+        )}
 
         {isGrid ? (
           <>
@@ -1507,8 +2241,13 @@ export default function Workload() {
                         <tr>
                           <th className="rn" title="Select all" onMouseDown={(e) => startSel('all', 0, 0, e)} />
                           {tableCols.map((k, ci) => (
-                            <th key={k} className={`xl-colhead${colInSel(ci) ? ' hl' : ''}`} title="Click to select the column"
-                              data-c={ci} onMouseDown={(e) => startSel('col', 0, ci, e)}>{head(k)}</th>
+                            <th key={k} className={`xl-colhead${colInSel(ci) ? ' hl' : ''}${sort.k === k ? ' sorted' : ''}`} title="Click to select the column"
+                              data-c={ci} onMouseDown={(e) => startSel('col', 0, ci, e)}>
+                              {head(k)}
+                              <button type="button" className="xl-sort" aria-label={`Sort by ${head(k)}`} title="Click to sort" onMouseDown={(e) => e.stopPropagation()} onClick={() => sortBy(nextSort(sort, k))}>
+                                {sort.k === k ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}
+                              </button>
+                            </th>
                           ))}
                           {canWrite ? <th /> : null}
                         </tr>
@@ -1517,7 +2256,7 @@ export default function Workload() {
                         {grid.rows.length ? grid.rows.map((r, ri) => (
                           <tr key={r._key} data-ri={ri} className={`${r._dirty ? 'dirty' : ''}${r.is_priority ? ' prio-row' : ''}${xlLocked(r) ? ' locked-row' : ''}`.trim()}>
                             <td className={`rn${rowInSel(ri) ? ' hl' : ''}`} title={xlLocked(r) ? `Locked: ${lockNote(r.work_date, meta.locks)} — an Admin must unlock it first` : 'Click to select the whole row (Ctrl+C to copy)'}
-                              onMouseDown={(e) => startSel('row', ri, 0, e)}>{ri + 1}{r.is_priority ? <i className="prio-dot" title="Priority" /> : null}{xlLocked(r) ? <span className="row-lock"><LockIcon /></span> : null}</td>
+                              onMouseDown={(e) => startSel('row', ri, 0, e)}>{offset + ri + 1}{r.is_priority ? <i className="prio-dot" title="Priority" /> : null}{xlLocked(r) ? <span className="row-lock"><LockIcon /></span> : null}</td>
                             {tableCols.map((k, ci) => (
                               <td key={k} data-k={k} data-r={ri} data-c={ci} onMouseDown={cellMouseDown(ri, ci)} onBlur={() => { hist.current.tag = null; }}
                                 onFocus={(e) => { if (isTextTarget(e.target)) setGridSel((sel) => (sel && sel.r0 === ri && sel.r1 === ri && sel.c0 === ci && sel.c1 === ci ? sel : { r0: ri, c0: ci, r1: ri, c1: ci })); }}
@@ -1537,9 +2276,7 @@ export default function Workload() {
                             {canWrite ? <td className="right nowrap"><button type="button" className="btn sm ghost" onClick={() => removeRow(r)} disabled={xlLocked(r)} title={xlLocked(r) ? `Locked: ${lockNote(r.work_date, meta.locks)}` : undefined}>{r._new ? 'Remove' : 'Delete'}</button></td> : null}
                           </tr>
                         )) : (() => {
-                          const text = isAll
-                            ? 'No rows are waiting for a team. Plugs copied from the PSD Daily Plug List show up here until you set their Units Concerned — pick VGFX, VEDIT or Audio to edit a team’s rows.'
-                            : `No ${meta.tabs.find((t) => t.key === tab).label} rows match these filters.${canWrite ? ' Use “Add Row” to start.' : ''}`;
+                          const text = `No ${isAll ? '' : `${meta.tabs.find((t) => t.key === tab).label} `}rows match these filters.${canWrite && narrowUi ? ' Use “Add Row” to start.' : ''}`;
                           return <tr><td colSpan={tableCols.length + 2} className="empty xl-empty"><div className="xl-empty-msg" title={text}>{text}</div></td></tr>;
                         })()}
                       </tbody>
@@ -1566,50 +2303,51 @@ export default function Workload() {
                 </FitMenu>
               );
             })() : null}
-            {grid && grid.total > GRID_LIMIT ? (
-              <div className="pager"><span>Showing the first {GRID_LIMIT} of {grid.total} rows — narrow the date range to edit the rest.</span></div>
-            ) : null}
+            <Pager total={grid ? grid.total || 0 : 0} offset={offset} size={size} onOffset={goOffset} head={sheetTabs} lead={rowsPicker} />
           </>
         ) : (
           <>
-            {canWrite && data && data.rows && data.rows.length ? (
-              <div className="sel-bar">
-                {pickedCount ? (
-                  <span className="sel-count">
-                    {allMatching ? <>All <strong>{total}</strong> matching rows selected</> : <><strong>{pickedCount}</strong> selected</>}
-                    {!allMatching && pageAllPicked && isAdminUser && total > pageRows.length ? <span className="dim">Press Ctrl+A again to select all {total} matching rows</span> : null}
-                    <button type="button" className="linkbtn" onClick={clearPicks}>Clear</button>
-                  </span>
-                ) : <span className="dim sel-count">Tick the boxes (or drag across rows; Shift / Ctrl+click to extend) · Ctrl+A selects all</span>}
-                <span className="grow" />
-                <button type="button" className="btn danger sm" disabled={!pickedCount} onClick={() => deleteSelected()}>Delete selected{pickedCount ? ` (${pickedCount})` : ''}</button>
-                {isAdminUser ? <button type="button" className="btn danger sm" onClick={() => setDeletingAll(true)} title="Delete every row that matches the current tab and filters">Delete all…</button> : null}
-              </div>
-            ) : null}
             <div className={`table-wrap${cards ? '' : ' wl-fit'}`} id="tbl" onClickCapture={(e) => {
               if (tblSuppress.current) { tblSuppress.current = false; e.stopPropagation(); e.preventDefault(); return; }   // the click that ended a drag / Shift / Ctrl+click
-              if (canWrite && (picked.size || allMatching) && !(e.target.closest && e.target.closest('.actions-cell, .chk'))) clearPicks();
+              if ((picked.size || allMatching) && !(e.target.closest && e.target.closest('.actions-cell, .chk, .rn'))) clearPicks();
             }}>
               {!data ? <Empty>Loading…</Empty>
                 : data.error ? <Empty>{data.error}</Empty>
-                  : !data.rows.length ? <Empty>No workload items match these filters.</Empty>
+                  : !data.rows.length && !draft && !spareOn ? <Empty>No workload items match these filters.</Empty>
                     : (
                       <table className={`t wl v-${viewKey.toLowerCase()}${cards ? ' cards' : ''}`}>
-                        <thead><tr>{canWrite ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
+                        <thead><tr>{!cards ? <th className="rn" title={pageAllPicked ? 'Click to unselect all' : 'Select all rows on this page (Ctrl+A)'} onClick={() => (pageAllPicked ? clearPicks() : selectPage())} /> : null}{canWrite && cards ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
+                          {draft && draft.at !== 'bottom' ? (
+                            <tr key="draft" className="draft-row" data-draft="1">
+                              {!cards ? <td className="rn" title="New row — not saved yet">＋</td> : null}
+                              {cards ? <td className="chk" /> : null}
+                              {tableCols.map((k) => (k === 'breakdate_vgfx' ? breakdateCell(draft) : cell(draft, k)))}
+                              <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
+                                <button type="button" className="btn primary" style={{ padding: "4px 10px" }} id="draft-save" onClick={() => saveDraft()}>Save</button>{' '}
+                                <button type="button" className="btn" style={{ padding: "4px 10px" }} id="draft-discard" onClick={() => { setDraft(null); setEditing(null); }}>Discard</button>
+                              </td>
+                            </tr>
+                          ) : null}
                           {data.rows.map((r, idx) => (
-                            <tr key={r.id} data-id={r.id}
-                              className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}`.trim()}
-                              onMouseDown={canWrite ? (e) => rowDown(e, r, idx) : undefined}
-                              onContextMenu={canWrite ? (e) => rowMenu(e, r) : undefined}
-                              onClick={canWrite ? undefined : () => setForm({ rec: r })}>
-                              {canWrite ? (
+                            <Fragment key={r.id}>
+                            {isPrep ? prepDivider(r, idx > 0 ? data.rows[idx - 1] : null, idx === 0 && offset === 0) : null}
+                            <tr data-id={r.id}
+                              className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}${isPrep && (r.prep_missing || []).length ? ' prep-wait' : ''}${groupPos.pos[idx] ? ` grp ${groupPos.pos[idx].cls} c-${groupPos.pos[idx].hue}` : ''}`.trim()}
+                              onMouseDown={cellDown}
+                              onContextMenu={(e) => rowMenu(e, r)}
+                              onClick={canWrite ? undefined : (e) => { if (!(e.target.closest && e.target.closest('.rn'))) setForm({ rec: r }); }}>
+                              {!cards ? (
+                                <td className={`rn${allMatching || picked.has(r.id) ? ' hl' : ''}`} onMouseDown={(e) => numDown(e, r, idx)}
+                                  title={lockedForPick(r) ? 'Locked period: cannot be selected' : canWrite ? 'Click to select the row (Shift-click a range, Ctrl-click to add; Ctrl+C copies, Ctrl+V pastes)' : 'Click to select the row (Shift-click a range, Ctrl-click to add; Ctrl+C copies)'}>{offset + idx + 1}</td>
+                              ) : null}
+                              {canWrite && cards ? (
                                 <td className="chk">
                                   <input type="checkbox" checked={allMatching || picked.has(r.id)} disabled={rowLocked(r)} title={rowLocked(r) ? 'Locked period: cannot be selected' : undefined} aria-label={`Select row ${r.plug_id || r.id}`}
                                     onChange={() => { setAllMatching(false); setPicked((cur) => { const n = new Set(allMatching ? pickable.map((x) => x.id) : cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; }); lastPick.current = r.id; }} />
                                 </td>
                               ) : null}
-                              {tableCols.map((k) => (k === 'breakdate_vgfx' ? breakdateCell(r) : cell(r, k)))}
+                              {tableCols.map((k, ci) => { const td = k === 'breakdate_vgfx' ? breakdateCell(r) : cell(r, k); const n = normCells(); return cloneElement(td, { 'data-r': idx, 'data-c': ci, 'data-sel': n && idx >= n.r0 && idx <= n.r1 && ci >= n.c0 && ci <= n.c1 ? '1' : undefined }); })}
                               {canWrite ? (
                                 <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
                                   <RowMenu
@@ -1620,34 +2358,60 @@ export default function Workload() {
                                 </td>
                               ) : null}
                             </tr>
+                            </Fragment>
                           ))}
+                          {isPrep && prepNextWait ? (
+                            <tr className="prep-divider waiting jump" onClick={() => { if (prepNextWait.offset !== offset) { jumpWait.current = true; setTimeout(() => { jumpWait.current = false; }, 6000); } goOffset(prepNextWait.offset); }} title="Go to the first page with rows For Follow-up">
+                              <td colSpan={tableCols.length + 4}><strong>For Follow-up</strong> <span className="dim">({prepNextWait.n}): continues on page {prepNextWait.page}. Click to go there.</span></td>
+                            </tr>
+                          ) : null}
+                          {spareOn ? <SpareRows count={spareN} start={offset + (data.rows ? data.rows.length : 0)} cols={tableCols} lead="rn" trail onOpen={openSpare}
+                            at={draft && draft.at === 'bottom' ? draft.slot : -1}
+                            node={draft && draft.at === 'bottom' ? (
+                              <tr key="spare-draft" className="draft-row spare-draft" data-draft="1">
+                                <td className="rn">{offset + (data.rows ? data.rows.length : 0) + draft.slot + 1}</td>
+                                {tableCols.map((k) => (k === 'breakdate_vgfx' ? breakdateCell(draft) : cell(draft, k)))}
+                                <td className="actions-cell" />
+                              </tr>
+                            ) : null} /> : null}
                         </tbody>
                       </table>
                     )}
             </div>
-            <Pager total={total} offset={offset} size={PAGE} onOffset={setOffset} />
+            <Pager total={total} offset={offset} size={size} onOffset={cards ? setOffset : goOffset} head={cards ? undefined : sheetTabs} lead={cards ? undefined : rowsPicker} />
             {tctx ? (
               <FitMenu x={tctx.x} y={tctx.y} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
+                {canWrite ? <>
                 <button type="button" disabled={!tblHist.current.past.length} onClick={() => { setTctx(null); undoTbl(); }}>Undo<span>Ctrl+Z</span></button>
                 <button type="button" disabled={!tblHist.current.future.length} onClick={() => { setTctx(null); redoTbl(); }}>Redo<span>Ctrl+Y</span></button>
                 <hr />
                 <button type="button" disabled={!picked.size || allMatching} onClick={() => { setTctx(null); cutPicked(); }}>Cut<span>Ctrl+X</span></button>
-                <button type="button" disabled={!picked.size} onClick={() => { setTctx(null); copyPicked(); }}>Copy<span>Ctrl+C</span></button>
-                <button type="button" onClick={menuPasteRows}>Paste<span>Ctrl+V</span></button>
+                </> : null}
+                <button type="button" disabled={!picked.size && !cellSel} onClick={() => { setTctx(null); if (picked.size) copyPicked(); else copyCells(); }}>Copy<span>Ctrl+C</span></button>
+                {canWrite ? <>
+                <button type="button" onClick={() => menuPasteRows()}>{picked.size ? 'Paste (replace row)' : 'Paste'}<span>Ctrl+V</span></button>
+                <button type="button" disabled={!picked.size} onClick={() => menuPasteRows('above')}>Paste as new row above</button>
+                <button type="button" disabled={!picked.size} onClick={() => menuPasteRows('below')}>Paste as new row below</button>
                 <hr />
+                {tctx.bd ? <button type="button" disabled={!prioRows.length} onClick={() => { setTctx(null); toggleTablePriority(); }}>{pickedAllPrio ? 'Remove priority' : 'Set priority'}</button> : null}
                 <button type="button" disabled={!pickedCount} onClick={() => { setTctx(null); deleteSelected(); }}>Delete {pickedCount > 1 ? `${pickedCount} rows` : 'row'}<span>Del</span></button>
+                </> : null}
               </FitMenu>
             ) : null}
           </>
         )}
       </div>
 
+      {filling ? (
+        <FillModal file={filling.file} onClose={() => setFilling(false)} onDone={() => { setFilling(false); load(); }} />
+      ) : null}
+
       {deletingAll ? (
         <DeleteAllModal
           total={total}
-          scope={[tab === 'ALL' ? 'All tab' : `${meta.tabs.find((t) => t.key === tab).label} tab`, filt.units && `Units: ${filt.units}`, filt.platform && `Platform: ${filt.platform}`, filt.plug_type && `Plug Type: ${filt.plug_type}`,
+          scope={[tab === 'ALL' ? 'All tab' : `${meta.tabs.find((t) => t.key === tab).label} tab`, filt.units && `Units: ${filt.units}`, filt.platform && `Platform: ${filt.platform}`, filt.plug_type && `Plug Type: ${filt.plug_type}`, filt.group && `Group: ${filt.group}`,
             (filt.from || filt.to) && `Dates: ${filt.from || '…'} → ${filt.to || '…'}`, q && `Search: “${q}”`].filter(Boolean)}
-          filters={{ team: tab === 'ALL' ? undefined : tab, units: filt.units || undefined, platform: filt.platform || undefined, plug_type: filt.plug_type || undefined, from: filt.from || undefined, to: filt.to || undefined, q: q || undefined }}
+          filters={{ team: tab === 'ALL' ? undefined : tab, units: filt.units || undefined, platform: filt.platform || undefined, plug_type: filt.plug_type || undefined, group: filt.group || undefined, from: filt.from || undefined, to: filt.to || undefined, q: q || undefined }}
           onClose={() => setDeletingAll(false)}
           onDone={(out) => { setDeletingAll(false); afterBulk(out); }}
         />
@@ -1685,6 +2449,54 @@ export default function Workload() {
 
 // Admin-only: name a new column. It shows up everywhere (Table, Excel grid, the add/edit form, Excel export)
 // as a plain open-text field, appended after the template's own columns.
+// Fill the BLANK cells of rows already in the tracker from the team's original per-day workbook (merged cells and extra columns are fine).
+// Step 1 reads the file and shows what would change; step 2 saves it. Typed values are never overwritten and no rows are created.
+function FillModal({ file, onClose, onDone }) {
+  const toast = useToast();
+  const [res, setRes] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [defUnits, setDefUnits] = useState('');
+  const [otherDays, setOtherDays] = useState(true);
+  const run = async (apply) => {
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    setBusy(true);
+    try {
+      const out = await post(`/api/workload/fill?${apply ? 'apply=1&' : ''}units=${encodeURIComponent(defUnits)}&otherDays=${otherDays ? 1 : 0}`, fd);
+      if (apply) { toast(`${out.updated} row${out.updated === 1 ? '' : 's'} filled (${out.cells} cell${out.cells === 1 ? '' : 's'})`); onDone(out); return; }
+      setRes(out);
+    } catch (e) { toast(e.message, 'err'); } finally { setBusy(false); }
+  };
+  useEffect(() => { setRes(null); run(false); }, [defUnits, otherDays]);   // check the file now, and again whenever an option changes
+  const FIELD_NAMES = { units_concerned: 'Units Concerned', psd: 'PSD', prog_name: 'Prog. Name', breakdate_vgfx: 'Breakdate (VGFX)', breakdate_vedit: 'Breakdate (VEDIT)', vo: 'VO', script: 'Script', art_stb: 'Artwork / STB', audio_guide: 'Audio Guide', remarks: 'Remarks', total_mats: 'Total Mats', platform: 'Platform' };
+  return (
+    <Modal title="Fill from team workbook" onClose={onClose}
+      footer={(<><span className="grow" /><button type="button" className="btn" onClick={onClose}>Cancel</button>
+        {res && res.updated ? <button type="button" className="btn primary" id="fill-apply" disabled={busy} onClick={() => run(true)}>{busy ? 'Saving…' : `Fill ${res.updated} row${res.updated === 1 ? '' : 's'}`}</button> : null}</>)}>
+      <p><strong>{file ? file.name : ''}</strong> is the team's per-day workbook (sheets like <em>SEP 10_main</em>), so it doesn't add rows: its values fill the blank cells of the rows you already have, matched by Work Date and Plug ID. Anything already typed is kept. The Audio (_ojo) sheets fill Length, Remarks and Status, and the unit of audio-only plugs.</p>
+      <label className="check-row" style={{ marginTop: 8 }}><input id="fill-otherdays" type="checkbox" checked={otherDays} onChange={(e) => { setOtherDays(e.target.checked); setRes(null); }} /> <span>If a plug's own day isn't in the workbook, use the same plug from the nearest day that lists it (not its Breakdate)</span></label>
+      <label className="f" style={{ marginTop: 8 }}><span>Units Concerned for plugs the workbook doesn't name a team for (e.g. “NEW OCTOBER TEMPLATE”, “WAITING FOR LOCAL”)</span>
+        <select id="fill-units" value={defUnits} onChange={(e) => { setDefUnits(e.target.value); setRes(null); }}>
+          <option value="">Leave blank</option><option value="VGFX/VEDIT">VGFX/VEDIT</option><option value="VGFX Only">VGFX Only</option><option value="VEDIT Only">VEDIT Only</option>
+        </select></label>
+      {!res && busy ? <p className="dim">Reading the workbook…</p> : null}
+      {res ? (
+        <div id="fill-result" style={{ marginTop: 12 }}>
+          <p><strong>{res.updated}</strong> row{res.updated === 1 ? '' : 's'} would be filled ({res.cells} cell{res.cells === 1 ? '' : 's'}) from {res.sheets} sheet{res.sheets === 1 ? '' : 's'} covering {res.days} day{res.days === 1 ? '' : 's'}.</p>
+          {Object.keys(res.byField).length ? <ul className="plug-warn" style={{ color: 'inherit' }}>{Object.entries(res.byField).map(([k, n]) => <li key={k}>{FIELD_NAMES[k] || k}: {n}</li>)}</ul> : null}
+          <p className="dim">{res.unchanged} matched row{res.unchanged === 1 ? ' is' : 's are'} already complete{res.locked ? `, ${res.locked} in a locked period (left alone)` : ''}. {res.noMatch} row{res.noMatch === 1 ? '' : 's'} on those days {res.noMatch === 1 ? 'was' : 'were'} not found in the workbook{res.noMatchSample.length ? ` (e.g. ${res.noMatchSample.slice(0, 5).join(', ')})` : ''}.</p>
+          {res.errorCount ? <p className="dim">{res.errorCount} row{res.errorCount === 1 ? '' : 's'} skipped: {res.errors[0]}</p> : null}
+          {res.unitsSet ? <p className="dim">Units Concerned: {res.unitsSet - res.unitsFromOtherDays - res.unitsDefaulted - res.unitsFromAudio} from the row's own Breakdate{res.unitsFromOtherDays ? `, ${res.unitsFromOtherDays} from the same plug on another day` : ''}{res.unitsFromAudio ? `, ${res.unitsFromAudio} from the Audio sheets` : ''}{res.unitsDefaulted ? `, ${res.unitsDefaulted} set to ${defUnits}` : ''}.</p> : null}
+          {res.otherDayMatched ? <p className="dim">{res.otherDayMatched} row{res.otherDayMatched === 1 ? '' : 's'} filled from the same plug on another day (their own day has no sheet entry).</p> : null}
+          {res.looseMatched ? <p className="dim">{res.looseMatched} row{res.looseMatched === 1 ? '' : 's'} matched by plug name without the length (e.g. …_LNXX in the plug list, …_LN060 in the workbook).</p> : null}
+          {res.updated ? null : <p>Nothing to fill.</p>}
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
 function DeleteAllModal({ total, scope, filters, onClose, onDone }) {
   const toast = useToast();
   const [typed, setTyped] = useState('');
@@ -1814,7 +2626,7 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
   const initial = Object.keys(meta.fields).reduce((o, k) => ({ ...o, [k]: (rec && rec[k]) ?? (duplicateFrom && duplicateFrom[k]) ?? '' }), {});
   if (!rec && !duplicateFrom) { initial.work_date = isoDate(); initial.units_concerned = defaultUnits; }
   initial.is_priority = !!(rec && rec.is_priority);   // a duplicate is a new item, so it starts un-prioritised
-  const [f, , setAll] = useForm(initial);
+  const [f, , setAll] = useForm(initial, 'workload');
   // Plug ID is not typed: it is picked from the PSD Daily Plug List of the chosen Work Date, which fills PSD and PROG. NAME / PROJ. TITLE too
   const session = useSession();
   const [plugs, setPlugs] = useState(null);   // null = loading
@@ -1859,9 +2671,9 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
     && !(k === 'breakdate_vgfx' && !teams.includes('VGFX'))
     && !(k === 'breakdate_vedit' && !teams.includes('VEDIT')));
   // Any row that involves Audio also gets the Audio-only columns (Length, Others)
-  const shown = f.units_concerned
-    ? [...base, ...(teams.includes('AUDIO') ? meta.audioExtra.filter((k) => !base.includes(k)) : [])]
-    : [];
+  // (with no Units Concerned yet — e.g. a plug copied from the PSD Daily Plug List — the usual fields still show, so Edit opens the full card straight away;
+  // the Breakdate / Time fields appear once a team is chosen)
+  const shown = [...base, ...(teams.includes('AUDIO') ? meta.audioExtra.filter((k) => !base.includes(k)) : [])];
   const bothVgfxVedit = teams.includes('VGFX') && teams.includes('VEDIT');
   // Only one of the two teams involved: drop the "(VGFX)"/"(VEDIT)" suffix since there's no ambiguity to resolve
   const fieldLabel = (k, def) => (!bothVgfxVedit && (k === 'breakdate_vgfx' || k === 'breakdate_vedit') ? 'Breakdate / Time' : k === 'others' && !audioOnly ? 'Remarks (Audio)' : def.label);
@@ -1887,7 +2699,7 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
 
   return (
     <Modal
-      title={rec ? `${canWrite ? 'Edit' : 'View'} Workload #${rec.id}` : duplicateFrom ? 'Duplicate Workload' : 'New Workload'}
+      title={rec ? `${canWrite ? 'Edit' : 'View'} Workload` : duplicateFrom ? 'Duplicate Workload' : 'New Workload'}
       onClose={onClose}
       footer={(
         <>
@@ -1909,7 +2721,8 @@ function WorkloadForm({ rec, duplicateFrom, defaultUnits, meta, lookups, canWrit
             {' '}Priority <span className="dim">— highlights this item's Breakdate / Time</span>
           </span>
         </label>
-        {!f.units_concerned ? <div className="full dim">Choose Units Concerned to see the fields.</div> : shown.map((k) => {
+        {!f.units_concerned ? <div className="full dim">Choose Units Concerned to add the Breakdate / Time fields.</div> : null}
+        {shown.map((k) => {
           const def = meta.fields[k];
           if (k === 'plug_id') {
             // no free-text box: the Plug ID is chosen from the PSD Daily Plug List of the Work Date
