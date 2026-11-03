@@ -807,15 +807,49 @@ router.post('/link', requireAction('workload.write'), asyncH(async (req, res) =>
 
 // Copy chosen columns of one row to the other rows of its group (e.g. whoever it is assigned to), so a plug is handled by one person.
 // Never copies the columns that identify or place a row (Plug ID, Work Date, Platform, Units Concerned) or the Breakdate / Time pills.
+// Returns what changed on every row (before / after) so the page can undo and redo it.
 const GROUP_COPY_KINDS = ['text', 'select', 'date_or_text', 'audio_guide'];
+const copyableFields = (wanted, customCols) => [...new Set((Array.isArray(wanted) ? wanted : []).map((k) => String(k)))].slice(0, 40)
+  .filter((k) => (COLS.includes(k) && !['plug_id', 'platform', 'units_concerned'].includes(k) && GROUP_COPY_KINDS.includes(FIELDS[k].kind)) || customCols.some((c) => c.col_key === k));
+/** Sets the given columns of row `mid` (inside transaction c). Returns null when its date is locked, else { id, before, after } for the columns that really changed. */
+async function setCopyValues(c, req, locks, customCols, mid, values, fieldsChanged) {
+  const cur = (await c.query('SELECT * FROM workload_items WHERE id = $1 FOR UPDATE', [mid])).rows[0];
+  if (!cur) return undefined;
+  try { assertNotLocked(locks, cur.work_date); } catch (e) { return null; }
+  const before = {};
+  const after = {};
+  const regular = Object.keys(values).filter((k) => COLS.includes(k));
+  const custom = Object.keys(values).filter((k) => !COLS.includes(k));
+  if (regular.length) {
+    const merged = {};
+    COLS.forEach((k) => { merged[k] = cur[k]; });
+    regular.forEach((k) => { merged[k] = values[k]; });
+    const rec = await parseRow(c, merged, cur, customCols);
+    const changed = regular.filter((k) => String(rec[k] ?? '') !== String(cur[k] ?? ''));
+    if (changed.length) {
+      await c.query(`UPDATE workload_items SET ${changed.map((k, i) => `"${k}"=$${i + 2}`).join(', ')}, updated_by=$${changed.length + 2}, updated_at=now() WHERE id=$1`, [mid, ...changed.map((k) => rec[k]), req.user.id]);
+      changed.forEach((k) => { before[k] = cur[k] ?? ''; after[k] = rec[k] ?? ''; });
+      const notify = changed.filter((k) => NOTIFY_FIELDS[k]);
+      if (notify.length) fieldsChanged.push({ plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur, Object.fromEntries(notify.map((k) => [k, rec[k]]))) });
+    }
+  }
+  const customChanged = custom.filter((k) => String(values[k] ?? '') !== String((cur.custom_fields || {})[k] ?? ''));
+  if (customChanged.length) {
+    const patch = Object.fromEntries(customChanged.map((k) => [k, String(values[k] ?? '')]));
+    await c.query('UPDATE workload_items SET custom_fields = custom_fields || $2::jsonb, updated_by=$3, updated_at=now() WHERE id=$1', [mid, JSON.stringify(patch), req.user.id]);
+    customChanged.forEach((k) => { before[k] = String((cur.custom_fields || {})[k] ?? ''); after[k] = String(values[k] ?? ''); });
+  }
+  if (!Object.keys(after).length) return { id: mid, before: {}, after: {} };
+  return { id: mid, before, after };
+}
+
 router.post('/apply-group', requireAction('workload.write'), asyncH(async (req, res) => {
   const id = v.id(req.body && req.body.id);
   const customCols = await loadCustomCols(db);
-  const wanted = Array.isArray(req.body.fields) ? [...new Set(req.body.fields.map((k) => String(k)))].slice(0, 40) : [];
-  const fields = wanted.filter((k) => (COLS.includes(k) && !['plug_id', 'platform', 'units_concerned'].includes(k) && GROUP_COPY_KINDS.includes(FIELDS[k].kind)) || customCols.some((c) => c.col_key === k));
+  const fields = copyableFields(req.body && req.body.fields, customCols);
   if (!fields.length) throw new HttpError(400, 'Those columns cannot be copied to a group');
   const locks = await loadLocks(db);
-  let fieldsChanged = [];
+  const fieldsChanged = [];
   const out = await db.tx(async (c) => {
     const auto = autoOn(req.body);
     const src = (await c.query('SELECT w.*, ' + groupKeySql(auto) + ' AS gk FROM workload_items w WHERE w.id = $1', [id])).rows[0];
@@ -823,37 +857,47 @@ router.post('/apply-group', requireAction('workload.write'), asyncH(async (req, 
     if (!src.gk) throw new HttpError(400, 'This row is not in a group');
     const members = (await c.query(`SELECT w.id FROM workload_items w WHERE ${groupKeySql(auto)} = $1 AND w.id <> $2 ORDER BY w.id`, [src.gk, id])).rows.map((r) => r.id);
     if (!members.length) throw new HttpError(400, 'This row is not in a group');
-    let updated = 0;
+    const values = {};
+    fields.forEach((k) => { values[k] = COLS.includes(k) ? src[k] : String((src.custom_fields || {})[k] ?? ''); });
+    const changes = [];
     let skipped = 0;
     for (const mid of members) {
-      const cur = (await c.query('SELECT * FROM workload_items WHERE id = $1 FOR UPDATE', [mid])).rows[0];
-      if (!cur) continue;
-      try { assertNotLocked(locks, cur.work_date); } catch (e) { skipped++; continue; }
-      const regular = fields.filter((k) => COLS.includes(k));
-      const custom = fields.filter((k) => !COLS.includes(k));
-      if (regular.length) {
-        const merged = {};
-        COLS.forEach((k) => { merged[k] = cur[k]; });
-        regular.forEach((k) => { merged[k] = src[k]; });
-        const rec = await parseRow(c, merged, cur, customCols);
-        const changed = regular.filter((k) => String(rec[k] ?? '') !== String(cur[k] ?? ''));
-        if (changed.length) {
-          await c.query(`UPDATE workload_items SET ${changed.map((k, i) => `"${k}"=$${i + 2}`).join(', ')}, updated_by=$${changed.length + 2}, updated_at=now() WHERE id=$1`, [mid, ...changed.map((k) => rec[k]), req.user.id]);
-          const notify = changed.filter((k) => NOTIFY_FIELDS[k]);
-          if (notify.length) fieldsChanged.push({ plug_id: rec.plug_id, work_date: rec.work_date, fields: fieldsSet(cur, Object.fromEntries(notify.map((k) => [k, rec[k]]))) });
-        }
-      }
-      if (custom.length) {
-        const patch = Object.fromEntries(custom.map((k) => [k, String((src.custom_fields || {})[k] ?? '')]));
-        await c.query('UPDATE workload_items SET custom_fields = custom_fields || $2::jsonb, updated_by=$3, updated_at=now() WHERE id=$1', [mid, JSON.stringify(patch), req.user.id]);
-      }
+      const r = await setCopyValues(c, req, locks, customCols, mid, values, fieldsChanged);
+      if (r === undefined) continue;
+      if (r === null) { skipped++; continue; }
       await audit(req, 'workload.update', 'workload_item', mid, { via: 'apply-group', from: id, fields }, c);
-      updated++;
+      if (Object.keys(r.after).length) changes.push(r);
+    }
+    return { updated: members.length - skipped, skipped, changes };
+  });
+  if (fieldsChanged.length) await notifyFieldsSet(req, fieldsChanged);
+  res.json({ ok: true, ...out, fields });
+}));
+
+// Undo / redo of Apply to whole group: put the given values back on the given rows (same columns, same checks, same locked-date rule)
+router.post('/set-values', requireAction('workload.write'), asyncH(async (req, res) => {
+  const list = Array.isArray(req.body && req.body.rows) ? req.body.rows.slice(0, 500) : [];
+  if (!list.length) throw new HttpError(400, 'Nothing to restore');
+  const customCols = await loadCustomCols(db);
+  const locks = await loadLocks(db);
+  const fieldsChanged = [];
+  const out = await db.tx(async (c) => {
+    let updated = 0;
+    let skipped = 0;
+    for (const item of list) {
+      const mid = v.id(item && item.id);
+      const keys = copyableFields(Object.keys((item && item.values) || {}), customCols);
+      if (!keys.length) continue;
+      const values = {};
+      keys.forEach((k) => { values[k] = item.values[k]; });
+      const r = await setCopyValues(c, req, locks, customCols, mid, values, fieldsChanged);
+      if (r === null) { skipped++; continue; }
+      if (r && Object.keys(r.after).length) { updated++; await audit(req, 'workload.update', 'workload_item', mid, { via: 'undo-apply-group', fields: keys }, c); }
     }
     return { updated, skipped };
   });
   if (fieldsChanged.length) await notifyFieldsSet(req, fieldsChanged);
-  res.json({ ok: true, ...out, fields });
+  res.json({ ok: true, ...out });
 }));
 
 // Save ONE field of a row (click-to-edit in the table). Only that column is written, so someone else's edit to a

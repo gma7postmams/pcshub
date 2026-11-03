@@ -1437,6 +1437,11 @@ export default function Workload() {
     if (!(await confirm('Apply to the whole group?', `${labels.join(', ')} of this entry will be copied to the other ${others} entr${others === 1 ? 'y' : 'ies'} of its group, replacing what is there now.`))) return;
     try {
       const out = await post('/api/workload/apply-group', { id: applySrc.id, fields: applyKeys, auto: filt.auto === '0' ? '0' : '1' });
+      const changes = (out.changes || []).filter((c) => Object.keys(c.after || {}).length);
+      if (changes.length) {   // undo / redo: the server says what each row had before and after
+        const put = (which) => async () => { await post('/api/workload/set-values', { rows: changes.map((c) => ({ id: c.id, values: c[which] })) }); };
+        pushTbl({ label: 'apply to whole group', undo: put('before'), redo: put('after') });
+      }
       toast(`Copied to ${out.updated} entr${out.updated === 1 ? 'y' : 'ies'}${out.skipped ? ` (${out.skipped} in a locked period skipped)` : ''}`);
       load();
     } catch (e) { toast(e.message, 'err'); }
