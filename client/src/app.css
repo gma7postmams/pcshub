@@ -1405,9 +1405,9 @@ table.t.wl tbody tr.grp-last td { border-bottom: 1px solid color-mix(in srgb, va
 .tpop-menu button .wl-switch { margin-left: 18px; }
 
 /* Workload: a plug group = a header row with the shared values + the member rows (faint = same as the group, highlighted = the column differs) */
-table.t.wl tr.grp-head td { background: color-mix(in srgb, var(--c) 11%, var(--surface)); border-top: 1px solid color-mix(in srgb, var(--c) 45%, var(--border)); }
+table.t.wl tr.grp-head td { border-top: 1px solid color-mix(in srgb, var(--c) 45%, var(--border)); }
 table.t.wl tr.grp-head td.hd-editable { cursor: pointer; }
-table.t.wl tr.grp-head td.hd-editable:hover { background: color-mix(in srgb, var(--c) 18%, var(--surface)); }
+table.t.wl tr.grp-head td.hd-editable:hover { background: var(--surface-3); }
 table.t.wl tr.grp-head td.editing { overflow: visible; }
 .hd-rn { white-space: nowrap; }
 .hd-tgl { cursor: pointer; user-select: none; display: inline-block; width: 16px; color: var(--c); font-size: 13px; }
@@ -1417,8 +1417,6 @@ table.t.wl tr.grp-head td.editing { overflow: visible; }
 table.t.wl td.g-faint > * { opacity: .4; }
 table.t.wl td.g-faint:hover > * { opacity: .9; }
 
-.grp-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 4px 2px; font-size: 12.5px; color: var(--text-2); }
-.grp-legend .faint-sample { opacity: .45; }
 
 /* group header number cell: arrow + range on ONE line; the column is as wide as the longest range on the page (--rn-w, set from the code) */
 table.t.wl.has-groups:not(.cards) th.rn, table.t.wl.has-groups:not(.cards) td.rn { width: var(--rn-w, 34px); min-width: var(--rn-w, 34px); max-width: var(--rn-w, 34px); }

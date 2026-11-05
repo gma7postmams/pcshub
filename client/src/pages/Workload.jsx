@@ -2511,12 +2511,6 @@ export default function Workload() {
                       </table>
                     )}
             </div>
-            {Object.keys(runAt).length ? (
-              <div className="grp-legend">
-                <span className="faint-sample">faint</span> = same as the group header; "N differs" in the header means the entries do not all match in that column
-                <span className="dim">Every cell is still there and editable; editing a faint cell turns it into a normal one. Double-click a header value to set it on the whole group.</span>
-              </div>
-            ) : null}
             <Pager total={total} offset={offset} size={size} onOffset={cards ? setOffset : goOffset} head={cards ? undefined : sheetTabs} lead={cards ? undefined : rowsPicker} />
             {tctx ? (
               <FitMenu x={tctx.x} y={tctx.y} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
