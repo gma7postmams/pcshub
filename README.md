@@ -278,6 +278,16 @@ of **that account** for the lock time (refused even with the right password), an
 must see real client addresses: set `TRUST_PROXY=1`, and if another gateway is in front of nginx, set `set_real_ip_from` in `deploy/nginx.conf` (otherwise the audit log shows the gateway and everybody behind it shares one lock).
 Live self-test against a throw-away copy: `python3 scripts/security-selftest2.py` (see the header of the file).
 
+### Scheduled Excel export
+
+**Administration > Backup and Restore > Scheduled export** saves Excel copies of the **PSD Daily Plug List, Ingest Tracker and Workload Tracker** on a schedule, for people who want readable files next to the database backup. The files are the same workbooks the pages' own **Export** buttons make (the feature calls those routes, so layout, colours and columns match) and are kept in `<backup folder>/exports/<date_time>/`.
+
+- **Dates:** *Yesterday* (runs every day), *Last week* (the Monday-Sunday before this one; runs every Monday), *Last month* (the whole calendar month before; runs on the 1st) or *Custom* (From / To, at most a year; runs every day with the same dates). The line under the form shows what that means today.
+- **Separate data by date into tabs:** one tab per day, like the Export dialog's option.
+- Pick which of the three lists to include, the time (server time) and how many exports to keep (older folders are removed). **Export now** runs it with the saved settings; the last result and every saved file (with a Download button) are listed on the same tab.
+- A day's run is made once, also after a restart (it catches up if the server was off at the set time). A failed list is shown in the last-result bar and written to the Audit Log (*Scheduled Excel Export*); saving the schedule and downloading a file are logged too.
+- These files are **not** inside the backup ZIP and are not restored by it: the database backup already holds all the data. Copy the folder to OneDrive or another drive if you want them off the server.
+
 ### Backups encrypted at rest
 
 With `BACKUP_ENC_KEY` set, every new backup is encrypted (AES-256-GCM) and named `….zip.enc`; verify, restore, upload and the backup server

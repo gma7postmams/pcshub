@@ -173,6 +173,7 @@ app.use('/api/plugs',         live.track('plugs'), require('./src/routes/plugs')
 app.use('/api/knowledge',     requirePageAccess('/knowledge'), require('./src/routes/knowledge'));
 app.use('/api/admin/ip-rules', requirePageAccess('/admin'),    require('./src/routes/ip-rules'));
 app.use('/api/admin/backups', requirePageAccess('/admin'),     require('./src/routes/backups'));
+app.use('/api/admin/exports', requirePageAccess('/admin'),     require('./src/routes/export-schedule'));
 app.use('/api/admin/node',    requirePageAccess('/admin'),     require('./src/routes/node-admin'));
 app.use('/api/admin',         requirePageAccess('/admin'),     require('./src/routes/admin'));
 
@@ -244,6 +245,7 @@ boot
     // Production default: localhost only — users reach the app through the HTTPS reverse proxy.
     const HOST = process.env.HOST || (PROD ? '127.0.0.1' : '0.0.0.0');
 
+    try { require('./src/export-schedule').start(); } catch (e) { console.error('[export] scheduler not started:', e.message); }
     try { require('./src/backup/scheduler').start(); } catch (e) { console.error('[backup] scheduler not started:', e.message); }
     try { require('./src/security-check-schedule').start(); } catch (e) { console.error('[security-check] schedule not started:', e.message); }
     try { require('./src/node-sync').start(); } catch (e) { console.error('[node-sync] not started:', e.message); }
