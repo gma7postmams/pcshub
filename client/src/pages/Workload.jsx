@@ -477,6 +477,8 @@ export default function Workload() {
   useEffect(() => { syncDialog('workload', form); }, [form]);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState(() => loadEdit('workload').draft || null);   // Table mode: the empty row Add Row put at the top, not saved yet (kept across a refresh)
+  const [collapsed, setCollapsed] = useState(() => new Set());   // plug groups whose member rows are folded away (only their header row shows)
+  const [hdrEdit, setHdrEdit] = useState(null);   // a group header cell is being edited: { key, k }
   const [editing, setEditing] = useState(() => loadEdit('workload').cell || null);   // an open cell editor comes back after a refresh
   const prevEd = useRef(editing ? `${editing.id}:${editing.k}` : null);
   useEffect(() => { prevEd.current = syncEdit('workload', editing, draft, prevEd.current); }, [editing, draft]);
@@ -1429,6 +1431,12 @@ export default function Workload() {
   const scopeRows = linkRows.length >= 2 || pickedRowsList.length ? linkRows : [];
   const selMode = canWrite && scopeRows.length > 0;   // entries are selected: the menu offers group actions for them instead of the view-wide switch
   const inOneGroup = scopeRows.length >= 2 && scopeRows.every((r) => r.group_key && r.group_key === scopeRows[0].group_key);
+  const recordApply = (out) => {   // undo / redo: the server says what each row had before and after
+    const changes = (out.changes || []).filter((c) => Object.keys(c.after || {}).length);
+    if (!changes.length) return;
+    const put = (which) => async () => { await post('/api/workload/set-values', { rows: changes.map((c) => ({ id: c.id, values: c[which] })) }); };
+    pushTbl({ label: 'apply to whole group', undo: put('before'), redo: put('after') });
+  };
   const applyToGroup = async () => {
     const applyKeys = applyKeysOf();
     if (!applySrc || !applyKeys.length) return;
@@ -1437,11 +1445,7 @@ export default function Workload() {
     if (!(await confirm('Apply to the whole group?', `${labels.join(', ')} of this entry will be copied to the other ${others} entr${others === 1 ? 'y' : 'ies'} of its group, replacing what is there now.`))) return;
     try {
       const out = await post('/api/workload/apply-group', { id: applySrc.id, fields: applyKeys, auto: filt.auto === '0' ? '0' : '1' });
-      const changes = (out.changes || []).filter((c) => Object.keys(c.after || {}).length);
-      if (changes.length) {   // undo / redo: the server says what each row had before and after
-        const put = (which) => async () => { await post('/api/workload/set-values', { rows: changes.map((c) => ({ id: c.id, values: c[which] })) }); };
-        pushTbl({ label: 'apply to whole group', undo: put('before'), redo: put('after') });
-      }
+      recordApply(out);
       toast(`Copied to ${out.updated} entr${out.updated === 1 ? 'y' : 'ies'}${out.skipped ? ` (${out.skipped} in a locked period skipped)` : ''}`);
       load();
     } catch (e) { toast(e.message, 'err'); }
@@ -1928,6 +1932,118 @@ export default function Workload() {
   // Table mode only: Breakdate/Time (VGFX) and (VEDIT) merge into ONE column/cell, holding one or two pills —
   // 'breakdate_vgfx' is kept as that column's position; breakdateCell() below decides what actually shows in it.
   const tableCols = cols.filter((k) => k !== 'breakdate_vedit');
+
+  // ---- Plug groups as a header row + member rows (table mode only) ----
+  // A run = the rows of one group that sit together on this page. Its header row shows the values the members share (or "N differs");
+  // the member rows keep every cell: faint when equal to the group, highlighted when the column differs inside the group.
+  const runAt = {};
+  if (!cards && !isPrep) {
+    for (let i = 0; i < pageRows.length; i += 1) {
+      const gp = groupPos.pos[i];
+      if (!gp || gp.cls !== 'grp-first') continue;
+      let j = i;
+      while (j < pageRows.length - 1 && groupPos.pos[j] && groupPos.pos[j].cls !== 'grp-last') j += 1;
+      const run = { key: pageRows[i].group_key, hue: gp.hue, start: i, end: j, rows: pageRows.slice(i, j + 1) };
+      for (let t = i; t <= j; t += 1) runAt[t] = run;
+      i = j;
+    }
+  }
+  const ID_COLS = ['plug_id', 'platform'];   // differ by design inside a group: never faint / highlighted
+  const sameKey = (r, k) => (k === 'breakdate_vgfx' ? `${r.breakdate_vgfx || ''}|${r.breakdate_vedit || ''}|${r.units_concerned || ''}`
+    : k === 'work_date' ? String(r.work_date || '').slice(0, 10) : String(r[k] ?? '').trim());
+  // per column of a run: are all members equal, and how many differ from the most common value
+  const runStats = (run) => {
+    if (run.stats) return run.stats;
+    const stats = {};
+    tableCols.forEach((k) => {
+      if (ID_COLS.includes(k)) return;
+      const counts = new Map();
+      run.rows.forEach((r) => { const x = sameKey(r, k); counts.set(x, (counts.get(x) || 0) + 1); });
+      const top = Math.max(...counts.values());
+      stats[k] = { same: counts.size === 1, differs: run.rows.length - top };
+    });
+    run.stats = stats;
+    return stats;
+  };
+  const toggleRun = (run) => {
+    const fold = !collapsed.has(run.key);
+    setCollapsed((cur) => { const n = new Set(cur); if (n.has(run.key)) n.delete(run.key); else n.add(run.key); return n; });
+    if (fold) { setCellSel(null); setPicked((p) => { const q = new Set(p); run.rows.forEach((x) => q.delete(x.id)); return q; }); }
+  };
+  const copyableCol = (k) => !NO_COPY.includes(k) && (k.startsWith('custom_') || (meta.fields[k] && ['text', 'select', 'date_or_text', 'audio_guide'].includes(meta.fields[k].kind)));
+  // a value typed into a header cell is set on every entry of the group (undoable)
+  const saveHeader = async (run, k, value) => {
+    setHdrEdit(null);
+    try {
+      const out = await post('/api/workload/apply-group', { id: run.rows[0].id, fields: [k], set: { [k]: value }, auto: filt.auto === '0' ? '0' : '1' });
+      recordApply(out);
+      toast(`Set on ${out.updated} entr${out.updated === 1 ? 'y' : 'ies'}${out.skipped ? ` (${out.skipped} in a locked period skipped)` : ''}`);
+      load();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const headCell = (run, k) => {
+    const rep = run.rows[0];
+    const common = { key: k, 'data-k': k, 'data-label': head(k) };
+    if (k === 'plug_id') {
+      const parts = run.rows.map((x) => { const f = String(x.plug_id || '').split('\n')[0].trim(); const i = f.indexOf('_'); return { pre: i > 0 ? f.slice(0, i).trim().toUpperCase() : '', base: i > 0 ? f.slice(i + 1).trim() : f }; });
+      const prefixes = [...new Set(parts.map((x) => x.pre).filter(Boolean))];
+      const oneBase = parts.every((x) => x.base.toUpperCase() === parts[0].base.toUpperCase());
+      return (
+        <td {...common} className="hd">
+          {oneBase ? <><span className="hd-pfx">{prefixes.join('')}</span><span className="strong">_{parts[0].base}</span></> : <span className="strong">Linked project · {run.rows.length} entries</span>}
+        </td>
+      );
+    }
+    if (k === 'platform') {
+      const plats = [...new Set(run.rows.map((x) => x.platform).filter(Boolean))];
+      return <td {...common} className="hd"><span className="chips">{plats.map((x) => <PlatformCell key={x} value={x} />)}</span></td>;
+    }
+    const st = runStats(run)[k];
+    if (!st) return <td {...common} className="hd" />;
+    if (hdrEdit && hdrEdit.key === run.key && hdrEdit.k === k) {
+      return (
+        <td {...common} className="hd editing" onClick={(e) => e.stopPropagation()}>
+          <CellEditor memo={`grp:${run.key}:${k}`} def={meta.fields[k]} initial={st.same ? rep[k] : ''} lookups={lookups}
+            onSave={(value) => saveHeader(run, k, value)} onCancel={() => setHdrEdit(null)} onUndo={() => setHdrEdit(null)} />
+        </td>
+      );
+    }
+    const editable = canWrite && copyableCol(k) && !run.rows.some((x) => rowLocked(x));
+    const extra = editable ? { onDoubleClick: () => setHdrEdit({ key: run.key, k }), title: `Double-click to set this on all ${run.rows.length} entries of the group` } : {};
+    if (!st.same) {
+      return <td {...common} {...extra} className={`hd hd-differs${editable ? ' hd-editable' : ''}`}><span className="hd-diff">{st.differs} differs</span></td>;
+    }
+    let td;
+    if (k === 'breakdate_vgfx') {
+      const teams = meta.unitTeams[rep.units_concerned] || [];
+      const parts = [];
+      if (teams.includes('VGFX')) parts.push({ k: 'breakdate_vgfx', hue: 'purple', tag: 'VGFX' });
+      if (teams.includes('VEDIT')) parts.push({ k: 'breakdate_vedit', hue: 'orange', tag: 'VEDIT' });
+      td = (
+        <td {...common}><span className="chips bd-chips">
+          {parts.map(({ k: bk, hue, tag }) => (rep[bk]
+            ? <DateChip key={bk} hue={hue}><span className="chip-tag">{tag}</span>{fmtBreakdate(rep[bk])}</DateChip>
+            : <DateChip key={bk} hue="gray"><span className="chip-tag">{tag}</span>PENDING</DateChip>))}
+        </span></td>
+      );
+    } else td = cellView(rep, k);
+    return cloneElement(td, { ...extra, className: ['hd', editable ? 'hd-editable' : '', td.props.className].filter(Boolean).join(' ') });
+  };
+  const headRow = (run) => {
+    const folded = collapsed.has(run.key);
+    const first = offset + run.start + 1;
+    const last = offset + run.end + 1;
+    return (
+      <tr key={`gh:${run.key}`} className={`grp grp-first grp-head c-${run.hue}`} data-gk={run.key}>
+        <td className="rn hd-rn" title="Click the number to select all entries of the group; the arrow folds or unfolds them">
+          <span className="hd-tgl" role="button" tabIndex={0} aria-expanded={!folded} onClick={() => toggleRun(run)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleRun(run); } }}>{folded ? '▸' : '▾'}</span>
+          <span className="hd-num" onClick={() => { setAllMatching(false); setPicked(new Set(run.rows.filter((x) => !lockedForPick(x)).map((x) => x.id))); setCellSel(null); }}>{first}–{last}</span>
+        </td>
+        {tableCols.map((k) => headCell(run, k))}
+        {canWrite ? <td className="right nowrap actions-cell" /> : null}
+      </tr>
+    );
+  };
   // PREP: a band across the table where the upper part (all four available) and the lower part (still waiting) begin
   const prepDivider = (r, prev, first) => {
     const ready = !(r.prep_missing || []).length;
@@ -2332,8 +2448,10 @@ export default function Workload() {
                           {data.rows.map((r, idx) => (
                             <Fragment key={r.id}>
                             {isPrep ? prepDivider(r, idx > 0 ? data.rows[idx - 1] : null, idx === 0 && offset === 0) : null}
+                            {runAt[idx] && runAt[idx].start === idx ? headRow(runAt[idx]) : null}
+                            {runAt[idx] && collapsed.has(runAt[idx].key) ? null : (
                             <tr data-id={r.id}
-                              className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}${isPrep && (r.prep_missing || []).length ? ' prep-wait' : ''}${groupPos.pos[idx] ? ` grp ${groupPos.pos[idx].cls} c-${groupPos.pos[idx].hue}` : ''}`.trim()}
+                              className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}${isPrep && (r.prep_missing || []).length ? ' prep-wait' : ''}${groupPos.pos[idx] ? ` grp ${runAt[idx] && groupPos.pos[idx].cls === 'grp-first' ? 'grp-mid' : groupPos.pos[idx].cls} c-${groupPos.pos[idx].hue}` : ''}`.trim()}
                               onMouseDown={cellDown}
                               onContextMenu={(e) => rowMenu(e, r)}
                               onClick={canWrite ? undefined : (e) => { if (!(e.target.closest && e.target.closest('.rn'))) setForm({ rec: r }); }}>
@@ -2347,7 +2465,12 @@ export default function Workload() {
                                     onChange={() => { setAllMatching(false); setPicked((cur) => { const n = new Set(allMatching ? pickable.map((x) => x.id) : cur); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; }); lastPick.current = r.id; }} />
                                 </td>
                               ) : null}
-                              {tableCols.map((k, ci) => { const td = k === 'breakdate_vgfx' ? breakdateCell(r) : cell(r, k); const n = normCells(); return cloneElement(td, { 'data-r': idx, 'data-c': ci, 'data-sel': n && idx >= n.r0 && idx <= n.r1 && ci >= n.c0 && ci <= n.c1 ? '1' : undefined }); })}
+                              {tableCols.map((k, ci) => {
+                                const td = k === 'breakdate_vgfx' ? breakdateCell(r) : cell(r, k); const n = normCells();
+                                const st = runAt[idx] ? runStats(runAt[idx])[k] : null;   // inside a group: faint = same as the group, highlighted = the column differs
+                                const gcls = st && !/\bediting\b/.test(td.props.className || '') ? (st.same ? 'g-faint' : 'g-differs') : '';
+                                return cloneElement(td, { 'data-r': idx, 'data-c': ci, 'data-sel': n && idx >= n.r0 && idx <= n.r1 && ci >= n.c0 && ci <= n.c1 ? '1' : undefined, ...(gcls ? { className: [td.props.className, gcls].filter(Boolean).join(' ') } : {}) });
+                              })}
                               {canWrite ? (
                                 <td className="right nowrap actions-cell" onClick={(e) => e.stopPropagation()}>
                                   <RowMenu
@@ -2358,6 +2481,7 @@ export default function Workload() {
                                 </td>
                               ) : null}
                             </tr>
+                            )}
                             </Fragment>
                           ))}
                           {isPrep && prepNextWait ? (
@@ -2378,6 +2502,13 @@ export default function Workload() {
                       </table>
                     )}
             </div>
+            {Object.keys(runAt).length ? (
+              <div className="grp-legend">
+                <span className="faint-sample">faint</span> = same as the group header
+                <span className="differs-sample">highlighted</span> = differs from the group
+                <span className="dim">Every cell is still there and editable; editing a faint cell turns it into a normal one. Double-click a header value to set it on the whole group.</span>
+              </div>
+            ) : null}
             <Pager total={total} offset={offset} size={size} onOffset={cards ? setOffset : goOffset} head={cards ? undefined : sheetTabs} lead={cards ? undefined : rowsPicker} />
             {tctx ? (
               <FitMenu x={tctx.x} y={tctx.y} onMouseDown={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>

@@ -846,7 +846,11 @@ async function setCopyValues(c, req, locks, customCols, mid, values, fieldsChang
 router.post('/apply-group', requireAction('workload.write'), asyncH(async (req, res) => {
   const id = v.id(req.body && req.body.id);
   const customCols = await loadCustomCols(db);
-  const fields = copyableFields(req.body && req.body.fields, customCols);
+  // body.set = { column: value }: the value typed into a group's header row, set on EVERY entry of the group (the source row included)
+  // instead of copied from the source row
+  const setObj = req.body && req.body.set && typeof req.body.set === 'object' && !Array.isArray(req.body.set) ? req.body.set : null;
+  let fields = copyableFields(req.body && req.body.fields, customCols);
+  if (setObj) fields = fields.filter((k) => Object.prototype.hasOwnProperty.call(setObj, k));
   if (!fields.length) throw new HttpError(400, 'Those columns cannot be copied to a group');
   const locks = await loadLocks(db);
   const fieldsChanged = [];
@@ -858,17 +862,18 @@ router.post('/apply-group', requireAction('workload.write'), asyncH(async (req, 
     const members = (await c.query(`SELECT w.id FROM workload_items w WHERE ${groupKeySql(auto)} = $1 AND w.id <> $2 ORDER BY w.id`, [src.gk, id])).rows.map((r) => r.id);
     if (!members.length) throw new HttpError(400, 'This row is not in a group');
     const values = {};
-    fields.forEach((k) => { values[k] = COLS.includes(k) ? src[k] : String((src.custom_fields || {})[k] ?? ''); });
+    fields.forEach((k) => { values[k] = setObj ? String(setObj[k] ?? '') : (COLS.includes(k) ? src[k] : String((src.custom_fields || {})[k] ?? '')); });
     const changes = [];
     let skipped = 0;
-    for (const mid of members) {
+    const targets = setObj ? [id, ...members] : members;
+    for (const mid of targets) {
       const r = await setCopyValues(c, req, locks, customCols, mid, values, fieldsChanged);
       if (r === undefined) continue;
       if (r === null) { skipped++; continue; }
-      await audit(req, 'workload.update', 'workload_item', mid, { via: 'apply-group', from: id, fields }, c);
+      await audit(req, 'workload.update', 'workload_item', mid, { via: setObj ? 'group-header' : 'apply-group', from: id, fields }, c);
       if (Object.keys(r.after).length) changes.push(r);
     }
-    return { updated: members.length - skipped, skipped, changes };
+    return { updated: targets.length - skipped, skipped, changes };
   });
   if (fieldsChanged.length) await notifyFieldsSet(req, fieldsChanged);
   res.json({ ok: true, ...out, fields });

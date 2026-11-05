@@ -1403,3 +1403,21 @@ table.t.wl tbody tr.grp-last td { border-bottom: 1px solid color-mix(in srgb, va
 .wl-switch.on { background: var(--green); }
 .wl-switch.on i { transform: translateX(15px); }
 .tpop-menu button .wl-switch { margin-left: 18px; }
+
+/* Workload: a plug group = a header row with the shared values + the member rows (faint = same as the group, highlighted = the column differs) */
+table.t.wl tr.grp-head td { background: color-mix(in srgb, var(--c) 11%, var(--surface)); border-top: 1px solid color-mix(in srgb, var(--c) 45%, var(--border)); }
+table.t.wl tr.grp-head td.hd-editable { cursor: pointer; }
+table.t.wl tr.grp-head td.hd-editable:hover { background: color-mix(in srgb, var(--c) 18%, var(--surface)); }
+table.t.wl tr.grp-head td.editing { overflow: visible; }
+.hd-rn { white-space: nowrap; }
+.hd-tgl { cursor: pointer; user-select: none; display: inline-block; width: 16px; color: var(--c); font-size: 13px; }
+.hd-num { cursor: pointer; font-weight: 600; }
+.hd-pfx { color: var(--c); font-weight: 800; letter-spacing: .02em; }
+.hd-diff { color: var(--text-3); font-size: 12.5px; }
+table.t.wl td.g-faint > * { opacity: .4; }
+table.t.wl td.g-faint:hover > * { opacity: .9; }
+table.t.wl td.g-differs { background-image: linear-gradient(color-mix(in srgb, var(--amber) 20%, transparent), color-mix(in srgb, var(--amber) 20%, transparent)); }
+
+.grp-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 4px 2px; font-size: 12.5px; color: var(--text-2); }
+.grp-legend .faint-sample { opacity: .45; }
+.grp-legend .differs-sample { background: color-mix(in srgb, var(--amber) 22%, transparent); padding: 1px 8px; border-radius: 6px; font-weight: 600; color: var(--text); }
