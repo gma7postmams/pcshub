@@ -2477,7 +2477,7 @@ export default function Workload() {
                               {tableCols.map((k, ci) => {
                                 const td = k === 'breakdate_vgfx' ? breakdateCell(r) : cell(r, k); const n = normCells();
                                 const st = runAt[idx] ? runStats(runAt[idx])[k] : null;   // inside a group: faint = same as the group, highlighted = the column differs
-                                const gcls = st && !/\bediting\b/.test(td.props.className || '') ? (st.same ? 'g-faint' : 'g-differs') : '';
+                                const gcls = st && !/\bediting\b/.test(td.props.className || '') ? (st.same ? 'g-faint' : '') : '';
                                 return cloneElement(td, { 'data-r': idx, 'data-c': ci, 'data-sel': n && idx >= n.r0 && idx <= n.r1 && ci >= n.c0 && ci <= n.c1 ? '1' : undefined, ...(gcls ? { className: [td.props.className, gcls].filter(Boolean).join(' ') } : {}) });
                               })}
                               {canWrite ? (
@@ -2513,8 +2513,7 @@ export default function Workload() {
             </div>
             {Object.keys(runAt).length ? (
               <div className="grp-legend">
-                <span className="faint-sample">faint</span> = same as the group header
-                <span className="differs-sample">highlighted</span> = differs from the group
+                <span className="faint-sample">faint</span> = same as the group header; "N differs" in the header means the entries do not all match in that column
                 <span className="dim">Every cell is still there and editable; editing a faint cell turns it into a normal one. Double-click a header value to set it on the whole group.</span>
               </div>
             ) : null}
