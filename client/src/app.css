@@ -1422,7 +1422,8 @@ table.t.wl td.g-differs { background-image: linear-gradient(color-mix(in srgb, v
 .grp-legend .faint-sample { opacity: .45; }
 .grp-legend .differs-sample { background: color-mix(in srgb, var(--amber) 22%, transparent); padding: 1px 8px; border-radius: 6px; font-weight: 600; color: var(--text); }
 
-/* the row-number cell of a group header wraps (arrow on top, a range like 11–12 breaks after the dash) instead of widening the column */
-table.t.wl:not(.cards) td.hd-rn { white-space: normal; overflow-wrap: anywhere; line-height: 1.15; padding: 4px 2px; cursor: pointer; }
-.hd-rn .hd-tgl { display: block; width: auto; }
-.hd-rn .hd-num { display: block; cursor: inherit; }
+/* group header number cell: arrow + range on ONE line; the column is as wide as the longest range on the page (--rn-w, set from the code) */
+table.t.wl.has-groups:not(.cards) th.rn, table.t.wl.has-groups:not(.cards) td.rn { width: var(--rn-w, 34px); min-width: var(--rn-w, 34px); max-width: var(--rn-w, 34px); }
+table.t.wl:not(.cards) td.hd-rn { white-space: nowrap; overflow: hidden; text-align: left; padding: 0 4px 0 6px; cursor: pointer; }
+.hd-rn .hd-tgl { display: inline-block; width: 14px; }
+.hd-rn .hd-num { display: inline; }
