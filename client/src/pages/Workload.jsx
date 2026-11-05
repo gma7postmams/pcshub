@@ -1948,6 +1948,8 @@ export default function Workload() {
       i = j;
     }
   }
+  const runList = [...new Set(Object.values(runAt))];
+  const rnWidth = runList.length ? Math.max(34, Math.round(Math.max(...runList.map((r) => `${offset + r.start + 1}–${offset + r.end + 1}`.length)) * 7.2 + 32)) : 0;   // px: digits + the fold arrow + padding
   const ID_COLS = ['plug_id', 'platform'];   // differ by design inside a group: never faint / highlighted
   const sameKey = (r, k) => (k === 'breakdate_vgfx' ? `${r.breakdate_vgfx || ''}|${r.breakdate_vedit || ''}|${r.units_concerned || ''}`
     : k === 'work_date' ? String(r.work_date || '').slice(0, 10) : String(r[k] ?? '').trim());
@@ -2044,7 +2046,7 @@ export default function Workload() {
           }}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleRun(run); } }}>
           <span className="hd-tgl">{folded ? '▸' : '▾'}</span>
-          <span className="hd-num">{first}–<wbr />{last}</span>
+          <span className="hd-num">{first}–{last}</span>
         </td>
         {tableCols.map((k) => headCell(run, k))}
         {canWrite ? <td className="right nowrap actions-cell" /> : null}
@@ -2438,7 +2440,7 @@ export default function Workload() {
                 : data.error ? <Empty>{data.error}</Empty>
                   : !data.rows.length && !draft && !spareOn ? <Empty>No workload items match these filters.</Empty>
                     : (
-                      <table className={`t wl v-${viewKey.toLowerCase()}${cards ? ' cards' : ''}${Object.keys(runAt).length ? ' has-groups' : ''}`}>
+                      <table className={`t wl v-${viewKey.toLowerCase()}${cards ? ' cards' : ''}${runList.length ? ' has-groups' : ''}`} style={rnWidth ? { '--rn-w': `${rnWidth}px` } : undefined}>
                         <thead><tr>{!cards ? <th className="rn" title={pageAllPicked ? 'Click to unselect all' : 'Select all rows on this page (Ctrl+A)'} onClick={() => (pageAllPicked ? clearPicks() : selectPage())} /> : null}{canWrite && cards ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {draft && draft.at !== 'bottom' ? (
