@@ -477,7 +477,7 @@ export default function Workload() {
   useEffect(() => { syncDialog('workload', form); }, [form]);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState(() => loadEdit('workload').draft || null);   // Table mode: the empty row Add Row put at the top, not saved yet (kept across a refresh)
-  const [collapsed, setCollapsed] = useState(() => new Set());   // plug groups whose member rows are folded away (only their header row shows)
+  const [expanded, setExpanded] = useState(() => new Set());   // plug groups that are opened; every other group shows only its header row (closed is the default)
   const [hdrEdit, setHdrEdit] = useState(null);   // a group header cell is being edited: { key, k }
   const [editing, setEditing] = useState(() => loadEdit('workload').cell || null);   // an open cell editor comes back after a refresh
   const prevEd = useRef(editing ? `${editing.id}:${editing.k}` : null);
@@ -1966,8 +1966,8 @@ export default function Workload() {
     return stats;
   };
   const toggleRun = (run) => {
-    const fold = !collapsed.has(run.key);
-    setCollapsed((cur) => { const n = new Set(cur); if (n.has(run.key)) n.delete(run.key); else n.add(run.key); return n; });
+    const fold = expanded.has(run.key);   // it is open now, so this click closes it
+    setExpanded((cur) => { const n = new Set(cur); if (n.has(run.key)) n.delete(run.key); else n.add(run.key); return n; });
     if (fold) { setCellSel(null); setPicked((p) => { const q = new Set(p); run.rows.forEach((x) => q.delete(x.id)); return q; }); }
   };
   const copyableCol = (k) => !NO_COPY.includes(k) && (k.startsWith('custom_') || (meta.fields[k] && ['text', 'select', 'date_or_text', 'audio_guide'].includes(meta.fields[k].kind)));
@@ -2030,7 +2030,7 @@ export default function Workload() {
     return cloneElement(td, { ...extra, className: ['hd', editable ? 'hd-editable' : '', td.props.className].filter(Boolean).join(' ') });
   };
   const headRow = (run) => {
-    const folded = collapsed.has(run.key);
+    const folded = !expanded.has(run.key);
     const first = offset + run.start + 1;
     const last = offset + run.end + 1;
     return (
@@ -2431,7 +2431,7 @@ export default function Workload() {
                 : data.error ? <Empty>{data.error}</Empty>
                   : !data.rows.length && !draft && !spareOn ? <Empty>No workload items match these filters.</Empty>
                     : (
-                      <table className={`t wl v-${viewKey.toLowerCase()}${cards ? ' cards' : ''}`}>
+                      <table className={`t wl v-${viewKey.toLowerCase()}${cards ? ' cards' : ''}${Object.keys(runAt).length ? ' has-groups' : ''}`}>
                         <thead><tr>{!cards ? <th className="rn" title={pageAllPicked ? 'Click to unselect all' : 'Select all rows on this page (Ctrl+A)'} onClick={() => (pageAllPicked ? clearPicks() : selectPage())} /> : null}{canWrite && cards ? <th className="chk"><input type="checkbox" checked={pageAllPicked} disabled={!pickable.length} onChange={() => (pageAllPicked ? clearPicks() : selectPage())} aria-label="Select all rows on this page" /></th> : null}{tableCols.map((k) => <SortTh key={k} k={k} sort={sort} onSort={setSort} data-k={k}>{head(k)}</SortTh>)}{canWrite ? <th className="right">Actions</th> : null}</tr></thead>
                         <tbody>
                           {draft && draft.at !== 'bottom' ? (
@@ -2449,7 +2449,7 @@ export default function Workload() {
                             <Fragment key={r.id}>
                             {isPrep ? prepDivider(r, idx > 0 ? data.rows[idx - 1] : null, idx === 0 && offset === 0) : null}
                             {runAt[idx] && runAt[idx].start === idx ? headRow(runAt[idx]) : null}
-                            {runAt[idx] && collapsed.has(runAt[idx].key) ? null : (
+                            {runAt[idx] && !expanded.has(runAt[idx].key) ? null : (
                             <tr data-id={r.id}
                               className={`${canWrite ? '' : 'clickable'}${allMatching || picked.has(r.id) ? ' picked' : ''}${isPrep && (r.prep_missing || []).length ? ' prep-wait' : ''}${groupPos.pos[idx] ? ` grp ${runAt[idx] && groupPos.pos[idx].cls === 'grp-first' ? 'grp-mid' : groupPos.pos[idx].cls} c-${groupPos.pos[idx].hue}` : ''}`.trim()}
                               onMouseDown={cellDown}
