@@ -30,10 +30,6 @@ export const UngroupIcon = () => (<svg {...ico}><path d="M10 13a5 5 0 0 0 3 1.4"
 export const ApplyGroupIcon = () => (<svg {...ico}><rect x="8" y="8" width="13" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></svg>);
 export const GroupIcon = () => (<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.4" /><path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.33-1.33" /></svg>);
 
-/** Colour of a Plug ID prefix (PV_, PN_, PD_, PH_ ...): the same prefix is always the same colour, and the common ones differ from each other. */
-const PREFIX_HUE = { PV: 'blue', PN: 'green', PD: 'pink', PH: 'amber' };
-export const prefixHue = (p) => PREFIX_HUE[String(p).trim().toUpperCase()] || hueOf(String(p).trim().toUpperCase());
-
 const TYPE_HUE = { EPISODIC: 'blue', SEASONAL: 'pink', BUMPER: 'red', 'POP-UP/POP LOGO': 'blue', RADIO: 'green' };   // avoids purple/orange/teal (the team colours)
 export const TypePill = ({ value }) => (value ? <Chip hue={Object.prototype.hasOwnProperty.call(TYPE_HUE, value) ? TYPE_HUE[value] : hueOf(value)}>{value}</Chip> : null);
 
