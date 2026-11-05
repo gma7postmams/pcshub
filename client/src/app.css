@@ -1423,3 +1423,6 @@ table.t.wl.has-groups:not(.cards) th.rn, table.t.wl.has-groups:not(.cards) td.rn
 table.t.wl:not(.cards) td.hd-rn { white-space: nowrap; overflow: hidden; text-align: left; padding: 0 4px 0 6px; cursor: pointer; }
 .hd-rn .hd-tgl { display: inline-block; width: 14px; }
 .hd-rn .hd-num { display: inline; }
+
+/* Plug ID prefixes (PV_ / PN_ / PD_ ...) in their own colour, in every row and in a group header */
+.pfx-t { color: var(--c); font-weight: 800; }

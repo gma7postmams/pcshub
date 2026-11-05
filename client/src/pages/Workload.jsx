@@ -7,7 +7,7 @@ import { del, get, patch, post, put } from '../lib/api.js';
 import { fmtBreakdate, fmtDate, isoDate } from '../lib/util.js';
 import { useSession } from '../context.jsx';
 import { ColumnIcon, DownloadIcon, ExitFullscreenIcon, FlagIcon, FullscreenIcon, LockIcon, PlusIcon, SaveIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons.jsx';
-import { DateChip, DateRange, ExportButton, ApplyGroupIcon, AutoDetectIcon, FilterSelect, GroupIcon, PlatformCell, UngroupIcon, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useNarrow, useSpareRows } from '../components/wl.jsx';
+import { DateChip, DateRange, ExportButton, ApplyGroupIcon, AutoDetectIcon, FilterSelect, GroupIcon, PlatformCell, UngroupIcon, prefixHue, FiltersMenu, Pager, RowMenu, SortTh, SpareRows, ToolMenu, nextSort, TypePill, UnitsPills, WorkDate, useNarrow, useSpareRows } from '../components/wl.jsx';
 import { Empty, Modal, Options, useConfirm, useDebounced, useForm, useToast } from '../components/ui.jsx';
 import PresenceAvatars from '../components/PresenceAvatars.jsx';
 import { useLive, useCellPresence, rangeCells, peerStyle } from '../lib/live.js';
@@ -1992,7 +1992,7 @@ export default function Workload() {
       const oneBase = parts.every((x) => x.base.toUpperCase() === parts[0].base.toUpperCase());
       return (
         <td {...common} className="hd">
-          {oneBase ? <><span className="hd-pfx">{prefixes.join('')}</span><span className="strong">_{parts[0].base}</span></> : <span className="strong">Linked project · {run.rows.length} entries</span>}
+          {oneBase ? <span className="strong">{prefixes.map((x) => <span key={x} className={`pfx-t c-${prefixHue(x)}`}>{x}</span>)}_{parts[0].base}</span> : <span className="strong">Linked project · {run.rows.length} entries</span>}
         </td>
       );
     }
@@ -2086,6 +2086,13 @@ export default function Workload() {
   const oneLine = (t) => String(t ?? '').replace(/\s*\n+\s*/g, ' · ');
 
   // Cells wrap (pasted line breaks kept) instead of being cut off; data-label feeds the card layout.
+  // A Plug ID with its prefix (the part before the first underscore) in the prefix's colour
+  const plugText = (txt) => {
+    const t = String(txt || '');
+    const i = t.indexOf('_');
+    if (i < 1) return t;
+    return <><span className={`pfx-t c-${prefixHue(t.slice(0, i))}`}>{t.slice(0, i)}</span>{t.slice(i)}</>;
+  };
   const cellView = (r, k) => {
     const val = r[k];
     const common = { key: k, 'data-k': k, 'data-label': head(k) };
@@ -2098,7 +2105,7 @@ export default function Workload() {
         const [first, ...rest] = firstLineOf(val);
         return (
           <td {...common} className={r.is_priority && !cols.includes('breakdate_vgfx') ? 'prio' : undefined}>
-            <span className="strong">{first}</span>
+            <span className="strong">{plugText(first)}</span>
             {rest.length ? <span className="dim-inline"> · {rest.join(' · ')}</span> : null}
           </td>
         );
