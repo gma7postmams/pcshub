@@ -2035,9 +2035,16 @@ export default function Workload() {
     const last = offset + run.end + 1;
     return (
       <tr key={`gh:${run.key}`} className={`grp grp-first grp-head c-${run.hue}`} data-gk={run.key}>
-        <td className="rn hd-rn" title="Click the number to select all entries of the group; the arrow folds or unfolds them">
-          <span className="hd-tgl" role="button" tabIndex={0} aria-expanded={!folded} onClick={() => toggleRun(run)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleRun(run); } }}>{folded ? '▸' : '▾'}</span>
-          <span className="hd-num" onClick={() => { setAllMatching(false); setPicked(new Set(run.rows.filter((x) => !lockedForPick(x)).map((x) => x.id))); setCellSel(null); }}>{first}–{last}</span>
+        <td className="rn hd-rn" role="button" tabIndex={0} aria-expanded={!folded}
+          title="Click to open or close the group (Ctrl-click selects all its entries)"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            if (e.ctrlKey || e.metaKey) { setAllMatching(false); setPicked(new Set(run.rows.filter((x) => !lockedForPick(x)).map((x) => x.id))); setCellSel(null); return; }
+            toggleRun(run);
+          }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleRun(run); } }}>
+          <span className="hd-tgl">{folded ? '▸' : '▾'}</span>
+          <span className="hd-num">{first}–<wbr />{last}</span>
         </td>
         {tableCols.map((k) => headCell(run, k))}
         {canWrite ? <td className="right nowrap actions-cell" /> : null}

@@ -1422,6 +1422,7 @@ table.t.wl td.g-differs { background-image: linear-gradient(color-mix(in srgb, v
 .grp-legend .faint-sample { opacity: .45; }
 .grp-legend .differs-sample { background: color-mix(in srgb, var(--amber) 22%, transparent); padding: 1px 8px; border-radius: 6px; font-weight: 600; color: var(--text); }
 
-/* the row-number column is wider while a group header shows a range like 11–12 (it was 34px, the range spilled into the next column) */
-table.t.wl.has-groups:not(.cards) th.rn, table.t.wl.has-groups:not(.cards) td.rn { width: 84px; min-width: 84px; max-width: 84px; }
-table.t.wl.has-groups:not(.cards) td.hd-rn { text-align: left; padding: 0 4px 0 6px; overflow: hidden; }
+/* the row-number cell of a group header wraps (arrow on top, a range like 11–12 breaks after the dash) instead of widening the column */
+table.t.wl:not(.cards) td.hd-rn { white-space: normal; overflow-wrap: anywhere; line-height: 1.15; padding: 4px 2px; cursor: pointer; }
+.hd-rn .hd-tgl { display: block; width: auto; }
+.hd-rn .hd-num { display: block; cursor: inherit; }
