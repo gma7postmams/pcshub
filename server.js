@@ -15,7 +15,7 @@ const {
 const { PAGE_BY_PATH, landingPath } = require('./src/permissions');
 const live = require('./src/live');   // live updates for the trackers
 const {
-  PROD, cookieSecure, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks, API_RATE_LIMIT,
+  PROD, isSecureReq, cookieNameFor, twofaRequired, trustProxyValue, startupChecks, API_RATE_LIMIT,
 } = require('./src/config');
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
@@ -27,7 +27,7 @@ app.disable('x-powered-by');
 if (trustProxyValue() !== null) app.set('trust proxy', trustProxyValue());
 
 // ---------- Security headers ----------
-app.use(helmet({
+const helmetFor = (secure) => helmet({
   contentSecurityPolicy: {
     useDefaults: false,
     directives: {
@@ -43,13 +43,18 @@ app.use(helmet({
       frameAncestors: ["'none'"],
       baseUri: ["'self'"],
       formAction: ["'self'"],
-      ...(cookieSecure ? { upgradeInsecureRequests: [] } : {}),
+      ...(secure ? { upgradeInsecureRequests: [] } : {}),
     },
   },
   crossOriginEmbedderPolicy: false,
   frameguard: { action: 'deny' },   // same answer as frame-ancestors 'none' for browsers that only read the older header
-  hsts: cookieSecure ? { maxAge: 31536000, includeSubDomains: true } : false,
-}));
+  hsts: secure ? { maxAge: 31536000, includeSubDomains: true } : false,
+});
+// HTTPS-only headers (HSTS, upgrade-insecure-requests) only on requests that came over HTTPS: with COOKIE_SECURE=auto the LAN's plain-HTTP address must not be upgraded.
+const helmetSecure = helmetFor(true);
+const helmetPlain = helmetFor(false);
+app.use((req, res, next) => (isSecureReq(req) ? helmetSecure : helmetPlain)(req, res, next));
+
 app.use((req, res, next) => {
   res.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
   next();
@@ -68,10 +73,11 @@ app.get('/api/maintenance/status', maintenance.status);
 app.use(express.json({ limit: '1mb' }));   // the app only speaks JSON (and multipart for uploads): no form-encoded parser
 
 // ---------- Sessions (PostgreSQL) ----------
-app.use(session({
-  name: COOKIE_NAME,
-  // table is created by src/schema.sql, so the runtime DB role needs no DDL rights
-  store: new PgStore({ pool: db.pool, tableName: 'user_sessions', createTableIfMissing: false, pruneSessionInterval: 60 * 15 }),
+// table is created by src/schema.sql, so the runtime DB role needs no DDL rights
+const sessionStore = new PgStore({ pool: db.pool, tableName: 'user_sessions', createTableIfMissing: false, pruneSessionInterval: 60 * 15 });
+const sessionFor = (secure) => session({
+  name: cookieNameFor(secure),
+  store: sessionStore,
   secret: process.env.SESSION_SECRET,   // startupChecks() has already refused to start without a strong one
   resave: false,
   saveUninitialized: false,
@@ -79,11 +85,16 @@ app.use(session({
   cookie: {
     httpOnly: true,
     sameSite: 'lax',
-    secure: cookieSecure,
+    secure,
     path: '/',
     maxAge: require('./src/security-settings').idleMs(),
   },
-}));
+});
+// One session set-up per side (HTTPS: __Host- cookie with Secure; plain HTTP on the LAN: ordinary cookie). Both read the same session table.
+const sessionSecure = sessionFor(true);
+const sessionPlain = sessionFor(false);
+app.use((req, res, next) => (isSecureReq(req) ? sessionSecure : sessionPlain)(req, res, next));
+
 // Idle sign-out is an Admin setting: each request renews the cookie and its store row with the current value.
 app.use((req, res, next) => { if (req.session) req.session.cookie.maxAge = require('./src/security-settings').idleMs(); next(); });
 

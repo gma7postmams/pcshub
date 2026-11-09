@@ -2,9 +2,15 @@
 const PROD = process.env.NODE_ENV === 'production';
 
 // HTTPS-only features (secure cookie, HSTS, upgrade-insecure-requests).
-const cookieSecure = process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : PROD;
+// COOKIE_SECURE=auto: decided per request. Opened over HTTPS (through the reverse proxy, which sends X-Forwarded-Proto) -> secure cookie, HSTS and
+// upgrade-insecure-requests; opened over plain HTTP (the LAN address) -> none of them, so the same server works for both.
+const cookieAuto = String(process.env.COOKIE_SECURE || '').toLowerCase() === 'auto';
+const cookieSecure = cookieAuto ? false : (process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : PROD);
+/** Is this request on the HTTPS side? (static modes: the setting; auto: how the browser reached us.) */
+const isSecureReq = (req) => (cookieAuto ? Boolean(req && req.secure) : cookieSecure);
 // __Host- prefix: browser only accepts it over HTTPS, path=/, no Domain — blocks subdomain cookie injection.
-const COOKIE_NAME = cookieSecure ? '__Host-phub.sid' : 'phub.sid';
+const cookieNameFor = (secure) => (secure ? '__Host-phub.sid' : 'phub.sid');
+const COOKIE_NAME = cookieNameFor(cookieSecure);
 
 // 2FA is off for everyone by default. An Admin turns it on (or off) per user; a user it is on for must enrol before using the app.
 // Also on for every Admin when Admin > Security > "Require 2FA for Admins" is switched on.
@@ -55,7 +61,8 @@ function startupChecks() {
   if (PROD && !process.env.BACKUP_ENC_KEY) warn.push('BACKUP_ENC_KEY not set: backups are stored unencrypted (they hold password hashes and 2FA secrets). Set it with: openssl rand -hex 32, and keep a copy off this server');
   if (PROD && !process.env.BACKUP_SIGNING_KEY) warn.push('BACKUP_SIGNING_KEY not set: backups are created unsigned, so a tampered archive cannot be told apart from a real one. Set it with: openssl rand -hex 32');
   if (PROD && /change[-_ ]?me/i.test(process.env.ADMIN_PASSWORD || '')) warn.push('ADMIN_PASSWORD is still the placeholder from .env.example. Change it (and remove it from .env once the first Admin has signed in).');
-  if (PROD && !cookieSecure) warn.push('COOKIE_SECURE=false in production: sessions travel without the Secure flag. Only acceptable on an isolated LAN.');
+  if (PROD && !cookieSecure && !cookieAuto) warn.push('COOKIE_SECURE=false in production: sessions travel without the Secure flag. Only acceptable on an isolated LAN.');
+  if (cookieAuto && !process.env.TRUST_PROXY) warn.push('COOKIE_SECURE=auto needs TRUST_PROXY (the reverse proxy\'s address): without it people on the HTTPS address get the plain cookie too.');
   if (PROD && !process.env.TRUST_PROXY) warn.push('TRUST_PROXY not set. If this runs behind a reverse proxy, every user shares the proxy IP: the audit log shows the gateway, and one person\'s wrong passwords shut out everybody behind it. Set TRUST_PROXY=1 (and see set_real_ip_from in deploy/nginx.conf if another gateway is in front of nginx).');
   if (/^(true|yes|on)$/i.test(process.env.TRUST_PROXY || '')) warn.push('TRUST_PROXY=true trusts any X-Forwarded-For a client sends, so the audit log and the sign-in limits can be faked. Use the number of proxies (1) or their addresses.');
   warn.forEach((w) => console.warn(`[security] ${w}`));
@@ -66,6 +73,6 @@ function startupChecks() {
 }
 
 module.exports = {
-  PROD, cookieSecure, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks, weakSecret,
+  PROD, cookieSecure, cookieAuto, isSecureReq, cookieNameFor, COOKIE_NAME, twofaRequired, trustProxyValue, startupChecks, weakSecret,
   SESSION_IDLE_MS, SESSION_MAX_MS, API_RATE_LIMIT, APP_ORIGINS,
 };

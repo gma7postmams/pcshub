@@ -1,7 +1,7 @@
 const path = require('path');
 const db = require('./db');
 const { canPage, can, canSection } = require('./permissions');
-const { APP_ORIGINS, COOKIE_NAME, cookieSecure } = require('./config');
+const { APP_ORIGINS, isSecureReq, cookieNameFor } = require('./config');
 
 // React build output. Every page returns the same index.html, but only after the role/group check.
 const CLIENT_DIST = path.join(__dirname, '..', 'client', 'dist');
@@ -11,7 +11,7 @@ const watch = () => require('./security-watch');   // loaded on first use (it ne
 const asyncH = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 // Must repeat the attributes the cookie was set with, or browsers ignore the request to drop a __Host- cookie.
-const clearSessionCookie = (res) => res.clearCookie(COOKIE_NAME, { path: '/', httpOnly: true, sameSite: 'lax', secure: cookieSecure });
+const clearSessionCookie = (res) => { const secure = isSecureReq(res.req); res.clearCookie(cookieNameFor(secure), { path: '/', httpOnly: true, sameSite: 'lax', secure }); };
 // End the signed-in session but leave the request with a fresh, empty one (later handlers such as sign-in expect req.session to exist).
 const endSession = (req, res, next) => req.session.regenerate((err) => { clearSessionCookie(res); next(err); });
 

@@ -278,6 +278,20 @@ of **that account** for the lock time (refused even with the right password), an
 must see real client addresses: set `TRUST_PROXY=1`, and if another gateway is in front of nginx, set `set_real_ip_from` in `deploy/nginx.conf` (otherwise the audit log shows the gateway and everybody behind it shares one lock).
 Live self-test against a throw-away copy: `python3 scripts/security-selftest2.py` (see the header of the file).
 
+### Open on the LAN (http) and online (https) at the same time
+
+Set in `.env`:
+
+```
+NODE_ENV=production
+HOST=0.0.0.0                  # reachable from the LAN (production defaults to this computer only)
+COOKIE_SECURE=auto            # Secure cookie + HSTS for the https address, ordinary cookie for the LAN's http address
+TRUST_PROXY=192.168.1.20      # the LAN address of the computer running nginx (not 1, not true: then LAN users could not fake their address)
+# APP_ORIGIN                  # leave unset: it would block the LAN address
+```
+
+The nginx computer proxies to `http://<this server>:<PORT>` and must send `Host`, `X-Forwarded-For` and `X-Forwarded-Proto` (see `deploy/nginx.conf`). Over plain http the page is not upgraded to https and no HSTS is sent; over https both are on. Sessions made on one address do not carry over to the other (different cookie), so a user signs in once on each.
+
 ### Scheduled Excel export
 
 **Administration > Backup and Restore > Scheduled export** saves Excel copies of the **PSD Daily Plug List, Ingest Tracker and Workload Tracker** on a schedule, for people who want readable files next to the database backup. The files are the same workbooks the pages' own **Export** buttons make (the feature calls those routes, so layout, colours and columns match) and are kept in `<backup folder>/exports/<date_time>/`.
