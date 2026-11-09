@@ -127,9 +127,17 @@ function probe(method, urlPath, headers = {}) {
     req.end();
   });
 }
+// A 503 means maintenance mode, a restore or a backup server answered instead of the app's own protection: that is "could not test", not a failure.
+const na = (r) => (r && r.status === 503 ? ' The server answered "unavailable" (maintenance mode, a restore or a backup server), so this could not be tested: switch maintenance off and run the check again.' : '');
 async function liveChecks(a) {
   const home = await probe('GET', '/login');
   if (!home) { a('probe', 'Live test', 'The server answers its own test requests', 'info', 'Could not reach this server on 127.0.0.1 (a different PORT or HOST?), so the live tests were skipped.', null); return; }
+  if (home.status === 503) {   // maintenance mode, a restore, or a backup server: the answers below would say nothing about the real protection
+    let why = 'the site answered 503 (unavailable)';
+    try { const j = JSON.parse((await probe('GET', '/api/auth/me')).body); if (j && j.maintenance) why = 'maintenance mode is on'; } catch (_) { /* keep the generic reason */ }
+    a('probe', 'Live test', 'Live tests could not run', 'info', `Skipped: ${why}, so the live tests (headers, sign-in, cross-site, admin pages) were not tested.`, 'Switch maintenance mode off (Administration > Maintenance, or remove the MAINTENANCE file / MAINTENANCE_MODE), wait for any restore to finish, then run the check again.');
+    return;
+  }
   const h = home.headers;
   const missing = [['content-security-policy', 'CSP'], ['x-content-type-options', 'nosniff'], ['x-frame-options', 'frame-deny'], ['referrer-policy', 'referrer policy']].filter(([k]) => !h[k]).map(([, n]) => n);
   a('headers', 'Live test', 'Security headers are sent', missing.length ? 'fail' : 'ok', missing.length ? `Missing: ${missing.join(', ')}.` : 'CSP, nosniff, frame-deny and referrer policy are present.', 'A proxy in front may be stripping them; check its config.');
@@ -137,9 +145,9 @@ async function liveChecks(a) {
   a('csp', 'Live test', 'The page blocks inline scripts (CSP)', /script-src[^;]*'unsafe-(inline|eval)'/.test(csp) ? 'fail' : 'ok', /script-src[^;]*'unsafe-(inline|eval)'/.test(csp) ? "script-src allows 'unsafe-inline' or 'unsafe-eval'." : 'Scripts only run from this site.', null);
   a('powered', 'Live test', 'Server does not announce its software', h['x-powered-by'] ? 'warn' : 'ok', h['x-powered-by'] ? `X-Powered-By: ${h['x-powered-by']}` : 'No X-Powered-By header.', null);
   const unauth = await probe('GET', '/api/ingest');
-  a('unauth', 'Live test', 'Data needs a sign-in', unauth && unauth.status === 401 ? 'ok' : 'fail', `GET /api/ingest without signing in answered ${unauth ? unauth.status : 'nothing'} (should be 401).`, 'Do not expose the app without its login; check any proxy rule that adds access.');
+  a('unauth', 'Live test', 'Data needs a sign-in', unauth && unauth.status === 401 ? 'ok' : unauth && unauth.status === 503 ? 'info' : 'fail', `GET /api/ingest without signing in answered ${unauth ? unauth.status : 'nothing'} (should be 401).${na(unauth)}`, 'Do not expose the app without its login; check any proxy rule that adds access.');
   const csrf = await probe('POST', '/api/ingest', { 'Content-Type': 'application/json' });
-  a('csrf', 'Live test', 'Changes need the app header (cross-site requests blocked)', csrf && csrf.status === 403 ? 'ok' : 'fail', `POST without the app header answered ${csrf ? csrf.status : 'nothing'} (should be 403).`, null);
+  a('csrf', 'Live test', 'Changes need the app header (cross-site requests blocked)', csrf && csrf.status === 403 ? 'ok' : csrf && csrf.status === 503 ? 'info' : 'fail', `POST without the app header answered ${csrf ? csrf.status : 'nothing'} (should be 403).${na(csrf)}`, null);
   const leaks = [];
   for (const p of ['/.env', '/uploads/..%2f.env', '/..%2f.env', '/package.json', '/server.js', '/src/db.js', '/.git/config']) {
     const r = await probe('GET', p);
@@ -147,7 +155,7 @@ async function liveChecks(a) {
   }
   a('leaks', 'Live test', 'Source and settings files are not downloadable', leaks.length ? 'fail' : 'ok', leaks.length ? `Readable from the web: ${leaks.join(', ')}` : '.env, package.json, source and .git are not served.', 'Fix the proxy/static rules so only the built app is served.');
   const sensitive = await probe('GET', '/api/admin/users');
-  a('admin', 'Live test', 'Admin pages need an Admin', sensitive && [401, 403].includes(sensitive.status) ? 'ok' : 'fail', `GET /api/admin/users without signing in answered ${sensitive ? sensitive.status : 'nothing'}.`, null);
+  a('admin', 'Live test', 'Admin pages need an Admin', sensitive && [401, 403].includes(sensitive.status) ? 'ok' : sensitive && sensitive.status === 503 ? 'info' : 'fail', `GET /api/admin/users without signing in answered ${sensitive ? sensitive.status : 'nothing'}.${na(sensitive)}`, null);
 }
 
 // ---- known weak packages (needs the npm registry: skipped when unreachable) ----
