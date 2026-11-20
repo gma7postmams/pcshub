@@ -292,6 +292,14 @@ TRUST_PROXY=192.168.1.20      # the LAN address of the computer running nginx (n
 
 The nginx computer proxies to `http://<this server>:<PORT>` and must send `Host`, `X-Forwarded-For` and `X-Forwarded-Proto` (see `deploy/nginx.conf`). Over plain http the page is not upgraded to https and no HSTS is sent; over https both are on. Sessions made on one address do not carry over to the other (different cookie), so a user signs in once on each.
 
+### Admin role: looking after users
+
+An **Admin** (not System Admin) has a **Users** tab in Settings next to Dropdowns, Branding and the Audit Log. Admins can add users, change a user's role (up to Admin) and group, deactivate, **reset passwords**, **unlock**, and **delete** users. The server enforces the limits:
+
+- Nobody below System Admin can create, edit, delete, reset or unlock a **System Admin** account or make anyone one; System Admin accounts are not even listed for an Admin.
+- Importing / exporting users, 2FA changes, bulk changes, Roles, Groups and every other Administration tab stay System Admin only.
+- Creating an Admin, changing an Admin role, resetting a password and deleting users still ask the Admin for their password again; everything is in the Audit Log under the Admin's name.
+
 ### Scheduled Excel export
 
 **Administration > Backup and Restore > Scheduled export** saves Excel copies of the **PSD Daily Plug List, Ingest Tracker and Workload Tracker** on a schedule, for people who want readable files next to the database backup. The files are the same workbooks the pages' own **Export** buttons make (the feature calls those routes, so layout, colours and columns match) and are kept in `<backup folder>/exports/<date_time>/`.

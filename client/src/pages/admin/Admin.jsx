@@ -13,6 +13,7 @@ import Maintenance from './Maintenance.jsx';
 import IpAccess from './IpAccess.jsx';
 import ClearData from './ClearData.jsx';
 import NodeTab from './NodeTab.jsx';
+import Users from './Users.jsx';
 
 
 const TABS = [
@@ -22,17 +23,19 @@ const TABS = [
 ];
 // Users, Roles and Groups are the Access tab's three parts. Old links (#users, #roles, #groups) still land on the right one.
 const ALIAS = { users: 'access/users', roles: 'access/roles', groups: 'access/groups' };
-// An Admin (not System Admin) gets only these two tabs; the server enforces the same.
+// An Admin (not System Admin) gets only these tabs (Users is the Access tab's Users part, without the System Admin-only controls); the server enforces the same.
 const ADMIN_TABS = ['dropdowns', 'branding', 'audit'];
+const ADMIN_USERS = ['users', 'Users', Users];
+const tabsFor = (role) => (role === 'System Admin' ? TABS : [ADMIN_USERS, ...TABS.filter(([k]) => ADMIN_TABS.includes(k))]);
 const fromHash = (tabs = TABS) => {
   const raw = window.location.hash.slice(1);
-  const [t, sub = ''] = (ALIAS[raw] || raw).split('/');
+  const [t, sub = ''] = (tabs.some(([k]) => k === 'access') ? (ALIAS[raw] || raw) : raw).split('/');
   return { tab: tabs.some(([k]) => k === t) ? t : tabs[0][0], sub };
 };
 
 export default function Admin() {
   const { user } = useSession();
-  const tabs = user.role === 'System Admin' ? TABS : TABS.filter(([k]) => ADMIN_TABS.includes(k));
+  const tabs = tabsFor(user.role);
   const [loc, setLoc] = useState(() => fromHash(tabs));
   const { tab, sub } = loc;
   const setTab = useCallback((t) => { const [k, sb = ''] = (ALIAS[t] || t).split('/'); setLoc({ tab: k, sub: sb }); }, []);

@@ -10,8 +10,14 @@ import JsonTools from './JsonTools.jsx';
 // Shared by the list and the Manage dialog (UserForm), which is a separate component
 const isLocked = (u) => u.locked_until && new Date(u.locked_until) > new Date();
 
-export default function Users({ model }) {
+// An Admin (not System Admin) looks after users but cannot make a System Admin, import/export, change 2FA or use bulk changes; the server enforces the same.
+const roleName = (r) => (typeof r === 'string' ? r : r.value || r.name);
+const rolesFor = (model, limited) => (limited ? model.roles.filter((r) => roleName(r) !== 'System Admin') : model.roles);
+
+export default function Users({ model: fullModel }) {
   const s = useSession();
+  const limited = s.user.role !== 'System Admin';
+  const model = { ...fullModel, roles: rolesFor(fullModel, limited) };
   const toast = useToast();
   const confirm = useConfirm();
   const [list, setList] = useState(null);
@@ -97,17 +103,17 @@ export default function Users({ model }) {
         <span className="users-actions">
           {picked.size ? (
             <>
-              <select className="sm" aria-label="Bulk action" value={bulk.action} onChange={(e) => setBulk({ action: e.target.value, value: '' })}>
+              {limited ? null : <select className="sm" aria-label="Bulk action" value={bulk.action} onChange={(e) => setBulk({ action: e.target.value, value: '' })}>
                 <option value="">{picked.size} selected — action…</option>
                 {Object.entries(BULK_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-              </select>
+              </select>}
               {bulk.action === 'role' ? <select className="sm" aria-label="New role" value={bulk.value} onChange={(e) => setBulk({ ...bulk, value: e.target.value })}><option value="">Role…</option><Options list={model.roles} /></select> : null}
               {bulk.action === 'group' ? <select className="sm" aria-label="New group" value={bulk.value} onChange={(e) => setBulk({ ...bulk, value: e.target.value })}><Options list={groups.map((x) => ({ value: String(x.id), label: x.name }))} blank="— Not enrolled —" /></select> : null}
-              <button type="button" className="btn primary" id="bulk-go" disabled={!bulk.action} onClick={runBulk}>Apply</button>
+              {limited ? null : <button type="button" className="btn primary" id="bulk-go" disabled={!bulk.action} onClick={runBulk}>Apply</button>}
               <button type="button" className="btn danger" id="del-sel" onClick={removePicked}>Delete ({picked.size})</button>
             </>
           ) : null}
-          <JsonTools path="/api/admin/users" onDone={load} summary={(r) => `Imported: ${r.added} added, ${r.existing} already there${r.skipped ? `, ${r.skipped} skipped` : ''}`} />
+          {limited ? null : <JsonTools path="/api/admin/users" onDone={load} summary={(r) => `Imported: ${r.added} added, ${r.existing} already there${r.skipped ? `, ${r.skipped} skipped` : ''}`} />}
           <button type="button" className="btn primary" id="add" onClick={() => setEditing({})}><PlusIcon /> Add user</button>
         </span>
       </div>
@@ -147,6 +153,7 @@ export default function Users({ model }) {
 
 function UserForm({ u, groups, model, onClose, onSaved }) {
   const s = useSession();
+  const limited = s.user.role !== 'System Admin';
   const toast = useToast();
   const confirm = useConfirm();
   const self = u && u.id === s.user.id;
@@ -225,6 +232,7 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
             <h3 className="mt-16 mb-12">Security</h3>
             <div className="row">
               <button type="button" className="btn" id="rpw" onClick={() => { setRpMode('generate'); setRpPw(''); setRpEmail(false); setRpForce(true); setResetOpen(true); }}>Reset password</button>
+              {limited ? null : <>
               <select aria-label="2FA method" id="tfa-method" value={method} onChange={(e) => setMethod(e.target.value)}>
                 <option value="app">2FA by authenticator app</option>
                 <option value="email" disabled={!emailOk && method !== 'email'}>2FA by emailed code{emailOk ? '' : ' (not enabled)'}</option>
@@ -245,6 +253,7 @@ function UserForm({ u, groups, model, onClose, onSaved }) {
                 onClick={() => action('reset-2fa', '2FA reset', ['Reset 2FA', `Remove 2FA from ${u.full_name}? They can set it up again from Profile.`, { okText: 'Reset 2FA', danger: true }])}>Reset 2FA</button>
               <button type="button" className="btn" id="signout" disabled={!u.sessions} title={u.sessions ? undefined : 'Not signed in anywhere'}
                 onClick={() => action('sign-out', 'Signed out everywhere', ['Sign out everywhere', `Sign ${u.full_name} out of ${u.sessions} ${u.sessions === 1 ? 'device' : 'devices'}? They sign in again with their password.`, { okText: 'Sign out' }])}>Sign out everywhere{u.sessions ? ` (${u.sessions})` : ''}</button>
+              </>}
               <button type="button" className="btn" id="unlock" disabled={!(isLocked(u) || u.failed_attempts > 0)} title={isLocked(u) || u.failed_attempts > 0 ? undefined : 'Nothing to unlock: no recent wrong passwords'} onClick={() => action('unlock', 'Account unlocked')}>Unlock</button>
               {!self ? <button type="button" className="btn danger" id="del-user" onClick={async () => {
                 if (!(await confirm('Delete user', `Permanently delete ${u.full_name}? Their records stay, but they can no longer sign in. This cannot be undone.`, { okText: 'Delete', danger: true }))) return;

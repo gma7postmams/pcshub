@@ -17,13 +17,25 @@ const { loadRoles } = require('../roles');
 
 // Mounted behind requirePageAccess('/admin') => Admin role only; the role is re-checked here as defence in depth.
 const router = express.Router();
-// System Admin: everything here. Admin: only the Audit Log, the Dropdowns and Branding (and the access-model reference the Admin page loads).
-const ADMIN_ALLOWED = /^\/(audit|dropdowns|branding)(\/|$)|^\/access-model$/;
+// System Admin: everything here. Admin: the Audit Log, Dropdowns and Branding (and the access-model reference the Admin page loads), plus
+// looking after users: list, add, change role (never to System Admin) and group, delete, reset password, unlock. Importing / exporting users, 2FA changes,
+// bulk changes, roles and groups stay System Admin only, and an Admin never sees or touches a System Admin account (see `noSysAdminFor` below).
+const ADMIN_ALLOWED = [
+  [null, /^\/(audit|dropdowns|branding)(\/|$)|^\/access-model$/],
+  ['GET', /^\/(users|groups)$/],
+  ['POST', /^\/users$/],
+  ['PUT', /^\/users\/\d+$/],
+  ['POST', /^\/users\/delete$/],
+  ['POST', /^\/users\/\d+\/(reset-password|unlock)$/],
+];
 router.use((req, res, next) => {
   const role = req.user && req.user.role;
-  if (role === 'System Admin' || (role === 'Admin' && ADMIN_ALLOWED.test(req.path))) return next();
+  if (role === 'System Admin' || (role === 'Admin' && ADMIN_ALLOWED.some(([m, re]) => (!m || m === req.method) && re.test(req.path)))) return next();
   res.status(403).json({ error: role === 'Admin' ? 'This needs the System Admin role' : 'System Admin role required' });
 });
+const isSys = (req) => req.user && req.user.role === 'System Admin';
+/** An Admin may not create, change, delete, reset or unlock a System Admin account, nor make anyone one. */
+const noSysAdminFor = (req, role) => { if (!isSys(req) && role === 'System Admin') throw new HttpError(403, 'Only a System Admin can manage a System Admin account.'); };
 
 const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads', 'branding');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -317,12 +329,13 @@ router.get('/users', asyncH(async (req, res) => {
             u.totp_enabled, u.twofa_required, u.twofa_method, u.must_change_password, u.last_login_at, u.locked_until, u.created_at, u.failed_attempts,
             (SELECT count(*)::int FROM user_sessions s WHERE (s.sess->>'userId')::int = u.id AND s.expire > now()) AS sessions
        FROM users u LEFT JOIN groups g ON g.id = u.group_id
+      ${isSys(req) ? '' : "WHERE u.role <> 'System Admin'"}
       ORDER BY u.is_active DESC, u.full_name`
   );
   res.json(rows);
 }));
 
-async function parseUser(body, { creating }) {
+async function parseUser(body, { creating, req }) {
   const out = {
     full_name: v.str(body.full_name, { field: 'Full name', max: 120, required: true }),
     email: v.str(body.email, { field: 'Email', max: 200 }),
@@ -330,6 +343,7 @@ async function parseUser(body, { creating }) {
     group_id: v.int(body.group_id, { field: 'Group', min: 1 }),
     is_active: body.is_active === undefined ? true : !!body.is_active,
   };
+  if (req) noSysAdminFor(req, out.role);
   if (out.email && !validator.isEmail(out.email)) throw new HttpError(400, 'Invalid email');
   if (out.group_id) {
     const g = await db.query('SELECT 1 FROM groups WHERE id=$1', [out.group_id]);
@@ -353,7 +367,7 @@ async function assertAnotherAdmin(c, excludingId) {
 }
 
 router.post('/users', asyncH(async (req, res) => {
-  const u = await parseUser(req.body, { creating: true });
+  const u = await parseUser(req.body, { creating: true, req });
   if (u.role === 'Admin' || u.role === 'System Admin') await stepUp.confirm(req, 'admin.user_create_admin', 'create an Admin account');
   // mode 'generate': a random temporary password (shown once; always must be changed). Otherwise the Admin typed one (forcing a change is the default, not a must).
   const generate = req.body.mode === 'generate';
@@ -391,15 +405,17 @@ router.post('/users', asyncH(async (req, res) => {
 
 router.put('/users/:id', asyncH(async (req, res) => {
   const id = v.id(req.params.id);
-  const u = await parseUser(req.body, { creating: false });
+  const u = await parseUser(req.body, { creating: false, req });
   {   // changing who is an Admin (or an Admin's own details) needs the password again; ordinary edits do not
     const before = (await db.query('SELECT role FROM users WHERE id=$1', [id])).rows[0];
+    if (before) noSysAdminFor(req, before.role);   // refused before any password prompt
     const adminish = (r) => r === 'Admin' || r === 'System Admin';
     if (before && (before.role !== u.role) && (adminish(before.role) || adminish(u.role))) await stepUp.confirm(req, 'admin.user_role_change', 'change an Admin role');
   }
   await db.tx(async (c) => {
     const cur = await c.query('SELECT username, full_name, email, role, group_id, is_active FROM users WHERE id=$1 FOR UPDATE', [id]);
     if (!cur.rows.length) throw new HttpError(404, 'User not found');
+    noSysAdminFor(req, cur.rows[0].role);
     const wasAdmin = cur.rows[0].role === 'System Admin' && cur.rows[0].is_active;
     const staysAdmin = u.role === 'System Admin' && u.is_active;
     if (wasAdmin && !staysAdmin) await assertAnotherAdmin(c, id);
@@ -442,6 +458,7 @@ router.post('/users/delete', asyncH(async (req, res) => {
   const gone = await db.tx(async (c) => {
     const { rows } = await c.query('SELECT id, username, full_name, role, is_active FROM users WHERE id = ANY($1::int[]) FOR UPDATE', [ids]);
     if (!rows.length) throw new HttpError(404, 'User not found');
+    rows.forEach((u) => noSysAdminFor(req, u.role));
     if (rows.some((u) => u.role === 'System Admin' && u.is_active)) {
       const left = await c.query(`SELECT count(*)::int AS n FROM users WHERE role='System Admin' AND is_active AND id <> ALL($1::int[])`, [rows.map((u) => u.id)]);
       if (left.rows[0].n === 0) throw new HttpError(400, 'At least one active Admin must remain');
@@ -459,8 +476,9 @@ router.post('/users/delete', asyncH(async (req, res) => {
 router.post('/users/:id/reset-password', asyncH(async (req, res) => {
   await stepUp.confirm(req, 'admin.user_reset_password', 'reset this password');
   const id = v.id(req.params.id);
-  const target = (await db.query('SELECT username, full_name, email FROM users WHERE id=$1', [id])).rows[0];
+  const target = (await db.query('SELECT username, full_name, email, role FROM users WHERE id=$1', [id])).rows[0];
   if (!target) throw new HttpError(404, 'User not found');
+  noSysAdminFor(req, target.role);
   const mailer = require('../mailer');
   const mode = req.body.mode === 'manual' || (req.body.mode !== 'generate' && req.body.password) ? 'manual' : 'generate';
   const sendMail = req.body.email === true || req.body.mode === 'email';   // optional with either way of choosing the password
@@ -537,11 +555,12 @@ router.post('/users/:id/reset-2fa', asyncH(async (req, res) => {
 router.post('/users/:id/unlock', asyncH(async (req, res) => {
   const id = v.id(req.params.id);
   const cur = await db.query(
-    'SELECT username FROM users WHERE id=$1',
+    'SELECT username, role FROM users WHERE id=$1',
     [id]
   );
 
   if (!cur.rows.length) throw new HttpError(404, 'User not found');
+  noSysAdminFor(req, cur.rows[0].role);
 
   await db.query(
     'UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=$1',
