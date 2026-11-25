@@ -227,11 +227,16 @@ async function autoBlock(ip, note, hours, db = require('./db')) {
   const p = parseEntry(unmap(ip));
   if (covers(p.cidr, '127.0.0.1') || covers(p.cidr, '::1')) return false;
   const { rows } = await db.query('SELECT count(*)::int AS n FROM ip_rules');
-  if (rows[0].n >= MAX_RULES) return false;
+  if (rows[0].n >= MAX_RULES) {
+    // Permanent automatic blocks pile up: make room by dropping the oldest automatic one (never a rule an Admin made).
+    const del = await db.query(`DELETE FROM ip_rules WHERE id = (SELECT id FROM ip_rules WHERE created_by_name = 'security-watch' AND kind = 'block' ORDER BY created_at LIMIT 1)`);
+    if (!del.rowCount) return false;
+  }
+  const hrs = Number(hours) > 0 ? String(Number(hours)) : null;   // no hours = permanent (no expiry)
   await db.query(
-    `INSERT INTO ip_rules (kind, cidr, note, expires_at, created_by, created_by_name) VALUES ('block',$1,$2, now() + ($3 || ' hours')::interval, NULL, 'security-watch')
+    `INSERT INTO ip_rules (kind, cidr, note, expires_at, created_by, created_by_name) VALUES ('block',$1,$2, CASE WHEN $3::text IS NULL THEN NULL ELSE now() + ($3 || ' hours')::interval END, NULL, 'security-watch')
      ON CONFLICT (kind, cidr) DO UPDATE SET note = EXCLUDED.note, expires_at = EXCLUDED.expires_at`,
-    [p.cidr, String(note || '').slice(0, MAX_NOTE), String(hours)]
+    [p.cidr, String(note || '').slice(0, MAX_NOTE), hrs]
   );
   await load(db);
   return true;

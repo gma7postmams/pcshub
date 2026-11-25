@@ -252,7 +252,7 @@ sudo systemctl restart pcshub
 - The Security self-check runs by itself every `SECURITY_CHECK_HOURS` (default 24) and alerts the System Admins (bell, phone, email) only about problems that are NEW since the last run. The last result is shown on the Security page.
 - Admins and System Admins are signed out after **Admin idle sign-out** minutes (default 30, Security → Rules) without a click or key press. An open tab left alone does not keep the session alive.
 - Sensitive admin actions ask for the password again (and not again for a few minutes): deleting users, resetting a password or 2FA, changing an Admin role, role permissions, the security rules, maintenance mode, and removing or importing IP rules or adding a trusted address.
-- Scanner probes (`/api/graphql`, `/wp-login.php`, `/.env`, `*.php` ...) get a plain 404 and are logged. An address that asks for three different ones is blocked for 24 hours (Administration → IP Access); addresses inside your network and the proxy are never blocked. `AUTO_BLOCK_PROBES=false` turns the blocking off.
+- Scanner probes (`/api/graphql`, `/wp-login.php`, `/.env`, `*.php` ...) get a plain 404 and are logged. An address that asks for three different ones is blocked **permanently** (set `AUTO_BLOCK_HOURS=24` for a timed block instead; Administration → IP Access); addresses inside your network and the proxy are never blocked. `AUTO_BLOCK_PROBES=false` turns the blocking off.
 - Audit Log and Security page: a **Block** button next to any address adds it to the block list (1 hour to permanent) without leaving the page.
 
 ## Security self-check

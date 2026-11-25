@@ -111,7 +111,9 @@ function distributed(username, ips, failures) {
 // ---- scanner probes (see probe-guard.js) ----
 const PROBE_N = 3;                 // this many DIFFERENT probe paths from one address ...
 const PROBE_MS = 10 * 60 * 1000;   // ... within this long ...
-const PROBE_BLOCK_HOURS = 24;      // ... and the address is blocked for this long
+// ... and the address is blocked: permanently by default (Admins can remove it in IP Access); AUTO_BLOCK_HOURS=24 makes it a timed block instead
+const blockHours = () => { const n = parseInt(process.env.AUTO_BLOCK_HOURS, 10); return Number.isFinite(n) && n > 0 ? n : 0; };
+const blockFor = (h) => (h ? `${h} hours` : 'permanently');
 const probes = new Map();          // ip -> Map(path -> time)
 
 const isPrivateIp = (ip) => {
@@ -153,11 +155,11 @@ async function autoBlock(req, paths) {
   probes.delete(ip);
   alerted.set(`burst|${ip}`, Date.now());   // one email per scanner: the block alert below says it all, so the burst alarm for this address stays quiet (requests already in flight would otherwise trigger it)
   try {
-    const ok = await rules.autoBlock(ip, `Automatic: asked for ${paths.length} scanner-only paths (${paths.slice(0, 3).join(', ')})`, PROBE_BLOCK_HOURS);
+    const ok = await rules.autoBlock(ip, `Automatic: asked for ${paths.length} scanner-only paths (${paths.slice(0, 3).join(', ')})`, blockHours());
     if (!ok) { alerted.delete(`burst|${ip}`); return; }   // not blocked after all: let the burst alarm speak
-    console.warn(`[security] ALERT scanner ${ip} blocked for ${PROBE_BLOCK_HOURS} h (${paths.join(', ')})`);
-    audit({ ...SYSTEM, ip }, 'security.ip_auto_blocked', 'security', null, { ip, hours: PROBE_BLOCK_HOURS, paths: paths.length, sample: paths.slice(0, 5) }).catch(() => {});
-    raise(`probe-block|${ip}`, ip, `Scanner blocked: ${ip}`, `${ip} asked for ${paths.length} paths that only attack tools use (${paths.slice(0, 3).join(', ')}) and was blocked for ${PROBE_BLOCK_HOURS} hours. Remove it in Administration → IP Access if that was a mistake.`, { ip, hours: PROBE_BLOCK_HOURS, paths: paths.length });
+    console.warn(`[security] ALERT scanner ${ip} blocked ${blockFor(blockHours())} (${paths.join(', ')})`);
+    audit({ ...SYSTEM, ip }, 'security.ip_auto_blocked', 'security', null, { ip, hours: blockHours() || null, permanent: !blockHours(), paths: paths.length, sample: paths.slice(0, 5) }).catch(() => {});
+    raise(`probe-block|${ip}`, ip, `Scanner blocked: ${ip}`, `${ip} asked for ${paths.length} paths that only attack tools use (${paths.slice(0, 3).join(', ')}) and was blocked ${blockFor(blockHours())}. Remove it in Administration → IP Access if that was a mistake.`, { ip, hours: blockHours() || null, paths: paths.length });
   } catch (e) { console.error('[security-watch] could not block the scanner:', e.message); }
 }
 

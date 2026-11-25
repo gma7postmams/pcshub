@@ -1,4 +1,4 @@
-// Scanner probes: only attack-tool paths match, a few different ones from a public address block it for 24 h, inside the network nothing is blocked.
+// Scanner probes: only attack-tool paths match, a few different ones from a public address block it (permanently by default), inside the network nothing is blocked.
 const test = require('node:test');
 const assert = require('node:assert');
 
@@ -27,15 +27,24 @@ test('the middleware answers a probe with 404 and lets everything else through',
   assert.strictEqual(nexted, true);
 });
 
-test('three different probe paths from a public address block it for 24 hours', async () => {
+test('three different probe paths from a public address block it', async () => {
   w.reset(); audits.length = 0; sqls.length = 0; delete process.env.TRUST_PROXY; delete process.env.AUTO_BLOCK_PROBES;
   w.probe(req('203.0.113.7', '/api/gql')); w.probe(req('203.0.113.7', '/api/graphql')); await tick();
   assert.ok(!sqls.some((s) => /INSERT INTO ip_rules/.test(s.q)), 'two paths are not enough');
   w.probe(req('203.0.113.7', '/wp-login.php')); await tick(); await tick();
   const ins = sqls.find((s) => /INSERT INTO ip_rules/.test(s.q));
-  assert.ok(ins, 'blocked'); assert.strictEqual(ins.p[0], '203.0.113.7'); assert.strictEqual(ins.p[2], '24');
+  assert.ok(ins, 'blocked'); assert.strictEqual(ins.p[0], '203.0.113.7'); assert.strictEqual(ins.p[2], null, 'no expiry: permanent by default');
   assert.ok(audits.some((a) => a.action === 'security.ip_auto_blocked'));
   assert.ok(audits.some((a) => a.action === 'security.probe'));
+});
+
+test('AUTO_BLOCK_HOURS=24 makes the block a timed one', async () => {
+  w.reset(); sqls.length = 0; process.env.AUTO_BLOCK_HOURS = '24'; delete process.env.TRUST_PROXY;
+  for (const p of ['/a.php', '/b.php', '/c.php']) w.probe(req('203.0.113.77', p));
+  await tick(); await tick();
+  const ins = sqls.find((s) => /INSERT INTO ip_rules/.test(s.q));
+  assert.ok(ins); assert.strictEqual(ins.p[2], '24');
+  delete process.env.AUTO_BLOCK_HOURS;
 });
 
 test('the same path again and again is one probe, not three', async () => {
@@ -69,6 +78,7 @@ test('autoBlock refuses localhost and writes a timed rule', async () => {
   sqls.length = 0;
   assert.strictEqual(await rules.autoBlock('127.0.0.1', 'x', 24), false);
   assert.strictEqual(await rules.autoBlock('198.51.100.4', 'x', 24), true);
+  assert.strictEqual(await rules.autoBlock('198.51.100.5', 'x', 0), true);   // 0 = permanent
   assert.ok(sqls.some((s) => /now\(\) \+/.test(s.q)));
 });
 

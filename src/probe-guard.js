@@ -1,6 +1,6 @@
 // Scanner probes: requests for paths that only attack tools ask for (GraphQL endpoints, WordPress, phpMyAdmin, .env, .git, *.php ...). This app has none of
 // them, so nobody legitimate ever sends one. They are answered with a plain 404 straight away (no session, no database), written to the audit log, and
-// an address that tries several different ones is blocked for 24 hours (Administration > IP Access shows it; remove it there if it was a mistake).
+// an address that tries several different ones is blocked permanently (Administration > IP Access shows it; remove it there if it was a mistake; AUTO_BLOCK_HOURS=24 makes it a timed block).
 // Switch the automatic block off with AUTO_BLOCK_PROBES=false (probes are then only logged and counted).
 const PROBE = new RegExp([
   '\\.(php\\d?|phtml|asp|aspx|jsp|jspx|cgi|cfm|env|bak|sql|swp|git|svn|htaccess|htpasswd)(/|\\?|$)',
